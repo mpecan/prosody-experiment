@@ -49,7 +49,8 @@ guard exists — they are not deferred to the end.
 | M4a | Repetition: refrain, anaphora, epistrophe, and `VoiceId` | **done** | §4.3, §7.4; iteration 7 |
 | M4b | Repetition: alliteration, assonance, morphological near-repetition | **done** | §4.3; iteration 8 |
 | M5a | Surprisal (§4.4) and the lexicon | **done** | §4.4; iteration 9 |
-| M5b | Role assignment (§4.1), Voice IR + lowering | todo | §7.5 |
+| M5b | Role assignment (§4.1) | **done** | §4.1, §9 free-verse fallback; iteration 10 |
+| M5c | Voice IR + lowering | todo | §7.5, §10 |
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6 — cheapest audition path |
 | M6a | **§8 acceptance test: the couplet synonym swap** | todo | §8 — runs the moment M6 gives an audition path, not later |
 | M7 | Debug annotation view | todo | §8 — the enforcement mechanism for I4 |
@@ -72,14 +73,40 @@ the golden corpus genuinely does belong later; the acceptance test does not.
   magnitudes. Nothing has been auditioned, so an unequal split would be a guess dressed as a
   decision. **Tune at M6, when there is something to listen to** — §9 expects exactly this.
 
+- **§4.1's measure cannot see period, only spread.** Relative variance is computed from `n`, `Σx`
+  and `Σx²`, so it is permutation-invariant: `[8,6,8,6]`, `[8,6,6,8]` and `[6,8,8,6]` are one
+  stanza to it. A ballad passes for the same reason its shuffle does. Measured in both directions
+  and pinned by `known_limitations` in `prosody-lts/tests/roles.rs`: a limerick (0.0938) and a
+  Sapphic stanza (0.1191) are rigidly fixed forms the pass calls ragged, and **no threshold fixes
+  them**, because Whitman's "Song of Myself" — correctly rejected — measures 0.0880. §4.1 asks for
+  dispersion and *names* it periodicity; those are different things. An autocorrelation term would
+  change what a poetic feature maps to, which `CLAUDE.md` §10 says is a spec change. **Raised, not
+  decided.** It also means the Voice IR has nowhere to record loop *length*: a foundation stanza of
+  `[8,6,8,6]` wants a two-bar loop and `[7,7,7,7]` a one-bar one. **M5c must decide whether to
+  carry it.**
+- **§4.1's caesura tier is unimplemented.** "consider a second tier where a line-internal caesura
+  splits a voice." `Line::segments` already exposes the boundaries and the grammar already parses
+  caesura; nothing reads either. M5b added a second tier at line grain for *refrains*, which is a
+  different tier. **Deferred explicitly; decide at M5c or M7.**
+- **The role corpus is 16 hand-picked stanzas.** The threshold's window is (0.0364, 0.0880) and the
+  test asserts the window rather than an accuracy score, precisely because a percentage over a
+  self-chosen corpus grades the corpus. Two canonical free-verse pieces (H.D.'s *Oread*, a short
+  Whitman passage) do classify as regular — defensible, since §4.1 asks about line-length evenness,
+  but it means agreement with "the forms a reader would name" is weaker than 16/16 suggests.
+  **Revisit when the golden corpus lands at M8.**
+- **Foot count has no measured accuracy floor.** It is half of §4.1's rule and derives from the
+  same lexical-stress vector that makes `dominant_foot` 50–57% accurate. `scansion.rs` has
+  hand-worked cases but no floor of the `accuracy.rs` kind. **Add one at M8.**
+
 - **Word families are order-dependent, like rhyme classes.** A word joins the nearest family
   *built so far*, so editing an early stanza can change a later word's `WordVoiceId`. Depth is now
-  order-independent — measured from each family's shortest form — but membership is not. Same
-  shape as the rhyme and role-locality questions; **M5 must settle all three together.**
+  order-independent — measured from each family's shortest form — but membership is not. Settled at M5b for roles: locality is preserved wherever it can be, and the two places it cannot
+  be — the free-verse fallback and the refrain lift — say so in the output. Word-family membership
+  still has no such disclosure. **Fold into M5c.**
 - **A token can be both a family member and a rhyme.** "burning" may be a variation on "burn"
   (§4.3, timbre and modulation) *and* rhyme with "turning" (§4.5, pitch). The two passes stay
   structurally separate — verified, no shared state — but nothing says how a mapping should
-  reconcile both signals on one word. **Decide at M5.**
+  reconcile both signals on one word. **Deferred to M5c**, where a token's role and its voice meet.
 - **Irregular morphology is entirely missed** — `sing`/`sang`, `go`/`went`, `be`/`was`. No prefix
   rule can reach it, and these are disproportionately the oldest, commonest, most repeated verbs
   in English. A small closed table of principal parts would fix it, in the same shape as the
@@ -173,18 +200,63 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 10 — M5b: role assignment and the Voice IR.** Not yet planned.
+**Iteration 11 — M5c: the Voice IR and lowering.** Not yet planned.
 
-M5b still inherits the four decisions that are really one question — how much may an analysis
-depend on the rest of the poem? Surprisal turned out to be free of it: rarity comes from a static
-table and novelty is scoped to a word's neighbours, so editing one stanza cannot move another's
-score. Meter, rhyme and word families are not.
+It inherits four questions that are now one: how does a token that is several things at once
+become one voice? A word can be a family variation (§4.3, timbre), a rhyme (§4.5, pitch), the
+sharpest word in its line (§4.4, brightness) and sit in a foundation stanza (§4.1, layer) — four
+passes with four opinions and no rule for combining them. M5b settled the locality half of the
+question and deliberately did not touch this half.
+
+---
 
 ---
 
 ---
 
 ## Log
+
+### Iteration 10 — M5b role assignment
+
+Built: `prosody-core::role` (§4.1's load-bearing decision), a measured corpus in
+`prosody-lts/tests/roles.rs`, and eight invariant properties. 400 tests.
+
+**The decisions M5b owed.** Relative variance, not raw — §4.1 compares stanzas against each other
+and raw spread grows with line length. Not `dominant_foot`, which is 50–57% accurate on the
+commonest English metre. An absolute threshold with a *named* fallback, so locality holds wherever
+it can and the output admits where it cannot. And a line grain for refrains, because a stanza's
+variance is a fact about how its lines differ and so cannot see the one line that repeats.
+
+**The finding that outranks all of them: the measure cannot see what §4.1 says it sees.** Variance
+is permutation-invariant, so `[8,6,8,6]`, `[8,6,6,8]` and `[6,8,8,6]` are one stanza to it. My own
+doc comment had claimed common measure scores well *because* it alternates; it scores well for the
+same reason its shuffle does. A limerick and a Sapphic stanza — two of the most rigidly fixed forms
+in English — measure raggeder than Whitman, so no threshold admits them. Now pinned as
+`known_limitations` and raised in the questions above rather than absorbed into the constant.
+
+| Finding | Resolution |
+|---|---|
+| **A stanza with nothing to measure became the foundation.** `Variance::relative` returns zero for an empty sum, so `...`/`!`, or `1914`/`1918`, or a Slovenian couplet under a dictionary-only phonemiser, all read as *perfectly regular* — and, being foundation, denied the free-verse fallback to the whole poem. `LineMeter::unpronounced` records exactly this and the pass never read it | `StanzaBasis::Unmeasured`. The pass now distinguishes "no spread" from "no evidence" |
+| **`assign` accepted a meter and a repetition from different poems and invented refrains.** The doc claimed spans prevented it; they cannot — "war is kind maiden" and "one two three four" occupy the same bytes, and my first fix compared spans and passed the reviewer's own counterexample | Analyses carry a `Poem::fingerprint`. Equal fingerprints mean equal sources, which made the span and count checks unreachable, so `RoleError` collapsed to one variant |
+| **The refrain lift is a second poem-wide dependence, and the module denied it twice** | Documented as what it is — §4.3's figure, which cannot be made local without ceasing to detect repetition — and the locality property now covers the line grain that actually fails |
+| **A poem of one-line stanzas got no foundation at all**, contradicting §9's "always anchors", and the property `prop_assume!`d exactly that case away | `StanzaBasis::OnlyCandidate`: promoted for want of an alternative, and says so |
+| `Variance::threshold` was `pub`, letting anyone fabricate a measurement — and its `assert!` is a *runtime* panic that `clippy::panic` does not catch, in a comparison that overflows `u128` and inverts in release | `pub(crate)`, which closes all three at once |
+| Two public `foot_variance()` methods returned different quantities under one name — raw on `StanzaMeter`, relative on `StanzaRole` | Renamed, and the role now *reads* both from `StanzaMeter` instead of recomputing them |
+| One `Basis` enum spanned two grains, so a `StanzaRole` could hold `Refrain` — visible as a `prop_assert!(false)` arm in the new property | Split into `StanzaBasis` and `LineBasis`, and `Refrain` now carries the `VoiceId`, so a looping line can say *what* it loops with |
+| Two mislabelled fixtures. Housman's "Loveliest of trees" is iambic tetrameter throughout, not alternating — and I had leaned on the corpus containing awkward alternating forms to justify the lower bound, leaving only three genuine ones | Relabelled; Coleridge marked as the expanded variant it is |
+
+**Five mutations survived the first test suite**, each caught by a reviewer running them rather
+than reasoning about them: dropping the foot half of the rule (the discriminating case occurs in
+0.11% of generated stanzas, so the property caught it 9 runs in 12 — a coin toss, not a test); a
+line role carrying its *stanza's* span (containment is reflexive, so an I4 property that checks
+nesting can never see it); a promoted stanza whose lines all stay flourish; the promotion ranking
+and tie-break, both documented and neither pinned; and the two variances swapped, which every
+symmetric assertion cancels out. All ten now die, including the swap.
+
+Also fixed, found by a property run and unrelated to M5b: `LetterToSound` failed on any word whose
+spelling is a single consonant grapheme — "dge" spells `JH`, consuming the word's only vowel — so
+the *fallback* phonemiser went silent on exactly the odd input it exists to catch. A written vowel
+now survives as a spoken one, while "brrr" still honestly has no syllable.
 
 ### Iteration 9 — M5a surprisal
 

@@ -313,6 +313,20 @@ impl Poem {
         Seed::for_unit(Domain::Stanza, stanza.span(), &self.source)
     }
 
+    /// A fingerprint of the whole poem, identifying which poem an analysis describes.
+    ///
+    /// **Never a seed.** Seeding anything from this would be a direct I2 violation — it is the
+    /// global seed I2 exists to forbid. It is here because passes hand their results to each
+    /// other and spans cannot tell two poems apart: "war is kind maiden" and "one two three four"
+    /// occupy exactly the same bytes, so a role pass given one poem's meter and another's
+    /// repetitions would invent confident refrains between lines that have never met.
+    ///
+    /// Returns `None` only for a source that is not a valid slice of itself, which cannot happen.
+    #[must_use]
+    pub fn fingerprint(&self) -> Option<Seed> {
+        Seed::for_unit(Domain::Poem, Span::new(0, self.source.len()), &self.source)
+    }
+
     /// The seed for a line.
     #[must_use]
     pub fn line_seed(&self, stanza: StanzaIdx, line: LineIdx) -> Option<Seed> {

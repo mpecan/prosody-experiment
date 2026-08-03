@@ -18,6 +18,7 @@
 //! - [`repetition`] — the figures `SPEC.md` §4.3 turns into loops, ostinati and cadences.
 //! - [`sound`] — §4.3's phonetic rows: word families, alliteration, assonance.
 //! - [`surprisal`] — §4.4's distinctiveness metric, which drives sharpness and brightness.
+//! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
@@ -33,6 +34,7 @@ pub mod parse;
 pub mod phoneme;
 pub mod repetition;
 pub mod rhyme;
+pub mod role;
 pub mod seed;
 pub mod sound;
 pub mod span;
@@ -51,6 +53,7 @@ pub use phoneme::{
 };
 pub use repetition::{Figure, FigureKind, PoemRepetition, VoiceId};
 pub use rhyme::{LineRhyme, PoemRhyme, RhymeClassId, RhymeScore, StanzaRhyme};
+pub use role::{DifferentPoems, Layer, LineBasis, LineRole, PoemRoles, StanzaBasis, StanzaRole};
 pub use seed::{Domain, Seed};
 pub use sound::{Distance, SoundFigure, SoundFigureKind, SoundRepetition, WordForm, WordVoiceId};
 pub use span::Span;

@@ -174,6 +174,7 @@ impl StanzaRepetition {
 /// A poem's repetitions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoemRepetition {
+    poem: Option<crate::seed::Seed>,
     stanzas: Vec<StanzaRepetition>,
     figures: Vec<Figure>,
     voices: usize,
@@ -184,6 +185,12 @@ impl PoemRepetition {
     #[must_use]
     pub fn stanzas(&self) -> &[StanzaRepetition] {
         &self.stanzas
+    }
+
+    /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
+    #[must_use]
+    pub const fn poem(&self) -> Option<crate::seed::Seed> {
+        self.poem
     }
 
     /// Every repeated figure found: by kind, then longest first, then by first occurrence.
@@ -308,6 +315,7 @@ pub fn analyse(poem: &Poem) -> PoemRepetition {
         .collect();
 
     PoemRepetition {
+        poem: poem.fingerprint(),
         stanzas,
         figures,
         voices: voice_count,

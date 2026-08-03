@@ -119,3 +119,18 @@ proptest! {
         }
     }
 }
+
+#[test]
+fn a_written_vowel_survives_as_a_spoken_one() {
+    // "dge" spells one grapheme, `JH`, so the rules consume the word's only vowel letter and
+    // leave nothing to build a syllable on. A fallback phonemiser that fails here goes silent on
+    // exactly the odd input it exists to catch. Found by a property run, which is why the
+    // fixture looks arbitrary.
+    let lts = LetterToSound::new();
+    for word in ["dge", "dges", "edge"] {
+        let said = lts.pronounce(word);
+        assert!(said.is_ok(), "{word:?} -> {said:?}");
+    }
+    // ...but a word with no written vowel at all still honestly has no syllable.
+    assert!(lts.pronounce("brrr").is_err());
+}

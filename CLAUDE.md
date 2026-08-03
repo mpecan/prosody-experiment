@@ -73,9 +73,13 @@ That happened; it hid a broken test for a whole iteration.
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
+cargo test --workspace --no-fail-fast
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
+
+`--no-fail-fast` matters: without it `cargo test` stops at the first failing target, so a broken
+unit test in `prosody-core` hides every integration suite behind it — including the measured
+accuracy floors, which are the only thing pinning several constants.
 
 Run them with `--locked`, as CI does. The `RUSTDOCFLAGS` prefix is not decoration: the lints
 table only denies `broken_intra_doc_links`, so without it a local `cargo doc` enforces less than
@@ -99,6 +103,11 @@ float_cmp = "deny"
 todo = "deny"
 dbg_macro = "deny"
 ```
+
+`clippy::panic = "deny"` catches the `panic!` macro and **not** `assert!`, `unreachable!`, array
+indexing, or integer overflow. A bare `assert!` in a `const fn` is a runtime panic at any
+non-`const` call site and no lint will say so — if a function must reject an argument, either
+make it `pub(crate)` with only `const` callers, or return a `Result`.
 
 Test code may `unwrap` and index; put
 `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing))]`

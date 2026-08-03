@@ -18,10 +18,11 @@ use proptest::prelude::{
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
 use prosody_core::repetition::FigureKind;
+use prosody_core::role::{Layer, LineBasis, PERIODIC, StanzaBasis};
 use prosody_core::sound;
 use prosody_core::surprisal::{self, Lexicon, Rarity};
 use prosody_core::{
-    Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, repetition, rhyme,
+    Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, repetition, rhyme, role,
 };
 
 /// A lexicon whose bands vary with spelling, so generated poems contain both common and rare
@@ -189,6 +190,56 @@ fn token_spans(poem: &Poem) -> Vec<Span> {
         .flat_map(prosody_core::Line::tokens)
         .copied()
         .map(prosody_core::Token::span)
+        .collect()
+}
+
+/// One-syllable words, so a line's syllable count is its word count.
+const MONOSYLLABLES: &[&str] = &[
+    "ba", "be", "bi", "bo", "bu", "da", "de", "di", "do", "du", "ka", "ke", "ki", "ko", "ku", "la",
+    "le", "li", "lo", "lu", "ma", "me", "mi", "mo", "mu",
+];
+
+/// A poem whose **last** stanza is regular by construction: every line the same number of
+/// one-syllable words, so both spreads are zero.
+///
+/// `poem_source` draws line lengths independently, so a regular stanza is rare — a property
+/// about what happens to a regular stanza would spend its whole budget on rejections and pass
+/// without ever reaching the case it names.
+fn poem_with_a_regular_last_stanza() -> impl Strategy<Value = String> {
+    (
+        poem_source(),
+        2_usize..5,
+        1_usize..5,
+        proptest::collection::vec(0_usize..MONOSYLLABLES.len(), 16),
+    )
+        .prop_map(|(head, lines, per_line, picks)| {
+            let mut next = picks.into_iter().cycle();
+            let regular: Vec<String> = (0..lines)
+                .map(|_| {
+                    (0..per_line)
+                        .map(|_| MONOSYLLABLES[next.next().unwrap()])
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect();
+            format!("{}\n\n{}\n", head.trim_end(), regular.join("\n"))
+        })
+}
+
+/// Every role in a poem, using the test phonemiser.
+fn roles_of(source: &str) -> role::PoemRoles {
+    let poem = Poem::parse(source.to_owned()).unwrap();
+    let meter = meter::scan(&poem, &EverySyllableStressed);
+    let repetition = repetition::analyse(&poem);
+    role::assign(&meter, &repetition).unwrap()
+}
+
+/// Every line span in the poem, in source order.
+fn line_spans(poem: &Poem) -> Vec<Span> {
+    poem.stanzas()
+        .iter()
+        .flat_map(prosody_core::Stanza::lines)
+        .map(prosody_core::Line::span)
         .collect()
 }
 
@@ -1147,6 +1198,207 @@ proptest! {
         let fresh = Poem::parse(poem.source().to_owned()).unwrap();
         prop_assert_eq!(poem.stanzas(), fresh.stanzas());
         prop_assert_eq!(stanza_seeds(&poem), stanza_seeds(&fresh));
+    }
+
+    /// I1 — role assignment is a pure function of the two analyses it reads.
+    #[test]
+    fn i1_role_assignment_is_reproducible(source in poem_source()) {
+        prop_assert_eq!(roles_of(&source), roles_of(&source));
+    }
+
+    /// I4 — a role names the text that earned it, exactly.
+    ///
+    /// Equality, not containment: a stanza contains itself, so a line role that mistakenly
+    /// carried its *stanza's* extent would satisfy every containment check while pointing the
+    /// debug view at the wrong text. That mutation survived an earlier version of this property.
+    #[test]
+    fn i4_every_role_traces_to_its_text(source in poem_source()) {
+        let roles = roles_of(&source);
+        let poem = Poem::parse(source.clone()).unwrap();
+        prop_assert_eq!(roles.stanzas().len(), poem.stanzas().len());
+        prop_assert_eq!(
+            roles.lines().map(|(_, line)| line.span()).collect::<Vec<_>>(),
+            line_spans(&poem)
+        );
+        prop_assert_eq!(
+            roles.stanzas().iter().map(prosody_core::StanzaRole::span).collect::<Vec<_>>(),
+            poem.stanzas().iter().map(prosody_core::Stanza::span).collect::<Vec<_>>()
+        );
+        for stanza in roles.stanzas() {
+            prop_assert!(stanza.span().text(poem.source()).is_some());
+            for line in stanza.lines() {
+                prop_assert!(line.span().text(poem.source()).is_some());
+                prop_assert!(stanza.span().contains(line.span()));
+            }
+        }
+    }
+
+    /// A recorded basis can be checked against the recorded evidence, without re-deriving it.
+    ///
+    /// This is what makes `SPEC.md` §4.1 auditable rather than merely plausible: a stanza that
+    /// claims `Regularity` must actually be at or below the threshold on both spreads, and one
+    /// that claims `Irregularity` must exceed it on at least one.
+    #[test]
+    fn a_stanzas_basis_agrees_with_the_variances_it_carries(source in poem_source()) {
+        let roles = roles_of(&source);
+        for stanza in roles.stanzas() {
+            let within = stanza.relative_syllable_variance() <= PERIODIC
+                && stanza.relative_foot_variance() <= PERIODIC;
+            match stanza.basis() {
+                StanzaBasis::Regularity => {
+                    prop_assert!(within);
+                    prop_assert_eq!(stanza.layer(), Layer::Foundation);
+                }
+                StanzaBasis::Irregularity => {
+                    prop_assert!(!within);
+                    prop_assert_eq!(stanza.layer(), Layer::Flourish);
+                }
+                StanzaBasis::MostRegular | StanzaBasis::OnlyCandidate => {
+                    prop_assert_eq!(stanza.layer(), Layer::Foundation);
+                }
+                StanzaBasis::TooShort => {
+                    prop_assert!(stanza.lines().len() < 2);
+                    prop_assert_eq!(stanza.layer(), Layer::Flourish);
+                }
+                StanzaBasis::Unmeasured => prop_assert_eq!(stanza.layer(), Layer::Flourish),
+            }
+        }
+    }
+
+    /// Structural locality — a stanza's measured spread is a fact about that stanza alone, so no
+    /// edit anywhere else can move it.
+    ///
+    /// This is the role-assignment analogue of I2. It is the strongest form the property can
+    /// take: `SPEC.md` §9's fallback is deliberately poem-wide, so the *layer* of a ragged stanza
+    /// may legitimately change when the poem around it does. The evidence never may.
+    #[test]
+    fn an_edit_elsewhere_does_not_move_another_stanzas_evidence(
+        source in poem_source(),
+        pick in 0_usize..4096,
+        text in replacement(),
+    ) {
+        let mut poem = Poem::parse(source.clone()).unwrap();
+        prop_assume!(poem.stanzas().len() > 1);
+        let untouched = poem.stanzas().len() - 1;
+        let edited = poem.stanzas()[0].span();
+
+        let spans = token_spans(&poem);
+        let inside: Vec<Span> = spans.into_iter().filter(|s| edited.contains(*s)).collect();
+        prop_assume!(!inside.is_empty());
+        poem.apply(inside[pick % inside.len()], text).unwrap();
+        // The edit must not have merged or split stanzas, or "the last stanza" means something
+        // different on each side and the comparison is meaningless.
+        prop_assume!(poem.stanzas().len() == untouched + 1);
+
+        let before = roles_of(&source);
+        let after = roles_of(poem.source());
+        prop_assert_eq!(
+            before.stanzas()[untouched].relative_syllable_variance(),
+            after.stanzas()[untouched].relative_syllable_variance()
+        );
+        prop_assert_eq!(
+            before.stanzas()[untouched].relative_foot_variance(),
+            after.stanzas()[untouched].relative_foot_variance()
+        );
+    }
+
+    /// A stanza that is regular on its own evidence keeps that verdict whatever the rest of the
+    /// poem does — the fallback can only promote, never demote.
+    #[test]
+    fn regularity_survives_any_edit_to_another_stanza(
+        source in poem_with_a_regular_last_stanza(),
+        pick in 0_usize..4096,
+        text in replacement(),
+    ) {
+        let mut poem = Poem::parse(source.clone()).unwrap();
+        prop_assume!(poem.stanzas().len() > 1);
+        let untouched = poem.stanzas().len() - 1;
+        let before = roles_of(&source);
+        prop_assume!(before.stanzas()[untouched].basis() == StanzaBasis::Regularity);
+        let edited = poem.stanzas()[0].span();
+
+        let inside: Vec<Span> = token_spans(&poem)
+            .into_iter()
+            .filter(|s| edited.contains(*s))
+            .collect();
+        prop_assume!(!inside.is_empty());
+        poem.apply(inside[pick % inside.len()], text).unwrap();
+        prop_assume!(poem.stanzas().len() == untouched + 1);
+
+        let after = roles_of(poem.source());
+        prop_assert_eq!(after.stanzas()[untouched].basis(), StanzaBasis::Regularity);
+        prop_assert_eq!(after.stanzas()[untouched].layer(), Layer::Foundation);
+        // The lines keep their layer too, unless one became a refrain — the one poem-wide
+        // line-grain judgement, and the reason this asserts a reason rather than a bare layer.
+        for (before_line, after_line) in before.stanzas()[untouched]
+            .lines()
+            .iter()
+            .zip(after.stanzas()[untouched].lines())
+        {
+            if matches!(after_line.basis(), LineBasis::Refrain(_)) {
+                continue;
+            }
+            // Layers, not spans: an edit to an earlier stanza shifts every later byte offset,
+            // so the spans legitimately differ while the roles must not.
+            prop_assert_eq!(before_line.layer(), after_line.layer());
+        }
+    }
+
+    /// Any poem with a stanza gets a foundation. A piece that is all ornament has no pulse, which
+    /// is the degeneracy `SPEC.md` §9 asks the fallback to prevent.
+    #[test]
+    fn every_poem_has_a_foundation(source in poem_source()) {
+        let roles = roles_of(&source);
+        // An implication rather than an assumption: a poem whose words the phonemiser cannot
+        // pronounce at all has no sound to loop, and saying so is the honest answer. Everything
+        // else must have a pulse.
+        prop_assume!(
+            roles.stanzas().iter().any(|s| s.basis() != StanzaBasis::Unmeasured)
+        );
+        // Asserted on `foundation()`, the accessor a backend consumes, and not on the stanza
+        // layer. A stanza marked Foundation whose lines were all Flourish would leave the piece
+        // with no pulse at all while looking correct one grain up — a mutation that survived
+        // when this checked stanza layers.
+        prop_assert!(
+            roles.foundation().next().is_some(),
+            "{:?}",
+            roles.stanzas().iter().map(role::StanzaRole::basis).collect::<Vec<_>>()
+        );
+    }
+
+    /// Every line's basis is consistent with its layer, and a refrain always plays.
+    #[test]
+    fn a_lines_basis_agrees_with_its_layer(source in repetitive_poem()) {
+        let roles = roles_of(&source);
+        for (stanza, line) in roles.lines() {
+            match line.basis() {
+                LineBasis::Refrain(_) => prop_assert_eq!(line.layer(), Layer::Foundation),
+                LineBasis::Inherited(basis) => {
+                    prop_assert_eq!(basis, stanza.basis());
+                    prop_assert_eq!(line.layer(), stanza.layer());
+                }
+            }
+        }
+    }
+
+    /// A line marked a refrain really does share its voice with another line, and one marked
+    /// inherited does not.
+    #[test]
+    fn a_refrain_names_a_voice_that_actually_repeats(source in repetitive_poem()) {
+        let roles = roles_of(&source);
+        let poem = Poem::parse(source.clone()).unwrap();
+        let repetition = repetition::analyse(&poem);
+        let mut voices: std::collections::BTreeMap<_, usize> = std::collections::BTreeMap::new();
+        for stanza in repetition.stanzas() {
+            for line in stanza.lines() {
+                *voices.entry(line.voice()).or_default() += 1;
+            }
+        }
+        for (_, line) in roles.lines() {
+            if let LineBasis::Refrain(voice) = line.basis() {
+                prop_assert!(voices.get(&voice).copied().unwrap_or(0) > 1);
+            }
+        }
     }
 
     /// I4 — containment is reflexive and transitive, so a token inside a line inside a stanza is

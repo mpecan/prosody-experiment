@@ -16,6 +16,7 @@
 
 use crate::parse::{Line, Poem, Stanza};
 use crate::phoneme::{Phonemiser, Provenance, Stress};
+use crate::seed::Seed;
 use crate::span::Span;
 
 /// How many syllables something has — the subdivision count of `SPEC.md` §4.2.
@@ -341,6 +342,36 @@ impl Variance {
         }
     }
 
+    /// A variance of exactly `numerator / denominator`, for expressing a threshold to compare
+    /// measurements against.
+    ///
+    /// Not a measurement, and deliberately **not public**. The private fields are what make a
+    /// `Variance` in hand evidence that something was counted — the same property `CLAUDE.md` §5
+    /// requires of [`Pronunciation::guessed`](crate::phoneme::Pronunciation::guessed). A cutoff
+    /// is the one value that legitimately comes from nowhere, and [`crate::role::PERIODIC`] is
+    /// the only one. Its sibling [`crate::rhyme::RHYME_THRESHOLD`] needs no constructor at all
+    /// because it sits in the module that owns the fields; this one does not.
+    ///
+    /// Keeping it crate-internal also closes two holes. `Ord` cross-multiplies without a guard,
+    /// so a fabricated numerator near `u128::MAX` would overflow — panicking in debug and, worse,
+    /// silently inverting the comparison in release, where the exact integer representation
+    /// exists precisely to guarantee a total order. And the `assert!` below is a *runtime* panic
+    /// in any non-`const` call, which `clippy::panic` does not catch. With one `const` call site
+    /// both are unreachable.
+    ///
+    /// # Panics
+    ///
+    /// If `denominator` is zero. Every call site is a `const` initialiser, so this is a
+    /// compile-time error in practice.
+    #[must_use]
+    pub(crate) const fn threshold(numerator: u128, denominator: u128) -> Self {
+        assert!(denominator != 0, "a threshold needs a non-zero denominator");
+        Self {
+            numerator,
+            denominator,
+        }
+    }
+
     /// Whether this is zero — a perfectly regular set.
     #[must_use]
     pub const fn is_zero(self) -> bool {
@@ -404,6 +435,7 @@ pub struct StanzaMeter {
     syllable_variance: Variance,
     relative_syllable_variance: Variance,
     foot_variance: Variance,
+    relative_foot_variance: Variance,
 }
 
 impl StanzaMeter {
@@ -419,16 +451,20 @@ impl StanzaMeter {
         &self.lines
     }
 
-    /// How much the lines' syllable counts vary.
+    /// How much the lines' syllable counts vary, in syllables squared.
     ///
-    /// Low means periodic, which `SPEC.md` §4.1 turns into a foundation layer; high means
-    /// aperiodic, which becomes a flourish.
+    /// **Raw**, so it grows with line length: `[8,6,8,6]` scores 1.0 where
+    /// [`StanzaMeter::relative_syllable_variance`] scores 1/49. Only ever compare this against
+    /// another *raw* variance — `role::PERIODIC` is a relative one, and testing this against it
+    /// calls common measure ragged.
     #[must_use]
     pub const fn syllable_variance(&self) -> Variance {
         self.syllable_variance
     }
 
-    /// How much the lines' foot counts vary.
+    /// How much the lines' foot counts vary, in feet squared.
+    ///
+    /// **Raw**, like [`StanzaMeter::syllable_variance`]; see the warning there.
     #[must_use]
     pub const fn foot_variance(&self) -> Variance {
         self.foot_variance
@@ -442,11 +478,23 @@ impl StanzaMeter {
     pub const fn relative_syllable_variance(&self) -> Variance {
         self.relative_syllable_variance
     }
+
+    /// Foot-count spread relative to line length.
+    ///
+    /// The pair of [`StanzaMeter::relative_syllable_variance`], and what
+    /// [`crate::role::assign`] compares against [`crate::role::PERIODIC`]. Both figures live here
+    /// rather than being recomputed by the role pass, so there is one implementation of each
+    /// statistic and no way for two copies to drift apart.
+    #[must_use]
+    pub const fn relative_foot_variance(&self) -> Variance {
+        self.relative_foot_variance
+    }
 }
 
 /// A poem's meter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoemMeter {
+    poem: Option<Seed>,
     stanzas: Vec<StanzaMeter>,
 }
 
@@ -455,6 +503,12 @@ impl PoemMeter {
     #[must_use]
     pub fn stanzas(&self) -> &[StanzaMeter] {
         &self.stanzas
+    }
+
+    /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
+    #[must_use]
+    pub const fn poem(&self) -> Option<Seed> {
+        self.poem
     }
 }
 
@@ -465,6 +519,7 @@ impl PoemMeter {
 #[must_use]
 pub fn scan(poem: &Poem, phonemiser: &impl Phonemiser) -> PoemMeter {
     PoemMeter {
+        poem: poem.fingerprint(),
         stanzas: poem
             .stanzas()
             .iter()
@@ -486,6 +541,7 @@ fn scan_stanza(stanza: &Stanza, source: &str, phonemiser: &impl Phonemiser) -> S
         syllable_variance: Variance::of(&syllables),
         relative_syllable_variance: Variance::relative(&syllables),
         foot_variance: Variance::of(&feet),
+        relative_foot_variance: Variance::relative(&feet),
         lines,
     }
 }

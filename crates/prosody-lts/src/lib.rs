@@ -81,7 +81,21 @@ impl Phonemiser for LetterToSound {
         if letters.is_empty() {
             return Err(Unpronounceable::NotKnown);
         }
-        let symbols = transcribe(&letters);
+        let mut symbols = transcribe(&letters);
+        // A written vowel must survive as a spoken one. "dge" spells a single grapheme, `JH`, so
+        // the rules consume the word's only vowel letter and leave nothing to build a syllable
+        // on — the fallback phonemiser going silent on exactly the odd input it exists to catch.
+        // The word takes the vowel a speaker gives it when sounding the cluster out.
+        //
+        // Only when the spelling *had* a vowel. "brrr" and "hm" have none, and inventing one
+        // there would overrule the deliberate choice tested by
+        // `letters_that_yield_no_vowel_are_unsyllabifiable_not_unknown`: a word with no written
+        // nucleus honestly has no syllable, which is `CMUdict`'s own answer for "hm".
+        if !symbols.iter().any(|s| is_vowel_symbol(s))
+            && letters.iter().copied().any(is_vowel_letter)
+        {
+            symbols.push("AH");
+        }
         let phones = stressed(&letters, &symbols)
             .ok_or(Unpronounceable::Unsyllabifiable(SyllabifyError::NoNucleus))?;
         let syllables = phoneme::syllabify(&phones)?;

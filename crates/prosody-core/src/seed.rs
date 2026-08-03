@@ -42,6 +42,12 @@ pub enum Domain {
     Stanza,
     /// A line.
     Line,
+    /// The whole poem.
+    ///
+    /// Not a seeding unit — seeding a whole poem is exactly what invariant I2 forbids. This
+    /// exists so an analysis can record *which* poem it describes, since spans are bare byte
+    /// offsets and two different poems with the same line lengths have identical ones.
+    Poem,
 }
 
 impl Domain {
@@ -55,6 +61,7 @@ impl Domain {
         match self {
             Self::Stanza => "prosody-core seed v1 stanza",
             Self::Line => "prosody-core seed v1 line",
+            Self::Poem => "prosody-core seed v1 poem",
         }
     }
 }
