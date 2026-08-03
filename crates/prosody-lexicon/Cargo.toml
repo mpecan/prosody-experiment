@@ -1,0 +1,12 @@
+[package]
+name = "prosody-lexicon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "How common an English word is, for SPEC.md §4.4's lexical rarity."
+
+[dependencies]
+prosody-core = { workspace = true }
+
+[lints]
+workspace = true

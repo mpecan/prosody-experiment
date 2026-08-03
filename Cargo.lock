@@ -265,12 +265,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "prosody-lexicon"
+version = "0.1.0"
+dependencies = [
+ "prosody-core",
+]
+
+[[package]]
 name = "prosody-lts"
 version = "0.1.0"
 dependencies = [
  "proptest",
  "prosody-cmudict",
  "prosody-core",
+ "prosody-lexicon",
 ]
 
 [[package]]

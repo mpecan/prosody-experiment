@@ -19,9 +19,20 @@ use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
 use prosody_core::repetition::FigureKind;
 use prosody_core::sound;
+use prosody_core::surprisal::{self, Lexicon, Rarity};
 use prosody_core::{
     Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, repetition, rhyme,
 };
+
+/// A lexicon whose bands vary with spelling, so generated poems contain both common and rare
+/// words rather than everything landing in one band.
+struct LengthLexicon;
+
+impl Lexicon for LengthLexicon {
+    fn rarity(&self, word: &str) -> Rarity {
+        Rarity::band(u8::try_from(word.chars().count()).unwrap_or(u8::MAX))
+    }
+}
 
 /// A phonemiser whose output varies with spelling, so a generated poem contains lines that
 /// genuinely rhyme and lines that genuinely do not.
@@ -262,6 +273,59 @@ fn phone_sequence() -> impl Strategy<Value = Vec<(Phoneme, Stress)>> {
 }
 
 proptest! {
+    /// Surprisal is bounded, and its two halves stay within the whole.
+    ///
+    /// `SPEC.md` §4.4 turns this number into filter cutoff and attack time, so a value outside
+    /// `0..=1` would drive a parameter off its range rather than to its edge.
+    #[test]
+    fn surprisal_is_bounded(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let scored = surprisal::analyse(&poem, &EverySyllableStressed, &LengthLexicon);
+        let one = surprisal::Surprisal::NONE;
+        for word in scored.words() {
+            prop_assert!(word.surprisal() >= one);
+            prop_assert!(word.novelty() >= one);
+            prop_assert!(word.rarity().get() < Rarity::BANDS);
+            // Both halves are ratios of at most one, so their weighted mean is too.
+            prop_assert!(word.surprisal().as_f64() <= 1.0 + f64::EPSILON);
+            prop_assert!(word.novelty().as_f64() <= 1.0 + f64::EPSILON);
+        }
+    }
+
+    /// I4 — every score names the word it came from.
+    #[test]
+    fn i4_every_score_traces_to_a_word(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let scored = surprisal::analyse(&poem, &EverySyllableStressed, &LengthLexicon);
+        let mut seen = std::collections::BTreeSet::new();
+        for word in scored.words() {
+            prop_assert!(word.span().text(poem.source()).is_some());
+            prop_assert!(seen.insert(word.span()), "a word scored twice");
+        }
+    }
+
+    /// Rarity depends on the word alone, never on its neighbours — the half of §4.4 that is
+    /// supposed to be context-free.
+    #[test]
+    fn rarity_ignores_context(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let scored = surprisal::analyse(&poem, &EverySyllableStressed, &LengthLexicon);
+        for word in scored.words() {
+            let text = word.span().text(poem.source()).unwrap();
+            prop_assert_eq!(word.rarity(), LengthLexicon.rarity(text));
+        }
+    }
+
+    /// I1 — scoring is a pure function of the poem, the phonemiser and the lexicon.
+    #[test]
+    fn i1_surprisal_is_reproducible(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        prop_assert_eq!(
+            surprisal::analyse(&poem, &EverySyllableStressed, &LengthLexicon),
+            surprisal::analyse(&poem, &EverySyllableStressed, &LengthLexicon)
+        );
+    }
+
     /// A word family means what it says: every member shares its root's opening, and no two
     /// families hold words that should have been one.
     ///

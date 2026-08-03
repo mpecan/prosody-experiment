@@ -10,6 +10,7 @@ prosody-core = { workspace = true }
 
 [dev-dependencies]
 prosody-cmudict = { workspace = true }
+prosody-lexicon = { workspace = true }
 proptest = { workspace = true }
 
 [lints]

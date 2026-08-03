@@ -17,6 +17,7 @@
 //! - [`rhyme`] — continuous rhyme scoring and the classes `SPEC.md` §4.5 maps to scale degrees.
 //! - [`repetition`] — the figures `SPEC.md` §4.3 turns into loops, ostinati and cadences.
 //! - [`sound`] — §4.3's phonetic rows: word families, alliteration, assonance.
+//! - [`surprisal`] — §4.4's distinctiveness metric, which drives sharpness and brightness.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
@@ -35,6 +36,7 @@ pub mod rhyme;
 pub mod seed;
 pub mod sound;
 pub mod span;
+pub mod surprisal;
 
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
@@ -52,3 +54,4 @@ pub use rhyme::{LineRhyme, PoemRhyme, RhymeClassId, RhymeScore, StanzaRhyme};
 pub use seed::{Domain, Seed};
 pub use sound::{Distance, SoundFigure, SoundFigureKind, SoundRepetition, WordForm, WordVoiceId};
 pub use span::Span;
+pub use surprisal::{Lexicon, PoemSurprisal, Rarity, Surprisal, WordSurprisal};

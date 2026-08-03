@@ -365,7 +365,9 @@ fn transcribe(letters: &[char]) -> Vec<&'static str> {
             continue;
         }
 
-        if let Some(phones) = single_letter(letters, index, letter) {
+        if let Some(phones) = voiced_ending(&symbols, letters, index, letter)
+            .or_else(|| single_letter(letters, index, letter))
+        {
             symbols.extend_from_slice(phones);
         }
         index += 1;
@@ -377,7 +379,8 @@ fn transcribe(letters: &[char]) -> Vec<&'static str> {
         // ...then whatever inflection followed it: the `s` of "tables".
         for index in tail..letters.len() {
             if let Some(&letter) = letters.get(index)
-                && let Some(phones) = single_letter(letters, index, letter)
+                && let Some(phones) = voiced_ending(&symbols, letters, index, letter)
+                    .or_else(|| single_letter(letters, index, letter))
             {
                 symbols.extend_from_slice(phones);
             }
@@ -592,6 +595,43 @@ fn longest_of(
     best
 }
 
+/// A word-final `s` or `d` takes its voicing from the sound before it.
+///
+/// English voices its inflections to match: "cats" ends in `S` but "dogs" ends in `Z`, and
+/// "walked" ends in `T` but "burned" ends in `D`. Emitting a flat `S` made "tables" and
+/// "krapplesnaffles" come out with a voiceless plural — which the word-family rule then correctly
+/// refused to accept as an inflection, since English would never build it that way.
+fn voiced_ending(
+    symbols: &[&'static str],
+    letters: &[char],
+    index: usize,
+    letter: char,
+) -> Option<&'static [&'static str]> {
+    if index + 1 != letters.len() || !matches!(letter, 's' | 'd') {
+        return None;
+    }
+    // Only an *inflectional* ending takes its voicing from the stem. The `s` of "this", "yes",
+    // "glass" and "bus" belongs to the root and stays voiceless — so a final `s` counts as an
+    // inflection only in a long enough word whose preceding letter is not itself part of a
+    // root-final cluster.
+    if letters.len() < 4 {
+        return None;
+    }
+    let before = index.checked_sub(1).and_then(|i| letters.get(i)).copied()?;
+    if matches!(before, 's' | 'i' | 'u' | 'a' | 'o') {
+        return None;
+    }
+    let previous = symbols.last()?;
+    let voiceless = matches!(*previous, "P" | "T" | "K" | "F" | "TH" | "S" | "SH" | "CH");
+    Some(match (letter, voiceless) {
+        ('s', true) => &["S"],
+        ('s', false) => &["Z"],
+        ('d', true) => &["T"],
+        ('d', false) => &["D"],
+        _ => return None,
+    })
+}
+
 /// The sound of a single letter, given what surrounds it.
 #[allow(clippy::match_same_arms)] // one arm per letter reads as the table it is; merging loses that
 fn single_letter(letters: &[char], index: usize, letter: char) -> Option<&'static [&'static str]> {
@@ -768,8 +808,11 @@ mod tests {
     fn an_inflected_form_keeps_its_stems_silent_e() {
         // The suffix-blind version got every past tense and plural wrong: "hoped" as
         // `HH AA P EH D`.
-        assert_eq!(say("hoped"), ["HH", "OW", "P", "D"]);
+        // Voiceless `P`, so the ending is `T` — "hoped", not "hobed".
+        assert_eq!(say("hoped"), ["HH", "OW", "P", "T"]);
         assert_eq!(say("smiled"), ["S", "M", "AY", "L", "D"]);
+        // ...and a voiced `L` takes `Z`, not `S`.
+        assert_eq!(say("smiles"), ["S", "M", "AY", "L", "Z"]);
         assert_eq!(say("makes"), ["M", "EY", "K", "S"]);
         assert_eq!(say("hopes"), ["HH", "OW", "P", "S"]);
     }
@@ -838,8 +881,8 @@ mod tests {
     fn an_inflected_consonant_le_word_keeps_its_syllable() {
         // The `-le` rule looked at the whole word, so a plural lost the syllable entirely and
         // came out as `T EY B L AH S`. Same blindness the silent-`e` rule had for "hoped".
-        assert_eq!(say("tables"), ["T", "EY", "B", "AH", "L", "S"]);
-        assert_eq!(say("candles"), ["K", "AE", "N", "D", "AH", "L", "S"]);
+        assert_eq!(say("tables"), ["T", "EY", "B", "AH", "L", "Z"]);
+        assert_eq!(say("candles"), ["K", "AE", "N", "D", "AH", "L", "Z"]);
     }
 
     #[test]

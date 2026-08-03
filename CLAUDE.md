@@ -65,7 +65,10 @@ cheaper to test and it is what makes I4 attributable.
 
 ## 3. Quality gates
 
-A change is not done until all of these pass. Run them; do not assume.
+A change is not done until all of these pass. Run them; do not assume — and **check the exit
+code**, not the summary text. `cargo test` prints `test result: FAILED. 9 passed; 1 failed`, so a
+command that greps for a passed-count reports a healthy-looking number while a test is failing.
+That happened; it hid a broken test for a whole iteration.
 
 ```sh
 cargo fmt --all -- --check

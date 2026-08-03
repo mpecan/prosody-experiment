@@ -48,7 +48,8 @@ guard exists — they are not deferred to the end.
 | M3b | Rhyme: continuous scoring, equivalence classes | **done** | §4.5, §7.3; iteration 6 |
 | M4a | Repetition: refrain, anaphora, epistrophe, and `VoiceId` | **done** | §4.3, §7.4; iteration 7 |
 | M4b | Repetition: alliteration, assonance, morphological near-repetition | **done** | §4.3; iteration 8 |
-| M5 | Surprisal (§4.4), role assignment (§4.1), Voice IR + lowering (several passes) | todo | §7.5 |
+| M5a | Surprisal (§4.4) and the lexicon | **done** | §4.4; iteration 9 |
+| M5b | Role assignment (§4.1), Voice IR + lowering | todo | §7.5 |
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6 — cheapest audition path |
 | M6a | **§8 acceptance test: the couplet synonym swap** | todo | §8 — runs the moment M6 gives an audition path, not later |
 | M7 | Debug annotation view | todo | §8 — the enforcement mechanism for I4 |
@@ -62,6 +63,14 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **The rarity corpus stops at 1929.** Every source is public domain, so `phone`, `jazz`,
+  `explode` and `plastic` are absent and score as maximally rare. For a poem about a mobile phone
+  that is simply wrong, and no public-domain corpus can fix it. Live with it, or accept a
+  non-redistributable table behind a feature flag. **Not urgent; revisit if a modern poem misfires.**
+- **α and β are both 1 and unmeasured.** `SPEC.md` §4.4 gives the formula's shape and no
+  magnitudes. Nothing has been auditioned, so an unequal split would be a guess dressed as a
+  decision. **Tune at M6, when there is something to listen to** — §9 expects exactly this.
 
 - **Word families are order-dependent, like rhyme classes.** A word joins the nearest family
   *built so far*, so editing an early stanza can change a later word's `WordVoiceId`. Depth is now
@@ -164,20 +173,48 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 9 — M5: surprisal, role assignment, and the Voice IR.** Not yet planned.
+**Iteration 10 — M5b: role assignment and the Voice IR.** Not yet planned.
 
-M5 inherits four recorded decisions that have to be made together, because they are all the same
-question — how much may an analysis depend on the rest of the poem?
-- which variance the role assignment uses (raw or relative)
-- whether `dominant_foot` is trustworthy enough to lower from
-- rhyme-class and word-family order-dependence
-- how a token that is both a family variation and a rhyme reconciles timbre against pitch
+M5b still inherits the four decisions that are really one question — how much may an analysis
+depend on the rest of the poem? Surprisal turned out to be free of it: rarity comes from a static
+table and novelty is scoped to a word's neighbours, so editing one stanza cannot move another's
+score. Meter, rhyme and word families are not.
 
 ---
 
 ---
 
 ## Log
+
+### Iteration 9 — M5a surprisal
+
+Built: `prosody-core::surprisal` (§4.4's metric) and `crates/prosody-lexicon` (the rarity table).
+364 tests.
+
+**A process failure first.** The build was reported as "319 tests passed, all gates green" while a
+test was failing. The gate command summed the passed-count from each `test result:` line, and a
+failing line reads `FAILED. 9 passed; 1 failed` — so the sum counted the 9 and never saw the 1.
+`CLAUDE.md` §3 now says to check the exit code. The failing test was real: the word-family
+allomorphy rule from iteration 8 correctly refused `krapplesnaffle`/`krapplesnaffles`, because the
+letter-to-sound module emitted a voiceless plural after a voiced sound — English would never build
+that. The new rule *exposed* an old bug rather than causing one.
+
+| Finding | Resolution |
+|---|---|
+| **The metric picked function words as sharpest in 4 of 6 real poems** — "shorter" over "civility" in Dickinson, "Maybe" over "explode" in Hughes, "a" over "burn". Dividing novelty by the word's own length let a one-phoneme word reach the top of the scale on a single unheard vowel | Novelty counts *how many* sounds a word brings, up to four, instead of what fraction of itself is new. Dickinson now gives "gossamer", Hughes "explode" |
+| **The corpus was four fifths King James.** "thou" and "unto" ranked alongside "not", while `coffee`, `hemlock`, `dryad` and `gossamer` — one of them from Keats, a source text — all collapsed into the same bucket as invented gibberish | Fourteen sources, nine verse and five prose, each contributing its *relative* frequencies with equal weight. 20,000 words kept rather than 6,000 |
+| **Long lines saturated the second term.** On a 27-word Whitman line, 17 words scored no novelty at all — with a wide enough window every phoneme is covered by something | The window is a bounded neighbourhood within the line, which is what §4.4's "local window" means |
+| `sharpest()`'s tie-break was correct only by a non-obvious cancellation in `max_by`, and flipping it to the naive direction passed all 59 relevant tests | Tested |
+| The "window is the line" invariant was unverified — a poem-wide context passed everything, because the only test that could catch it used a single-line poem | Tested, with a multi-line fixture |
+| A rarity-blind metric passed every real-vocabulary test, because the chosen words were also the most phonetically novel in their lines | A fixture where only rarity separates the words |
+
+Verified rather than assumed: `combine()` reduces exactly to `(α·r/bands + β·n)/(α+β)`, `Eq` agrees
+with `Ord` — the third time that contract has come up and the first without being told — and
+`Surprisal` cannot overflow, because its denominator is bounded by the 39-phoneme inventory rather
+than by poem length.
+
+Surprisal is also the one M5 subsystem with no poem-order dependence: rarity is a static table and
+novelty reaches only a few words either side, so editing one stanza cannot move another's score.
 
 ### Iteration 8 — M4b phonetic repetition
 
