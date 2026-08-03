@@ -158,12 +158,22 @@ impl SoundFigure {
 /// A poem's phonetic repetitions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SoundRepetition {
+    poem: crate::seed::Fingerprint,
     forms: Vec<WordForm>,
     figures: Vec<SoundFigure>,
     voices: usize,
 }
 
 impl SoundRepetition {
+    /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
+    ///
+    /// Spans are bare byte offsets, so two poems with the same line lengths have identical ones.
+    /// Any pass combining several analyses must check this rather than compare spans.
+    #[must_use]
+    pub const fn poem(&self) -> crate::seed::Fingerprint {
+        self.poem
+    }
+
     /// Every pronounceable word of the poem, placed in a family, in source order.
     #[must_use]
     pub fn forms(&self) -> &[WordForm] {
@@ -340,6 +350,7 @@ pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser) -> SoundRepetition {
 
     let (forms, voices) = assign_families(&words);
     SoundRepetition {
+        poem: poem.fingerprint(),
         forms,
         figures,
         voices,

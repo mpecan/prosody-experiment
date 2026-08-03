@@ -42,12 +42,6 @@ pub enum Domain {
     Stanza,
     /// A line.
     Line,
-    /// The whole poem.
-    ///
-    /// Not a seeding unit — seeding a whole poem is exactly what invariant I2 forbids. This
-    /// exists so an analysis can record *which* poem it describes, since spans are bare byte
-    /// offsets and two different poems with the same line lengths have identical ones.
-    Poem,
 }
 
 impl Domain {
@@ -61,13 +55,47 @@ impl Domain {
         match self {
             Self::Stanza => "prosody-core seed v1 stanza",
             Self::Line => "prosody-core seed v1 line",
-            Self::Poem => "prosody-core seed v1 poem",
         }
     }
 }
 
 /// The key-derivation context for sub-streams. Frozen, for the same reason as [`Domain::context`].
 const CHILD_CONTEXT: &str = "prosody-core seed v1 child";
+
+/// Which poem an analysis describes.
+///
+/// A pass that combines several analyses has to know they came from the same poem, and spans
+/// cannot tell it: "war is kind maiden" and "one two three four" occupy exactly the same bytes.
+///
+/// Deliberately **not** a [`Seed`]. An earlier version of this was a `Seed` under a `Domain::Poem`
+/// — which made `Seed::for_unit(Domain::Poem, whole_poem_span, source)` a legal way to obtain a
+/// PRNG seeded from an entire poem, the one thing invariant I2 exists to forbid. `CLAUDE.md` §1
+/// states that enforcement as "there is no global RNG and no unseeded one", and a doc comment
+/// saying "never seed from this" is a comment doing a type's job. A `Fingerprint` has no way to
+/// become randomness: identity and entropy are different things and now have different types.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Fingerprint([u8; 32]);
+
+impl Fingerprint {
+    /// Fingerprints a poem's source text.
+    ///
+    /// Infallible, unlike [`Seed::for_unit`]: there is no span to resolve, so there is no failure
+    /// to report and no `None` for callers to handle — and no way for two different poems to both
+    /// fingerprint as "unknown" and compare equal.
+    #[must_use]
+    pub fn of(source: &str) -> Self {
+        Self(blake3::derive_key(FINGERPRINT_CONTEXT, source.as_bytes()))
+    }
+}
+
+impl core::fmt::Debug for Fingerprint {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Fingerprint({:02x}{:02x}..)", self.0[0], self.0[1])
+    }
+}
+
+/// The key-derivation context for poem fingerprints. Frozen, like [`Domain::context`].
+const FINGERPRINT_CONTEXT: &str = "prosody-core fingerprint v1 poem";
 
 /// A deterministic PRNG seed derived from a single unit's content.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]

@@ -15,12 +15,14 @@
 use proptest::prelude::{
     Strategy, prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, proptest,
 };
+use prosody_core::lower::{self, Analyses};
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
 use prosody_core::repetition::FigureKind;
 use prosody_core::role::{Layer, LineBasis, PERIODIC, StanzaBasis};
 use prosody_core::sound;
 use prosody_core::surprisal::{self, Lexicon, Rarity};
+use prosody_core::voice::Score;
 use prosody_core::{
     Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, repetition, rhyme, role,
 };
@@ -232,6 +234,27 @@ fn roles_of(source: &str) -> role::PoemRoles {
     let meter = meter::scan(&poem, &EverySyllableStressed);
     let repetition = repetition::analyse(&poem);
     role::assign(&meter, &repetition).unwrap()
+}
+
+/// A poem, lowered with the test phonemiser and lexicon.
+fn score_of(source: &str) -> Score {
+    let poem = Poem::parse(source.to_owned()).unwrap();
+    let meter = meter::scan(&poem, &EverySyllableStressed);
+    let rhyme = rhyme::analyse(&poem, &EverySyllableStressed);
+    let repetition = repetition::analyse(&poem);
+    let sound = sound::analyse(&poem, &EverySyllableStressed);
+    let surprisal = surprisal::analyse(&poem, &EverySyllableStressed, &LengthLexicon);
+    let roles = role::assign(&meter, &repetition).unwrap();
+    lower::run(Analyses {
+        poem: &poem,
+        meter: &meter,
+        rhyme: &rhyme,
+        repetition: &repetition,
+        sound: &sound,
+        surprisal: &surprisal,
+        roles: &roles,
+    })
+    .unwrap()
 }
 
 /// Every line span in the poem, in source order.
@@ -1399,6 +1422,144 @@ proptest! {
                 prop_assert!(voices.get(&voice).copied().unwrap_or(0) > 1);
             }
         }
+    }
+
+    /// I1 — lowering is a pure function of the analyses.
+    #[test]
+    fn i1_lowering_is_reproducible(source in poem_source()) {
+        prop_assert_eq!(score_of(&source), score_of(&source));
+    }
+
+    /// I4 — every event names a word that exists in the poem.
+    ///
+    /// The property `SPEC.md` §6 states directly: "Every audible event must be attributable to a
+    /// specific token span. If it can't be traced, it shouldn't exist."
+    #[test]
+    fn i4_every_event_traces_to_a_word(source in poem_source()) {
+        let poem = Poem::parse(source.clone()).unwrap();
+        let words = poem
+            .stanzas()
+            .iter()
+            .flat_map(prosody_core::Stanza::lines)
+            .flat_map(prosody_core::Line::words)
+            .map(|token| token.span())
+            .collect::<std::collections::BTreeSet<Span>>();
+        for event in score_of(&source).events() {
+            prop_assert!(event.span().text(poem.source()).is_some());
+            prop_assert!(words.contains(&event.span()), "{:?} is not a word", event.span());
+        }
+    }
+
+    /// I4 — every event belongs to a voice the score declares, and every voice sounds.
+    ///
+    /// A voice with no events would be an instrument that never plays; an event whose voice is
+    /// absent would be a sound with no instrument.
+    #[test]
+    fn i4_events_and_voices_account_for_each_other(source in repetitive_poem()) {
+        let score = score_of(&source);
+        for event in score.events() {
+            prop_assert!(score.voice(event.voice()).is_some());
+        }
+        for voice in score.voices() {
+            prop_assert!(
+                score.events_of(voice.id()).next().is_some()
+                    || score.events().is_empty(),
+                "voice {:?} never sounds", voice.id()
+            );
+        }
+    }
+
+    /// Events reach a backend in one total order, so output cannot depend on the order a pass
+    /// happened to build them in (`CLAUDE.md` §4).
+    #[test]
+    fn events_are_totally_ordered(source in poem_source()) {
+        let score = score_of(&source);
+        let mut previous = None;
+        for event in score.events() {
+            let key = (
+                event.bar().get(),
+                event.beat().get(),
+                event.subdivision().index(),
+                event.span().start(),
+            );
+            if let Some(last) = previous {
+                prop_assert!(last <= key, "{last:?} came before {key:?}");
+            }
+            previous = Some(key);
+        }
+    }
+
+    /// A syllable divides its beat, so its index is always inside the divisor.
+    #[test]
+    fn subdivisions_lie_within_their_beat(source in poem_source()) {
+        for event in score_of(&source).events() {
+            prop_assert!(event.subdivision().of() > 0);
+            prop_assert!(event.subdivision().index() < event.subdivision().of());
+            prop_assert_eq!(event.subdivision().of(), event.foot().syllables());
+        }
+    }
+
+    /// I2 — editing one stanza leaves the events of every other stanza's voices alone.
+    ///
+    /// The invariant in its own words: "changing one word reshuffles the whole piece" is what
+    /// must not happen. Compared by shape rather than by span, since an edit shifts every later
+    /// byte offset without changing what is played.
+    #[test]
+    fn i2_an_edit_leaves_other_stanzas_events_alone(
+        source in poem_source(),
+        pick in 0_usize..4096,
+        text in replacement(),
+    ) {
+        let mut poem = Poem::parse(source.clone()).unwrap();
+        prop_assume!(poem.stanzas().len() > 1);
+        let stanzas = poem.stanzas().len();
+        let last = poem.stanzas()[stanzas - 1].span();
+        let edited = poem.stanzas()[0].span();
+
+        let inside: Vec<Span> = token_spans(&poem)
+            .into_iter()
+            .filter(|s| edited.contains(*s))
+            .collect();
+        prop_assume!(!inside.is_empty());
+        poem.apply(inside[pick % inside.len()], text).unwrap();
+        prop_assume!(poem.stanzas().len() == stanzas);
+        let moved = poem.stanzas()[stanzas - 1].span();
+
+        // Everything about the untouched stanza that reaches a listener, relative to the stanza
+        // so that a byte shift is not mistaken for a change.
+        //
+        // An earlier version compared only beat, subdivision and velocity — all of which come
+        // from `meter::scan` and are local by construction, so the property held by virtue of the
+        // pipeline's shape rather than the implementation's. The fields where a locality break
+        // actually appears are the ones fed by poem-wide numbering: sharpness, family, and the
+        // bar. Pitch is deliberately *not* here; see the note below.
+        let shape = |score: &Score, within: Span| {
+            let first = score
+                .events()
+                .iter()
+                .find(|e| within.contains(e.span()))
+                .map_or(0, |e| e.bar().get());
+            score
+                .events()
+                .iter()
+                .filter(|e| within.contains(e.span()))
+                .map(|e| (
+                    e.bar().get() - first,
+                    e.beat().get(),
+                    e.subdivision().index(),
+                    e.subdivision().of(),
+                    e.velocity(),
+                    e.sharpness(),
+                    e.family().map(prosody_core::Family::depth),
+                    e.anchor(),
+                    e.span().start() - within.start(),
+                ))
+                .collect::<Vec<_>>()
+        };
+        prop_assert_eq!(
+            shape(&score_of(&source), last),
+            shape(&score_of(poem.source()), moved)
+        );
     }
 
     /// I4 — containment is reflexive and transitive, so a token inside a line inside a stanza is

@@ -27,7 +27,7 @@
 
 use tree_sitter::{InputEdit, Node, Parser, Point, Tree};
 
-use crate::seed::{Domain, Seed};
+use crate::seed::{Domain, Fingerprint, Seed};
 use crate::span::Span;
 
 /// The style-header delimiter (`SPEC.md` §5). TOML, so `+++` rather than YAML's `---`.
@@ -321,10 +321,9 @@ impl Poem {
     /// occupy exactly the same bytes, so a role pass given one poem's meter and another's
     /// repetitions would invent confident refrains between lines that have never met.
     ///
-    /// Returns `None` only for a source that is not a valid slice of itself, which cannot happen.
     #[must_use]
-    pub fn fingerprint(&self) -> Option<Seed> {
-        Seed::for_unit(Domain::Poem, Span::new(0, self.source.len()), &self.source)
+    pub fn fingerprint(&self) -> Fingerprint {
+        Fingerprint::of(&self.source)
     }
 
     /// The seed for a line.

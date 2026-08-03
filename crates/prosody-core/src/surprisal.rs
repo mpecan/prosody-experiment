@@ -202,10 +202,20 @@ impl WordSurprisal {
 /// A poem's distinctiveness, word by word.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoemSurprisal {
+    poem: crate::seed::Fingerprint,
     words: Vec<WordSurprisal>,
 }
 
 impl PoemSurprisal {
+    /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
+    ///
+    /// Spans are bare byte offsets, so two poems with the same line lengths have identical ones.
+    /// Any pass combining several analyses must check this rather than compare spans.
+    #[must_use]
+    pub const fn poem(&self) -> crate::seed::Fingerprint {
+        self.poem
+    }
+
     /// Every pronounceable word, in source order.
     #[must_use]
     pub fn words(&self) -> &[WordSurprisal] {
@@ -232,7 +242,10 @@ pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser, lexicon: &impl Lexicon
             words.extend(scan_line(line, poem, phonemiser, lexicon));
         }
     }
-    PoemSurprisal { words }
+    PoemSurprisal {
+        poem: poem.fingerprint(),
+        words,
+    }
 }
 
 /// Scores one line's words against their neighbours.

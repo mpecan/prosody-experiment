@@ -174,7 +174,7 @@ impl StanzaRepetition {
 /// A poem's repetitions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoemRepetition {
-    poem: Option<crate::seed::Seed>,
+    poem: crate::seed::Fingerprint,
     stanzas: Vec<StanzaRepetition>,
     figures: Vec<Figure>,
     voices: usize,
@@ -189,7 +189,7 @@ impl PoemRepetition {
 
     /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
     #[must_use]
-    pub const fn poem(&self) -> Option<crate::seed::Seed> {
+    pub const fn poem(&self) -> crate::seed::Fingerprint {
         self.poem
     }
 

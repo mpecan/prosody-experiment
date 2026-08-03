@@ -236,10 +236,21 @@ impl StanzaRole {
 /// Every role in a poem.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoemRoles {
+    poem: crate::seed::Fingerprint,
     stanzas: Vec<StanzaRole>,
 }
 
 impl PoemRoles {
+    /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
+    ///
+    /// Taken from the meter, which [`assign`] has already checked against the repetition. Without
+    /// it a later pass could combine these roles with another poem's analyses and invert the
+    /// arrangement — §4.1's load-bearing decision, silently taken from the wrong text.
+    #[must_use]
+    pub const fn poem(&self) -> crate::seed::Fingerprint {
+        self.poem
+    }
+
     /// The poem's stanzas, in order.
     #[must_use]
     pub fn stanzas(&self) -> &[StanzaRole] {
@@ -338,7 +349,10 @@ pub fn assign(meter: &PoemMeter, repetition: &PoemRepetition) -> Result<PoemRole
         })
         .collect();
 
-    Ok(PoemRoles { stanzas })
+    Ok(PoemRoles {
+        poem: meter.poem(),
+        stanzas,
+    })
 }
 
 /// A stanza's verdict on its own evidence, before the poem-wide fallback is considered.

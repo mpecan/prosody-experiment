@@ -55,6 +55,15 @@ impl RhymeScore {
         self.matched == self.total
     }
 
+    /// The exact fraction, for a pass that must derive another exact quantity from it.
+    ///
+    /// Crate-internal: outside, the point of the type is that scores are compared rather than
+    /// arithmetic'd. `SPEC.md` §4.5 turns this into pitch precision, and
+    /// [`Detune`](crate::voice::Detune) needs the ratio rather than a rounded value.
+    pub(crate) const fn parts(self) -> (u64, u64) {
+        (self.matched, self.total)
+    }
+
     /// The value, for display only. Never compare two of these — use [`Ord`], which is exact.
     #[must_use]
     #[allow(clippy::cast_precision_loss)] // display only; ordering uses the exact rational
@@ -255,11 +264,21 @@ impl StanzaRhyme {
 /// A poem's rhymes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoemRhyme {
+    poem: crate::seed::Fingerprint,
     stanzas: Vec<StanzaRhyme>,
     classes: usize,
 }
 
 impl PoemRhyme {
+    /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
+    ///
+    /// Spans are bare byte offsets, so two poems with the same line lengths have identical ones.
+    /// Any pass combining several analyses must check this rather than compare spans.
+    #[must_use]
+    pub const fn poem(&self) -> crate::seed::Fingerprint {
+        self.poem
+    }
+
     /// The poem's stanzas.
     #[must_use]
     pub fn stanzas(&self) -> &[StanzaRhyme] {
@@ -346,6 +365,7 @@ pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser) -> PoemRhyme {
     }
 
     PoemRhyme {
+        poem: poem.fingerprint(),
         stanzas,
         classes: classes.len(),
     }

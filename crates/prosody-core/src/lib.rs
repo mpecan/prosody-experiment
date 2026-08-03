@@ -19,6 +19,8 @@
 //! - [`sound`] — §4.3's phonetic rows: word families, alliteration, assonance.
 //! - [`surprisal`] — §4.4's distinctiveness metric, which drives sharpness and brightness.
 //! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
+//! - [`voice`] — the IR of §3: sounding events, with nothing a style could supply.
+//! - [`lower`] — §7.5, turning every analysis above into that IR.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
@@ -29,6 +31,7 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod lower;
 pub mod meter;
 pub mod parse;
 pub mod phoneme;
@@ -39,6 +42,7 @@ pub mod seed;
 pub mod sound;
 pub mod span;
 pub mod surprisal;
+pub mod voice;
 
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
@@ -58,3 +62,6 @@ pub use seed::{Domain, Seed};
 pub use sound::{Distance, SoundFigure, SoundFigureKind, SoundRepetition, WordForm, WordVoiceId};
 pub use span::Span;
 pub use surprisal::{Lexicon, PoemSurprisal, Rarity, Surprisal, WordSurprisal};
+pub use voice::{
+    Bar, BeatIndex, Detune, Event, Family, Pitch, ScaleDegree, Score, Subdivision, Velocity, Voice,
+};

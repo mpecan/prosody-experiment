@@ -16,7 +16,6 @@
 
 use crate::parse::{Line, Poem, Stanza};
 use crate::phoneme::{Phonemiser, Provenance, Stress};
-use crate::seed::Seed;
 use crate::span::Span;
 
 /// How many syllables something has — the subdivision count of `SPEC.md` §4.2.
@@ -494,7 +493,7 @@ impl StanzaMeter {
 /// A poem's meter.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PoemMeter {
-    poem: Option<Seed>,
+    poem: crate::seed::Fingerprint,
     stanzas: Vec<StanzaMeter>,
 }
 
@@ -507,7 +506,7 @@ impl PoemMeter {
 
     /// Which poem this describes; see [`Poem::fingerprint`](crate::parse::Poem::fingerprint).
     #[must_use]
-    pub const fn poem(&self) -> Option<Seed> {
+    pub const fn poem(&self) -> crate::seed::Fingerprint {
         self.poem
     }
 }

@@ -50,9 +50,9 @@ guard exists — they are not deferred to the end.
 | M4b | Repetition: alliteration, assonance, morphological near-repetition | **done** | §4.3; iteration 8 |
 | M5a | Surprisal (§4.4) and the lexicon | **done** | §4.4; iteration 9 |
 | M5b | Role assignment (§4.1) | **done** | §4.1, §9 free-verse fallback; iteration 10 |
-| M5c | Voice IR + lowering | todo | §7.5, §10 |
-| M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6 — cheapest audition path |
-| M6a | **§8 acceptance test: the couplet synonym swap** | todo | §8 — runs the moment M6 gives an audition path, not later |
+| M5c | Voice IR + lowering | **done** | §7.5, §10; iteration 11 |
+| M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6. **`Style` and realisation live here, not in core** — that is what makes I3 a compiler-enforced edge rather than a convention |
+| M6a | **§8 acceptance test: the couplet synonym swap** | **done** | §8; landed at M5c — the IR *is* the audition path, no backend needed |
 | M7 | Debug annotation view | todo | §8 — the enforcement mechanism for I4 |
 | M8 | Golden corpus (`insta`) + full I1–I4 property suite | todo | §8 — hardening, legitimately after M7 |
 | M9 | OSC → SuperCollider, live-reload watcher | todo | §7.8 — only after mappings hold up |
@@ -64,6 +64,31 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **A scale degree is a poem-wide number, so an edit can transpose an untouched stanza.** `SPEC.md`
+  §4.5 assigns degrees "in order of first appearance", which is inherently a fact about the whole
+  poem: introduce a rhyme in stanza 1 and every later class shifts up one. Invariant I2's own words
+  are "changing one word reshuffles the whole piece". The two requirements genuinely conflict, and
+  §4.5's is the explicit one, so the behaviour stands and is pinned by
+  `a_new_rhyme_class_transposes_the_classes_after_it` rather than left implicit. Same shape as the
+  role-locality question M5b settled, and the same answer is available — a basis-style disclosure
+  saying *why* a degree is what it is. **Decide at M6, when it can be heard.**
+- **Free verse produces no melody at all.** A rhyme class of one expresses no melodic relation, so
+  it gets no pitch — and in unrhymed free verse that means every event is unpitched. §4.1's
+  equivalent degeneracy got a named `OnlyCandidate` fallback; §4.5's gets silence. Consistent with
+  the mapping, but it means a whole class of poems reaches the backend with no pitch information
+  whatsoever. **Decide at M6.**
+- **Pitch reaches about 8% of events**, since only rhyme words are pitched. Whatever a backend
+  chooses for the other 92% will dominate what is heard and none of it traces to the poem — §1's
+  failure mode arriving through omission. §4.5's own consequences ("ABAB → alternating cadences",
+  "villanelle → a two-note obsession") are claims about the *piece*, not about one note per line.
+  The middle path worth considering: keep the per-event pitch and additionally carry the line's
+  rhyme class on the `Voice` as a tonal centre — one field, every pitch still traceable, and it
+  gives §4.3's anchors something to resolve to. **Raise at M6.**
+- **The IR has no duration, tie, or rest**, and no per-bar beat count. A consumer infers a bar's
+  length by scanning its events. The equal-subdivision convention is now documented on
+  `Subdivision`, which is enough for a Tidal-style emitter but not for a held note. **Revisit at
+  M6 if the emitter needs it.**
 
 - **The rarity corpus stops at 1929.** Every source is public domain, so `phone`, `jazz`,
   `explode` and `plastic` are absent and score as maximally rare. For a poem about a mobile phone
@@ -200,13 +225,11 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 11 — M5c: the Voice IR and lowering.** Not yet planned.
+**Iteration 12 — M6: the Strudel/Tidal text backend and the CLI.** Not yet planned.
 
-It inherits four questions that are now one: how does a token that is several things at once
-become one voice? A word can be a family variation (§4.3, timbre), a rhyme (§4.5, pitch), the
-sharpest word in its line (§4.4, brightness) and sit in a foundation stanza (§4.1, layer) — four
-passes with four opinions and no rule for combining them. M5b settled the locality half of the
-question and deliberately did not touch this half.
+The crate boundary is the point. `Style` and realisation go in `prosody-emit`, which depends on
+`prosody-core` — so `voice` and `lower` *cannot* import them, and I3 stops being a claim in a doc
+comment and becomes the same compiler-enforced edge `CLAUDE.md` §2 already uses for purity.
 
 ---
 
@@ -215,6 +238,48 @@ question and deliberately did not touch this half.
 ---
 
 ## Log
+
+### Iteration 11 — M5c the Voice IR, and §8's acceptance test
+
+Built: `prosody-core::voice` (the IR) and `prosody-core::lower` (rhythm, melody, colour, figures),
+plus `prosody-lts/tests/acceptance.rs` — `SPEC.md` §8's test, which turns out to need no backend
+at all, because an event list *is* what would be heard. 437 tests.
+
+**How six passes become one voice**, the question M5b deferred: they were never in competition.
+Role decides the layer, repetition decides which lines are the same instrument, meter decides when
+and how hard, rhyme decides pitch, surprisal decides brightness, families decide modulation depth.
+The collision recorded since M4b — a word that is both a family member and a rhyme — dissolves the
+same way: §4.3's word voice is *timbral* and §4.5's class is *pitch*.
+
+**Three of §4.3's five rows never reached the IR.** Anaphora ("downbeat-anchored ostinato"),
+epistrophe ("cadence figure") and alliteration/assonance ("same sample bank") were all computed by
+the analysis passes and silently dropped by the lowering — in the section the spec calls its
+highest-value pass, while both my module doc and my plan presented §4.3 as handled. They are not
+recoverable downstream: `Score` is the whole contract with M6, and "downbeat-anchored" is a claim
+about *where in the bar an event sits*. Now carried as `Anchor` and `bank`.
+
+| Finding | Resolution |
+|---|---|
+| **The §8 acceptance test — the project's reason to exist — graded a guess.** "smoulder" is not in `CMUdict`, so the pipeline guessed it by letter-to-sound at 68% stress accuracy; my doc comment stated `S M OW L D ER`, the phonemes of the *American* spelling, while the code produced `S M AW L D ER`. Then "smolder" fixed the dictionary problem but sits in the rarity band reserved for *absence*, so the §4.4 assertion reduced to "a word we have never seen outranks one we have" — true of any nonsense string | "flicker": in the dictionary, and band 6 against burn's 5. A real gradient, and `both_words_are_dictionary_facts` pins it |
+| **`roles` was the one input not fingerprint-checked**, so §4.1's load-bearing decision could come from another poem: the arrangement inverted and `run` returned `Ok`. My own acceptance criterion said all six were checked | `PoemRoles` carries a fingerprint |
+| **`Domain::Poem` made a global RNG constructible.** `Seed::for_unit(Domain::Poem, whole_poem_span, source)` type-checked, which is the one thing I2 forbids, guarded only by a doc comment saying "never seed from this" | `Fingerprint` is its own type with no `rng()`. Identity and entropy are different things |
+| **`Detune` derived `Ord` on a fraction**, so `1/2 < 1/4` — the worse slant rhyme sorting as the closer one, reproduced on real verse. Third occurrence: `Variance` documents fixing it, `RhymeScore` hand-writes it, and I wrote a doc comment about keeping floats out of branches while regressing to a derive | Hand-written, cross-multiplied in `u128`. `Velocity` lost its per-value denominator; `Subdivision` lost an order that was never meaningful |
+| **`bars()` was derived from the last event**, so a poem ending in an unpronounceable line came back a bar short | Counted while lowering. `Score::silent` now reports the words that make no sound |
+| **Provenance was dropped by lowering**, so an event resting entirely on a guess was byte-identical to one resting on the dictionary — and the §8 debug view can only render what the IR kept | Carried on every event |
+| **Scale degrees were consumed by rhyme classes that never sound**, so a poem's first *audible* note could be degree 5 | Numbered over the classes that actually sound |
+| **A voice was created for lines that produce no events** — an instrument that never plays, which the new I4 property asserts is impossible and could not reach | Voices are built from the events that exist |
+
+**Five mutations survived my own first pass**, and four more survived after that. The instructive
+one: seeding a voice from the *stanza* span, or from the whole poem, passed everything — because
+`Voice::seed()` had no callers at all. `CLAUDE.md` §5 says `Seed::for_unit` takes a span precisely
+so a caller cannot pass the whole poem where a unit belongs; the type stops a bare `&str` and
+leaves a poem-wide *span* perfectly typeable, and this pass is its first real caller. I2 rests on
+that one argument, and nothing was watching it.
+
+Also caught: no fixture ever produced a secondary stress, so the middle rung of the velocity
+ladder could be set to zero unnoticed; and one of my test rewrites silently failed to apply
+because `cargo fmt` had reflowed the block my pattern matched, so a test I believed I had
+strengthened was the old one. I only found it by re-running the mutation.
 
 ### Iteration 10 — M5b role assignment
 
