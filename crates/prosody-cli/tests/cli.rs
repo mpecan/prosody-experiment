@@ -111,20 +111,36 @@ fn node() -> Option<String> {
 }
 
 #[test]
-fn explain_names_every_mapping_the_spec_asks_for() {
+fn explain_renders_the_poem_with_each_token_annotated() {
     // `SPEC.md` §8: "render the poem with each token annotated by what it became (role, beat
-    // position, pitch class, modulation, seed)".
+    // position, pitch class, modulation, seed)". Through the real dictionary, so this checks the
+    // pipeline is wired up and not only that the renderer works on a stub.
     let (out, err, code) = run(&["--explain"], COUPLET);
     assert_eq!(code, Some(0), "{err}");
+
+    // The poem itself, line by line — the thing §8 asks to be rendered.
+    for line in [
+        "the fire will burn the night",
+        "and turn the dark to light",
+        "the river finds the sea",
+    ] {
+        assert!(out.contains(line), "the poem is missing {line:?}:\n{out}");
+    }
+    // ...and every word of it annotated.
+    for word in ["fire", "burn", "night", "river", "carries"] {
+        assert!(out.contains(word), "{word} is unannotated");
+    }
+
     assert!(
-        out.contains("Foundation") || out.contains("Flourish"),
+        out.contains("foundation") || out.contains("flourish"),
         "role"
     );
-    assert!(out.contains("bar  0 beat"), "beat position");
+    assert!(out.contains("0.0.0/"), "beat position");
     assert!(out.contains("deg "), "pitch class");
-    assert!(out.contains("fam "), "modulation depth");
     assert!(out.contains("seed "), "seed");
-    assert!(out.contains("\"burn\""), "the token itself: {out}");
+    // Which pass decided each, which is what makes a wrong mapping findable.
+    assert!(out.contains("meter,"), "provenance of the values: {out}");
+    assert!(out.contains("§4.2"), "the legend cites SPEC.md");
 }
 
 #[test]

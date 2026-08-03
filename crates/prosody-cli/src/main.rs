@@ -14,10 +14,12 @@ use std::process::ExitCode;
 
 use anyhow::{Context as _, Result, bail};
 use prosody_cmudict::CmuDict;
+use prosody_core::annotate;
 use prosody_core::lower::{self, Analyses};
+use prosody_core::role::PoemRoles;
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
-use prosody_emit::{Backend as _, Strudel, Style, fmt_param};
+use prosody_emit::{Backend as _, Strudel, Style};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
 
@@ -121,7 +123,7 @@ fn run() -> Result<()> {
     .context("lowering the poem to a score")?;
 
     if arguments.explain {
-        return explain(&poem, &score, &style);
+        return explain(&poem, &score, &style, &roles);
     }
 
     let pattern = Strudel::new()
@@ -157,12 +159,11 @@ fn read(source: Option<&Path>) -> Result<String> {
     Ok(text)
 }
 
-/// Prints what each line became — the beginning of `SPEC.md` §8's debug view.
+/// Prints the poem with what each token became written under it — `SPEC.md` §8's debug view.
 ///
-/// Not the whole thing: §8 wants every *token* annotated with role, beat position, pitch class,
-/// modulation depth and seed, and that is M7. This is the line-and-event grain, which is what M6
-/// can honestly show.
-fn explain(poem: &Poem, score: &Score, style: &Style) -> Result<()> {
+/// The rendering lives in `prosody_core::annotate` so it can be tested without running a binary;
+/// this adds the two things only the IO edge knows: the palette, and the realised tempo.
+fn explain(poem: &Poem, score: &Score, style: &Style, roles: &PoemRoles) -> Result<()> {
     let mut out = String::new();
     let _ = writeln!(out, "style");
     for (key, value) in style.describe() {
@@ -175,71 +176,7 @@ fn explain(poem: &Poem, score: &Score, style: &Style) -> Result<()> {
         score.voices().len(),
         score.events().len()
     );
-
-    let _ = writeln!(out, "\nvoices");
-    for voice in score.voices() {
-        let text = voice.span().text(poem.source()).unwrap_or("<lost>");
-        // The seed is one of the five things SPEC.md §8 asks the debug view to show, and the only
-        // place invariant I2 is visible to a reader at all.
-        let _ = writeln!(
-            out,
-            "  {:>3}  {:<10}  {} event(s)  seed {}  {text:?}",
-            voice.id().get(),
-            format!("{:?}", voice.layer()),
-            score.events_of(voice.id()).count(),
-            voice.seed(),
-        );
-    }
-
-    if !score.silent().is_empty() {
-        let _ = writeln!(out, "\nno pronunciation found for");
-        for span in score.silent() {
-            let _ = writeln!(out, "  {:?}", span.text(poem.source()).unwrap_or("<lost>"));
-        }
-    }
-
-    let _ = writeln!(out, "\nevents");
-    for event in score.events() {
-        let word = event.span().text(poem.source()).unwrap_or("<lost>");
-        let pitch = event.pitch().map_or_else(
-            || "-".to_owned(),
-            |pitch| {
-                let detune = if pitch.detune().is_exact() {
-                    String::new()
-                } else {
-                    format!("+{}", fmt_param(pitch.detune().as_f64()))
-                };
-                format!("deg {}{detune}", pitch.degree().get())
-            },
-        );
-        // §8 asks for modulation depth by name, and it is §4.3's morphological row — the mapping
-        // the spec says earns the project. An earlier version of this view omitted it.
-        let family = event.family().map_or_else(
-            || "-".to_owned(),
-            |family| format!("v{}+{}", family.voice().get(), family.depth().get()),
-        );
-        let figure = event.anchor().map_or_else(
-            || "-".to_owned(),
-            |anchor| format!("{anchor:?}").to_lowercase(),
-        );
-        let _ = writeln!(
-            out,
-            "  bar {:>2} beat {:>2} {}/{}  gain {}  {:<10}  fam {:<8}  {:<8}  sharp {}{}  {word:?}",
-            event.bar().get(),
-            event.beat().get(),
-            event.subdivision().index(),
-            event.subdivision().of(),
-            fmt_param(event.velocity().as_f64()),
-            pitch,
-            family,
-            figure,
-            fmt_param(event.sharpness().as_f64()),
-            if event.rests_on_a_guess() {
-                " (guessed)"
-            } else {
-                ""
-            },
-        );
-    }
+    let _ = writeln!(out);
+    out.push_str(&annotate::render(poem, &annotate::run(poem, score, roles)));
     write(&out)
 }

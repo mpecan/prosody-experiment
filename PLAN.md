@@ -53,7 +53,7 @@ guard exists — they are not deferred to the end.
 | M5c | Voice IR + lowering | **done** | §7.5, §10; iteration 11 |
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | **done** | §7.6; iteration 12. `Style` lives in `prosody-emit`, so I3 is a compiler-enforced edge |
 | M6a | **§8 acceptance test: the couplet synonym swap** | **done** | §8; landed at M5c — the IR *is* the audition path, no backend needed |
-| M7 | Debug annotation view | todo | §8 — the enforcement mechanism for I4 |
+| M7 | Debug annotation view | **done** | §8; iteration 13 |
 | M8 | Golden corpus (`insta`) + full I1–I4 property suite | todo | §8 — hardening, legitimately after M7 |
 | M9 | OSC → SuperCollider, live-reload watcher | todo | §7.8 — only after mappings hold up |
 
@@ -64,6 +64,14 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **Every word carries a `Family`, including words that are alone in one.** §4.3's morphological
+  row is about *near-repetition* — "burn / burning / burnt" — so a word sharing its family with
+  nothing has no variation to modulate. The debug view suppresses singletons, because otherwise
+  every row reads `f0+0` and the real families are invisible; but the IR still records them, and
+  the emitter still emits a crush depth for them (a no-op at depth zero, so harmless today). Either
+  `Event::family` should be `None` for a family of one, or the view's suppression is the right
+  place for it. **Decide at M8**, when the golden corpus makes the noise visible in a snapshot.
 
 - **A cycle is a fixed span, so mapping a line to a bar makes the *foot* elastic.** A two-foot line
   and a five-foot line occupy the same time, and the pulse stretches to fit. §4.2 says "line → bar
@@ -254,12 +262,14 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 13 — M7: the debug annotation view.** Not yet planned.
+**Iteration 14 — M8: the golden corpus and the full property suite.** Not yet planned.
 
-`SPEC.md` §8 wants the poem rendered with each token annotated by what it became. `--explain` is
-the event-grain version and covers role, beat, pitch, modulation and seed; what it is not is the
-*poem*, annotated. M7 is also where the span-carrying error question above gets settled, since it
-is the same machinery.
+`CLAUDE.md` §7.2 names the seven poems it must contain: strict iambic pentameter, free verse, a
+villanelle, a refrain-heavy lyric, a one-line poem, a poem with an out-of-vocabulary word, and a
+non-English poem. Nothing in the workspace uses `insta` yet, and iteration 12's review named a
+committed snapshot as the single cheapest fix for most of what its mutations found — a snapshot of
+the whole emitted text and the whole debug view would have caught the empty palette block, the
+zeroed header counts, the swapped layer labels and both invalid-JavaScript mutants at once.
 
 ---
 
@@ -268,6 +278,36 @@ is the same machinery.
 ---
 
 ## Log
+
+### Iteration 13 — M7 the debug annotation view
+
+Built: `prosody-core::annotate`, and `--explain` now renders it. 497 tests.
+
+`SPEC.md` §8 calls this "the only real defence against I4 quietly failing", and the reason is that
+nothing enforces I4 by construction: a `Span` proves an event *claims* a range of bytes, not that
+the claim is right, and a wrong claim is invisible in a backend's output. So the module runs the
+attribution backwards — every other pass goes text → structure; this one takes the finished score
+and asks, for each token the poem actually contains, what became of it. A token with no events is
+as interesting as one with too many.
+
+Two things it does that a printf would not. It names **which pass decided each value**, which is
+what turns "that sounds wrong" into "that pass is wrong" — and each pass cites its `SPEC.md`
+section. And it distinguishes a token that is *silent* (nobody could pronounce it, which
+`CLAUDE.md` §6 requires be visible) from one that is simply **absent from the score**, which is a
+hole in the attribution and has no innocent explanation.
+
+There is a test that fails when a mapping reaches the IR without reaching the view. Twice — at
+M5c and again at M6 — a row of §4.3 was computed, carried, and silently dropped one layer later,
+and both times what would have caught it is a reader seeing that the column was empty.
+
+**The view found something within a minute of working**: every word was annotated `f0+0`, a "word
+family" with one member. §4.3's row is about near-repetition, so a family of one has nothing to
+modulate, and printing it buried the real families in noise. Suppressed in the view and raised in
+the questions above, because whether the *IR* should carry it is a mapping question.
+
+Mutation testing: eleven applied, all killed — but only after two rounds. Printing a constant
+beat position satisfied every assertion in the module, because the beat column's whole value is
+that its numbers differ and nothing said so.
 
 ### Iteration 12 — M6 the Strudel backend, the style layer, and the CLI
 

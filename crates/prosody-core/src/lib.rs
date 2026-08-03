@@ -21,6 +21,7 @@
 //! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
 //! - [`voice`] — the IR of §3: sounding events, with nothing a style could supply.
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
+//! - [`annotate`] — §8's debug view: the poem, with what each token became written under it.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
@@ -31,6 +32,7 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod annotate;
 pub mod lower;
 pub mod meter;
 pub mod parse;
@@ -44,6 +46,7 @@ pub mod span;
 pub mod surprisal;
 pub mod voice;
 
+pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
 };
