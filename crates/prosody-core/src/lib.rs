@@ -13,6 +13,7 @@
 //!   the mechanism behind invariant I2 (per-unit seeding).
 //! - [`parse`] — the tree-sitter boundary: text in, span-carrying stanzas and lines out.
 //! - [`phoneme`] — how words sound, and the [`Phonemiser`] boundary `SPEC.md` §9 asks for.
+//! - [`meter`] — stress vectors, feet, and the metrical variance `SPEC.md` §4.1 assigns roles by.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
@@ -23,11 +24,15 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod meter;
 pub mod parse;
 pub mod phoneme;
 pub mod seed;
 pub mod span;
 
+pub use meter::{
+    Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
+};
 pub use parse::{
     Diagnostic, DiagnosticKind, Line, LineIdx, ParseError, Poem, Stanza, StanzaIdx, Token,
     TokenKind,

@@ -44,7 +44,8 @@ guard exists — they are not deferred to the end.
 | M1 | Tree-sitter grammar: frontmatter / stanza / line / caesura / token, incremental reparse | **done** | `SPEC.md` §7.1; iteration 2 |
 | M2a | `Phonemiser` trait, phoneme model, CMUdict | **done** | §7.2, §9; iteration 3 |
 | M2b | Letter-to-sound fallback for out-of-vocabulary words | **done** | §7.2, §9; iteration 4 |
-| M3 | Meter: stress vectors, foot segmentation. Rhyme: continuous scoring, equivalence classes | todo | §4.2, §4.5, §7.3 |
+| M3a | Meter: stress vectors, foot segmentation, metrical variance | **done** | §4.2, §7.3; iteration 5 |
+| M3b | Rhyme: continuous scoring, equivalence classes | todo | §4.5, §7.3 |
 | M4 | Repetition passes: exact → anaphora/epistrophe → morphological | todo | §4.3, §7.4 — ship exact first |
 | M5 | Surprisal (§4.4), role assignment (§4.1), Voice IR + lowering (several passes) | todo | §7.5 |
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6 — cheapest audition path |
@@ -60,6 +61,19 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **Which variance does role assignment use?** (`SPEC.md` §4.1). Raw `Variance::of` grows with
+  line length even when raggedness does not: `[4,4,4,6]` scores 0.75 and `[10,10,10,15]` scores
+  4.69, though they are equally ragged in proportion. `Variance::relative` (variance ÷ mean²,
+  still exact) is scale-free. **Decide at M5.** Raw is right for comparing stanzas of similar line
+  length; relative is right across a poem that mixes hexameter and trimeter stanzas.
+- **`dominant_foot` is unreliable for iambic pentameter** — measured 50–57% agreement on
+  Shakespeare, Milton and Pope. Not a segmentation bug: `CMUdict` marks monosyllabic function
+  words (`of`, `to`, `as`, `shall`, `but`) with primary stress, so a run of them reads as
+  spondees. This is `SPEC.md` §9's lexical-vs-phrasal stress limitation, and its practical reach
+  is much larger than that bullet suggests. Anything downstream that leans on `dominant_foot`
+  gets the wrong answer about half the time on the commonest English metre. **Decide at M5**
+  whether the Voice IR should use it at all.
 
 - **Heteronym sense selection** (`SPEC.md` §4.5, §9): `CMUdict` lists `wind` as `W AY N D` (the
   verb) before the common noun `W IH N D`, and similarly for `bow`, `live`, `tear`, `lead`,
@@ -105,21 +119,58 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 5 — M3: meter and rhyme.** Not yet planned; plan it at the start of the iteration.
+**Iteration 6 — M3b: rhyme.** Not yet planned; plan it at the start of the iteration.
 
-Carried into M3 from iteration 4's review:
-- **Heteronym variant selection** is now actionable: `CmuDict::variants` exposes the alternates,
-  and the rhyme pass is where the choice belongs. `wind` resolves to the verb by default.
-- Guessed pronunciations carry `Provenance::LetterToSound` and are 25% exact / 84% syllable-count
-  accurate. Rhyme and alliteration must not treat a guess as authoritative — decide what a
-  low-confidence pronunciation does to a rhyme class.
-- `TokenKind::Number` still has no consumer.
+Carried into M3b from iteration 5's review:
+- `Beat` keeps only stress, not phonemes, so the rhyme pass re-derives pronunciations for
+  line-final words. Harmless — the phonemiser is pure — but worth knowing before optimising.
+- Secondary stress counts as prominence for rhyme and as weak for metre. `Pronunciation::rhyme_tail`
+  already does the former; do not "fix" it to match `meter::carries_the_beat`.
+- Heteronym variants are reachable through `CmuDict::variants`; rhyme is where choosing among
+  them belongs.
 
 ---
 
 ---
 
 ## Log
+
+### Iteration 5 — M3a meter
+
+Built: `prosody-core::meter` — stress vectors, foot segmentation by dynamic programming, and
+exact-rational metrical variance. 231 tests.
+
+Reviewed by three parallel agents (prosody, invariants, rust-and-tests). The prosody reviewer
+scanned Shakespeare, Milton, Pope, Blake, Dickinson and Hopkins, and brute-forced every stress
+pattern up to length 14.
+
+| Finding | Resolution |
+|---|---|
+| **`Variance` derived `PartialEq` but hand-wrote `Ord`**, so equal spreads at different stanza lengths compared unequal while `cmp` called them equal — Rust's contract broken on the exact comparison the type exists for | `PartialEq` and `Hash` now mirror the cross-multiplication |
+| **The catalexis tie-break was added into the cost**, so it overrode strictly better tilings. Measured: 13–16% of odd-length stress patterns scanned worse than necessary — `S S w` took a one-mismatch dactyl over a perfect `Single` + trochee | Ranked below mismatch, where a tie-break belongs |
+| **Amphibrach (w S w) was missing.** An amphibrachic line still tiles at equal cost out of iambs and pyrrhics, so the search never noticed — the feet were just named wrong | Added. Cretic deferred: rare as an English base metre |
+| **A word could vanish entirely**: `Ok` with zero syllables produced no beats *and* no `unpronounced` entry, contradicting this slice's own acceptance criterion | Treated like any other failure |
+| **Foot spans overlap** when a word straddles two feet, reproduced from the property generators in under 150 cases | Documented as the poem's own doing, with `beats_of` giving exact per-syllable attribution, and a test pinning the overlap so it is visible rather than surprising |
+| Raw variance is scale-dependent, biasing §4.1 toward calling long-lined stanzas aperiodic | `Variance::relative` added, exact and sqrt-free; which one M5 uses is now an open question |
+| `Beat::index` was dead — hardcoding it to 0 passed all 221 tests | Asserted |
+| The catalexis tie-break and the primary-only stress rule had **no coverage in their own crate** — both were caught only by real-verse tests in `prosody-lts` | Both now have in-crate tests, and the `Fake` word table gained a secondary-stressed entry it had lacked |
+| `variance_is_a_total_order` passed an `Ord` that ignored the denominator entirely — the axioms alone admit a wrong-but-valid order | Strengthened with a duplication case, which fails for any comparison that reads the numerator alone |
+| `Foot`'s public fields let an inconsistent foot be built; `SyllableCount(pub usize)` let units be added together | Private fields with accessors; a property now checks `beats().len() == kind().syllables()` |
+| `Foot::beats` could index a foreign line and panic | `LineMeter::beats_of` |
+
+Five mutations were run against the finished code and all five now fail *in `prosody-core`*, not
+merely somewhere in the workspace: dead `Beat::index`, removed catalexis tie-break, secondary
+stress counted as a beat, `Ord` ignoring the denominator, and a dropped empty pronunciation.
+
+Deliberately **not** changed:
+- **`carries_the_beat` still counts primary stress only.** Verified correct for compounds
+  (`blackbird`, `grandmother`) and Latinate words (`understand`, `intervene`, `comprehend`). It
+  costs the "cavalcade" class, where a reader promotes secondary stress to carry the beat — the
+  same word iteration 3 noted for rhyme, now known to affect metre too.
+- **Cretic (S w S)** — no concrete English example justified the implementation effort.
+- **Elision.** "Temperate" scans as three syllables where the verse wants two. A different failure
+  from lexical-vs-phrasal stress — a syllable-*count* problem, not a stress-*placement* one — and
+  worth naming separately when auditing accuracy.
 
 ### Iteration 4 — M2b letter-to-sound fallback
 

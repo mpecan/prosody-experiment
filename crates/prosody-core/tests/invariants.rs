@@ -16,7 +16,38 @@ use proptest::prelude::{
     Strategy, prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, proptest,
 };
 use prosody_core::phoneme::arpabet::ARPABET;
-use prosody_core::{Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, phoneme};
+use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
+use prosody_core::{Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme};
+
+/// A phonemiser that gives every word one stressed syllable, so meter properties depend on the
+/// segmentation rather than on a dictionary.
+struct EverySyllableStressed;
+
+impl Phonemiser for EverySyllableStressed {
+    fn inventory(&self) -> &'static Inventory {
+        &ARPABET
+    }
+
+    fn pronounce(&self, word: &str) -> Result<Pronunciation, Unpronounceable> {
+        // One syllable per vowel letter, alternating stress, so lines get varied stress vectors.
+        let count = word.chars().filter(|c| "aeiou".contains(*c)).count();
+        if count == 0 {
+            return Err(Unpronounceable::NotKnown);
+        }
+        let nucleus = ARPABET.phoneme("AH").unwrap();
+        let syllables = (0..count)
+            .map(|i| {
+                let stress = if i % 2 == 0 {
+                    Stress::Primary
+                } else {
+                    Stress::Unstressed
+                };
+                prosody_core::Syllable::new(vec![], nucleus, vec![], stress).unwrap()
+            })
+            .collect();
+        Ok(Pronunciation::from_dictionary(syllables))
+    }
+}
 use rand_core::Rng;
 
 /// A well-formed poem: stanzas of lines of words, blank-line separated.
@@ -139,6 +170,106 @@ fn phone_sequence() -> impl Strategy<Value = Vec<(Phoneme, Stress)>> {
 }
 
 proptest! {
+    /// I4 — every syllable of a line belongs to exactly one foot, and no foot reaches past the
+    /// line. A segmentation that dropped or double-counted a syllable would change the rhythm
+    /// with nothing to trace it to.
+    #[test]
+    fn i4_feet_partition_a_line_exactly(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        let scanned = meter::scan(&poem, &EverySyllableStressed);
+        for stanza in scanned.stanzas() {
+            for line in stanza.lines() {
+                let mut next = 0;
+                for foot in line.feet() {
+                    prop_assert_eq!(foot.beats().start, next, "feet must be contiguous");
+                    prop_assert!(foot.beats().end > foot.beats().start, "a foot has syllables");
+                    prop_assert_eq!(
+                        foot.beats().len(),
+                        foot.kind().syllables(),
+                        "a foot's width must match its kind"
+                    );
+                    prop_assert!(line.span().contains(foot.span()));
+                    next = foot.beats().end;
+                }
+                prop_assert_eq!(next, line.beats().len(), "feet must cover every syllable");
+                prop_assert_eq!(line.syllable_count().get(), line.beats().len());
+                prop_assert_eq!(line.foot_count().get(), line.feet().len());
+            }
+        }
+    }
+
+    /// I4 — every syllable names the word it came from, and that word lies inside its line.
+    #[test]
+    fn i4_every_syllable_traces_to_a_word(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        let scanned = meter::scan(&poem, &EverySyllableStressed);
+        for stanza in scanned.stanzas() {
+            for line in stanza.lines() {
+                for beat in line.beats() {
+                    prop_assert!(beat.word.text(poem.source()).is_some());
+                    prop_assert!(line.span().contains(beat.word));
+                }
+                for span in line.unpronounced() {
+                    prop_assert!(line.span().contains(*span));
+                }
+            }
+        }
+    }
+
+    /// I1 — scanning is a pure function of the poem and the phonemiser.
+    #[test]
+    fn i1_scanning_is_reproducible(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        prop_assert_eq!(
+            meter::scan(&poem, &EverySyllableStressed),
+            meter::scan(&poem, &EverySyllableStressed)
+        );
+    }
+
+    /// Variance is a total order, so role assignment can rank stanzas without a tie-break that
+    /// depends on float rounding — and the order tracks the *value*, not the representation.
+    ///
+    /// The axioms alone are not enough: an `Ord` that compared numerators and ignored denominators
+    /// is still a valid total order, and passed an earlier version of this test while defeating
+    /// the whole point of the exact arithmetic. The duplication case below is what catches it.
+    #[test]
+    fn variance_is_a_total_order(
+        a in proptest::collection::vec(0_usize..20, 0..8),
+        b in proptest::collection::vec(0_usize..20, 0..8),
+    ) {
+        let (x, y) = (meter::Variance::of(&a), meter::Variance::of(&b));
+        prop_assert_eq!(x.cmp(&y), y.cmp(&x).reverse());
+        prop_assert_eq!(x.cmp(&x), core::cmp::Ordering::Equal);
+
+        // Equality must agree with ordering, or `Ord`'s contract is broken.
+        prop_assert_eq!(x == y, x.cmp(&y) == core::cmp::Ordering::Equal);
+
+        // Repeating a set leaves its spread unchanged but scales the stored fraction, so this
+        // fails for any comparison that reads the numerator without the denominator.
+        let doubled: Vec<usize> = a.iter().chain(a.iter()).copied().collect();
+        prop_assert_eq!(meter::Variance::of(&doubled), x);
+        prop_assert_eq!(meter::Variance::of(&doubled).cmp(&y), x.cmp(&y));
+
+        // A set of identical values has no spread at all, whatever the value is.
+        if a.iter().all(|v| Some(v) == a.first()) {
+            prop_assert!(x.is_zero());
+        }
+    }
+
+    /// Relative variance is invariant under scaling every line's length, which raw variance is
+    /// not — the property `SPEC.md` §4.1 needs when stanzas differ in line length.
+    #[test]
+    fn relative_variance_ignores_scale(
+        counts in proptest::collection::vec(1_usize..12, 1..6),
+        factor in 2_usize..5,
+    ) {
+        let scaled: Vec<usize> = counts.iter().map(|c| c * factor).collect();
+        prop_assert_eq!(
+            meter::Variance::relative(&scaled),
+            meter::Variance::relative(&counts)
+        );
+    }
+
     /// I4, for sound rather than text — syllabification attributes every phoneme exactly once,
     /// in order. A pass that lost or reordered a phoneme would make every syllable count, stress
     /// vector and rhyme derived from it untraceable to what the poet wrote.
