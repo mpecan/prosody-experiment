@@ -1,1 +1,6 @@
 /target
+
+# Editor and OS cruft
+.DS_Store
+.idea/
+*.swp

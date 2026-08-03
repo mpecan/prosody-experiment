@@ -16,7 +16,7 @@ mechanical enforcement and a test. Never weaken the enforcement to make a featur
 | Invariant | Enforced by | Test |
 |---|---|---|
 | **I1** Determinism: same poem + style ⇒ bit-identical output | no ambient nondeterminism (§4) | property test: N runs, same bytes |
-| **I2** Per-unit seeding from that unit's content | `Seed::for_unit(&content)`; there is no global RNG | property test: edit stanza *n*, stanza *m ≠ n* voices byte-identical |
+| **I2** Per-unit seeding from that unit's content | `Seed::for_unit(domain, span, source)` — a span, never a bare `&str`, so a caller cannot pass the whole poem where a unit belongs; there is no global RNG and no unseeded one | property test: edit stanza *n*, stanza *m ≠ n* voices byte-identical |
 | **I3** Style is palette, not structure | `Style` is only readable during *realisation*, never during analysis or role assignment | property test: change style ⇒ event structure identical, only parameters differ |
 | **I4** Traceability: every event attributable to a token span | every IR node carries a non-`Option` `Span`; constructors require it | property test: every emitted event resolves to a byte range that exists in the source |
 
@@ -124,10 +124,23 @@ The mapping is the whole project; encode it in types so wrong mappings don't com
   `ScaleDegree`, `Bpm`, `Velocity`, `StanzaIdx`. No bare `usize`/`f32` crossing a pass boundary.
   A function taking `(usize, usize, f32)` is a defect report waiting to happen.
 - **`Span { start: usize, end: usize }` is mandatory on every IR node**, not optional, not added
-  later. This is the only real defence against I4 quietly failing (`SPEC.md` §8).
+  later. This is the only real defence against I4 quietly failing (`SPEC.md` §8). Use
+  `Span::new` only where `start <= end` is structurally guaranteed; when the bounds come from
+  arithmetic, use `Span::try_new` so a reversed-argument bug surfaces instead of collapsing into
+  an innocuous zero-length token.
+- **A unit's seed is derived from a span, never from a loose string.** `Seed::for_unit` takes
+  `(Domain, Span, &str)` deliberately: a bare `&str` parameter cannot tell one stanza from the
+  whole poem, so misuse would stay perfectly deterministic (I1 intact) while breaking I2, and no
+  test of the function itself could detect it.
 - **Make illegal states unrepresentable.** Rhyme classes are an equivalence relation — represent
   them as a union-find or an interned `RhymeClassId`, not as a `String` compared repeatedly.
   Roles are an enum, not a bool `is_foundation`.
+- **Voice identity is not a seed.** Seeds avalanche: a one-character edit yields an unrelated
+  stream. That is right for `SPEC.md` §4.3's refrain row and wrong for its morphological row,
+  where "burn / burning / burnt" must stay *one* voice with modulated parameters. Voice identity
+  comes from the repetition pass that groups related units (a `VoiceId`); the seed supplies only
+  the residual jitter within an already-established voice. Deriving a `VoiceId` from a `Seed`
+  turns the spec's highest-value mapping into three unrelated instruments.
 - **Parse, don't validate.** The style header becomes a `Style` struct with validated ranges at
   the IO boundary; downstream code never re-checks `tempo_range`.
 - **Trait boundaries the spec demands now, even with one impl:**

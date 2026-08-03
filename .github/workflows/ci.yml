@@ -1,0 +1,42 @@
+# The four gates from CLAUDE.md §3. They exist as commands so that "high quality" is a thing the
+# repository checks rather than a thing a contributor remembers.
+name: ci
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the exact patch version; installing from it rather than naming a
+      # version here keeps the pin in one place.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.1"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # --locked everywhere: invariant I1 promises bit-identical output, and silently resolving a
+      # different patch release of a dependency is a way to break that between machines.
+      - name: format
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+      - name: test
+        run: cargo test --workspace --locked
+
+      - name: docs
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings

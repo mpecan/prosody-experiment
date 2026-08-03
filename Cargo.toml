@@ -1,6 +1,33 @@
-[package]
-name = "prosody-experiment"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.96"
 
-[dependencies]
+[workspace.dependencies]
+blake3 = "1"
+rand_chacha = "0.10"
+rand_core = "0.10"
+proptest = "1"
+
+# See CLAUDE.md §3. Lints live here, not in per-file `#![allow]`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny" # slicing a poem by index is how you panic on unicode
+float_cmp = "deny"
+todo = "deny"
+dbg_macro = "deny"

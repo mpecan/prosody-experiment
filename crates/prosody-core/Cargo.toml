@@ -1,0 +1,20 @@
+[package]
+name = "prosody-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Pure, deterministic analysis of a poem into musical structure."
+
+[dependencies]
+# Seed derivation needs strong avalanche: a one-word edit must produce an unrelated PRNG
+# stream, or near-identical stanzas get correlated randomness and the correlation is audible.
+# BLAKE3's output is specified and stable across releases; `DefaultHasher`'s is not.
+blake3 = { workspace = true }
+rand_chacha = { workspace = true }
+rand_core = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true
