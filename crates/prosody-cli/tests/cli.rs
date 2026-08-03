@@ -360,3 +360,103 @@ fn the_watcher_survives_a_poem_that_will_not_compile() {
         "and keeps going afterwards:\n{out}"
     );
 }
+
+/// The examples directory, from this crate.
+fn examples() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
+}
+
+#[test]
+fn every_example_compiles() {
+    // The examples are real poems with real punctuation, so they exercise paths the stripped test
+    // fixtures do not — and an example that stops compiling is a regression nobody would notice,
+    // because nothing else reads them.
+    let mut found = 0;
+    for entry in std::fs::read_dir(examples()).expect("the examples directory") {
+        let path = entry.expect("a directory entry").path();
+        if path.extension().is_none_or(|extension| extension != "poem") {
+            continue;
+        }
+        found += 1;
+        for arguments in [vec![], vec!["--explain"], vec!["--osc"]] {
+            let finished = Command::new(env!("CARGO_BIN_EXE_prosody"))
+                .args(&arguments)
+                .arg(&path)
+                .output()
+                .expect("the binary should run");
+            assert!(
+                finished.status.success(),
+                "{} failed with {arguments:?}:\n{}",
+                path.display(),
+                String::from_utf8_lossy(&finished.stderr)
+            );
+            assert!(
+                !String::from_utf8_lossy(&finished.stdout).is_empty(),
+                "{} produced nothing with {arguments:?}",
+                path.display()
+            );
+        }
+    }
+    assert!(
+        found >= 9,
+        "expected the examples to still be there, found {found}"
+    );
+}
+
+#[test]
+fn the_examples_readme_lists_every_example() {
+    // A poem added to the directory and not to the table is undocumented; one removed and left in
+    // the table is a lie. Both are cheap to prevent.
+    let readme = std::fs::read_to_string(examples().join("README.md")).expect("the README");
+    for entry in std::fs::read_dir(examples()).expect("the examples directory") {
+        let path = entry.expect("a directory entry").path();
+        if path.extension().is_none_or(|extension| extension != "poem") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            readme.contains(&name),
+            "{name} is not in examples/README.md"
+        );
+    }
+}
+
+#[test]
+fn the_examples_exercise_the_cases_they_claim_to() {
+    // The README makes specific claims about what these poems demonstrate. If a mapping changes
+    // and the claims stop holding, the README becomes fiction — so they are assertions.
+    let explain = |name: &str| -> String {
+        let finished = Command::new(env!("CARGO_BIN_EXE_prosody"))
+            .arg("--explain")
+            .arg(examples().join(name))
+            .output()
+            .expect("the binary should run");
+        String::from_utf8_lossy(&finished.stdout).into_owned()
+    };
+
+    // Blake's first stanza returns as his last, so those lines share a voice (§4.3's refrain row).
+    let blake = explain("blake-tyger.poem");
+    assert!(
+        blake.matches("refrain of voice").count() >= 4,
+        "The Tyger's returning stanza must be heard as a refrain"
+    );
+
+    // Whitman is free verse: §4.1 finds nothing regular, so §9's fallback is what anchors it.
+    let whitman = explain("whitman-song-of-myself.poem");
+    assert!(
+        whitman.contains("foundation (mostregular)"),
+        "free verse must fall back rather than find a regular stanza"
+    );
+    assert!(
+        !whitman.contains("(regularity)"),
+        "and nothing in it should qualify on its own evidence"
+    );
+
+    // Carroll and Prešeren are carried by the letter-to-sound fallback, visibly.
+    for name in ["carroll-jabberwocky.poem", "preseren-zdravljica.poem"] {
+        assert!(
+            explain(name).matches("(guessed)").count() > 5,
+            "{name} must exercise the letter-to-sound fallback, and say so"
+        );
+    }
+}

@@ -65,6 +65,21 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
 
+- **The rhyme tail starts at the last *primary-stressed* vowel, which is wrong for polysyllabic
+  feminine rhyme.** Found by running `examples/wilde-theocritus.poem`, a real villanelle, which has
+  two rhymes and which the pipeline splits into **four** classes: `Persephone` alone, `Sicily`
+  alone, `bee`/`sea` together, and the `-ate` group. Every reader hears the first three as one
+  rhyme; the pass does not, because in `Persephone` the last primary stress is three syllables
+  before the sound the rhyme turns on. The rule is right for monosyllables and masculine rhyme, and
+  wrong for exactly the rhyme a villanelle is built from — so `SPEC.md` §4.5's "villanelle → a
+  two-note obsession" does not hold on an actual villanelle.
+
+  The synthetic villanelle in `tests/corpus/` *does* collapse to two notes, because its rhyme words
+  are monosyllables. That is the difference between a fixture and a poem, and the argument for
+  `examples/` existing. A fix probably means scoring from the last *syllable* boundary as well as
+  the last stress and taking the better of the two, which is a change to what §4.5 maps — so:
+  **raised, not decided.**
+
 - **Every word carries a `Family`, including words that are alone in one.** §4.3's morphological
   row is about *near-repetition* — "burn / burning / burnt" — so a word sharing its family with
   nothing has no variation to modulate. The debug view suppresses singletons, because otherwise
