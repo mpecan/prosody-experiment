@@ -271,24 +271,32 @@ fn transcribe(letters: &[char]) -> Vec<&'static str> {
     let word: String = letters.iter().collect();
     let voiced_th = VOICED_TH.contains(&word.as_str());
 
-    // A consonant + `le` ending is its own syllable and is emitted at the end; the main loop
-    // stops before it. Otherwise the `l` and `e` would also be transcribed normally.
-    let consonant_le = ends_with_consonant_le(letters);
+    // The stem is the word without an inflectional `d` or `s`, so "hoped" is treated as "hope"
+    // plus a suffix and keeps its silent `e`.
+    let stem = strip_inflection(letters);
+
+    // A consonant + `le` ending is its own syllable, emitted after the main loop. Checked against
+    // the *stem*, so "tables" and "candles" work: looking at the whole word missed them exactly
+    // as the silent-`e` rule once missed "hoped".
+    let consonant_le = ends_with_consonant_le(stem);
+    let tail = if consonant_le {
+        stem.len()
+    } else {
+        letters.len()
+    };
     let body = if consonant_le {
-        letters.len().saturating_sub(2)
+        stem.len().saturating_sub(2)
     } else {
         letters.len()
     };
 
-    // The stem is the word without an inflectional `d` or `s`, so "hoped" is treated as "hope"
-    // plus a suffix and keeps its silent `e`. Every index below is relative to the stem.
-    let stem_len = strip_inflection(letters).len().min(body);
+    let stem_len = stem.len().min(body);
     let silent_e_at = has_silent_final_e(letters)
         .then(|| stem_len.checked_sub(1))
         .flatten();
     let magic_e_vowel = silent_e_at.and_then(|_| stem_len.checked_sub(3));
     // "table" lengthens its vowel the way "make" does: v-C-l-e is the same shape as v-C-e.
-    let le_vowel = consonant_le.then(|| letters.len().checked_sub(4)).flatten();
+    let le_vowel = consonant_le.then(|| stem.len().checked_sub(4)).flatten();
 
     let mut symbols = Vec::with_capacity(letters.len());
     let mut index = 0;
@@ -366,6 +374,14 @@ fn transcribe(letters: &[char]) -> Vec<&'static str> {
     if consonant_le {
         symbols.push("AH");
         symbols.push("L");
+        // ...then whatever inflection followed it: the `s` of "tables".
+        for index in tail..letters.len() {
+            if let Some(&letter) = letters.get(index)
+                && let Some(phones) = single_letter(letters, index, letter)
+            {
+                symbols.extend_from_slice(phones);
+            }
+        }
     }
     symbols
 }
@@ -816,6 +832,14 @@ mod tests {
         // A vowel after the `r` means it opens the next syllable instead.
         assert_eq!(say("hero"), ["HH", "EH", "R", "OW"]);
         assert_eq!(say("very"), ["V", "EH", "R", "IY"]);
+    }
+
+    #[test]
+    fn an_inflected_consonant_le_word_keeps_its_syllable() {
+        // The `-le` rule looked at the whole word, so a plural lost the syllable entirely and
+        // came out as `T EY B L AH S`. Same blindness the silent-`e` rule had for "hoped".
+        assert_eq!(say("tables"), ["T", "EY", "B", "AH", "L", "S"]);
+        assert_eq!(say("candles"), ["K", "AE", "N", "D", "AH", "L", "S"]);
     }
 
     #[test]

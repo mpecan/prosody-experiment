@@ -18,6 +18,7 @@ use proptest::prelude::{
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
 use prosody_core::repetition::FigureKind;
+use prosody_core::sound;
 use prosody_core::{
     Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, repetition, rhyme,
 };
@@ -261,6 +262,81 @@ fn phone_sequence() -> impl Strategy<Value = Vec<(Phoneme, Stress)>> {
 }
 
 proptest! {
+    /// A word family means what it says: every member shares its root's opening, and no two
+    /// families hold words that should have been one.
+    ///
+    /// `SPEC.md` §4.3 turns a shared voice into a shared instrument and the distance into
+    /// modulation depth, so a family holding unrelated words would play them as variations of
+    /// each other.
+    #[test]
+    fn word_families_share_a_root(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let phonemiser = EverySyllableStressed;
+        let rep = sound::analyse(&poem, &phonemiser);
+
+        let phonemes_of = |form: &sound::WordForm| -> Vec<prosody_core::Phoneme> {
+            let text = form.span().text(poem.source()).unwrap();
+            phonemiser.pronounce(text).unwrap().phonemes().collect()
+        };
+
+        for voice in 0..rep.voice_count() {
+            let members: Vec<&sound::WordForm> = rep
+                .forms()
+                .iter()
+                .filter(|f| f.voice().get() == voice)
+                .collect();
+            let Some(root) = members.first() else { continue };
+            let root_sound = phonemes_of(root);
+            prop_assert!(root.distance().is_root(), "a family's first form is its root");
+
+            for member in &members {
+                let sound = phonemes_of(member);
+                // Every member shares the root's opening, up to the shorter of the two.
+                let shared = root_sound
+                    .iter()
+                    .zip(sound.iter())
+                    .take_while(|(a, b)| a == b)
+                    .count();
+                let shorter = root_sound.len().min(sound.len());
+                prop_assert!(
+                    shared >= shorter.saturating_sub(1) || shared * 4 >= shorter * 3,
+                    "a family member that does not share the root's opening"
+                );
+                // Distance is zero exactly when the sound is identical.
+                prop_assert_eq!(member.distance().is_root(), sound == root_sound);
+            }
+        }
+    }
+
+    /// I4 — every word form and every phonetic figure names real source text.
+    #[test]
+    fn i4_every_sound_form_traces_to_a_word(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let rep = sound::analyse(&poem, &EverySyllableStressed);
+        for form in rep.forms() {
+            prop_assert!(form.span().text(poem.source()).is_some());
+            prop_assert!(form.voice().get() < rep.voice_count());
+        }
+        for figure in rep.figures() {
+            prop_assert!(figure.words().len() >= 2, "a figure needs two words");
+            let mut seen = std::collections::BTreeSet::new();
+            for word in figure.words() {
+                prop_assert!(word.text(poem.source()).is_some());
+                prop_assert!(seen.insert(*word), "a word listed twice in one figure");
+            }
+        }
+    }
+
+    /// I1 — phonetic analysis is a pure function of the poem and the phonemiser.
+    #[test]
+    fn i1_sound_analysis_is_reproducible(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        prop_assert_eq!(
+            sound::analyse(&poem, &EverySyllableStressed),
+            sound::analyse(&poem, &EverySyllableStressed)
+        );
+    }
+
     /// Voices mean what they say: lines share a voice exactly when they are the same line.
     ///
     /// `SPEC.md` §4.3's refrain row turns a shared voice into a literal loop, so a voice shared

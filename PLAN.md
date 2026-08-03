@@ -47,7 +47,7 @@ guard exists — they are not deferred to the end.
 | M3a | Meter: stress vectors, foot segmentation, metrical variance | **done** | §4.2, §7.3; iteration 5 |
 | M3b | Rhyme: continuous scoring, equivalence classes | **done** | §4.5, §7.3; iteration 6 |
 | M4a | Repetition: refrain, anaphora, epistrophe, and `VoiceId` | **done** | §4.3, §7.4; iteration 7 |
-| M4b | Repetition: alliteration, assonance, morphological near-repetition | todo | §4.3 — the row that "earns the project" |
+| M4b | Repetition: alliteration, assonance, morphological near-repetition | **done** | §4.3; iteration 8 |
 | M5 | Surprisal (§4.4), role assignment (§4.1), Voice IR + lowering (several passes) | todo | §7.5 |
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6 — cheapest audition path |
 | M6a | **§8 acceptance test: the couplet synonym swap** | todo | §8 — runs the moment M6 gives an audition path, not later |
@@ -62,6 +62,23 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **Word families are order-dependent, like rhyme classes.** A word joins the nearest family
+  *built so far*, so editing an early stanza can change a later word's `WordVoiceId`. Depth is now
+  order-independent — measured from each family's shortest form — but membership is not. Same
+  shape as the rhyme and role-locality questions; **M5 must settle all three together.**
+- **A token can be both a family member and a rhyme.** "burning" may be a variation on "burn"
+  (§4.3, timbre and modulation) *and* rhyme with "turning" (§4.5, pitch). The two passes stay
+  structurally separate — verified, no shared state — but nothing says how a mapping should
+  reconcile both signals on one word. **Decide at M5.**
+- **Irregular morphology is entirely missed** — `sing`/`sang`, `go`/`went`, `be`/`was`. No prefix
+  rule can reach it, and these are disproportionately the oldest, commonest, most repeated verbs
+  in English. A small closed table of principal parts would fix it, in the same shape as the
+  endings table. **Decide at M5 or defer explicitly.**
+- **Alliteration's window is one line.** Editions that print each Anglo-Saxon half-line as its own
+  line would lose the form's structural device. A stanza-wide window would flood a Hopkins-density
+  poem instead; a bounded sliding word-window is the likely answer. **Decide when a real
+  alliterative text is in the corpus.**
 
 - **`VoiceId` is line-scoped; the morphological row is word-scoped** (`SPEC.md` §4.3). A line can
   be part of a verbatim refrain *and* contain a word whose family lives in an unrelated line —
@@ -147,20 +164,50 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 8 — M4b: the phonetic repetition rows.** Not yet planned; plan it at the start of the
-iteration.
+**Iteration 9 — M5: surprisal, role assignment, and the Voice IR.** Not yet planned.
 
-Carried into M4b from iteration 7's review:
-- Word-scoped voices, parallel to the line-scoped `VoiceId` (open question above).
-- `SPEC.md` §4.3's morphological row — stem match plus phoneme edit distance, with distance
-  driving modulation depth. The row the spec says earns the project.
-- Whether the assonance pass should skip pairs a rhyme class already connects (from iteration 6).
+M5 inherits four recorded decisions that have to be made together, because they are all the same
+question — how much may an analysis depend on the rest of the poem?
+- which variance the role assignment uses (raw or relative)
+- whether `dominant_foot` is trustworthy enough to lower from
+- rhyme-class and word-family order-dependence
+- how a token that is both a family variation and a rhyme reconciles timbre against pitch
 
 ---
 
 ---
 
 ## Log
+
+### Iteration 8 — M4b phonetic repetition
+
+Built: `prosody-core::sound` — word families, alliteration, assonance. 297 tests.
+
+Reviewed by two parallel agents. The linguistics reviewer graded the family rule against the whole
+dictionary rather than sampling it, which is what made this iteration worth having.
+
+**The family rule was 45% precision.** It grouped `for`, `fort`, `forty`, `force`, `forest`,
+`foreign` and `ford` into one voice, and produced 4,742 families of four or more words across the
+dictionary, some fifty wide. That is `SPEC.md` §1's failure mode exactly: a modulation landing on
+"forest" traceable to an accident in a table.
+
+| Finding | Resolution |
+|---|---|
+| **Any word plus a plausible suffix counted.** Two endings alone — bare `IY` at 7.8% precision and `AH N` at 8.3% — produced 34% of all false joins; `T` sat at 27.3% and made `for`/`fort`, `car`/`cart`, `star`/`start` | English picks its ending *by the sound before it*: `S` after voiceless, `Z` after voiced, `T` after voiceless or the irregular nasal class. Checking the allomorph is what separates `walked` from `cart`. The two worst endings are gone |
+| **Depth degenerated on word order.** "burning burn burnt" gave `burn` and `burnt` the same depth, collapsing no-suffix and shallow-suffix into one modulation | Measured from each family's *shortest* form, after every word is placed |
+| **Alliteration read the first syllable, not the stressed one.** `collide` and `believe` alliterate on a stressed `L`; the code reported a spurious assonance on the schwa they both open with and missed the alliteration | Reads the stressed syllable, as the rhyme pass already does |
+| **The ending check had no coverage in its own crate** — removing it passed all 17 unit and 38 property tests, caught only by a real-word test in another crate | `sing`/`sink` and `for`/`fort` are now hand-worked cases in `sound.rs` |
+| The property `word_families_share_a_root` allowed a slack the implementation does not, which is *why* two mutations were invisible to it | Tightened |
+| Comparing every occurrence rather than every distinct sound made refrain-heavy verse quadratic — 188ms on a 1000-line poem against 3.4ms for the text pass | Families hold distinct sounds |
+
+**Now measured and tracked**: `prosody-lts/tests/family_accuracy.rs` grades 1200 real inflection
+pairs and 1200 merely-similar pairs from the dictionary, with ground truth taken from *spelling*
+so it is independent of the phonetic rule under test. **80.6% recall at a 5.0% false-join rate**,
+with floors that fail the build on regression.
+
+A bug in iteration 4's work surfaced too: the letter-to-sound `-le` rule looked at the whole word,
+so "tables" came out `T EY B L AH S` instead of `T EY B AH L S` — the same suffix-blindness fixed
+for silent-`e` in that very iteration, in a rule written at the same time.
 
 ### Iteration 7 — M4a exact repetition and the voice
 
