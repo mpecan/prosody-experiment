@@ -12,6 +12,7 @@
 //! - [`seed`] — PRNG seeds derived from a single unit's own content, never globally. This is
 //!   the mechanism behind invariant I2 (per-unit seeding).
 //! - [`parse`] — the tree-sitter boundary: text in, span-carrying stanzas and lines out.
+//! - [`phoneme`] — how words sound, and the [`Phonemiser`] boundary `SPEC.md` §9 asks for.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
@@ -23,12 +24,17 @@
 )]
 
 pub mod parse;
+pub mod phoneme;
 pub mod seed;
 pub mod span;
 
 pub use parse::{
     Diagnostic, DiagnosticKind, Line, LineIdx, ParseError, Poem, Stanza, StanzaIdx, Token,
     TokenKind,
+};
+pub use phoneme::{
+    Inventory, Phoneme, PhonemeClass, Phonemiser, Pronunciation, Provenance, Stress,
+    SyllabifyError, Syllable, Unpronounceable,
 };
 pub use seed::{Domain, Seed};
 pub use span::Span;

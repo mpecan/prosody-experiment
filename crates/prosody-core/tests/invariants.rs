@@ -15,7 +15,8 @@
 use proptest::prelude::{
     Strategy, prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, proptest,
 };
-use prosody_core::{Domain, Poem, Seed, Span, StanzaIdx};
+use prosody_core::phoneme::arpabet::ARPABET;
+use prosody_core::{Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, phoneme};
 use rand_core::Rng;
 
 /// A well-formed poem: stanzas of lines of words, blank-line separated.
@@ -107,7 +108,98 @@ fn draw(seed: &Seed, count: usize) -> Vec<u32> {
     (0..count).map(|_| rng.next_u32()).collect()
 }
 
+/// An arbitrary phone sequence, drawn from the whole `ARPAbet` inventory.
+///
+/// Arbitrary sequences reach shapes no real word has — clusters English never uses, runs of
+/// vowels, consonant-only words — which is the point: the dictionary corpus only exercises
+/// sequences that happen to occur in English.
+fn phone_sequence() -> impl Strategy<Value = Vec<(Phoneme, Stress)>> {
+    let symbols: Vec<&'static str> = ARPABET.symbols.iter().map(|s| s.text).collect();
+    proptest::collection::vec(
+        (
+            proptest::sample::select(symbols),
+            proptest::sample::select(vec![Stress::Unstressed, Stress::Secondary, Stress::Primary]),
+        ),
+        0..12,
+    )
+    .prop_map(|drawn| {
+        drawn
+            .into_iter()
+            .map(|(symbol, stress)| {
+                let phoneme = ARPABET.phoneme(symbol).unwrap();
+                let stress = if phoneme.is_vowel() {
+                    stress
+                } else {
+                    Stress::Unstressed
+                };
+                (phoneme, stress)
+            })
+            .collect()
+    })
+}
+
 proptest! {
+    /// I4, for sound rather than text — syllabification attributes every phoneme exactly once,
+    /// in order. A pass that lost or reordered a phoneme would make every syllable count, stress
+    /// vector and rhyme derived from it untraceable to what the poet wrote.
+    #[test]
+    fn i4_syllabification_conserves_every_phoneme(phones in phone_sequence()) {
+        let expected: Vec<Phoneme> = phones.iter().map(|(p, _)| *p).collect();
+        let Ok(syllables) = phoneme::syllabify(&phones) else {
+            // The only refusal for a single-inventory sequence is having no vowel.
+            prop_assert!(!expected.iter().any(|p| p.is_vowel()));
+            return Ok(());
+        };
+
+        let got: Vec<Phoneme> = syllables.iter().flat_map(prosody_core::Syllable::phonemes).collect();
+        prop_assert_eq!(got, expected.clone());
+        prop_assert_eq!(
+            syllables.len(),
+            expected.iter().filter(|p| p.is_vowel()).count()
+        );
+    }
+
+    /// Every interior onset is legal *and* maximal, so the boundary is pinned rather than merely
+    /// permitted. Stated over arbitrary sequences, not just the ones English happens to use.
+    #[test]
+    fn syllable_boundaries_are_legal_and_maximal(phones in phone_sequence()) {
+        let Ok(syllables) = phoneme::syllabify(&phones) else {
+            return Ok(());
+        };
+        for index in 1..syllables.len() {
+            let onset = syllables[index].onset();
+            prop_assert!((ARPABET.legal_onset)(onset));
+
+            if let Some(&borrowed) = syllables[index - 1].coda().last() {
+                let mut longer = vec![borrowed];
+                longer.extend_from_slice(onset);
+                prop_assert!(
+                    !(ARPABET.legal_onset)(&longer),
+                    "onset is not maximal"
+                );
+            }
+        }
+    }
+
+    /// Every syllable holds exactly one vowel, in its nucleus.
+    #[test]
+    fn syllables_hold_one_vowel_each(phones in phone_sequence()) {
+        let Ok(syllables) = phoneme::syllabify(&phones) else {
+            return Ok(());
+        };
+        for syllable in &syllables {
+            prop_assert!(syllable.nucleus().is_vowel());
+            prop_assert!(syllable.onset().iter().all(|p| !p.is_vowel()));
+            prop_assert!(syllable.coda().iter().all(|p| !p.is_vowel()));
+        }
+    }
+
+    /// I1 — syllabification is a pure function of its input.
+    #[test]
+    fn i1_syllabification_is_reproducible(phones in phone_sequence()) {
+        prop_assert_eq!(phoneme::syllabify(&phones), phoneme::syllabify(&phones));
+    }
+
     /// I1 — derivation is a pure function of its inputs, so repeated runs agree, and the
     /// generator built from a seed replays the same stream.
     #[test]

@@ -245,6 +245,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "prosody-cmudict"
+version = "0.1.0"
+dependencies = [
+ "prosody-core",
+]
+
+[[package]]
 name = "prosody-core"
 version = "0.1.0"
 dependencies = [

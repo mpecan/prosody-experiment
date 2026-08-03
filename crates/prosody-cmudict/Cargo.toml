@@ -1,0 +1,12 @@
+[package]
+name = "prosody-cmudict"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "The CMU Pronouncing Dictionary as a Phonemiser."
+
+[dependencies]
+prosody-core = { workspace = true }
+
+[lints]
+workspace = true

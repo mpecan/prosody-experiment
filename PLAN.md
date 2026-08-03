@@ -42,7 +42,8 @@ guard exists — they are not deferred to the end.
 |---|---|---|---|
 | M0 | Workspace, lint gates, CI, `Span`, `Seed` | **done** | determinism + traceability primitives; iteration 1 |
 | M1 | Tree-sitter grammar: frontmatter / stanza / line / caesura / token, incremental reparse | **done** | `SPEC.md` §7.1; iteration 2 |
-| M2 | `Phonemiser` trait + CMUdict + letter-to-sound fallback | todo | §7.2, §9 — trait boundary designed for eSpeak-NG second impl |
+| M2a | `Phonemiser` trait, phoneme model, CMUdict | **done** | §7.2, §9; iteration 3 |
+| M2b | Letter-to-sound fallback for out-of-vocabulary words | todo | §7.2, §9 — must be marked `Provenance::LetterToSound` |
 | M3 | Meter: stress vectors, foot segmentation. Rhyme: continuous scoring, equivalence classes | todo | §4.2, §4.5, §7.3 |
 | M4 | Repetition passes: exact → anaphora/epistrophe → morphological | todo | §4.3, §7.4 — ship exact first |
 | M5 | Surprisal (§4.4), role assignment (§4.1), Voice IR + lowering (several passes) | todo | §7.5 |
@@ -59,6 +60,19 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **Heteronym sense selection** (`SPEC.md` §4.5, §9): `CMUdict` lists `wind` as `W AY N D` (the
+  verb) before the common noun `W IH N D`, and similarly for `bow`, `live`, `tear`, `lead`,
+  `close`, `read`, `record`, `content`. Taking the first entry is deterministic but often the
+  poetically wrong sense, which will produce both false rhymes and missed ones. `CmuDict::variants`
+  now exposes the alternates so the choice can be made where there is information to make it.
+  **Decide at M3**: most likely the rhyme pass picks the variant maximising rhyme within a stanza,
+  with a deterministic tie-break. Do not add a part-of-speech tagger — §9 rules that out for now.
+- **Maximal onset ignores morpheme boundaries** (`SPEC.md` §4.3): "bathroom" syllabifies as
+  `B AE` + `TH R UW M` ("ba-throom") because `TH R` is a legal onset, as in "three". Syllable
+  counts and rhyme tails are unaffected, but onset-based alliteration would credit that syllable
+  with a `TH R` onset. Not fixable through the phonotactics table — `TH R` genuinely is legal.
+  **Decide at M4**, when alliteration lands: either accept it, or add a morpheme-boundary hint.
 
 - **Apostrophe ambiguity** (`SPEC.md` §4.3, §9): the tokeniser keeps `'` inside a word so that
   `don't`, `o'er`, `'tis` and `burn'd` stay single tokens. The cost is that scare-quotes are
@@ -91,17 +105,64 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 3 — M2: phonemiser.** Not yet planned; plan it at the start of the iteration.
+**Iteration 4 — M2b: letter-to-sound fallback.** Not yet planned; plan it at the start of the
+iteration.
 
-Carried into M2 from iteration 2's review:
-- Edge-apostrophe normalisation on CMUdict lookup failure (see the open question above).
-- `TokenKind::Number` exists but nothing consumes it; decide how numerals phonemise, or
-  document that they do not.
-- Add `Domain::Caesura` only when a pass consumes `Line::segments`.
+Carried into M2b from iteration 3's review:
+- Guessed pronunciations must be built with `Pronunciation::guessed`, never `from_dictionary`.
+- Edge-apostrophe normalisation belongs here, on lookup failure — but `CMUdict` genuinely contains
+  `'tis`, `'bout` and `'cause`, so stripping must be a *fallback* after a direct lookup fails,
+  never a pre-pass.
+- `TokenKind::Number` still has no consumer: decide how numerals phonemise, or document that they
+  do not.
+
+---
 
 ---
 
 ## Log
+
+### Iteration 3 — M2a phoneme model and CMUdict
+
+Built: `prosody-core::phoneme` (inventory-agnostic phonemes, syllables, stress, the `Phonemiser`
+trait, maximal-onset syllabification) and `crates/prosody-cmudict` (the dictionary vendored and
+embedded, BSD-2-Clause). 141 tests. `prosody-core` still does no IO.
+
+Reviewed by four parallel agents (invariants, linguistics, rust-quality, test-quality). Three
+verified findings by running code; one scripted the whole dictionary. Findings accepted and fixed:
+
+| Finding | Resolution |
+|---|---|
+| **The corpus test did not do its job.** Three mutations — never forming an onset, reversing to minimal onset, and deleting an entry from the phonotactics table — all passed every corpus test over 135k words. Conservation and syllable counts are invariant under all three, and asserting produced onsets are *legal* is circular: the splitter only returns splits the same table approved | Added **maximality**: at every interior boundary, moving one more consonant into the onset must be illegal. Non-circular, and pins the boundary exactly. Plus more hand-worked splits, which are the only thing that can catch a wrong *table*. All three mutations now fail |
+| `pronounce` could not distinguish "not in the dictionary" from "in it but unsyllabifiable". 8 real vowel-less entries exist (`hm`, `shh`, `mm`, `fs`, `ths`), so `pronounce("hm")` was identical to `pronounce("krapplesnaffle")` | `Result<Pronunciation, Unpronounceable>` with `NotKnown` and `Unsyllabifiable(SyllabifyError)` |
+| `Pronunciation::new` took any `Provenance`, so `new(guessed, Dictionary)` compiled — the one claim provenance exists to prevent. Flagged independently by two reviewers | Named constructors `from_dictionary` / `guessed`; the free constructor is gone |
+| `Inventory::legal_onset` took `&[&'static str]`, allocating a `Vec` per candidate split, and made the one extension point every future inventory implements stringly-typed | Takes `&[Phoneme]`; one projection per word instead of one per candidate |
+| `Phoneme::Ord` had no test: dropping the inventory comparison passed all 109 tests, despite the doc claiming it provides the total order `CLAUDE.md` §4 requires before emission | Ordering, hashing and cross-inventory tests added. Mutation now caught |
+| Onset-table tests used one example per match *arm*: deleting `F` from stop+liquid (breaking "flee", "free") passed the whole suite | One example per listed *symbol*, each named with the word that attests it. Mutation now caught |
+| `Inventory::name` uniqueness was unenforced, so two inventories sharing a name would compare equal | Debug assertion that equal names imply the same symbol table. Pointer identity was rejected as the fix: addresses vary per run and `Ord` must not |
+| `syllabify` read the inventory from the first phoneme and applied it to all | `SyllabifyError::MixedInventories` |
+| `trim_last` did `len() - 1`, a panic in debug builds for empty input — the subtraction, which no lint catches, not the slicing | `saturating_sub` |
+| The "first entry wins" comment misdescribed where determinism came from; the `or_insert` path was dead on real data (verified: zero duplicate keys in 135k entries) | `parse_entries` split out and tested on synthetic input, including a genuine duplicate key |
+| `Provenance::LetterToSound`, empty pronunciations, and `Phoneme` hashing were unexercised | All tested |
+| No property test for this module | Four, over arbitrary phone sequences rather than only ones English happens to use |
+
+Two of my own hand-worked expectations were wrong and the tests caught them, which is why they
+are hand-worked: `CMUdict` lists `read` as `R EH D` (past tense) first, and "pentameter" is not in
+the dictionary at all.
+
+Deliberately **not** changed:
+- **The phonotactics table stands.** The linguistics review checked it against real entries and
+  confirmed `S F` (sphere), `S W` (swim), `TH W` (thwart), `G W` (penguin), `SH R` (shrimp) and the
+  `Y`-onsets are all attested, and that `V R` is correctly absent — "average" splits as `AEV`-`RIHJH`
+  through the single-consonant fallback, which is the right answer.
+- **`rhyme_tail` counts secondary stress**, not only primary. Restricting to primary would break
+  real rhymes: "cavalcade" carries primary stress on its first syllable and only secondary on the
+  rhyming final one, yet rhymes with "brigade". Now a test.
+- **Heteronyms and morpheme boundaries** are raised as open questions above rather than guessed at.
+
+Five mutations were run against the finished code to confirm the tests bite: never-onset,
+minimal-onset, a deleted table entry, `F` removed from stop+liquid, and `Ord` ignoring the
+inventory. All five fail the suite.
 
 ### Iteration 2 — M1 tree-sitter grammar
 
