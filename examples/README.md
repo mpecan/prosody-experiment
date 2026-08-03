@@ -21,6 +21,11 @@ cargo run -p prosody-cli -- --osc examples/dickinson-because.poem
 cargo run -p prosody-cli -- --watch --send 127.0.0.1:57120 examples/blake-tyger.poem
 ```
 
+To hear the OSC path you need a receiver: open `examples/prosody.scd` in SuperCollider, evaluate
+it, then `--send 127.0.0.1:57120`. It defines three synths — one per §4.1 layer plus one for
+§4.5's rhyme words — and schedules each note by the onset in its message rather than playing it on
+arrival.
+
 `./examples/run.sh` compiles all of them at once; `./examples/run.sh --explain` annotates them.
 
 ## What each one is for
@@ -44,6 +49,31 @@ All nine were first published before 1929 and their authors died long before tha
 public domain worldwide. The Prešeren text is transcribed from memory of a very widely reproduced
 poem and may contain small errors; it is here to exercise the non-English path, not as an
 authoritative edition.
+
+## Does any of this actually make a sound?
+
+Checked rather than assumed, because "it compiles" and "it plays" are different claims.
+
+**Strudel: yes, verified.** The emitted text was evaluated in real `@strudel/core` and
+`@strudel/mini` — not just parsed as JavaScript — and it produces genuine control events. Every
+method the emitter calls (`gain`, `lpf`, `attack`, `room`, `crush`, `vowel`, `bank`, `note`, `s`,
+`cpm`, `swingBy`, `stack`) exists on Strudel's `Pattern`. Querying Dickinson cycle by cycle gives
+eight events in the first cycle and six in the second — which is the syllable count of "Because I
+could not stop for Death" and "He kindly stopped for me". Successive cycles differ, so the poem's
+lines really do play in order, and repeated queries give identical results. All five bank names
+(`tr909`, `tr808`, `tr707`, `linn`, `casio`) resolve to real entries in Strudel's default
+drum-machine sample set.
+
+**OSC: yes, once you run the receiver.** The messages were decoded with `python-osc` — a
+third-party implementation, not the one that wrote them — and all of them parse. `examples/`
+ships the SuperCollider side, so there is something to listen.
+
+That check found a real defect. The backend computed exact onsets, printed them in the text
+output, and then **dropped them on the way to the wire**: every message arrived as fast as UDP
+would carry it with no indication of when it belonged. It was invisible to every test in the
+repository, because the schedule was only ever inspected through the same crate that built it.
+Decoding the bytes with something else is what showed it. The onset is now the first argument of
+every note, and the tempo is sent once ahead of them.
 
 ## What they show, including the parts that are wrong
 

@@ -300,6 +300,29 @@ The next iteration has no milestone to take. It should either take an open quest
 
 ## Log
 
+### After M9 — examples, and checking the output actually plays
+
+Added `examples/`: nine verbatim public-domain poems, a runner, and a `SuperCollider` receiver.
+Then checked the claim "this produces sound", which no test in the repository had ever established
+— every test inspected the output through the same crate that produced it.
+
+**Strudel holds up.** The emitted text was evaluated in real `@strudel/core` and `@strudel/mini`,
+not merely parsed as JavaScript. Every method the emitter calls exists on `Pattern`; querying
+Dickinson gives eight events in cycle 0 and six in cycle 1, matching the syllable counts of those
+two lines; successive cycles differ and repeated queries agree, so the lines play in order and
+deterministically; and all five bank names resolve to real samples in Strudel's default set.
+
+**OSC did not.** The backend computed exact onsets, printed them in `to_text`, and dropped them on
+the way to the wire — 85 messages arriving as fast as UDP would carry them with nothing to say when
+any of them belonged. Decoding the bytes with `python-osc`, a third-party implementation, is what
+showed it; the whole test suite was blind because it only ever read the schedule back through the
+type that built it. The onset is now the first argument of every note and the tempo is sent once
+ahead of them, and `examples/prosody.scd` gives the messages somewhere to arrive.
+
+The lesson generalises past this bug: **a serialiser tested only against its own deserialiser is
+untested.** The same is true of the Strudel text, which is why that check used Strudel rather than
+`node --check`.
+
 ### Iteration 15 — M9 OSC, the watcher, and the end of the build order
 
 Built: `prosody-emit::osc` and the `--watch` loop. 523 tests. Every milestone is now done.

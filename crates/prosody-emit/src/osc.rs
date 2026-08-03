@@ -217,6 +217,12 @@ fn pad(out: &mut Vec<u8>, bytes: &[u8]) {
     }
 }
 
+/// The address every note is sent to.
+pub const NOTE: &str = "/prosody/note";
+
+/// The address the tempo is sent to, once, before the notes.
+pub const TEMPO: &str = "/prosody/tempo";
+
 /// A whole piece, scheduled.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Schedule {
@@ -244,6 +250,23 @@ impl Schedule {
     #[must_use]
     pub fn beats(&self) -> f64 {
         self.messages.last().map_or(0.0, |m| m.at.as_beats())
+    }
+
+    /// The message that tells a receiver how fast a beat is.
+    ///
+    /// Sent before the notes. Onsets are in beats — a tempo is palette (`SPEC.md` §5), so it is one
+    /// number sent once rather than something baked into every timestamp.
+    #[must_use]
+    pub fn tempo_message(&self) -> Message {
+        Message {
+            at: Onset {
+                numerator: 0,
+                denominator: 1,
+            },
+            address: TEMPO.to_owned(),
+            args: vec![Arg::Float(f32::from(self.beats_per_minute))],
+            span: prosody_core::Span::new(0, 0),
+        }
     }
 
     /// The schedule as text, one message a line.
@@ -354,6 +377,11 @@ fn message(event: &Event, score: &Score, style: &Style, bar_starts: &[u64]) -> M
 
     #[allow(clippy::cast_possible_truncation)] // parameters are bounded 0..=1 and printed as f32
     let args = vec![
+        // **When it sounds**, in beats from the start of the piece. First, because it is the one
+        // argument a receiver cannot do without: an earlier version left it out, so a receiver got
+        // every message as fast as UDP would carry it with no idea when any of them belonged. The
+        // schedule was computed, printed, and then discarded on the way to the wire.
+        Arg::Float(at.as_beats() as f32),
         Arg::Str(match layer {
             Layer::Foundation => "foundation".to_owned(),
             Layer::Flourish => "flourish".to_owned(),
@@ -382,7 +410,7 @@ fn message(event: &Event, score: &Score, style: &Style, bar_starts: &[u64]) -> M
 
     Message {
         at,
-        address: "/prosody/note".to_owned(),
+        address: NOTE.to_owned(),
         args,
         span: event.span(),
     }
@@ -577,6 +605,37 @@ mod tests {
     }
 
     #[test]
+    fn every_message_carries_when_it_sounds() {
+        // The argument a receiver cannot do without. Without it the whole schedule arrives as fast
+        // as UDP will carry it and nothing knows what belongs where — which is what happened, and
+        // was invisible until the messages were decoded by something other than this crate.
+        let source = "bo bAn\nteA rot\n";
+        let schedule = schedule(source);
+        for message in schedule.messages() {
+            let Some(Arg::Float(beats)) = message.args().first() else {
+                panic!("the first argument is the onset: {:?}", message.args());
+            };
+            assert!(
+                (f64::from(*beats) - message.at().as_beats()).abs() < 1e-6,
+                "the onset on the wire must be the onset in the schedule"
+            );
+        }
+        // ...and the tempo is sent once, separately, because it is palette.
+        let tempo = schedule.tempo_message();
+        assert_eq!(tempo.address(), super::TEMPO);
+        assert_eq!(
+            tempo.args(),
+            &[Arg::Float(f32::from(schedule.beats_per_minute()))]
+        );
+        assert!(
+            schedule
+                .messages()
+                .iter()
+                .all(|m| m.address() == super::NOTE)
+        );
+    }
+
+    #[test]
     fn every_message_names_the_token_that_caused_it() {
         // Invariant I4, at the one backend whose output a human cannot read.
         let source = "bo bAn\nteA rot\n";
@@ -688,7 +747,7 @@ mod tests {
             schedule
                 .messages()
                 .iter()
-                .filter_map(|m| match m.args().get(3) {
+                .filter_map(|m| match m.args().get(4) {
                     Some(Arg::Int(note)) if *note >= 0 => Some(*note),
                     _ => None,
                 })

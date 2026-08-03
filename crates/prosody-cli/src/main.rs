@@ -242,6 +242,10 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
 /// messages; `SuperCollider` can hold them.
 fn send(schedule: &Schedule, address: &str) -> Result<()> {
     let socket = std::net::UdpSocket::bind("0.0.0.0:0").context("opening a UDP socket")?;
+    // The tempo first, so a receiver knows how long a beat is before any note arrives.
+    socket
+        .send_to(&schedule.tempo_message().encode(), address)
+        .with_context(|| format!("sending to {address}"))?;
     for message in schedule.messages() {
         socket
             .send_to(&message.encode(), address)
