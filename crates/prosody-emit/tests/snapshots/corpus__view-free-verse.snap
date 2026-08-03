@@ -1,0 +1,101 @@
+---
+source: crates/prosody-emit/tests/corpus.rs
+expression: view
+---
+passes
+  role        §4.1
+  meter       §4.2
+  repetition  §4.3
+  sound       §4.3
+  surprisal   §4.4
+  rhyme       §4.5
+  phoneme     §7.2
+  seed        I2
+
+stanza 0
+
+  i celebrate myself and sing myself
+  ──────────────────────────────────
+  bar 0  foundation (mostregular)  voice 0  seed f2849578
+    token          beat       gain    pitch   modulation sharp   bank   from
+    i              0.0.0/2    1.00    —       f0+0      0.06    AY     meter,sound,surprisal,repetition
+    celebrate      0.0.1/2    1.00    —       —         0.88    S      meter,surprisal
+                   0.1.0/2    0.33                                     meter
+                   0.1.1/2    0.67                                     meter
+    myself         0.2.0/2    0.67    —       f2+0      0.19    M      meter,sound,surprisal
+                   0.2.1/2    1.00                                     meter
+    and            0.3.0/2    0.33    —       f3+0      0.25    —      meter,sound,surprisal
+    sing           0.3.1/2    1.00    —       —         0.44    S      meter,surprisal
+    myself         0.4.0/2    0.67    —       f2+0      0.19    M      meter,sound,surprisal
+                   0.4.1/2    1.00                                     meter
+
+  and what i assume you shall assume
+  ──────────────────────────────────
+  bar 1  foundation (mostregular)  voice 1  seed ad83ec51
+    token          beat       gain    pitch   modulation sharp   bank   from
+    and            1.0.0/2    0.33    —       f3+0      0.25    AH     meter,sound,surprisal
+    what           1.0.1/2    1.00    —       —         0.38    AH     meter,surprisal
+    i              1.1.0/2    1.00    —       f0+0      0.19    —      meter,sound,surprisal
+    assume         1.1.1/2    0.33    —       f6+0      0.38    S      meter,sound,surprisal
+                   1.2.0/2    1.00                                     meter
+    you            1.2.1/2    1.00    —       f7+0      0.19    UW     meter,sound,surprisal
+    shall          1.3.0/2    1.00    —       —         0.50    —      meter,surprisal
+    assume         1.3.1/2    0.33    —       f6+0      0.38    S      meter,sound,surprisal
+                   1.4.0/1    1.00                                     meter
+
+  for every atom belonging to me as good belongs to you
+  ─────────────────────────────────────────────────────
+  bar 2  foundation (mostregular)  voice 2  seed da537398
+    token          beat       gain    pitch   modulation sharp   bank   from
+    for            2.0.0/2    1.00    —       —         0.31    AO     meter,surprisal
+    every          2.0.1/2    1.00    —       —         0.56    —      meter,surprisal
+                   2.1.0/2    0.33                                     meter
+                   2.1.1/2    0.33                                     meter
+    atom           2.2.0/3    1.00    —       —         0.50    AE     meter,surprisal
+                   2.2.1/3    0.33                                     meter
+    belonging      2.2.2/3    0.33    —       —         0.88    L      meter,surprisal
+                   2.3.0/2    1.00                                     meter
+                   2.3.1/2    0.33                                     meter
+    to             2.4.0/2    1.00    —       f13+0     0.12    T      meter,sound,surprisal
+    me             2.4.1/2    1.00    —       —         0.06    —      meter,surprisal
+    as             2.5.0/2    1.00    —       —         0.06    AE     meter,surprisal
+    good           2.5.1/2    1.00    —       —         0.56    —      meter,surprisal
+    belongs        2.6.0/2    0.33    —       —         0.81    L      meter,surprisal
+                   2.6.1/2    1.00                                     meter
+    to             2.7.0/2    1.00    —       f13+0     0.12    T      meter,sound,surprisal
+    you            2.7.1/2    1.00    —       f7+0      0.19    UW     meter,sound,surprisal
+
+stanza 1
+
+  i loafe and invite my soul
+  ──────────────────────────
+  bar 3  flourish (irregularity)  voice 3  seed ccc26f4e
+    token          beat       gain    pitch   modulation sharp   bank   from
+    i              3.0.0/2    1.00    —       f0+0      0.06    AY     meter,sound,surprisal,repetition
+    loafe          3.0.1/2    1.00    —       f18+0     0.56    OW     meter,sound,surprisal,phoneme(guessed)
+    and            3.1.0/3    0.33    —       f3+0      0.25    —      meter,sound,surprisal
+    invite         3.1.1/3    0.67    —       —         0.75    —      meter,surprisal
+                   3.1.2/3    1.00                                     meter
+    my             3.2.0/2    1.00    —       f20+0     0.19    AY     meter,sound,surprisal
+    soul           3.2.1/2    1.00    —       —         0.31    OW     meter,surprisal
+
+  i lean and loafe at my ease observing a spear of summer grass
+  ─────────────────────────────────────────────────────────────
+  bar 4  flourish (irregularity)  voice 4  seed d643e10c
+    token          beat       gain    pitch   modulation sharp   bank   from
+    i              4.0.0/2    1.00    —       f0+0      0.19    AY     meter,sound,surprisal,repetition
+    lean           4.0.1/2    1.00    —       —         0.44    L      meter,surprisal
+    and            4.1.0/2    0.33    —       f3+0      0.25    AH     meter,sound,surprisal
+    loafe          4.1.1/2    1.00    —       f18+0     0.69    L      meter,sound,surprisal,phoneme(guessed)
+    at             4.2.0/2    1.00    —       —         0.31    AE     meter,surprisal
+    my             4.2.1/2    1.00    —       f20+0     0.31    AY     meter,sound,surprisal
+    ease           4.3.0/2    1.00    —       —         0.38    IY     meter,surprisal
+    observing      4.3.1/2    0.33    —       —         0.62    —      meter,surprisal
+                   4.4.0/2    1.00                                     meter
+                   4.4.1/2    0.33                                     meter
+    a              4.5.0/2    0.33    —       —         0.00    AH     meter,surprisal
+    spear          4.5.1/2    1.00    —       —         0.44    S      meter,surprisal
+    of             4.6.0/2    1.00    —       —         0.00    AH     meter,surprisal
+    summer         4.6.1/2    1.00    —       —         0.31    S      meter,surprisal
+                   4.7.0/2    0.33                                     meter
+    grass          4.7.1/2    1.00    —       —         0.50    AE     meter,surprisal

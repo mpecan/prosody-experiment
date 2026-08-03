@@ -358,3 +358,118 @@ fn odd_metres_survive_into_the_pattern() {
         "five feet, five steps: {pattern}"
     );
 }
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+    /// I3, as a property rather than an example — `SPEC.md` §8 lists it among the three worth
+    /// having early, and it was the only invariant of the four with no property test.
+    ///
+    /// For an arbitrary poem and any two palettes, the *arrangement* of the rendered text is the
+    /// same: same layers, same bars, same steps, same rests. Only the values differ.
+    #[test]
+    fn i3_no_palette_can_change_the_arrangement(
+        body in poem(),
+        one in palette(),
+        two in palette(),
+    ) {
+        let (score, style_one) = score_of(&format!("{one}{body}"));
+        let (_, style_two) = score_of(&format!("{two}{body}"));
+        let backend = Strudel::new();
+        let (Ok(a), Ok(b)) = (
+            backend.render(&score, &style_one),
+            backend.render(&score, &style_two),
+        ) else {
+            // A poem nobody can pronounce renders under neither palette, which is itself
+            // style-independent.
+            return Ok(());
+        };
+        proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+    }
+
+    /// ...and the score the arrangement comes from is untouched too.
+    #[test]
+    fn i3_no_palette_can_change_the_score(body in poem(), one in palette(), two in palette()) {
+        let (bare, _) = score_of(&body);
+        let (with_one, _) = score_of(&format!("{one}{body}"));
+        let (with_two, _) = score_of(&format!("{two}{body}"));
+        let shape = |score: &Score| {
+            score
+                .events()
+                .iter()
+                .map(|e| {
+                    format!(
+                        "{} {} {}/{} {:?} {:?} {:?} {:?} {:?}",
+                        e.bar().get(),
+                        e.beat().get(),
+                        e.subdivision().index(),
+                        e.subdivision().of(),
+                        e.velocity(),
+                        e.sharpness(),
+                        e.pitch().map(|p| (p.degree().get(), p.detune())),
+                        e.family().map(|f| (f.voice(), f.depth())),
+                        e.voice(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        proptest::prop_assert_eq!(shape(&bare), shape(&with_one));
+        proptest::prop_assert_eq!(shape(&with_one), shape(&with_two));
+    }
+}
+
+/// Poems of a few stanzas, built from words the test phonemiser can say.
+fn poem() -> impl proptest::strategy::Strategy<Value = String> {
+    use proptest::strategy::Strategy as _;
+    proptest::collection::vec(
+        proptest::collection::vec(
+            proptest::collection::vec(
+                proptest::sample::select(vec![
+                    "bAn", "teA", "rot", "dos", "beA", "bo", "nAt", "roso", "GeA", "zz",
+                ]),
+                1..4,
+            ),
+            1..4,
+        ),
+        1..3,
+    )
+    .prop_map(|stanzas| {
+        let rendered: Vec<String> = stanzas
+            .iter()
+            .map(|lines| {
+                lines
+                    .iter()
+                    .map(|words| words.join(" "))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .collect();
+        format!("{}\n", rendered.join("\n\n"))
+    })
+}
+
+/// Any style header the parser accepts.
+fn palette() -> impl proptest::strategy::Strategy<Value = String> {
+    use proptest::strategy::Strategy as _;
+    (
+        proptest::sample::select(
+            prosody_emit::Scale::ALL
+                .iter()
+                .map(|scale| scale.name())
+                .collect::<Vec<_>>(),
+        ),
+        proptest::sample::select(vec!["C", "D", "E", "F#", "Bb", "A"]),
+        60_u16..200,
+        0_u8..100,
+        proptest::sample::select(prosody_emit::style::BANKS.to_vec()),
+        proptest::sample::select(prosody_emit::style::SYNTHS.to_vec()),
+    )
+        .prop_map(|(scale, root, low, swing, bank, synth)| {
+            format!(
+                "+++\n[style]\nscale = \"{scale}\"\nroot = \"{root}\"\n\
+                 tempo_range = [{low}, {}]\nswing = {}\nbank = \"{bank}\"\nsynth = \"{synth}\"\n+++\n",
+                low + 6,
+                f64::from(swing) / 100.0,
+            )
+        })
+}

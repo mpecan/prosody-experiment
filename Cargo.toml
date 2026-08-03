@@ -12,6 +12,7 @@ anyhow = "1"
 blake3 = "1"
 rand_chacha = "0.10"
 rand_core = "0.10"
+insta = "1"
 proptest = "1"
 thiserror = "2"
 # `SPEC.md` §5 says the style header is TOML, so the alternative is a hand-rolled subset parser.

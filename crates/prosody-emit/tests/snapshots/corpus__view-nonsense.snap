@@ -1,0 +1,65 @@
+---
+source: crates/prosody-emit/tests/corpus.rs
+expression: view
+---
+passes
+  role        §4.1
+  meter       §4.2
+  repetition  §4.3
+  sound       §4.3
+  surprisal   §4.4
+  rhyme       §4.5
+  phoneme     §7.2
+  seed        I2
+
+stanza 0
+
+  twas brillig and the slithy toves
+  ─────────────────────────────────
+  bar 0  foundation (regularity)  voice 0  seed 319e3915
+    token          beat       gain    pitch   modulation sharp   bank   from
+    twas           0.0.0/2    1.00    —       —         0.69    T      meter,surprisal
+    brillig        0.0.1/2    1.00    —       —         0.88    IH     meter,surprisal,phoneme(guessed)
+                   0.1.0/2    0.33                                     meter
+    and            0.1.1/2    0.33    —       f2+0      0.25    AH     meter,sound,surprisal
+    the            0.2.0/2    0.33    —       f3+0      0.12    AH     meter,sound,surprisal
+    slithy         0.2.1/2    1.00    —       —         0.88    IH     meter,surprisal,phoneme(guessed)
+                   0.3.0/2    0.33                                     meter
+    toves          0.3.1/2    1.00    —       —         1.00    T      meter,surprisal,phoneme(guessed)
+
+  did gyre and gimble in the wabe
+  ───────────────────────────────
+  bar 1  foundation (regularity)  voice 1  seed 7ecfd827
+    token          beat       gain    pitch   modulation sharp   bank   from
+    did            1.0.0/2    1.00    —       —         0.12    IH     meter,surprisal
+    gyre           1.0.1/2    1.00    —       —         0.62    JH     meter,surprisal,phoneme(guessed)
+    and            1.1.0/3    0.33    —       f2+0      0.00    AH     meter,sound,surprisal
+    gimble         1.1.1/3    1.00    —       —         0.75    JH     meter,surprisal,phoneme(guessed)
+                   1.1.2/3    0.33                                     meter
+    in             1.2.0/3    0.33    —       —         0.00    IH     meter,surprisal
+    the            1.2.1/3    0.33    —       f3+0      0.12    AH     meter,sound,surprisal
+    wabe           1.2.2/3    1.00    —       —         0.75    —      meter,surprisal,phoneme(guessed)
+
+  all mimsy were the borogoves
+  ────────────────────────────
+  bar 2  foundation (regularity)  voice 2  seed 9d1d791b
+    token          beat       gain    pitch   modulation sharp   bank   from
+    all            2.0.0/2    1.00    —       —         0.31    —      meter,surprisal
+    mimsy          2.0.1/2    1.00    —       —         1.00    —      meter,surprisal,phoneme(guessed)
+                   2.1.0/3    0.33                                     meter
+    were           2.1.1/3    1.00    —       —         0.38    —      meter,surprisal
+    the            2.1.2/3    0.33    —       f3+0      0.12    —      meter,sound,surprisal
+    borogoves      2.2.0/3    1.00    —       —         1.00    —      meter,surprisal,phoneme(guessed)
+                   2.2.1/3    0.33                                     meter
+                   2.2.2/3    0.33                                     meter
+
+  and the mome raths outgrabe
+  ───────────────────────────
+  bar 3  foundation (regularity)  voice 3  seed c2558f27
+    token          beat       gain    pitch   modulation sharp   bank   from
+    and            3.0.0/2    0.33    —       f2+0      0.25    AH     meter,sound,surprisal
+    the            3.0.1/2    0.33    —       f3+0      0.12    AH     meter,sound,surprisal
+    mome           3.1.0/2    1.00    —       —         0.75    —      meter,surprisal,phoneme(guessed)
+    raths          3.1.1/2    1.00    —       —         0.88    —      meter,surprisal,phoneme(guessed)
+    outgrabe       3.2.0/2    1.00    —       —         1.00    —      meter,surprisal,phoneme(guessed)
+                   3.2.1/2    0.33                                     meter

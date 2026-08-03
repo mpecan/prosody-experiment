@@ -54,7 +54,7 @@ guard exists — they are not deferred to the end.
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | **done** | §7.6; iteration 12. `Style` lives in `prosody-emit`, so I3 is a compiler-enforced edge |
 | M6a | **§8 acceptance test: the couplet synonym swap** | **done** | §8; landed at M5c — the IR *is* the audition path, no backend needed |
 | M7 | Debug annotation view | **done** | §8; iteration 13 |
-| M8 | Golden corpus (`insta`) + full I1–I4 property suite | todo | §8 — hardening, legitimately after M7 |
+| M8 | Golden corpus (`insta`) + full I1–I4 property suite | **done** | §8; iteration 14 |
 | M9 | OSC → SuperCollider, live-reload watcher | todo | §7.8 — only after mappings hold up |
 
 `SPEC.md` §8 is titled "First test to write — before any of the fun parts," and `CLAUDE.md` §7
@@ -262,14 +262,19 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 14 — M8: the golden corpus and the full property suite.** Not yet planned.
+**Iteration 15 — M9: OSC to `SuperCollider`, and the live-reload watcher.** Not yet planned.
 
-`CLAUDE.md` §7.2 names the seven poems it must contain: strict iambic pentameter, free verse, a
-villanelle, a refrain-heavy lyric, a one-line poem, a poem with an out-of-vocabulary word, and a
-non-English poem. Nothing in the workspace uses `insta` yet, and iteration 12's review named a
-committed snapshot as the single cheapest fix for most of what its mutations found — a snapshot of
-the whole emitted text and the whole debug view would have caught the empty palette block, the
-zeroed header counts, the swapped layer labels and both invalid-JavaScript mutants at once.
+The last milestone, and the one `SPEC.md` §7.8 puts behind everything else: "Only then: direct
+synthesis, OSC, live reload." The `Backend` trait was designed against this second implementation
+— `Output` is associated precisely so an OSC backend can emit timed messages rather than text —
+and iteration 12's review named what it will need that nothing provides yet: a time base, and
+somewhere for `Event::anchor` to mean something, since absolute scheduling is the case where
+"downbeat-anchored" has a place to go.
+
+The watcher is the other half, and it is what `SPEC.md` §6's I2 was written for: "Per-unit seeding
++ Tree-sitter's dirty-node set means an edit touches only the voices it should — this is what makes
+it live-codeable rather than render-and-pray." Incremental reparse has been in since M1 and nothing
+has yet used it for its actual purpose.
 
 ---
 
@@ -278,6 +283,32 @@ zeroed header counts, the swapped layer labels and both invalid-JavaScript mutan
 ---
 
 ## Log
+
+### Iteration 14 — M8 the golden corpus, and I3's property test
+
+Built: `crates/prosody-emit/tests/corpus/` — seven poems and fourteen committed snapshots — plus
+proptests for I3, the only invariant that had none. 505 tests.
+
+**What a snapshot is for here.** Not "the output is what it is", which is a test that can only be
+re-blessed. It is for the failure the unit tests kept missing: a whole *column* going empty.
+Iteration 12's review found the palette block, the header counts and the layer labels could each
+be blanked with the suite green, and iteration 13 found the beat position could be a constant.
+Each needed its own test afterwards; one snapshot of the whole text catches all four at once.
+
+`CLAUDE.md` §7.2 names seven cases and the corpus covers all of them, with a test asserting each
+poem is still the thing it was chosen for — a corpus entry that has quietly stopped being a
+villanelle passes its snapshot while covering nothing.
+
+**Reading the snapshots, which §7.2 insists on**, the villanelle gives six events at degree 0 and
+three at degree 1 across four refrain lines. That is `SPEC.md` §4.5's "villanelle → a two-note
+obsession (which is what a villanelle already is)", arrived at without anything in the code knowing
+what a villanelle is. Free verse produces no pitch at all and anchors on `MostRegular`; the
+nonsense poem marks eleven words guessed; and no poem anywhere produced an "attribution lost" row,
+so every token in every corpus poem is accounted for.
+
+**I3 now has properties, not just examples.** For an arbitrary poem and any two palettes drawn from
+the whole style space, the rendered *arrangement* is identical and so is the score. Verified to
+bite: a swing value that drops one event fails it in the first few cases.
 
 ### Iteration 13 — M7 the debug annotation view
 

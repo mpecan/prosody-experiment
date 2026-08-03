@@ -1,0 +1,16 @@
+---
+source: crates/prosody-emit/tests/corpus.rs
+expression: pattern
+---
+// compiled from a poem by prosody
+// 1 bars, 1 voices, 9 events
+//   bank = tr909
+//   root = c
+//   scale = minor
+//   swing = 0
+//   synth = triangle
+//   tempo_range = 110..130
+stack(
+  s("[bd bd] [bd bd] [bd bd] [bd bd] bd").gain("[0.333 1.000] [1.000 0.333] [1.000 0.333] [1.000 0.333] 1.000").lpf("[900.000 2150.000] [1650.000 400.000] [2400.000 900.000] [3650.000 3650.000] 2900.000").attack("[0.035 0.022] [0.028 0.040] [0.020 0.035] [0.007 0.007] 0.015").room("[0.050 0.175] [0.125 0.000] [0.200 0.050] [0.325 0.325] 0.250").crush("[16 16] [16 16] [16 16] [16 16] 16").vowel("[a a] [a a] [a a] [a a] a").bank("RolandTR909") // voice 0 — foundation
+)
+  .cpm(25.000)

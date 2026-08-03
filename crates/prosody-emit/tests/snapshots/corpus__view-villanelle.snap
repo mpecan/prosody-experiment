@@ -1,0 +1,155 @@
+---
+source: crates/prosody-emit/tests/corpus.rs
+expression: view
+---
+passes
+  role        §4.1
+  meter       §4.2
+  repetition  §4.3
+  sound       §4.3
+  surprisal   §4.4
+  rhyme       §4.5
+  phoneme     §7.2
+  seed        I2
+
+stanza 0
+
+  a little while to walk with thee dear child
+  ───────────────────────────────────────────
+  bar 0  foundation (refrain of voice 0)  voice 0  seed f60fbb1d
+    token          beat       gain    pitch   modulation sharp   bank   from
+    a              0.0.0/2    0.33    —       f0+0      0.00    —      meter,sound,surprisal
+    little         0.0.1/2    1.00    —       f1+0      0.12    IH     meter,sound,surprisal
+                   0.1.0/2    0.33                                     meter
+    while          0.1.1/2    1.00    —       f2+0      0.31    W      meter,sound,surprisal
+    to             0.2.0/2    1.00    —       f3+0      0.12    —      meter,sound,surprisal
+    walk           0.2.1/2    1.00    —       f4+0      0.50    W      meter,sound,surprisal
+    with           0.3.0/2    1.00    —       f5+0      0.06    W      meter,sound,surprisal
+    thee           0.3.1/2    1.00    —       f6+0      0.25    —      meter,sound,surprisal
+    dear           0.4.0/2    1.00    —       f7+0      0.31    IH     meter,sound,surprisal
+    child          0.4.1/2    1.00    deg 0   f8+0      0.56    AY     meter,rhyme,sound,surprisal
+
+  to lean on thee and feel thy hand in mine
+  ─────────────────────────────────────────
+  bar 1  foundation (regularity)  voice 1  seed febcb5dd
+    token          beat       gain    pitch   modulation sharp   bank   from
+    to             1.0.0/2    1.00    —       f3+0      0.25    —      meter,sound,surprisal
+    lean           1.0.1/2    1.00    —       —         0.31    IY     meter,surprisal
+    on             1.1.0/2    1.00    —       —         0.19    —      meter,surprisal
+    thee           1.1.1/2    1.00    —       f6+0      0.12    DH     meter,sound,surprisal
+    and            1.2.0/2    0.33    —       f11+0     0.12    —      meter,sound,surprisal
+    feel           1.2.1/2    1.00    —       —         0.38    IY     meter,surprisal
+    thy            1.3.0/2    1.00    —       —         0.12    DH     meter,surprisal
+    hand           1.3.1/2    1.00    —       —         0.44    —      meter,surprisal
+    in             1.4.0/2    0.33    —       —         0.12    —      meter,surprisal
+    mine           1.4.1/2    1.00    deg 1   —         0.31    AY     meter,rhyme,surprisal
+
+  and then to go my ways alone and wild
+  ─────────────────────────────────────
+  bar 2  foundation (refrain of voice 2)  voice 2  seed ebd7d831
+    token          beat       gain    pitch   modulation sharp   bank   from
+    and            2.0.0/2    0.33    —       f11+0     0.25    AH     meter,sound,surprisal
+    then           2.0.1/2    1.00    —       f17+0     0.38    —      meter,sound,surprisal
+    to             2.1.0/2    1.00    —       f3+0      0.25    —      meter,sound,surprisal
+    go             2.1.1/2    1.00    —       f18+0     0.31    OW     meter,sound,surprisal
+    my             2.2.0/2    1.00    —       f19+0     0.19    AY     meter,sound,surprisal
+    ways           2.2.1/2    1.00    —       f20+0     0.50    W      meter,sound,surprisal
+    alone          2.3.0/2    0.33    —       f21+0     0.19    OW     meter,sound,surprisal
+                   2.3.1/2    1.00                                     meter
+    and            2.4.0/2    0.33    —       f11+0     0.00    AH     meter,sound,surprisal
+    wild           2.4.1/2    1.00    deg 0   f2+1      0.19    W      meter,rhyme,sound,surprisal
+
+stanza 1
+
+  for even now the winds are growing wild
+  ───────────────────────────────────────
+  bar 3  foundation (regularity)  voice 3  seed b8597d4a
+    token          beat       gain    pitch   modulation sharp   bank   from
+    for            3.0.0/2    1.00    —       —         0.44    —      meter,surprisal
+    even           3.0.1/2    1.00    —       —         0.44    —      meter,surprisal
+                   3.1.0/2    0.33                                     meter
+    now            3.1.1/2    1.00    —       —         0.25    —      meter,surprisal
+    the            3.2.0/2    0.33    —       f25+0     0.25    —      meter,sound,surprisal
+    winds          3.2.1/2    1.00    —       —         0.38    W      meter,surprisal
+    are            3.3.0/2    1.00    —       f27+0     0.25    —      meter,sound,surprisal
+    growing        3.3.1/2    1.00    —       —         0.69    —      meter,surprisal
+                   3.4.0/2    0.33                                     meter
+    wild           3.4.1/2    1.00    deg 0   f2+1      0.44    W      meter,rhyme,sound,surprisal
+
+  and all the ways are darkening as we twine
+  ──────────────────────────────────────────
+  bar 4  foundation (regularity)  voice 4  seed 6524ba7f
+    token          beat       gain    pitch   modulation sharp   bank   from
+    and            4.0.0/3    0.33    —       f11+0     0.25    AH     meter,sound,surprisal
+    all            4.0.1/3    1.00    —       —         0.31    —      meter,surprisal
+    the            4.0.2/3    0.33    —       f25+0     0.12    AH     meter,sound,surprisal
+    ways           4.1.0/2    1.00    —       f20+0     0.38    W      meter,sound,surprisal
+    are            4.1.1/2    1.00    —       f27+0     0.12    AA     meter,sound,surprisal
+    darkening      4.2.0/2    1.00    —       —         0.81    AA     meter,surprisal
+                   4.2.1/2    0.33                                     meter
+                   4.3.0/2    0.33                                     meter
+    as             4.3.1/2    1.00    —       —         0.19    —      meter,surprisal
+    we             4.4.0/2    1.00    —       f32+0     0.25    W      meter,sound,surprisal
+    twine          4.4.1/2    1.00    deg 1   —         0.69    —      meter,rhyme,surprisal
+
+  a little while to walk with thee dear child
+  ───────────────────────────────────────────
+  bar 5  foundation (refrain of voice 0)  voice 0  seed f60fbb1d
+    token          beat       gain    pitch   modulation sharp   bank   from
+    a              5.0.0/2    0.33    —       f0+0      0.00    —      meter,sound,surprisal
+    little         5.0.1/2    1.00    —       f1+0      0.12    IH     meter,sound,surprisal
+                   5.1.0/2    0.33                                     meter
+    while          5.1.1/2    1.00    —       f2+0      0.31    W      meter,sound,surprisal
+    to             5.2.0/2    1.00    —       f3+0      0.12    —      meter,sound,surprisal
+    walk           5.2.1/2    1.00    —       f4+0      0.50    W      meter,sound,surprisal
+    with           5.3.0/2    1.00    —       f5+0      0.06    W      meter,sound,surprisal
+    thee           5.3.1/2    1.00    —       f6+0      0.25    —      meter,sound,surprisal
+    dear           5.4.0/2    1.00    —       f7+0      0.31    IH     meter,sound,surprisal
+    child          5.4.1/2    1.00    deg 0   f8+0      0.56    AY     meter,rhyme,sound,surprisal
+
+stanza 2
+
+  the winter comes and we are not beguiled
+  ────────────────────────────────────────
+  bar 6  foundation (regularity)  voice 5  seed 33f96152
+    token          beat       gain    pitch   modulation sharp   bank   from
+    the            6.0.0/2    0.33    —       f25+0     0.12    AH     meter,sound,surprisal
+    winter         6.0.1/2    1.00    —       —         0.62    W      meter,surprisal
+                   6.1.0/2    0.33                                     meter
+    comes          6.1.1/2    1.00    —       —         0.62    AH     meter,surprisal
+    and            6.2.0/2    0.33    —       f11+0     0.00    AH     meter,sound,surprisal
+    we             6.2.1/2    1.00    —       f32+0     0.25    W      meter,sound,surprisal
+    are            6.3.0/2    1.00    —       f27+0     0.25    AA     meter,sound,surprisal
+    not            6.3.1/2    1.00    —       —         0.19    AA     meter,surprisal
+    beguiled       6.4.0/2    0.33    deg 0   —         0.88    —      meter,rhyme,surprisal
+                   6.4.1/2    1.00                                     meter
+
+  we know the frost and know the bitter brine
+  ───────────────────────────────────────────
+  bar 7  foundation (regularity)  voice 6  seed 55288050
+    token          beat       gain    pitch   modulation sharp   bank   from
+    we             7.0.0/2    1.00    —       f32+0     0.38    —      meter,sound,surprisal
+    know           7.0.1/2    1.00    —       f38+0     0.12    N      meter,sound,surprisal
+    the            7.1.0/2    0.33    —       f25+0     0.00    DH     meter,sound,surprisal
+    frost          7.1.1/2    1.00    —       —         0.81    —      meter,surprisal
+    and            7.2.0/2    0.33    —       f11+0     0.12    AH     meter,sound,surprisal
+    know           7.2.1/2    1.00    —       f38+0     0.12    N      meter,sound,surprisal
+    the            7.3.0/2    0.33    —       f25+0     0.00    DH     meter,sound,surprisal
+    bitter         7.3.1/2    1.00    —       —         0.56    B      meter,surprisal
+                   7.4.0/2    0.33                                     meter
+    brine          7.4.1/2    1.00    deg 1   —         0.69    B      meter,rhyme,surprisal
+
+  and then to go my ways alone and wild
+  ─────────────────────────────────────
+  bar 8  foundation (refrain of voice 2)  voice 2  seed ebd7d831
+    token          beat       gain    pitch   modulation sharp   bank   from
+    and            8.0.0/2    0.33    —       f11+0     0.25    AH     meter,sound,surprisal
+    then           8.0.1/2    1.00    —       f17+0     0.38    —      meter,sound,surprisal
+    to             8.1.0/2    1.00    —       f3+0      0.25    —      meter,sound,surprisal
+    go             8.1.1/2    1.00    —       f18+0     0.31    OW     meter,sound,surprisal
+    my             8.2.0/2    1.00    —       f19+0     0.19    AY     meter,sound,surprisal
+    ways           8.2.1/2    1.00    —       f20+0     0.50    W      meter,sound,surprisal
+    alone          8.3.0/2    0.33    —       f21+0     0.19    OW     meter,sound,surprisal
+                   8.3.1/2    1.00                                     meter
+    and            8.4.0/2    0.33    —       f11+0     0.00    AH     meter,sound,surprisal
+    wild           8.4.1/2    1.00    deg 0   f2+1      0.19    W      meter,rhyme,sound,surprisal
