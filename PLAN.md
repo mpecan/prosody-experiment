@@ -41,7 +41,7 @@ guard exists — they are not deferred to the end.
 | # | Milestone | State | Notes |
 |---|---|---|---|
 | M0 | Workspace, lint gates, CI, `Span`, `Seed` | **done** | determinism + traceability primitives; iteration 1 |
-| M1 | Tree-sitter grammar: frontmatter / stanza / line / caesura / token, incremental reparse | todo | `SPEC.md` §7.1 — incremental from day one |
+| M1 | Tree-sitter grammar: frontmatter / stanza / line / caesura / token, incremental reparse | **done** | `SPEC.md` §7.1; iteration 2 |
 | M2 | `Phonemiser` trait + CMUdict + letter-to-sound fallback | todo | §7.2, §9 — trait boundary designed for eSpeak-NG second impl |
 | M3 | Meter: stress vectors, foot segmentation. Rhyme: continuous scoring, equivalence classes | todo | §4.2, §4.5, §7.3 |
 | M4 | Repetition passes: exact → anaphora/epistrophe → morphological | todo | §4.3, §7.4 — ship exact first |
@@ -59,6 +59,14 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **Apostrophe ambiguity** (`SPEC.md` §4.3, §9): the tokeniser keeps `'` inside a word so that
+  `don't`, `o'er`, `'tis` and `burn'd` stay single tokens. The cost is that scare-quotes are
+  absorbed too — `'the` and `burns'` become tokens distinct from `the` and `burns`, which will
+  break refrain matching and CMUdict lookup for any quoted word. English orthography does not
+  distinguish the two cases, so the grammar cannot either. **Decide at M2**: most likely a
+  normalisation step in the phonemiser that strips edge apostrophes when a lookup fails, rather
+  than a grammar change.
 
 - **Voice identity vs. seeds** (`SPEC.md` §4.3, morphological row): seeds avalanche by design, so
   they can express the refrain row ("identical text ⇒ identical voice") but not the near-repetition
@@ -83,17 +91,62 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 2 — M1: Tree-sitter grammar.** Not yet planned; plan it at the start of the iteration.
+**Iteration 3 — M2: phonemiser.** Not yet planned; plan it at the start of the iteration.
 
-Carried into M1 from iteration 1's review:
-- Add `Domain::Caesura` when the grammar produces real caesura nodes (`SPEC.md` §4.1's second
-  tier). Deliberately absent now — no consumer yet, and adding a variant later is additive and
-  does not disturb the frozen contexts.
-- Grammar node spans feed `Span::new`; computed spans (caesura splits) must use `Span::try_new`.
+Carried into M2 from iteration 2's review:
+- Edge-apostrophe normalisation on CMUdict lookup failure (see the open question above).
+- `TokenKind::Number` exists but nothing consumes it; decide how numerals phonemise, or
+  document that they do not.
+- Add `Domain::Caesura` only when a pass consumes `Line::segments`.
 
 ---
 
 ## Log
+
+### Iteration 2 — M1 tree-sitter grammar
+
+Built: `crates/tree-sitter-prosody` (grammar, committed generated parser, 14 corpus tests) and
+`prosody-core::parse` (`Poem`/`Stanza`/`Line`/`Token`, incremental reparse). 76 tests.
+
+Reviewed by four parallel agents (invariants, grammar correctness, rust-quality, test-quality),
+three of which verified their findings by running code rather than reading it. Findings accepted
+and fixed in the same iteration:
+
+| Finding | Resolution |
+|---|---|
+| **I2 broken.** Tree-sitter gives a line's trailing newline to the *stanza break* when another stanza follows and to the *line* when the stanza is terminal, so a stanza's raw node range — and its seed — changed when a stanza was appended after it. Reproduced on a two-line poem | Spans are now **content spans**: a line's is the hull of its tokens, a stanza's the hull of its lines. Neither includes a delimiter, so a unit's identity depends only on the unit. Recorded as a rule in `CLAUDE.md` §5 |
+| **I3 broken.** An unclosed style header, one not at byte 0, or trailing whitespace after `+++`, made the whole TOML block lex as poem text — with no frontmatter node *and no error node*, so nothing surfaced it | Grammar now accepts trailing whitespace after both delimiters; a `+++` line surviving into the body raises `DiagnosticKind::StrayStyleDelimiter` |
+| **I4 gap.** Characters that are whitespace to the lexer but not skipped (form feed, vertical tab) produce an `ERROR` nested *inside* a line; the root-only scan reported a clean parse while the byte vanished from every token list | Diagnostics are collected by walking the whole tree, not just root children |
+| `point_of` could be completely broken (row always 0) and all 12 property tests still passed — every generated edit stayed inside one line | Generators now pick a random line and token, and replacements include deletion, line breaks, stanza breaks and multi-byte text. Verified: the mutation is now caught |
+| `line_seed` had zero coverage — returning `None` unconditionally passed all 57 tests | Four unit tests plus use in properties. Verified caught |
+| `TokenKind::Punctuation` mapping untested — remapping it to `Word` passed everything, including the corpus test, which checks the grammar layer and never crosses the mapping seam | `every_token_kind_survives_the_mapping` |
+| The I4 nesting property accepted a tokeniser that dropped half its tokens | Added `i4_tokens_cover_every_non_whitespace_byte`. Verified caught |
+| `apply` edited `self.tree` in place before reparsing, so a failed reparse left a tree describing an edit that never happened — the next edit would build wrong spans from it | Edits a clone; the poem is untouched unless the reparse succeeds |
+| `Option<Result<..>>` forced `.unwrap().unwrap()` at every call site | Flat `Result` with `ParseError::InvalidSpan(Span)`, which also gives the error a span per `CLAUDE.md` §6 |
+| `line_seed(stanza: usize, line: usize)` — two same-typed indices, transposable silently | `StanzaIdx` / `LineIdx` newtypes |
+| `,` and `:` inside numerals lexed as caesurae, so `1,000` and `3:14` produced false voice-split boundaries | `number` token |
+| An ellipsis was three punctuation tokens | Single `...` token |
+| `point_at`'s `unwrap_or(text)` silently substituted the whole document on an invalid offset | Replaced by `point_of(prefix)` / `advance(point, added)`, which take already-sliced text so there is no invalid input to handle |
+| Corpus lacked the free-verse and refrain cases the milestone claimed | Both added, plus numerals and ellipsis (14 cases) |
+| `prop_assume!(error_spans().is_empty())` filtered nothing — measured 5000/5000 | Removed |
+| `CLAUDE.md` §3 claimed doc warnings were errors "via lints table"; they are only errors in CI via `RUSTDOCFLAGS` | Documented command corrected |
+
+Five mutations were run against the finished code to confirm the tests bite: broken `point_of`,
+a lossy tokeniser, `line_seed` returning `None`, punctuation mapped to `Word`, and stanza spans
+taken from raw node ranges. All five fail the suite.
+
+Deliberately **not** changed:
+- **Scare-quote apostrophes** stay inside words. Raised as an open question above rather than
+  guessed at — English does not distinguish `'tis` from `'the`, so the grammar cannot.
+- **Caesura stays punctuation-only.** It cannot detect an unpunctuated rhythmic pause. That is a
+  recorded M1 decision; whether a caesura splits a voice is an M5 question.
+- **`from_tree` rebuilds the whole view on every reparse**, discarding node reuse above the parse
+  itself. Poems are small, and the reason for incremental reparse is I2 locality, not speed.
+
+A tree-sitter bug worth remembering: `{2,}` in a token regex is lowered into repeated *pairs*, so
+`(\r?\n[ \t]*){2,}` left an odd trailing newline unconsumed and any poem ending in 3 or 5 blank
+lines produced an ERROR while 2 or 4 parsed cleanly. Written as "one, then one-or-more" instead.
+Independently reproduced by the grammar reviewer on a sibling grammar.
 
 ### Iteration 1 — M0 foundation
 

@@ -1,0 +1,33 @@
+[package]
+name = "tree-sitter-prosody"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Tree-sitter grammar for poems-as-scores."
+build = "build.rs"
+include = [
+    "build.rs",
+    "grammar.js",
+    "tree-sitter.json",
+    "bindings/rust/**",
+    "src/*.c",
+    "src/tree_sitter/*.h",
+]
+
+[lib]
+path = "bindings/rust/lib.rs"
+
+[dependencies]
+tree-sitter-language = "0.1"
+
+[build-dependencies]
+cc = "1"
+
+[dev-dependencies]
+tree-sitter = "0.26"
+
+# NOT `workspace = true`. The workspace forbids `unsafe_code`, which a binding to a generated C
+# parser cannot honour. This crate is the one documented exception, and it contains no
+# hand-written logic — only the FFI declaration below. See CLAUDE.md §3.
+[lints.rust]
+missing_docs = "warn"

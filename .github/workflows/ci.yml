@@ -40,3 +40,25 @@ jobs:
         run: cargo doc --workspace --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # The grammar's own corpus tests. Separate from the Rust gates because they need node, and
+  # because a grammar regression should be legible as a grammar regression.
+  grammar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: corpus tests
+        working-directory: crates/tree-sitter-prosody
+        run: npx --yes tree-sitter-cli@0.26.11 test
+
+      # The committed parser must match the grammar it claims to come from, or the Rust build and
+      # the corpus tests are testing different languages.
+      - name: generated parser is up to date
+        working-directory: crates/tree-sitter-prosody
+        run: |
+          npx --yes tree-sitter-cli@0.26.11 generate
+          git diff --exit-code -- src/

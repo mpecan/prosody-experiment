@@ -11,14 +11,24 @@
 //!   sound. This is the mechanism behind invariant I4 (traceability).
 //! - [`seed`] — PRNG seeds derived from a single unit's own content, never globally. This is
 //!   the mechanism behind invariant I2 (per-unit seeding).
+//! - [`parse`] — the tree-sitter boundary: text in, span-carrying stanzas and lines out.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
-// Tests may unwrap freely; production code may not. See CLAUDE.md §3.
-#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+// Tests may unwrap and index freely; production code may not. A panic in a test is a test
+// failure, which is exactly what it should be. See CLAUDE.md §3.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
+)]
 
+pub mod parse;
 pub mod seed;
 pub mod span;
 
+pub use parse::{
+    Diagnostic, DiagnosticKind, Line, LineIdx, ParseError, Poem, Stanza, StanzaIdx, Token,
+    TokenKind,
+};
 pub use seed::{Domain, Seed};
 pub use span::Span;

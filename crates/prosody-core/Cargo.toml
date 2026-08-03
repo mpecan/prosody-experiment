@@ -12,6 +12,9 @@ description = "Pure, deterministic analysis of a poem into musical structure."
 blake3 = { workspace = true }
 rand_chacha = { workspace = true }
 rand_core = { workspace = true }
+thiserror = { workspace = true }
+tree-sitter = { workspace = true }
+tree-sitter-prosody = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

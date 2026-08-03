@@ -1,0 +1,15 @@
+{
+  "grammars": [
+    {
+      "name": "prosody",
+      "camelcase": "Prosody",
+      "scope": "source.prosody",
+      "path": ".",
+      "file-types": ["poem"]
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "description": "A poem, as a score. See SPEC.md."
+  }
+}

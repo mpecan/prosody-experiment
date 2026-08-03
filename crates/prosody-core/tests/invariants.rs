@@ -1,22 +1,74 @@
 //! Property tests for the invariants in `SPEC.md` §6.
 //!
 //! These are written against the invariants themselves rather than against any one pass, and
-//! they grow as the pipeline does. At this stage only the seeding primitives exist, so the
-//! properties cover I1 (determinism) and I2 (per-unit seeding) at their source, plus the span
-//! resolution that I4 rests on. I3 arrives with the style layer; see `PLAN.md`.
+//! they grow as the pipeline does. They currently cover I1 (determinism of seeding and of
+//! incremental reparse), I2 (per-unit seeding, and locality of a real edit across stanzas) and
+//! I4 (spans resolve, nest and are attributable). I3 arrives with the style layer; see `PLAN.md`.
 //!
 //! Every property here must be able to fail. A property that holds by virtue of a function
 //! signature rather than by virtue of the implementation is not a test, and two such properties
 //! were removed from this file after review rather than left in to inflate the count.
 
-// Property-test bodies unwrap freely, as test code may. See CLAUDE.md §3.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+// Property-test bodies unwrap and index freely, as test code may. See CLAUDE.md §3.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 
 use proptest::prelude::{
     Strategy, prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, proptest,
 };
-use prosody_core::{Domain, Seed, Span};
+use prosody_core::{Domain, Poem, Seed, Span, StanzaIdx};
 use rand_core::Rng;
+
+/// A well-formed poem: stanzas of lines of words, blank-line separated.
+fn poem_source() -> impl Strategy<Value = String> {
+    proptest::collection::vec(
+        proptest::collection::vec(proptest::collection::vec("[a-zšč]{1,6}", 1..4), 1..4),
+        1..4,
+    )
+    .prop_map(|stanzas| {
+        let rendered: Vec<String> = stanzas
+            .iter()
+            .map(|lines| {
+                lines
+                    .iter()
+                    .map(|words| words.join(" "))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .collect();
+        format!("{}\n", rendered.join("\n\n"))
+    })
+}
+
+/// Every stanza's seed, in order.
+fn stanza_seeds(poem: &Poem) -> Vec<Seed> {
+    (0..poem.stanzas().len())
+        .filter_map(|i| poem.stanza_seed(StanzaIdx(i)))
+        .collect()
+}
+
+/// Every token span in the poem, in source order.
+fn token_spans(poem: &Poem) -> Vec<Span> {
+    poem.stanzas()
+        .iter()
+        .flat_map(prosody_core::Stanza::lines)
+        .flat_map(prosody_core::Line::tokens)
+        .copied()
+        .map(prosody_core::Token::span)
+        .collect()
+}
+
+/// Replacement texts an edit might use.
+///
+/// The point of the awkward ones is coverage the earlier version of this file lacked: an empty
+/// string deletes, `a\nb` inserts a line break, `\n\n` splits a stanza, and `gorči` is
+/// multi-byte. Without those, every generated edit stayed inside one line, and the row/column
+/// arithmetic in `Poem::apply` was never required to be right — a deliberately broken
+/// `point_of` passed the whole property suite.
+fn replacement() -> impl Strategy<Value = &'static str> {
+    proptest::sample::select(vec![
+        "", "x", "quenched", "gorči", "a\nb", "\n\n", "  ", "ó",
+    ])
+}
 
 /// The largest byte offset the span strategies draw. Chosen to sit somewhat beyond the longest
 /// source `poem_text()` can produce, so that in-bounds, boundary and out-of-bounds spans all
@@ -199,6 +251,163 @@ proptest! {
         prop_assert!(joined.contains(b));
         prop_assert_eq!(joined, b.join(a));
         prop_assert!(joined.len() >= a.len().max(b.len()));
+    }
+
+    /// I2, the property this whole design exists for — editing one stanza must not disturb any
+    /// other stanza's voice.
+    ///
+    /// A randomly chosen token in a randomly chosen line of stanza *i* is replaced. Every stanza
+    /// *j ≠ i* keeps a byte-identical seed, even though the edit shifts their byte offsets: seeds
+    /// follow text, not position. Stanza *i*'s own seed must change, or the edit would be
+    /// inaudible and the test vacuous.
+    #[test]
+    fn i2_an_edit_moves_only_its_own_stanza(
+        source in poem_source(),
+        pick in 0_usize..4096,
+        text in replacement(),
+    ) {
+        let mut poem = Poem::parse(source).unwrap();
+        let stanza_count = poem.stanzas().len();
+        let target = pick % stanza_count;
+
+        let lines = poem.stanzas()[target].lines();
+        let line = (pick / 7) % lines.len();
+        let tokens = lines[line].tokens();
+        let token = (pick / 13) % tokens.len();
+        let span = tokens[token].span();
+        prop_assume!(span.text(poem.source()) != Some(text));
+
+        let before = stanza_seeds(&poem);
+        poem.apply(span, text).unwrap();
+
+        // Edits that add or remove a stanza break change the stanza list itself; those are
+        // covered by the reparse property below, where index-wise comparison still makes sense.
+        prop_assume!(poem.stanzas().len() == stanza_count);
+
+        let after = stanza_seeds(&poem);
+        prop_assert_eq!(after.len(), before.len());
+        for index in 0..before.len() {
+            if index == target {
+                prop_assert_ne!(before[index], after[index], "edited stanza kept its seed");
+            } else {
+                prop_assert_eq!(before[index], after[index], "stanza {} moved", index);
+            }
+        }
+    }
+
+    /// I2 — appending or removing material *after* a stanza must not change that stanza's seed.
+    ///
+    /// This is the case a raw tree-sitter node range gets wrong: the trailing newline of a
+    /// stanza's last line belongs to the stanza when it is terminal and to the stanza break once
+    /// something follows, so the extent — and the seed — would move without the text moving.
+    #[test]
+    fn i2_appending_a_stanza_leaves_earlier_stanzas_alone(
+        source in poem_source(),
+        addition in poem_source(),
+    ) {
+        let mut poem = Poem::parse(source).unwrap();
+        let before = stanza_seeds(&poem);
+        let before_spans: Vec<Span> = poem.stanzas().iter().map(prosody_core::Stanza::span).collect();
+
+        let end = Span::new(poem.source().len(), poem.source().len());
+        poem.apply(end, &format!("\n{addition}")).unwrap();
+
+        let after = stanza_seeds(&poem);
+        prop_assert!(after.len() >= before.len());
+        for index in 0..before.len() {
+            prop_assert_eq!(before_spans[index], poem.stanzas()[index].span());
+            prop_assert_eq!(before[index], after[index]);
+        }
+    }
+
+    /// I4 — every node the parser produces resolves to real source text, and the tree nests:
+    /// tokens inside lines inside stanzas.
+    #[test]
+    fn i4_every_parsed_node_resolves_and_nests(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        for stanza in poem.stanzas() {
+            prop_assert!(stanza.span().text(poem.source()).is_some());
+            for line in stanza.lines() {
+                prop_assert!(line.span().text(poem.source()).is_some());
+                prop_assert!(stanza.span().contains(line.span()));
+                for token in line.tokens() {
+                    prop_assert!(token.span().text(poem.source()).is_some());
+                    prop_assert!(line.span().contains(token.span()));
+                    prop_assert!(!token.span().is_empty());
+                }
+            }
+        }
+    }
+
+    /// I4 — tokenisation loses nothing. Every non-whitespace byte of a line is covered by exactly
+    /// one token.
+    ///
+    /// Nesting and resolution say only that the tokens which exist are well-formed; they would
+    /// happily accept a tokeniser that dropped half its output. This says the text is *fully*
+    /// attributed, which is what invariant I4 actually claims.
+    #[test]
+    fn i4_tokens_cover_every_non_whitespace_byte(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        for stanza in poem.stanzas() {
+            for line in stanza.lines() {
+                let mut covered = vec![false; line.span().len()];
+                for token in line.tokens() {
+                    for offset in token.span().range() {
+                        let local = offset - line.span().start();
+                        prop_assert!(!covered[local], "byte {} covered twice", offset);
+                        covered[local] = true;
+                    }
+                }
+                let text = line.span().text(poem.source()).unwrap();
+                for (local, byte) in text.bytes().enumerate() {
+                    if !byte.is_ascii_whitespace() {
+                        prop_assert!(covered[local], "byte {local} of {text:?} has no token");
+                    }
+                }
+            }
+        }
+    }
+
+    /// I1 — an incremental reparse lands in exactly the same place as parsing the edited text
+    /// from scratch, for every shape of edit including ones that insert newlines and change the
+    /// stanza count. If these disagreed, output would depend on a poem's edit history rather
+    /// than on the poem.
+    #[test]
+    fn i1_incremental_reparse_matches_a_fresh_parse(
+        source in poem_source(),
+        pick in 0_usize..4096,
+        text in replacement(),
+    ) {
+        let mut incremental = Poem::parse(source).unwrap();
+        let spans = token_spans(&incremental);
+        let span = spans[pick % spans.len()];
+
+        incremental.apply(span, text).unwrap();
+
+        let fresh = Poem::parse(incremental.source().to_owned()).unwrap();
+        prop_assert_eq!(incremental.stanzas(), fresh.stanzas());
+        prop_assert_eq!(stanza_seeds(&incremental), stanza_seeds(&fresh));
+        prop_assert_eq!(incremental.diagnostics(), fresh.diagnostics());
+    }
+
+    /// I1 — a chain of incremental edits is equivalent to parsing the final text once. A single
+    /// edit can hide a stale-tree bug that only shows up on the edit after it.
+    #[test]
+    fn i1_chained_edits_match_a_fresh_parse(
+        source in poem_source(),
+        picks in proptest::collection::vec((0_usize..4096, replacement()), 1..5),
+    ) {
+        let mut poem = Poem::parse(source).unwrap();
+        for (pick, text) in picks {
+            let spans = token_spans(&poem);
+            if spans.is_empty() {
+                break;
+            }
+            poem.apply(spans[pick % spans.len()], text).unwrap();
+        }
+        let fresh = Poem::parse(poem.source().to_owned()).unwrap();
+        prop_assert_eq!(poem.stanzas(), fresh.stanzas());
+        prop_assert_eq!(stanza_seeds(&poem), stanza_seeds(&fresh));
     }
 
     /// I4 — containment is reflexive and transitive, so a token inside a line inside a stanza is

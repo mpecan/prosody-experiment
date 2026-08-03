@@ -1,0 +1,199 @@
+==================
+Two stanzas
+==================
+
+the fire that burns
+the fire that burnt
+
+and the tide came in
+
+---
+
+(source_file
+  (stanza
+    (line (word) (word) (word) (word))
+    (line (word) (word) (word) (word)))
+  (stanza
+    (line (word) (word) (word) (word) (word))))
+
+==================
+A wider gap is still one stanza break
+==================
+
+first
+
+
+
+second
+
+---
+
+(source_file
+  (stanza (line (word)))
+  (stanza (line (word))))
+
+==================
+Caesurae split a line
+==================
+
+gorči plamen, tiho gori;
+v temi -- brez besed
+
+---
+
+(source_file
+  (stanza
+    (line (word) (word) (caesura) (word) (word) (caesura))
+    (line (word) (word) (caesura) (word) (word))))
+
+==================
+Hyphens and apostrophes stay inside a word
+==================
+
+half-light, burn'd -- gone
+
+---
+
+(source_file
+  (stanza
+    (line (word) (caesura) (word) (caesura) (word))))
+
+==================
+Sentence punctuation is its own token
+==================
+
+it burns. it burnt!
+
+---
+
+(source_file
+  (stanza
+    (line (word) (word) (punctuation) (word) (word) (punctuation))))
+
+==================
+Frontmatter is opaque
+==================
++++
+[style]
+scale = "phrygian_dominant"
+tempo_range = [128, 134]
++++
+the fire that burns
+
+---
+
+(source_file
+  (frontmatter)
+  (stanza
+    (line (word) (word) (word) (word))))
+
+==================
+Frontmatter with no poem
+==================
++++
+root = "D"
++++
+
+---
+
+(source_file
+  (frontmatter))
+
+==================
+One line, no trailing newline
+==================
+one line only
+---
+
+(source_file
+  (stanza (line (word) (word) (word))))
+
+==================
+Leading and trailing blank lines
+==================
+
+
+the tide came in
+
+
+---
+
+(source_file
+  (stanza
+    (line (word) (word) (word) (word))))
+
+==================
+An empty poem
+==================
+
+---
+
+(source_file)
+
+==================
+Free verse: lines of wildly uneven length
+==================
+
+rain
+
+it came down all night and did not stop for anything
+not for the dogs
+not for the long slow turning of the year
+
+then nothing
+
+---
+
+(source_file
+  (stanza
+    (line (word)))
+  (stanza
+    (line (word) (word) (word) (word) (word) (word) (word) (word) (word) (word) (word))
+    (line (word) (word) (word) (word))
+    (line (word) (word) (word) (word) (word) (word) (word) (word) (word)))
+  (stanza
+    (line (word) (word))))
+
+==================
+A refrain: the same line repeated verbatim
+==================
+
+and the tide came in
+the boats went out
+
+and the tide came in
+the boats came home
+
+---
+
+(source_file
+  (stanza
+    (line (word) (word) (word) (word) (word))
+    (line (word) (word) (word) (word)))
+  (stanza
+    (line (word) (word) (word) (word) (word))
+    (line (word) (word) (word) (word))))
+
+==================
+Numerals are not caesurae
+==================
+
+1,000 miles at 3:14
+
+---
+
+(source_file
+  (stanza
+    (line (number) (word) (word) (number))))
+
+==================
+An ellipsis is one mark
+==================
+
+wait... gone
+
+---
+
+(source_file
+  (stanza
+    (line (word) (punctuation) (word))))

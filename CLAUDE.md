@@ -62,8 +62,12 @@ A change is not done until all of these pass. Run them; do not assume.
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
-cargo doc --workspace --no-deps          # doc warnings are errors via lints table
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
+
+Run them with `--locked`, as CI does. The `RUSTDOCFLAGS` prefix is not decoration: the lints
+table only denies `broken_intra_doc_links`, so without it a local `cargo doc` enforces less than
+CI does and missing docs slip through.
 
 Lints are configured in the workspace `Cargo.toml`, not with per-file `#![allow]`:
 
@@ -84,9 +88,15 @@ todo = "deny"
 dbg_macro = "deny"
 ```
 
-Test code may `unwrap`; put `#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]`
-at the crate root rather than sprinkling allows. Any *other* `#[allow]` needs a comment saying
-why, on the same line.
+Test code may `unwrap` and index; put
+`#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing))]`
+at the crate root rather than sprinkling allows — a panic in a test is a test failure, which is
+what it should be. Any *other* `#[allow]` needs a comment saying why, on the same line.
+
+**The one crate exempt from `unsafe_code = "forbid"`** is `tree-sitter-prosody`, whose entire
+Rust content is the `extern "C"` declaration binding the generated parser. It opts out by not
+setting `[lints] workspace = true`. No hand-written logic belongs in that crate; if it grows any,
+the logic goes in `prosody-core` instead.
 
 `todo!()` and `unimplemented!()` are banned in committed code. A stub returns a typed error or
 an empty result — a panic in a live-reload loop kills the session.
@@ -123,6 +133,11 @@ The mapping is the whole project; encode it in types so wrong mappings don't com
 - **Newtype every unit.** `SyllableCount`, `FootCount`, `Beat`, `Subdivision`, `Semitone`,
   `ScaleDegree`, `Bpm`, `Velocity`, `StanzaIdx`. No bare `usize`/`f32` crossing a pass boundary.
   A function taking `(usize, usize, f32)` is a defect report waiting to happen.
+- **A unit's span covers its content, not its delimiters.** A line's span is the extent of its
+  tokens; a stanza's is the extent of its lines. Tree-sitter attributes a trailing newline
+  differently depending on whether another stanza follows, so a raw node range would make a
+  stanza's extent — and therefore its seed — depend on what comes *after* it. Appending a stanza
+  would silently re-voice the previous one. Derive spans from content.
 - **`Span { start: usize, end: usize }` is mandatory on every IR node**, not optional, not added
   later. This is the only real defence against I4 quietly failing (`SPEC.md` §8). Use
   `Span::new` only where `start <= end` is structurally guaranteed; when the bounds come from
