@@ -33,20 +33,23 @@
     )
 )]
 
+pub mod osc;
 pub mod strudel;
 pub mod style;
 
 use prosody_core::voice::Score;
 
-pub use strudel::Strudel;
+pub use osc::Osc;
+pub use strudel::{Strudel, StrudelError};
 pub use style::{Bpm, Note, Scale, Style, StyleError, Swing, TempoRange};
 
 /// A target that can play a poem.
 ///
-/// One implementation today — [`Strudel`] — and designed against the second, which `SPEC.md` §7.8
-/// says is OSC to `SuperCollider`. That is why [`Backend::Output`] is associated rather than fixed
-/// to `String`: an OSC backend emits a stream of timed messages, not text, and a trait that
-/// promised text would have to be replaced rather than implemented.
+/// Two implementations, and the second is why [`Backend::Output`] is associated rather than fixed
+/// to `String`: [`Strudel`] emits pattern text and [`Osc`] emits a schedule of timed messages. A
+/// trait that promised text would have had to be replaced rather than implemented, and the two
+/// backends differ in what they can express — the OSC one honours `SPEC.md` §4.3's anchors, which
+/// mini-notation structurally cannot.
 pub trait Backend {
     /// What playing the score produces.
     type Output;

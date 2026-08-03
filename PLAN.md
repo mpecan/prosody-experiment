@@ -55,7 +55,7 @@ guard exists — they are not deferred to the end.
 | M6a | **§8 acceptance test: the couplet synonym swap** | **done** | §8; landed at M5c — the IR *is* the audition path, no backend needed |
 | M7 | Debug annotation view | **done** | §8; iteration 13 |
 | M8 | Golden corpus (`insta`) + full I1–I4 property suite | **done** | §8; iteration 14 |
-| M9 | OSC → SuperCollider, live-reload watcher | todo | §7.8 — only after mappings hold up |
+| M9 | OSC → `SuperCollider`, live-reload watcher | **done** | §7.8; iteration 15 |
 
 `SPEC.md` §8 is titled "First test to write — before any of the fun parts," and `CLAUDE.md` §7
 repeats that it precedes backend polish. M6a exists because an earlier draft of this plan buried
@@ -86,10 +86,11 @@ the golden corpus genuinely does belong later; the acceptance test does not.
   poem-wide aggregate so no token span explains it (I4), and adding one syllable anywhere retunes
   the whole piece (I2-shaped, like the rhyme-degree question above). **Raised late — it should have
   been raised when it was written.**
-- **`Event::anchor` is deliberately not rendered.** §4.3's anaphora and epistrophe rows say
-  "downbeat-anchored" and "cadence figure", and in mini-notation a step's position in the cycle
-  already fixes both — there is nowhere for an anchor to move it to. It is carried in the IR for
-  the OSC backend of §7.8, which schedules absolutely. **Decide at M9 whether that is real.**
+- ~~**`Event::anchor` is deliberately not rendered.**~~ **Answered at M9, and it was real.** The
+  OSC backend schedules in absolute beats, so an anaphora's words are pulled *onto* the pulse and
+  an epistrophe rings on where its neighbours are clipped. Both are still unexpressible in
+  mini-notation, so the two backends genuinely differ in what they can say — which is the argument
+  for the `Backend` trait having an associated `Output` rather than returning text.
 - **Scale degrees climb out of hearing.** `Scale::degree` keeps ascending so two rhyme classes
   never collide, which is right for I4 — but a poem with ~45 distinct rhyme classes reaches MIDI
   127, and past that the notes are inaudible, which defeats the I4 argument for climbing. Needs
@@ -262,19 +263,19 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 15 — M9: OSC to `SuperCollider`, and the live-reload watcher.** Not yet planned.
+**None. Every milestone in the table above is done, and `SPEC.md` §7's build order is complete.**
 
-The last milestone, and the one `SPEC.md` §7.8 puts behind everything else: "Only then: direct
-synthesis, OSC, live reload." The `Backend` trait was designed against this second implementation
-— `Output` is associated precisely so an OSC backend can emit timed messages rather than text —
-and iteration 12's review named what it will need that nothing provides yet: a time base, and
-somewhere for `Event::anchor` to mean something, since absolute scheduling is the case where
-"downbeat-anchored" has a place to go.
+What exists: a poem compiles to Strudel pattern text or to a schedule of OSC messages, with a
+live-reload watcher; every mapping in §4 is implemented; all four invariants of §6 have property
+tests; §8's acceptance test and debug view both exist; and the golden corpus of §7.2 covers all
+seven cases with committed snapshots.
 
-The watcher is the other half, and it is what `SPEC.md` §6's I2 was written for: "Per-unit seeding
-+ Tree-sitter's dirty-node set means an edit touches only the voices it should — this is what makes
-it live-codeable rather than render-and-pray." Incremental reparse has been in since M1 and nothing
-has yet used it for its actual purpose.
+What does not: the open questions below, which are the honest list of what a second pass would
+argue about. Several are spec-level — §4.1's measure cannot see period, §4.5's degrees are
+poem-wide, pitch reaches only the rhyme words — and were raised rather than decided because
+`CLAUDE.md` §10 says changing what a poetic feature maps to is a spec change.
+
+The next iteration has no milestone to take. It should either take an open question, or stop.
 
 ---
 
@@ -283,6 +284,41 @@ has yet used it for its actual purpose.
 ---
 
 ## Log
+
+### Iteration 15 — M9 OSC, the watcher, and the end of the build order
+
+Built: `prosody-emit::osc` and the `--watch` loop. 523 tests. Every milestone is now done.
+
+**The OSC backend is where `Backend::Output` being an associated type earns itself.** Two of
+`SPEC.md` §4.3's rows have been carried through the IR since M5c waiting for a backend that could
+express them, and mini-notation structurally cannot: a step's position in the cycle already fixes
+when it sounds, so "downbeat-anchored" has nowhere to move it to. Here time is a number. An
+anaphora's words are pulled onto the pulse; an epistrophe rings on where its neighbours are
+clipped. `PLAN.md` recorded this as the question M9 would answer, and the answer is that the
+anchor was real.
+
+It also does what the text backend could not for §4.2. A cycle is a fixed span, so mapping a line
+to a bar made the *foot* elastic — a two-foot line and a five-foot line took the same time. Onsets
+here accumulate: the second bar starts exactly where the first ended, so an odd metre stays odd
+and the pulse stays constant. That is the open question from iteration 12 answered by having a
+second backend rather than by arguing about the first.
+
+Onsets are exact rationals in beats, never seconds, and the tempo is a separate number. So I3
+holds here by construction: change the palette and every onset is identical.
+
+**Two dependencies not taken.** OSC 1.0's wire format for three argument types is about forty
+lines and *total* — every value has exactly one encoding and there is no dialect to get wrong,
+which is the opposite of the TOML case where a partial parser would silently mis-read what it did
+not understand. And the watcher polls `mtime` rather than taking `notify`, which would bring
+platform backends, a thread and a channel to watch one file; at a tenth of a second the poet
+cannot tell.
+
+The watcher is what I2 was written for — `SPEC.md` §6: "Per-unit seeding + Tree-sitter's
+dirty-node set means an edit touches only the voices it should — this is what makes it
+live-codeable rather than render-and-pray." A failed compile prints its reason and keeps watching,
+because a half-written poem mid-keystroke is the normal case, not an error worth exiting on.
+
+Ten mutations, all killed, including every one that would have broken the wire format.
 
 ### Iteration 14 — M8 the golden corpus, and I3's property test
 

@@ -224,3 +224,139 @@ fn the_same_poem_always_compiles_to_the_same_bytes() {
     let (second, _, _) = run(&[], COUPLET);
     assert_eq!(first, second);
 }
+
+#[test]
+fn the_osc_backend_emits_a_schedule() {
+    // `SPEC.md` §7.8's second backend. The onsets are in beats and the tempo is separate, so a
+    // reader can see both.
+    let (out, err, code) = run(&["--osc"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(out.starts_with("# "), "{out}");
+    assert!(out.contains("bpm"), "the tempo is stated: {out}");
+    assert!(out.contains("/prosody/note"), "{out}");
+    // Beats accumulate across bars of different lengths, which is the thing this backend exists
+    // to do — a fixed-length cycle cannot.
+    let onsets: Vec<f64> = out
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+        .filter_map(|token| token.parse().ok())
+        .collect();
+    assert!(onsets.len() > 4, "{out}");
+    assert!(onsets.windows(2).all(|pair| pair[0] <= pair[1]), "in order");
+    assert!(
+        onsets.last().copied().unwrap_or(0.0) > 3.0,
+        "a four-line poem runs past four beats: {onsets:?}"
+    );
+}
+
+#[test]
+fn the_two_backends_agree_about_what_happens() {
+    // Different outputs, same piece. The event count in the Strudel header must match the message
+    // count in the OSC schedule, or one backend is dropping something the other keeps.
+    let (strudel, _, _) = run(&[], COUPLET);
+    let (osc, _, _) = run(&["--osc"], COUPLET);
+    let events: usize = strudel
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("// ")?
+                .split(", ")
+                .nth(2)?
+                .strip_suffix(" events")
+        })
+        .and_then(|count| count.parse().ok())
+        .unwrap_or(0);
+    let messages: usize = osc
+        .lines()
+        .next()
+        .and_then(|line| line.split(", ").nth(1)?.strip_suffix(" messages"))
+        .and_then(|count| count.parse().ok())
+        .unwrap_or(0);
+    assert!(events > 0, "{strudel}");
+    assert_eq!(events, messages, "one message per event");
+}
+
+#[test]
+fn send_without_an_address_is_refused() {
+    let (_, err, code) = run(&["--send"], COUPLET);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("needs an address"), "{err}");
+}
+
+#[test]
+fn watch_without_a_file_is_refused() {
+    // There is nothing to watch on standard input.
+    let (_, err, code) = run(&["--watch"], COUPLET);
+    assert_eq!(code, Some(1));
+    assert!(err.contains("needs a file"), "{err}");
+}
+
+#[test]
+fn the_watcher_recompiles_when_the_poem_changes() {
+    // `SPEC.md` §7.8's live reload, and what invariant I2 was written for.
+    let poem = std::env::temp_dir().join("prosody-watch.poem");
+    std::fs::write(&poem, COUPLET).expect("writing the poem");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
+        .args(["--watch", "--osc"])
+        .arg(&poem)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary should start");
+
+    // Give it time for the first compile, then edit the poem and wait for the second.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    std::fs::write(&poem, format!("{COUPLET}and the wind will rise\n")).expect("editing");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    child.kill().expect("stopping the watcher");
+
+    let finished = child.wait_with_output().expect("collecting output");
+    let out = String::from_utf8_lossy(&finished.stdout);
+    let complaint = String::from_utf8_lossy(&finished.stderr);
+    let _ = std::fs::remove_file(&poem);
+
+    assert!(complaint.contains("watching"), "{complaint}");
+    assert!(!complaint.contains("panicked"), "{complaint}");
+    let compiles = out.matches("# ").count();
+    assert!(
+        compiles >= 2,
+        "the watcher must recompile after an edit, saw {compiles}:\n{out}"
+    );
+}
+
+#[test]
+fn the_watcher_survives_a_poem_that_will_not_compile() {
+    // A half-written poem is the normal case mid-keystroke, not an error worth exiting on.
+    let poem = std::env::temp_dir().join("prosody-watch-broken.poem");
+    std::fs::write(&poem, COUPLET).expect("writing the poem");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
+        .args(["--watch"])
+        .arg(&poem)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary should start");
+
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    std::fs::write(&poem, "+++\nscale = \"klingon\"\n+++\nthe fire burns\n").expect("breaking it");
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    std::fs::write(&poem, COUPLET).expect("fixing it");
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    child.kill().expect("stopping the watcher");
+
+    let finished = child.wait_with_output().expect("collecting output");
+    let out = String::from_utf8_lossy(&finished.stdout);
+    let complaint = String::from_utf8_lossy(&finished.stderr);
+    let _ = std::fs::remove_file(&poem);
+
+    assert!(
+        complaint.contains("unknown scale"),
+        "it says what broke: {complaint}"
+    );
+    assert!(
+        out.matches("stack(").count() >= 2,
+        "and keeps going afterwards:\n{out}"
+    );
+}
