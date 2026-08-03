@@ -45,7 +45,7 @@ guard exists — they are not deferred to the end.
 | M2a | `Phonemiser` trait, phoneme model, CMUdict | **done** | §7.2, §9; iteration 3 |
 | M2b | Letter-to-sound fallback for out-of-vocabulary words | **done** | §7.2, §9; iteration 4 |
 | M3a | Meter: stress vectors, foot segmentation, metrical variance | **done** | §4.2, §7.3; iteration 5 |
-| M3b | Rhyme: continuous scoring, equivalence classes | todo | §4.5, §7.3 |
+| M3b | Rhyme: continuous scoring, equivalence classes | **done** | §4.5, §7.3; iteration 6 |
 | M4 | Repetition passes: exact → anaphora/epistrophe → morphological | todo | §4.3, §7.4 — ship exact first |
 | M5 | Surprisal (§4.4), role assignment (§4.1), Voice IR + lowering (several passes) | todo | §7.5 |
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6 — cheapest audition path |
@@ -61,6 +61,18 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **Rhyme classes are poem-wide and order-dependent** (`SPEC.md` §4.5, §6 I2). Editing stanza 1 to
+  an unrhymed line shifts stanza 3's `RhymeClassId` even though stanza 3 is byte-identical — and
+  §4.5 hands each class a scale degree, so a pitch moves. Not a literal I2 violation: I2 is about
+  PRNG seeding, and voices do not exist until M5. But it is the same shape as the role-locality
+  question already recorded for meter, and **M5 must decide both together.**
+- **Rhyme scoring ranks consonance above assonance** (`SPEC.md` §4.3, §4.5). Because the score is
+  a suffix match, "worth"/"breath" (shared coda) scores 0.5 while "lake"/"fate" (shared stressed
+  vowel) scores 0. Most prosody treats the vowel as rhyme's primary ingredient. Left alone because
+  §4.3 gives assonance its own pass and a threshold sweep puts the current metric near its
+  optimum — but **M4 must decide** whether the assonance pass double-signals a pair that rhyme
+  has already connected.
 
 - **Which variance does role assignment use?** (`SPEC.md` §4.1). Raw `Variance::of` grows with
   line length even when raggedness does not: `[4,4,4,6]` scores 0.75 and `[10,10,10,15]` scores
@@ -119,21 +131,52 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 6 — M3b: rhyme.** Not yet planned; plan it at the start of the iteration.
+**Iteration 7 — M4: repetition passes.** Not yet planned; plan it at the start of the iteration.
 
-Carried into M3b from iteration 5's review:
-- `Beat` keeps only stress, not phonemes, so the rhyme pass re-derives pronunciations for
-  line-final words. Harmless — the phonemiser is pure — but worth knowing before optimising.
-- Secondary stress counts as prominence for rhyme and as weak for metre. `Pronunciation::rhyme_tail`
-  already does the former; do not "fix" it to match `meter::carries_the_beat`.
-- Heteronym variants are reachable through `CmuDict::variants`; rhyme is where choosing among
-  them belongs.
+Carried into M4 from iteration 6's review:
+- Decide whether assonance should skip pairs already connected by a rhyme class (open question
+  above).
+- `SPEC.md` §4.3's morphological row still needs a `VoiceId` assigned by the repetition pass and
+  *not* derived from a seed — the open question from iteration 1, now due.
 
 ---
 
 ---
 
 ## Log
+
+### Iteration 6 — M3b rhyme
+
+Built: `prosody-core::rhyme` — continuous scoring, poem-wide classes, and `Phonemiser::variants`
+so a heteronym's sense can be chosen where there is context to choose. 267 tests.
+
+Real verse: Gray's Elegy reads ABAB, Pope's couplet AA, and Thomas's villanelle resolves to
+exactly two classes with the refrain returning to its own across a stanza break — `SPEC.md` §4.5's
+"two-note obsession, which is what a villanelle already is".
+
+Reviewed by two parallel agents (prosody, invariants-and-Rust). The prosody reviewer swept the
+threshold over 64 true rhyme pairs and ~3000 negatives, and brute-forced order-dependence.
+
+| Finding | Resolution |
+|---|---|
+| **The reported score depended on which line founded the class.** "fade"/"shade" rhyme perfectly, but with "shed" read first the pair reported 0.5 — and §4.5 turns that number into exact pitch versus detune, so an unrelated third line swapped them | Scoring is a second pass, against the whole class, after every line is placed. Order-independent |
+| **A heteronym's wrong sense won whenever its rival matched nothing.** `classify` returned `PERFECT` for founding a class, which variant choice could not tell from a genuine perfect match: `crow`/`bow` picked the bend, not the weapon | Variant choice uses the raw best match, which never reports a founding score |
+| **`RhymeScore` overflowed `u32`** — wrong ordering in release, a panic in debug. `Variance` uses `u128` for exactly this reason; the Eq/Ord lesson was carried over from that incident but the width was not | Widened to `u64` |
+| **All four new property tests verified shape, not content.** Five mutations passed every one, including two opposite and obviously-wrong classifiers — a singleton-per-line partition and a one-class-for-everything partition are both partitions | Added a property tying membership to scoring. Then found the *fixture* was the deeper problem: the fake phonemiser gave every word the same vowel, so every line rhymed. It now varies with spelling |
+| `LineRhyme::score` reported `PERFECT` for a line that rhymes with nothing | `Option<RhymeScore>`, `None` for a class of one |
+| `is_none` had no consumer; `score` and `score_tails` duplicated the same logic | Removed; unified |
+
+The threshold of 1/2 was swept rather than assumed: 3.1% false negatives, 0.9% false positives,
+and a shallow plateau across 1/3–1/2 rather than a sharp optimum. Recorded, not guessed.
+
+A property also caught an over-claim in *itself*: it asserted a lone line rhymes with nothing
+anywhere, but under the greedy rule a later line may rhyme with it and still belong elsewhere,
+having found a better class. The honest invariant is that nothing placed *before* it rhymed.
+
+Deliberately **not** changed:
+- **Suffix-only scoring**, which ranks consonance above assonance. Raised as an M4 question.
+- **Greedy classification over transitive closure.** Union-find chains: *fade*~*shade*~*shed*
+  would put *fade* and *shed* on one pitch.
 
 ### Iteration 5 — M3a meter
 

@@ -17,11 +17,26 @@ use proptest::prelude::{
 };
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
-use prosody_core::{Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme};
+use prosody_core::{Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, rhyme};
 
-/// A phonemiser that gives every word one stressed syllable, so meter properties depend on the
-/// segmentation rather than on a dictionary.
+/// A phonemiser whose output varies with spelling, so a generated poem contains lines that
+/// genuinely rhyme and lines that genuinely do not.
+///
+/// Giving every syllable the same vowel would make *every* line rhyme with every other, and a
+/// classifier that dropped everything into one class would pass the rhyme properties below.
 struct EverySyllableStressed;
+
+/// The vowel a letter contributes, so different words end differently.
+fn vowel_for(c: char) -> Option<&'static str> {
+    Some(match c {
+        'a' => "AA",
+        'e' => "EH",
+        'i' => "IH",
+        'o' => "OW",
+        'u' => "UW",
+        _ => return None,
+    })
+}
 
 impl Phonemiser for EverySyllableStressed {
     fn inventory(&self) -> &'static Inventory {
@@ -29,25 +44,52 @@ impl Phonemiser for EverySyllableStressed {
     }
 
     fn pronounce(&self, word: &str) -> Result<Pronunciation, Unpronounceable> {
-        // One syllable per vowel letter, alternating stress, so lines get varied stress vectors.
-        let count = word.chars().filter(|c| "aeiou".contains(*c)).count();
-        if count == 0 {
+        let letters: Vec<char> = word.chars().collect();
+        let nuclei: Vec<&'static str> = letters.iter().filter_map(|c| vowel_for(*c)).collect();
+        if nuclei.is_empty() {
             return Err(Unpronounceable::NotKnown);
         }
-        let nucleus = ARPABET.phoneme("AH").unwrap();
-        let syllables = (0..count)
-            .map(|i| {
+        // A coda from the word's last consonant, so endings differ beyond their vowel.
+        let coda = letters
+            .iter()
+            .rev()
+            .find(|c| vowel_for(**c).is_none())
+            .and_then(|c| match c {
+                'b'..='d' => ARPABET.phoneme("B"),
+                'f'..='k' => ARPABET.phoneme("K"),
+                'l'..='p' => ARPABET.phoneme("N"),
+                'q'..='t' => ARPABET.phoneme("S"),
+                _ => ARPABET.phoneme("T"),
+            });
+
+        let last = nuclei.len() - 1;
+        let syllables = nuclei
+            .iter()
+            .enumerate()
+            .map(|(i, symbol)| {
                 let stress = if i % 2 == 0 {
                     Stress::Primary
                 } else {
                     Stress::Unstressed
                 };
-                prosody_core::Syllable::new(vec![], nucleus, vec![], stress).unwrap()
+                let coda = if i == last {
+                    coda.into_iter().collect()
+                } else {
+                    Vec::new()
+                };
+                prosody_core::Syllable::new(
+                    Vec::new(),
+                    ARPABET.phoneme(symbol).unwrap(),
+                    coda,
+                    stress,
+                )
+                .unwrap()
             })
             .collect();
         Ok(Pronunciation::from_dictionary(syllables))
     }
 }
+
 use rand_core::Rng;
 
 /// A well-formed poem: stanzas of lines of words, blank-line separated.
@@ -170,6 +212,126 @@ fn phone_sequence() -> impl Strategy<Value = Vec<(Phoneme, Stress)>> {
 }
 
 proptest! {
+    /// Class membership means what it says: lines sharing a class actually rhyme, and a line
+    /// alone in its class rhymes with nothing.
+    ///
+    /// The partition property below is about *shape*, and is satisfied by obviously-wrong
+    /// implementations — one class for everything, or a class per line, are both partitions.
+    /// This is the one that pins content, and it needs a phonemiser whose words do not all
+    /// rhyme with each other.
+    #[test]
+    fn rhyme_classes_mean_what_they_claim(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        let phonemiser = EverySyllableStressed;
+        let rhymes = rhyme::analyse(&poem, &phonemiser);
+
+        // Re-derive each rhyming pronunciation from the source, so this does not simply reuse
+        // whatever the module recorded.
+        let mut placed: Vec<(usize, prosody_core::Pronunciation)> = Vec::new();
+        for stanza in rhymes.stanzas() {
+            for line in stanza.lines() {
+                let (Some(class), Some(word)) = (line.class(), line.word()) else {
+                    prop_assert_eq!(line.score(), None, "a line with no word has no score");
+                    continue;
+                };
+                let text = word.text(poem.source()).unwrap();
+                placed.push((class.get(), phonemiser.pronounce(text).unwrap()));
+            }
+        }
+
+        for (index, (class, pronunciation)) in placed.iter().enumerate() {
+            let mates: Vec<&prosody_core::Pronunciation> = placed
+                .iter()
+                .enumerate()
+                .filter(|(other, (their, _))| *other != index && their == class)
+                .map(|(_, (_, p))| p)
+                .collect();
+
+            if let Some(best) = mates.iter().map(|m| rhyme::score(pronunciation, m)).max() {
+                prop_assert!(
+                    best >= rhyme::RHYME_THRESHOLD,
+                    "lines share a class without rhyming"
+                );
+            } else {
+                // Alone in its class, so nothing placed *before* it rhymed with it — otherwise
+                // it would have joined that class. A *later* line may still rhyme with it and
+                // yet belong elsewhere, having found a class it matches better; that is the
+                // greedy rule working, not a violation.
+                for (_, earlier) in placed.iter().take(index) {
+                    prop_assert!(
+                        rhyme::score(pronunciation, earlier) < rhyme::RHYME_THRESHOLD,
+                        "founded a class despite rhyming with an earlier line"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Rhyme classes are a partition: every line has at most one class, and the classes a poem
+    /// uses are numbered contiguously from zero — which is what lets `SPEC.md` §4.5 hand each one
+    /// the next scale degree.
+    #[test]
+    fn rhyme_classes_form_a_partition(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        let rhymes = rhyme::analyse(&poem, &EverySyllableStressed);
+
+        let mut seen = std::collections::BTreeSet::new();
+        for stanza in rhymes.stanzas() {
+            for line in stanza.lines() {
+                if let Some(class) = line.class() {
+                    prop_assert!(class.get() < rhymes.class_count());
+                    seen.insert(class.get());
+                }
+            }
+        }
+        prop_assert_eq!(seen.len(), rhymes.class_count());
+        for (expected, actual) in seen.iter().enumerate() {
+            prop_assert_eq!(expected, *actual);
+        }
+    }
+
+    /// I4 — a rhyme names the word it rests on, and that word lies inside its line.
+    #[test]
+    fn i4_every_rhyme_traces_to_a_word(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        let rhymes = rhyme::analyse(&poem, &EverySyllableStressed);
+        for stanza in rhymes.stanzas() {
+            for line in stanza.lines() {
+                if let Some(word) = line.word() {
+                    prop_assert!(word.text(poem.source()).is_some());
+                    prop_assert!(line.line().contains(word));
+                    prop_assert!(line.class().is_some(), "a rhyming word implies a class");
+                } else {
+                    prop_assert!(line.class().is_none(), "no word means no class");
+                    prop_assert!(line.tail().is_empty());
+                }
+            }
+        }
+    }
+
+    /// I1 — rhyme analysis is a pure function of the poem and the phonemiser.
+    #[test]
+    fn i1_rhyme_analysis_is_reproducible(source in poem_source()) {
+        let poem = Poem::parse(source).unwrap();
+        prop_assert_eq!(
+            rhyme::analyse(&poem, &EverySyllableStressed),
+            rhyme::analyse(&poem, &EverySyllableStressed)
+        );
+    }
+
+    /// Scoring is symmetric and reflexive — the two halves of an equivalence relation a
+    /// score-based rhyme test can honestly promise. Transitivity it cannot, which is why classes
+    /// are built greedily rather than by closure.
+    #[test]
+    fn rhyme_scoring_is_symmetric_and_reflexive(a in "[a-z]{1,8}", b in "[a-z]{1,8}") {
+        let phonemiser = EverySyllableStressed;
+        let (Ok(x), Ok(y)) = (phonemiser.pronounce(&a), phonemiser.pronounce(&b)) else {
+            return Ok(());
+        };
+        prop_assert_eq!(rhyme::score(&x, &y), rhyme::score(&y, &x));
+        prop_assert!(rhyme::score(&x, &x).is_perfect());
+    }
+
     /// I4 — every syllable of a line belongs to exactly one foot, and no foot reaches past the
     /// line. A segmentation that dropped or double-counted a syllable would change the rhythm
     /// with nothing to trace it to.

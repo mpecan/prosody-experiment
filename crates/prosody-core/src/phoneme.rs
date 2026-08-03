@@ -453,6 +453,18 @@ pub trait Phonemiser {
     /// [`Unpronounceable`], distinguishing a word the phonemiser does not know from one it knows
     /// but cannot syllabify.
     fn pronounce(&self, word: &str) -> Result<Pronunciation, Unpronounceable>;
+
+    /// Every pronunciation this phonemiser has for `word`, in a fixed order.
+    ///
+    /// The first is what [`Phonemiser::pronounce`] returns. Sources that record alternates — a
+    /// dictionary listing `wind` as both the verb and the breeze — expose them here so a pass
+    /// with more context can choose better than this layer can. The default is the single
+    /// pronunciation, which is right for any source that has no alternates.
+    ///
+    /// Must be deterministic, like `pronounce`.
+    fn variants(&self, word: &str) -> Vec<Pronunciation> {
+        self.pronounce(word).into_iter().collect()
+    }
 }
 
 /// A phonemiser that consults `primary` and falls back to `fallback`.
@@ -491,6 +503,15 @@ impl<P: Phonemiser, Q: Phonemiser> Phonemiser for Fallback<P, Q> {
         match self.primary.pronounce(word) {
             Err(Unpronounceable::NotKnown) => self.fallback.pronounce(word),
             other => other,
+        }
+    }
+
+    /// The primary's alternates when it knows the word, the fallback's when it does not — the
+    /// same rule `pronounce` follows, so the two never disagree about which half answered.
+    fn variants(&self, word: &str) -> Vec<Pronunciation> {
+        match self.primary.pronounce(word) {
+            Err(Unpronounceable::NotKnown) => self.fallback.variants(word),
+            _ => self.primary.variants(word),
         }
     }
 }

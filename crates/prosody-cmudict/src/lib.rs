@@ -76,13 +76,9 @@ impl CmuDict {
 
     /// Every pronunciation `CMUdict` lists for `word`, in the order the file gives them.
     ///
-    /// [`Phonemiser::pronounce`] returns the first, deterministically. This exposes the rest
-    /// because the choice is often poetically wrong — `CMUdict` lists `wind` as `W AY N D`, the
-    /// verb, before the ordinary noun `W IH N D` — and a rhyme pass has information this layer
-    /// does not. Keeping the alternates costs nothing and avoids a lossy decision that would be
-    /// expensive to undo later. See `PLAN.md`.
+    /// The inherent version of [`Phonemiser::variants`], which forwards to this.
     #[must_use]
-    pub fn variants(self, word: &str) -> Vec<Pronunciation> {
+    pub fn all_pronunciations(self, word: &str) -> Vec<Pronunciation> {
         lookup(word)
             .into_iter()
             .flatten()
@@ -95,6 +91,13 @@ impl CmuDict {
 impl Phonemiser for CmuDict {
     fn inventory(&self) -> &'static Inventory {
         &ARPABET
+    }
+
+    /// `CMUdict` records alternates — `wind` as the verb before the ordinary noun — and the
+    /// choice is often poetically wrong at this layer. A rhyme pass has the context to choose
+    /// better, so the alternates are exposed rather than discarded.
+    fn variants(&self, word: &str) -> Vec<Pronunciation> {
+        self.all_pronunciations(word)
     }
 
     fn pronounce(&self, word: &str) -> Result<Pronunciation, Unpronounceable> {
@@ -322,7 +325,7 @@ mod tests {
         assert_eq!(symbols(dict, "read"), ["R", "EH", "D"]);
 
         let all: Vec<Vec<&str>> = dict
-            .variants("read")
+            .all_pronunciations("read")
             .iter()
             .map(|p| p.phonemes().map(Phoneme::symbol).collect())
             .collect();
@@ -346,7 +349,7 @@ mod tests {
         let dict = CmuDict::new();
         assert_eq!(symbols(dict, "wind"), ["W", "AY", "N", "D"]);
         let alternates: Vec<Vec<&str>> = dict
-            .variants("wind")
+            .all_pronunciations("wind")
             .iter()
             .map(|p| p.phonemes().map(Phoneme::symbol).collect())
             .collect();
@@ -358,7 +361,11 @@ mod tests {
 
     #[test]
     fn variants_of_an_unknown_word_are_empty() {
-        assert!(CmuDict::new().variants("krapplesnaffle").is_empty());
+        assert!(
+            CmuDict::new()
+                .all_pronunciations("krapplesnaffle")
+                .is_empty()
+        );
     }
 
     #[test]
