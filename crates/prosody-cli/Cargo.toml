@@ -1,0 +1,20 @@
+[package]
+name = "prosody-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "prosody"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+prosody-core.workspace = true
+prosody-cmudict.workspace = true
+prosody-lexicon.workspace = true
+prosody-lts.workspace = true
+prosody-emit.workspace = true
+
+[lints]
+workspace = true

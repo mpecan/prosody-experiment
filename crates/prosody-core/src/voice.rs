@@ -564,6 +564,21 @@ impl Score {
         self.bars
     }
 
+    /// How many beats a bar has — its line's foot count (`SPEC.md` §4.2).
+    ///
+    /// Bars genuinely differ: §4.2 insists "iambic pentameter yields five beats […] Don't quantise
+    /// to 4/4", so a consumer that needs a bar's length must be told rather than assume one. Zero
+    /// for a bar whose words could not be pronounced.
+    #[must_use]
+    pub fn beats_in(&self, bar: usize) -> usize {
+        self.events
+            .iter()
+            .filter(|event| event.bar.0 == bar)
+            .map(|event| event.beat.0 + 1)
+            .max()
+            .unwrap_or(0)
+    }
+
     /// The words that make no sound, because no pronunciation could be found for them.
     ///
     /// `SPEC.md` §9's out-of-vocabulary case, kept visible at the IR rather than only in the

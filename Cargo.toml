@@ -8,16 +8,26 @@ edition = "2024"
 rust-version = "1.96"
 
 [workspace.dependencies]
+anyhow = "1"
 blake3 = "1"
 rand_chacha = "0.10"
 rand_core = "0.10"
 proptest = "1"
 thiserror = "2"
+# `SPEC.md` §5 says the style header is TOML, so the alternative is a hand-rolled subset parser.
+# That is the worse option: `Style::parse` promises to ignore keys it does not know so a header
+# written for a later version still plays, and that promise only holds if the *whole* document
+# parses. A subset parser that mis-reads the rest silently is the failure `CLAUDE.md` §6 forbids.
+# Six crates, no proc-macros, no derive — `serde_core` is the runtime-only split, and `toml::Table`
+# requires it regardless. `display` and `std` are off; nothing here writes TOML.
+toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 tree-sitter = "0.26"
 tree-sitter-prosody = { path = "crates/tree-sitter-prosody" }
 prosody-core = { path = "crates/prosody-core" }
 prosody-cmudict = { path = "crates/prosody-cmudict" }
 prosody-lexicon = { path = "crates/prosody-lexicon" }
+prosody-lts = { path = "crates/prosody-lts" }
+prosody-emit = { path = "crates/prosody-emit" }
 
 # See CLAUDE.md §3. Lints live here, not in per-file `#![allow]`.
 [workspace.lints.rust]

@@ -51,7 +51,7 @@ guard exists — they are not deferred to the end.
 | M5a | Surprisal (§4.4) and the lexicon | **done** | §4.4; iteration 9 |
 | M5b | Role assignment (§4.1) | **done** | §4.1, §9 free-verse fallback; iteration 10 |
 | M5c | Voice IR + lowering | **done** | §7.5, §10; iteration 11 |
-| M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6. **`Style` and realisation live here, not in core** — that is what makes I3 a compiler-enforced edge rather than a convention |
+| M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | **done** | §7.6; iteration 12. `Style` lives in `prosody-emit`, so I3 is a compiler-enforced edge |
 | M6a | **§8 acceptance test: the couplet synonym swap** | **done** | §8; landed at M5c — the IR *is* the audition path, no backend needed |
 | M7 | Debug annotation view | todo | §8 — the enforcement mechanism for I4 |
 | M8 | Golden corpus (`insta`) + full I1–I4 property suite | todo | §8 — hardening, legitimately after M7 |
@@ -64,6 +64,35 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **A cycle is a fixed span, so mapping a line to a bar makes the *foot* elastic.** A two-foot line
+  and a five-foot line occupy the same time, and the pulse stretches to fit. §4.2 says "line → bar
+  (or phrase)", which admits this, and warns against quantising to 4/4, which this does not do —
+  but it quantises the *line* instead, which is arguably worse. Strudel can express the alternative
+  (`.slow`, steps-per-cycle), so this is a mapping decision rather than a backend limit. **Decide at
+  M7 or M9, when the debug view can show the difference.**
+- **The poem picks the tempo inside the style's window, and `SPEC.md` §4 has no such mapping.**
+  `TempoRange::at_density` reads §5's "palette **and** constraint" as "the style gives the range,
+  the poem gives the position in it", which is defensible and arguably the only reading under which
+  a *range* means anything. But it is a §4-class mapping introduced in a §5 module, it is a
+  poem-wide aggregate so no token span explains it (I4), and adding one syllable anywhere retunes
+  the whole piece (I2-shaped, like the rhyme-degree question above). **Raised late — it should have
+  been raised when it was written.**
+- **`Event::anchor` is deliberately not rendered.** §4.3's anaphora and epistrophe rows say
+  "downbeat-anchored" and "cadence figure", and in mini-notation a step's position in the cycle
+  already fixes both — there is nowhere for an anchor to move it to. It is carried in the IR for
+  the OSC backend of §7.8, which schedules absolutely. **Decide at M9 whether that is real.**
+- **Scale degrees climb out of hearing.** `Scale::degree` keeps ascending so two rhyme classes
+  never collide, which is right for I4 — but a poem with ~45 distinct rhyme classes reaches MIDI
+  127, and past that the notes are inaudible, which defeats the I4 argument for climbing. Needs
+  octave folding with some other parameter distinguishing the classes. **Decide when a long poem
+  is in the corpus.**
+- **Error types do not carry spans, against `CLAUDE.md` §6.** `StyleError` is the first error a
+  *user* meets from their own file — a malformed header — and it reports no position, though
+  `Poem::frontmatter()` has the span and `toml` reports its own offset. `prosody-core`'s errors
+  (`DifferentPoems`, `Unpronounceable`, `SyllabifyError`) carry none either, so the rule as written
+  is out of step with the whole codebase. **Resolve in one direction at M7**, when the debug view
+  makes spans visible.
 
 - **A scale degree is a poem-wide number, so an edit can transpose an untouched stanza.** `SPEC.md`
   §4.5 assigns degrees "in order of first appearance", which is inherently a fact about the whole
@@ -225,11 +254,12 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 12 — M6: the Strudel/Tidal text backend and the CLI.** Not yet planned.
+**Iteration 13 — M7: the debug annotation view.** Not yet planned.
 
-The crate boundary is the point. `Style` and realisation go in `prosody-emit`, which depends on
-`prosody-core` — so `voice` and `lower` *cannot* import them, and I3 stops being a claim in a doc
-comment and becomes the same compiler-enforced edge `CLAUDE.md` §2 already uses for purity.
+`SPEC.md` §8 wants the poem rendered with each token annotated by what it became. `--explain` is
+the event-grain version and covers role, beat, pitch, modulation and seed; what it is not is the
+*poem*, annotated. M7 is also where the span-carrying error question above gets settled, since it
+is the same machinery.
 
 ---
 
@@ -238,6 +268,44 @@ comment and becomes the same compiler-enforced edge `CLAUDE.md` §2 already uses
 ---
 
 ## Log
+
+### Iteration 12 — M6 the Strudel backend, the style layer, and the CLI
+
+Built: `prosody-emit` (`Style`, the `Backend` trait, the Strudel text backend) and `prosody-cli`.
+The pipeline is end to end — `prosody poem.txt` emits pattern text. 487 tests.
+
+**I3 is now a dependency edge rather than a promise.** `Style` lives in `prosody-emit`, which
+depends on `prosody-core`, so `voice` and `lower` *cannot* import it. Its property test is the last
+of the four invariants to exist and needs both halves: that a style change leaves the score
+byte-identical, and that the style does reach the output — a backend ignoring style entirely would
+pass the first alone.
+
+**And the emitted pattern did not play the poem.** Four reviewers, 71 mutations, 26 survivors, and
+the most important findings were not in the Rust at all:
+
+| Finding | Resolution |
+|---|---|
+| **`\|` in mini-notation means *choose at random*, not "next bar".** Every pattern was `<bar0 \| bar1 \| …>`, so a poem's lines played in a different order every cycle and the same text produced a different piece on every play. I1 held for the text and failed for the sound; I4 failed outright | `<[bar] [bar] …>`, each bar bracketed as one element — `<a b c>` takes one *element* per cycle, so an unbracketed multi-step bar would have been four bars, not one |
+| **`.cpm` is cycles per minute and was given a BPM**, so every poem ran about five times its stated tempo and §5's window was decorative | Divided by the poem's mean beats per bar. `Score` now reports `beats_in`, which M5c's review had already asked for |
+| **`SPEC.md` §5's own example header played silence.** `bank = "tr909"` asks Strudel for a sample called `tr909_bd`; the bank is `RolandTR909`. `synth = "karplus"` is not a Strudel synth at all — and `tr909` is the *default*, so this was the out-of-the-box output for every poem | The poem's vocabulary is validated against a known list, and the *backend* translates it to identifiers Strudel has. Which is what "the backend owns palette-to-sound" meant all along |
+| **A style header could rewrite the arrangement.** `bank` and `synth` were free strings written straight into generated JavaScript; `bank = "a\").fast(4).s(\"bd"` appended `.fast(4)` to every voice — I3's stated failure, in the milestone whose headline claim is that I3 is enforced | Validated types. `scale` and `root` always were; the two fields needing it most were the two that lacked it |
+| **Every melody note landed half a foot early**, in every line of every iambic poem, because the melody derived its own grid instead of reading `Event::subdivision` | One `grid` function for every layer. It also removed a duplicate of the same 35 lines that had to stay positionally in step or each gain attached to the wrong syllable |
+| **`prosody poem.txt \| head -1` panicked.** Rust ignores `SIGPIPE` | Handled |
+| §4.3's `family`, `bank` and `anchor` were carried into the IR at M5c *because review caught them being dropped*, and were dropped again at emit. A doc table claimed the alliteration row shipped; `.vowel` appeared nowhere in the crate | Family drives bit-crush depth, alliteration drives vowel colour, and the anchor's deliberate absence is now argued rather than asserted |
+
+**What the tests were not doing.** Five mutations let the *style* delete events, reorder the
+melody, silence bars and double the tempo — all passing a suite that compared two `Score`s, which
+`prosody-core` builds without ever seeing a `Style`, so the comparison could not fail by
+construction. The half of I3 at risk is the emitter, and nothing was looking at it. §4.4's
+"direction" assertions took a max and a min over a bag and asserted they differed, which is true of
+any non-constant mapping — inverting both formulas survived. `Style::default()` was tested by
+`assert_eq!(default(), default())`, so every field of the palette most poems are heard through
+could be changed unnoticed.
+
+The CLI had no tests at all, and it is the artefact a user touches. It has twelve now, including
+one that runs `node --check` over the emitted text — because a bracket count had already let two
+syntax errors through, and an earlier bug put the separating comma *inside* a `//` comment, which
+made the whole program unparseable while looking fine.
 
 ### Iteration 11 — M5c the Voice IR, and §8's acceptance test
 
