@@ -1,0 +1,16 @@
+[package]
+name = "prosody-lts"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Guessing English pronunciation from spelling, when no dictionary has the word."
+
+[dependencies]
+prosody-core = { workspace = true }
+
+[dev-dependencies]
+prosody-cmudict = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

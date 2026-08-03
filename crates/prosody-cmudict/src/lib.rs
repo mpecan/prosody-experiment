@@ -71,7 +71,7 @@ impl CmuDict {
     /// [`Phonemiser::pronounce`], whose error says which case applies.
     #[must_use]
     pub fn contains(self, word: &str) -> bool {
-        table().contains_key(&normalise(word))
+        lookup(word).is_some()
     }
 
     /// Every pronunciation `CMUdict` lists for `word`, in the order the file gives them.
@@ -83,8 +83,7 @@ impl CmuDict {
     /// expensive to undo later. See `PLAN.md`.
     #[must_use]
     pub fn variants(self, word: &str) -> Vec<Pronunciation> {
-        table()
-            .get(&normalise(word))
+        lookup(word)
             .into_iter()
             .flatten()
             .filter_map(|phones| phoneme::syllabify(phones).ok())
@@ -99,13 +98,28 @@ impl Phonemiser for CmuDict {
     }
 
     fn pronounce(&self, word: &str) -> Result<Pronunciation, Unpronounceable> {
-        let entries = table()
-            .get(&normalise(word))
-            .ok_or(Unpronounceable::NotKnown)?;
+        let entries = lookup(word).ok_or(Unpronounceable::NotKnown)?;
         let phones = entries.first().ok_or(Unpronounceable::NotKnown)?;
         let syllables = phoneme::syllabify(phones)?;
         Ok(Pronunciation::from_dictionary(syllables))
     }
+}
+
+/// Finds a word's entries, retrying without edge apostrophes if the exact spelling is absent.
+///
+/// Order matters. `CMUdict` genuinely contains `'tis`, `'bout` and `'cause`, so the exact lookup
+/// must come first or those real entries would be lost to a normalisation that was meant to help.
+/// The retry exists for the other case the grammar cannot distinguish: a scare-quoted word, where
+/// `'the` and `burns'` are the same words as `the` and `burns` with punctuation attached. English
+/// orthography does not tell the two apart, so the dictionary decides — by preferring whichever
+/// spelling it actually knows.
+fn lookup(word: &str) -> Option<&'static Vec<Phones>> {
+    let key = normalise(word);
+    if let Some(entries) = table().get(&key) {
+        return Some(entries);
+    }
+    let trimmed = key.trim_matches(['\'', '\u{2019}']);
+    (trimmed != key).then(|| table().get(trimmed)).flatten()
 }
 
 /// The parsed dictionary: normalised word to its pronunciations, in file order.
@@ -345,6 +359,31 @@ mod tests {
     #[test]
     fn variants_of_an_unknown_word_are_empty() {
         assert!(CmuDict::new().variants("krapplesnaffle").is_empty());
+    }
+
+    #[test]
+    fn a_scare_quoted_word_falls_back_to_its_bare_spelling() {
+        // The tokeniser cannot tell a quote from an elision, so both reach here with the
+        // apostrophe attached. The dictionary resolves it: strip only when the exact spelling
+        // is unknown.
+        let dict = CmuDict::new();
+        assert_eq!(symbols(dict, "'the"), symbols(dict, "the"));
+        assert_eq!(symbols(dict, "burns'"), symbols(dict, "burns"));
+        assert_eq!(
+            symbols(dict, "\u{2019}burns\u{2019}"),
+            symbols(dict, "burns")
+        );
+    }
+
+    #[test]
+    fn stripping_never_overrides_a_real_entry() {
+        // "'tis" is its own word, not a quoted "tis". If the retry ran first, it would resolve
+        // to something else entirely — or to nothing, since "tis" is not an entry.
+        let dict = CmuDict::new();
+        assert_eq!(symbols(dict, "'tis"), ["T", "IH", "Z"]);
+        assert_ne!(symbols(dict, "'tis"), symbols(dict, "'bout"));
+        assert_eq!(symbols(dict, "'bout"), ["B", "AW", "T"]);
+        assert_eq!(symbols(dict, "'cause"), ["K", "AH", "Z"]);
     }
 
     #[test]

@@ -43,7 +43,7 @@ guard exists — they are not deferred to the end.
 | M0 | Workspace, lint gates, CI, `Span`, `Seed` | **done** | determinism + traceability primitives; iteration 1 |
 | M1 | Tree-sitter grammar: frontmatter / stanza / line / caesura / token, incremental reparse | **done** | `SPEC.md` §7.1; iteration 2 |
 | M2a | `Phonemiser` trait, phoneme model, CMUdict | **done** | §7.2, §9; iteration 3 |
-| M2b | Letter-to-sound fallback for out-of-vocabulary words | todo | §7.2, §9 — must be marked `Provenance::LetterToSound` |
+| M2b | Letter-to-sound fallback for out-of-vocabulary words | **done** | §7.2, §9; iteration 4 |
 | M3 | Meter: stress vectors, foot segmentation. Rhyme: continuous scoring, equivalence classes | todo | §4.2, §4.5, §7.3 |
 | M4 | Repetition passes: exact → anaphora/epistrophe → morphological | todo | §4.3, §7.4 — ship exact first |
 | M5 | Surprisal (§4.4), role assignment (§4.1), Voice IR + lowering (several passes) | todo | §7.5 |
@@ -105,22 +105,79 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 4 — M2b: letter-to-sound fallback.** Not yet planned; plan it at the start of the
-iteration.
+**Iteration 5 — M3: meter and rhyme.** Not yet planned; plan it at the start of the iteration.
 
-Carried into M2b from iteration 3's review:
-- Guessed pronunciations must be built with `Pronunciation::guessed`, never `from_dictionary`.
-- Edge-apostrophe normalisation belongs here, on lookup failure — but `CMUdict` genuinely contains
-  `'tis`, `'bout` and `'cause`, so stripping must be a *fallback* after a direct lookup fails,
-  never a pre-pass.
-- `TokenKind::Number` still has no consumer: decide how numerals phonemise, or document that they
-  do not.
+Carried into M3 from iteration 4's review:
+- **Heteronym variant selection** is now actionable: `CmuDict::variants` exposes the alternates,
+  and the rhyme pass is where the choice belongs. `wind` resolves to the verb by default.
+- Guessed pronunciations carry `Provenance::LetterToSound` and are 25% exact / 84% syllable-count
+  accurate. Rhyme and alliteration must not treat a guess as authoritative — decide what a
+  low-confidence pronunciation does to a rhyme class.
+- `TokenKind::Number` still has no consumer.
 
 ---
 
 ---
 
 ## Log
+
+### Iteration 4 — M2b letter-to-sound fallback
+
+Built: `crates/prosody-lts` (rule-based English grapheme-to-phoneme), `Fallback` in
+`prosody-core::phoneme`, and an edge-apostrophe retry in `CmuDict`. 192 tests.
+
+Reviewed by four parallel agents (linguistics, invariants, rust-quality, test-quality). The
+linguistics reviewer graded the guesser against all 124k dictionary entries rather than reading
+it, which is what made the iteration worth having.
+
+**Accuracy, before and after this iteration's fixes** — now a tracked test, not a claim:
+
+| measure | before | after |
+|---|---|---|
+| exact whole word | 17.9% | **25.4%** |
+| syllable count | not measured | **83.5%** |
+| primary stress position | 67.7% | 67.7% |
+| phoneme error rate | 0.29 | **0.24** |
+| coverage | not measured | **99.9%** |
+
+Findings accepted and fixed:
+
+| Finding | Resolution |
+|---|---|
+| **No vowel reduction at all** — the dominant error source. `abandon` came out `AE B AE N D AA N` | Unstressed monophthongs reduce to schwa |
+| **Silent-e detection was suffix-blind**, so every past tense and plural was wrong: `hoped` → `HH AA P EH D`. Measured `-ed` 2.7%, `-es` 0.2% | Looks through an inflectional `d`/`s` to the stem |
+| **The `dge` rule was dead code** — the silent-e limit excluded any spelling ending in `e`, which is exactly `dge`. `judge` gained a spurious `D` | Limit applies per-spelling; `judge` is now `JH AH JH` |
+| **R-controlled digraphs fired before a vowel**: `hero` → `HH ER AA`, `very` → `V ER IY` | Only when the `r` closes the syllable |
+| **Initial silent letters absent**: `knight` → `K N AY T`. Measured 0% for `wr`/`ps`/`gn` | `kn`, `gn`, `ps`, `pn`, `wr` handled |
+| **No `gh` rule**, so `though` leaked `G HH` | Silent after a vowel, hard word-initially |
+| **`-le` had an exclusion but no replacement**: `table` → `T AE B L EH` | Its own syllable, and the preceding vowel lengthens |
+| **German `ß` missing from the fold table**, so `straße` returned silence — contradicting the module's own goal | Folding now maps to *spellings*, not single letters: `ß`→`ss`, `č`→`ch`, `š`→`sh`, `ž`→`zh`, `œ`→`oe` |
+| `th` was always unvoiced, so `the` was `TH EH` — wrong English enshrined in a test | Voiced in a closed list of function words and between vowels |
+| `cc` before a front vowel collapsed as a geminate: `accent` → `AE S EH N T`, losing the /k/ | Doubled `c`/`g` split before a front vowel |
+| First-syllable stress is right for 6% of `-tion` words against 94% for penultimate | Penultimate for `-tion`/`-sion`/`-ic`/`-ity` and friends |
+| **Grapheme matching took the first rule, not the longest** — a rule appended at the natural place was silently shadowed (`eigh` by `ei`) | Longest match wins; declaration order no longer matters, and the misleading comment is gone |
+| `NotKnown` was returned for a word with rules but no vowel — the very distinction M2a introduced, applied inconsistently | `brrr` is now `Unsyllabifiable(NoNucleus)`, like `CMUdict`'s `hm` |
+| `fallback_refuses_to_mix_inventories` only asserted the compatible case; deleting the check entirely passed the suite | A second inventory exists in the tests, and both refusal directions are asserted |
+| `yod_drops` and `y_sound`'s mid-word branch were entirely untested — gutting either passed everything | Hand-worked cases for `rule`/`dune`/`chute`/`huge` and `gym`/`myth` |
+| The three `any_word` properties passed vacuously if the guesser returned `Err` for everything | Anchored by a fixed-word test and a vowel-bearing generator |
+| `LetterToSound` was a concrete English implementation living in the inventory-agnostic core | Moved to `crates/prosody-lts`, with the boundary rule written into `CLAUDE.md` §2 |
+| `Fallback` is generic but lived in the guesser's module | Moved beside the `Phonemiser` trait it composes |
+| `is_guess` was a free function with no consumer | `Provenance::is_guess`, mirroring `Stress::is_stressed` |
+| `_private: ()` marker fields | `#[non_exhaustive]` |
+
+A property test found a bug of its own: `has_silent_final_e` counted a leading `y` as a vowel
+while `transcribe` treats it as a consonant, so "ybe" silenced its only nucleus.
+
+Deliberately **not** changed:
+- **Vowel quality in stressed open syllables.** `sofa` is `S AA F AH`, not `S OW F AH`; `ghost` is
+  `G AA S T`. Open-syllable lengthening would fix those and break `city` and `very` — English is
+  genuinely split, and the tests now state the actual behaviour rather than an aspiration.
+- **`ou`, `ea`, `ow` each pick one value.** `though`, `bread` and `cow` are wrong as a result.
+  Spelling does not determine these; a closed list is the only fix and is not worth it yet.
+- **`ch` is never /k/**, so `chorus` and `chaos` are wrong. Needs a lexicon, which is what the
+  dictionary already is — these words only reach the guesser if they are absent from it.
+- **Stress accuracy did not move** (67.7%). The suffix rules help the families they cover, which
+  are a small share of the corpus. Recorded rather than papered over.
 
 ### Iteration 3 — M2a phoneme model and CMUdict
 

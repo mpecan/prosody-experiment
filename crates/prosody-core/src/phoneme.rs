@@ -299,6 +299,17 @@ pub enum Provenance {
     LetterToSound,
 }
 
+impl Provenance {
+    /// Whether this pronunciation was guessed rather than looked up.
+    ///
+    /// The predicate the debug view (`SPEC.md` §8) renders, and the one `CLAUDE.md` §6's
+    /// visible-fallback rule turns on.
+    #[must_use]
+    pub fn is_guess(self) -> bool {
+        self == Self::LetterToSound
+    }
+}
+
 /// How a word sounds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pronunciation {
@@ -442,6 +453,46 @@ pub trait Phonemiser {
     /// [`Unpronounceable`], distinguishing a word the phonemiser does not know from one it knows
     /// but cannot syllabify.
     fn pronounce(&self, word: &str) -> Result<Pronunciation, Unpronounceable>;
+}
+
+/// A phonemiser that consults `primary` and falls back to `fallback`.
+///
+/// The composition `SPEC.md` §7.2 asks for: a dictionary, then a guess. It falls back **only**
+/// when the primary has no entry at all. A word the primary knows but cannot syllabify — `hm`,
+/// `shh` — genuinely has no syllable, and guessing one would invent sound the poem does not
+/// contain.
+#[derive(Debug, Clone, Copy)]
+pub struct Fallback<P, Q> {
+    primary: P,
+    fallback: Q,
+}
+
+impl<P: Phonemiser, Q: Phonemiser> Fallback<P, Q> {
+    /// Composes two phonemisers, or `None` if they do not share an inventory.
+    ///
+    /// Mixing inventories would produce pronunciations that cannot be compared with one another,
+    /// so rhyme and alliteration would silently stop matching across the boundary.
+    #[must_use]
+    pub fn new(primary: P, fallback: Q) -> Option<Self> {
+        (primary.inventory().name == fallback.inventory().name)
+            .then_some(Self { primary, fallback })
+    }
+}
+
+impl<P: Phonemiser, Q: Phonemiser> Phonemiser for Fallback<P, Q> {
+    fn inventory(&self) -> &'static Inventory {
+        self.primary.inventory()
+    }
+
+    /// # Errors
+    ///
+    /// The primary's error when it knows the word, the fallback's when neither does.
+    fn pronounce(&self, word: &str) -> Result<Pronunciation, Unpronounceable> {
+        match self.primary.pronounce(word) {
+            Err(Unpronounceable::NotKnown) => self.fallback.pronounce(word),
+            other => other,
+        }
+    }
 }
 
 /// Groups a flat phone sequence into syllables by the maximal onset principle.

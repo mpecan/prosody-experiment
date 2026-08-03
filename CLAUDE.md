@@ -34,10 +34,19 @@ convention:
 ```
 crates/
   prosody-core/      pure analysis + IR + realisation. NO io, NO clock, NO env, NO fs.
+  prosody-cmudict/   the CMU dictionary, vendored and embedded
+  prosody-lts/       guessing pronunciation from spelling
   prosody-emit/      backend emitters (Strudel/Tidal text first; OSC later)
   prosody-cli/       argument parsing, file reads, stdout, the watcher. All IO lives here.
   tree-sitter-prosody/  the grammar
 ```
+
+**A concrete phonemiser is its own crate.** `prosody-core` holds the inventory-agnostic model —
+`Phoneme`, `Inventory`, `Phonemiser`, `syllabify` — that `SPEC.md` §9 requires so a second
+language can be added without a retrofit. An English ruleset or an English dictionary is not
+that, and a future Slovenian phonemiser must not inherit one by depending on the core. The
+`ARPAbet` inventory stays in the core as the one canonical `Inventory` value the abstraction
+needs in order to exist at all.
 
 `prosody-core` must not depend on `std::fs`, `std::time`, `std::env`, or any network/audio
 crate. Adding such a dependency to `prosody-core` is a design error, not a shortcut.
@@ -150,6 +159,10 @@ The mapping is the whole project; encode it in types so wrong mappings don't com
 - **Make illegal states unrepresentable.** Rhyme classes are an equivalence relation — represent
   them as a union-find or an interned `RhymeClassId`, not as a `String` compared repeatedly.
   Roles are an enum, not a bool `is_foundation`.
+- **A guess must be constructible only as a guess.** `Pronunciation::from_dictionary` and
+  `Pronunciation::guessed` are separate constructors precisely so that labelling a guess as a
+  dictionary fact cannot be written by accident. Never add a constructor taking a `Provenance`
+  argument.
 - **Voice identity is not a seed.** Seeds avalanche: a one-character edit yields an unrelated
   stream. That is right for `SPEC.md` §4.3's refrain row and wrong for its morphological row,
   where "burn / burning / burnt" must stay *one* voice with modulated parameters. Voice identity
@@ -192,11 +205,16 @@ worse than no test — it costs maintenance and catches nothing.
    poem, a poem with an OOV/nonsense word, and a non-English poem (documenting the §9 limitation).
    Review every snapshot diff by reading it — accepting an `insta` diff without reading it is the
    main way a mapping silently rots.
-3. **The §8 acceptance test, first.** A couplet; swap one word for a phonetically/metrically
+3. **Anything approximate gets a measured floor.** A ruleset that produces confident nonsense
+   passes every unit test written for it, because those tests came from the same rules. Grade it
+   against data nobody involved chose, print the numbers, and fail the build when they regress —
+   see `prosody-lts/tests/accuracy.rs`. Raise the floors when the thing improves; a floor far
+   below the truth has stopped being a test.
+4. **The §8 acceptance test, first.** A couplet; swap one word for a phonetically/metrically
    different synonym; assert (a) a specific named parameter changes in a specific voice, and
    (b) all other voices are byte-identical. This is the project's reason to exist — it comes
    before any backend polish.
-4. **Unit tests colocated** in `#[cfg(test)] mod tests` for each analysis pass, with hand-worked
+5. **Unit tests colocated** in `#[cfg(test)] mod tests` for each analysis pass, with hand-worked
    expected values (e.g. a known stress vector), not values copied from the implementation's
    output.
 

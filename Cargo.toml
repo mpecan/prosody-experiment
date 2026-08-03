@@ -16,6 +16,7 @@ thiserror = "2"
 tree-sitter = "0.26"
 tree-sitter-prosody = { path = "crates/tree-sitter-prosody" }
 prosody-core = { path = "crates/prosody-core" }
+prosody-cmudict = { path = "crates/prosody-cmudict" }
 
 # See CLAUDE.md §3. Lints live here, not in per-file `#![allow]`.
 [workspace.lints.rust]

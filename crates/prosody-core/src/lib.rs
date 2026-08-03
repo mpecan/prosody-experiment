@@ -33,7 +33,7 @@ pub use parse::{
     TokenKind,
 };
 pub use phoneme::{
-    Inventory, Phoneme, PhonemeClass, Phonemiser, Pronunciation, Provenance, Stress,
+    Fallback, Inventory, Phoneme, PhonemeClass, Phonemiser, Pronunciation, Provenance, Stress,
     SyllabifyError, Syllable, Unpronounceable,
 };
 pub use seed::{Domain, Seed};
