@@ -46,7 +46,8 @@ guard exists — they are not deferred to the end.
 | M2b | Letter-to-sound fallback for out-of-vocabulary words | **done** | §7.2, §9; iteration 4 |
 | M3a | Meter: stress vectors, foot segmentation, metrical variance | **done** | §4.2, §7.3; iteration 5 |
 | M3b | Rhyme: continuous scoring, equivalence classes | **done** | §4.5, §7.3; iteration 6 |
-| M4 | Repetition passes: exact → anaphora/epistrophe → morphological | todo | §4.3, §7.4 — ship exact first |
+| M4a | Repetition: refrain, anaphora, epistrophe, and `VoiceId` | **done** | §4.3, §7.4; iteration 7 |
+| M4b | Repetition: alliteration, assonance, morphological near-repetition | todo | §4.3 — the row that "earns the project" |
 | M5 | Surprisal (§4.4), role assignment (§4.1), Voice IR + lowering (several passes) | todo | §7.5 |
 | M6 | `prosody-emit`: Strudel/Tidal text backend. `prosody-cli`: parse in, pattern out | todo | §7.6 — cheapest audition path |
 | M6a | **§8 acceptance test: the couplet synonym swap** | todo | §8 — runs the moment M6 gives an audition path, not later |
@@ -61,6 +62,21 @@ before anyone confirmed a single traceable, confined, audible change. It is spli
 the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
+
+- **`VoiceId` is line-scoped; the morphological row is word-scoped** (`SPEC.md` §4.3). A line can
+  be part of a verbatim refrain *and* contain a word whose family lives in an unrelated line —
+  "burn" here, "burnt" there. `LineRepetition` holds one voice and has nowhere to put a second
+  identity. **M4b needs a parallel word-scoped structure**, not a refinement of this one. Iteration
+  1 charged M4a with getting `VoiceId` right: the seed-avalanche half is solved, the granularity
+  half is not.
+- **A sestina's rotating end-words are invisible.** One occurrence per stanza is far too sparse for
+  the density rule that admits Whitman's "I" and Ginsberg's "who". The form's whole mechanism is
+  single-word end-repetition rotated across stanzas, and it needs its own detector. **Decide at
+  M4b or defer explicitly.**
+- **A refrain line in otherwise-unique stanzas gives §4.1 no signal.** Per-stanza metrical variance
+  reflects the *other* lines, so the poem's most periodic, most loop-worthy line is invisible to
+  role assignment. Every real refrain form checked — villanelle, Psalm 136, The Three Ravens —
+  places one recurring line per stanza. **M5 needs line-grain repetition data alongside variance.**
 
 - **Rhyme classes are poem-wide and order-dependent** (`SPEC.md` §4.5, §6 I2). Editing stanza 1 to
   an unrhymed line shifts stanza 3's `RhymeClassId` even though stanza 3 is byte-identical — and
@@ -131,19 +147,47 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ## Current iteration
 
-**Iteration 7 — M4: repetition passes.** Not yet planned; plan it at the start of the iteration.
+**Iteration 8 — M4b: the phonetic repetition rows.** Not yet planned; plan it at the start of the
+iteration.
 
-Carried into M4 from iteration 6's review:
-- Decide whether assonance should skip pairs already connected by a rhyme class (open question
-  above).
-- `SPEC.md` §4.3's morphological row still needs a `VoiceId` assigned by the repetition pass and
-  *not* derived from a seed — the open question from iteration 1, now due.
+Carried into M4b from iteration 7's review:
+- Word-scoped voices, parallel to the line-scoped `VoiceId` (open question above).
+- `SPEC.md` §4.3's morphological row — stem match plus phoneme edit distance, with distance
+  driving modulation depth. The row the spec says earns the project.
+- Whether the assonance pass should skip pairs a rhyme class already connects (from iteration 6).
 
 ---
 
 ---
 
 ## Log
+
+### Iteration 7 — M4a exact repetition and the voice
+
+Built: `prosody-core::repetition` — refrain, anaphora, epistrophe, and `VoiceId`. No phonemiser
+needed; all three are facts about text. 291 tests.
+
+Reviewed by two parallel agents (spec fidelity, Rust-and-tests). The spec reviewer ran real poems
+through the pass; the other mutation-tested it.
+
+| Finding | Resolution |
+|---|---|
+| **Requiring two words made the canonical figure invisible.** Whitman's "I" (3 of 5 lines) and Ginsberg's "who" (4 of 4) both reported *zero* figures — the cases used to define anaphora. A content-word filter would not help: "I" and "who" are closed-class | A one-word figure now needs three occurrences covering at least half the lines it spans. Measured on real text: Ginsberg and Whitman qualify, Shakespeare's "And" (3 of 14) does not |
+| **A figure's span could claim text nobody repeated.** The hull from first to last matched word absorbs whatever sits between: `"and, the tide"` and `"and the tide"` were reported as the same three-word figure | `Occurrence` holds each word's span. `hull()` is available for a debug view and documented as approximate |
+| **A wordless line had no identity.** Two lines of `"..."` each got their own voice, so a repeated punctuation line could never be a refrain — and the test named for this used a blank line, which the grammar reads as a stanza break, so the branch had no coverage at all | Keyed on the raw line text when there are no words |
+| Dead arithmetic in the empty-line branch — a push immediately overwritten with the same value, hiding an invariant behind `saturating_sub` | Simplified |
+| `Figure::words()` meant "n" for an edge figure and "line length" for a refrain, via a fallible lookup whose fallback was unreachable | Derived from the occurrence: for a refrain the repeated part *is* the whole line, so the meaning is now uniform |
+| **The property generator produced no anaphora or epistrophe in 5000 samples** — every repetition property held vacuously for two of the three figures. The same fixture problem as the rhyme properties an iteration earlier | Lines are now assembled from shared openings, middles and endings, so nested figures are common |
+| Only single unit tests guarded the refrain-exclusion and the once-per-line-set rules | Properties for both. Three mutations that were previously caught by nothing in the property suite now fail it |
+
+Judged differently from the reviewer, with reasoning: it read the `covered` check as double-reporting
+when a fourth line dilutes a shorter n-gram — three lines sharing "and the tide" plus one sharing
+only "and the" yields two figures over different line-sets. That is nested anaphora, which is real
+and which a reader hears; Whitman has "I celebrate" inside "I". The rule is one figure per *set of
+lines*, not one figure per line, and the module doc now says so. A property pins it.
+
+Measured, not fixed: `analyse` runs in ~3.4ms on a realistic 1000-line poem, degrading
+super-linearly only when "lines" grow prose-length. Not a concern for verse.
 
 ### Iteration 6 — M3b rhyme
 

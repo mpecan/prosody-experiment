@@ -17,7 +17,10 @@ use proptest::prelude::{
 };
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
-use prosody_core::{Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, rhyme};
+use prosody_core::repetition::FigureKind;
+use prosody_core::{
+    Domain, Phoneme, Poem, Seed, Span, StanzaIdx, Stress, meter, phoneme, repetition, rhyme,
+};
 
 /// A phonemiser whose output varies with spelling, so a generated poem contains lines that
 /// genuinely rhyme and lines that genuinely do not.
@@ -91,6 +94,52 @@ impl Phonemiser for EverySyllableStressed {
 }
 
 use rand_core::Rng;
+
+/// A poem built to contain repetition: lines are drawn from a small vocabulary and assembled
+/// from a shared opening, a middle, and a shared ending, so refrains, anaphora and epistrophe all
+/// occur at usable rates.
+///
+/// The plain generator produced no anaphora or epistrophe at all — measured at 0 in 5000 samples
+/// — so every repetition property held vacuously for two of the three figures. This is the same
+/// fixture problem the rhyme properties hit an iteration earlier.
+fn repetitive_poem() -> impl Strategy<Value = String> {
+    // Each line is a shared opening, a middle, and a shared ending, drawn from small pools. That
+    // makes refrains, anaphora and epistrophe all common — and, because openings vary in length,
+    // makes *nested* figures common too, which is what the once-per-line-set property needs.
+    let opening = proptest::sample::select(vec![
+        Vec::new(),
+        vec!["and"],
+        vec!["and", "the"],
+        vec!["and", "the", "tide"],
+    ]);
+    let middle = proptest::collection::vec(
+        proptest::sample::select(vec!["burns", "dark", "fire", "slow"]),
+        0..3,
+    );
+    let ending = proptest::sample::select(vec![Vec::new(), vec!["in"], vec!["came", "in"]]);
+
+    let line = (opening, middle, ending).prop_map(|(open, mid, end)| {
+        let mut words: Vec<&str> = open;
+        words.extend(mid);
+        words.extend(end);
+        if words.is_empty() {
+            words.push("rain");
+        }
+        words.join(" ")
+    });
+
+    proptest::collection::vec(line, 1..8).prop_map(|lines| {
+        let mut poem = String::new();
+        for (index, line) in lines.iter().enumerate() {
+            poem.push_str(line);
+            poem.push('\n');
+            if index % 3 == 2 {
+                poem.push('\n');
+            }
+        }
+        poem
+    })
+}
 
 /// A well-formed poem: stanzas of lines of words, blank-line separated.
 fn poem_source() -> impl Strategy<Value = String> {
@@ -212,6 +261,171 @@ fn phone_sequence() -> impl Strategy<Value = Vec<(Phoneme, Stress)>> {
 }
 
 proptest! {
+    /// Voices mean what they say: lines share a voice exactly when they are the same line.
+    ///
+    /// `SPEC.md` §4.3's refrain row turns a shared voice into a literal loop, so a voice shared
+    /// by two different lines would loop something the poem never repeated.
+    #[test]
+    fn a_voice_is_shared_exactly_by_identical_lines(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let rep = repetition::analyse(&poem);
+
+        let normalise = |span: Span| -> Option<String> {
+            Some(span.text(poem.source())?.to_lowercase())
+        };
+        let placed: Vec<(usize, Option<String>)> = rep
+            .stanzas()
+            .iter()
+            .flat_map(prosody_core::repetition::StanzaRepetition::lines)
+            .map(|line| (line.voice().get(), normalise(line.line())))
+            .collect();
+
+        for (i, (voice, text)) in placed.iter().enumerate() {
+            for (other, other_text) in placed.iter().skip(i + 1) {
+                if voice == other {
+                    prop_assert_eq!(text, other_text, "one voice, two different lines");
+                } else {
+                    prop_assert_ne!(text, other_text, "one line, two different voices");
+                }
+            }
+        }
+    }
+
+    /// I4 — every figure occurrence resolves to real source text, and sits inside some line.
+    #[test]
+    fn i4_every_figure_occurrence_resolves(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let rep = repetition::analyse(&poem);
+        let lines: Vec<Span> = rep
+            .stanzas()
+            .iter()
+            .flat_map(prosody_core::repetition::StanzaRepetition::lines)
+            .map(repetition::LineRepetition::line)
+            .collect();
+
+        for figure in rep.figures() {
+            prop_assert!(figure.occurrences().len() >= 2, "a figure repeats");
+            let mut seen = std::collections::BTreeSet::new();
+            for occurrence in figure.occurrences() {
+                let hull = occurrence.hull();
+                prop_assert!(hull.is_some(), "an occurrence with no words");
+                let hull = hull.unwrap();
+                prop_assert!(
+                    lines.iter().any(|line| line.contains(hull)),
+                    "an occurrence outside every line"
+                );
+                for word in occurrence.words() {
+                    prop_assert!(word.text(poem.source()).is_some());
+                }
+                prop_assert!(seen.insert(hull), "duplicate occurrence");
+            }
+        }
+    }
+
+    /// Every occurrence of a figure really is the same words.
+    #[test]
+    fn figure_occurrences_share_their_text(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let rep = repetition::analyse(&poem);
+        for figure in rep.figures() {
+            // Word by word, so punctuation between the words cannot hide a difference.
+            let texts: Vec<Vec<String>> = figure
+                .occurrences()
+                .iter()
+                .map(|o| {
+                    o.words()
+                        .iter()
+                        .filter_map(|w| w.text(poem.source()))
+                        .map(str::to_lowercase)
+                        .collect()
+                })
+                .collect();
+            prop_assert_eq!(texts.len(), figure.occurrences().len());
+            for text in &texts {
+                prop_assert_eq!(text.len(), figure.words(), "wrong word count");
+                prop_assert_eq!(text, &texts[0], "occurrences differ");
+            }
+        }
+    }
+
+    /// No two figures of the same kind cover the same set of lines.
+    ///
+    /// This is what stops one ostinato being reported at every shorter n — three lines sharing
+    /// "and the tide" also share "and the" and "and", and reporting all three would triple a
+    /// single figure. Nested figures over *different* line-sets are fine and expected.
+    #[test]
+    fn a_figure_is_reported_once_per_set_of_lines(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let rep = repetition::analyse(&poem);
+        let lines: Vec<Span> = rep
+            .stanzas()
+            .iter()
+            .flat_map(prosody_core::repetition::StanzaRepetition::lines)
+            .map(prosody_core::repetition::LineRepetition::line)
+            .collect();
+
+        let mut seen: std::collections::BTreeSet<(FigureKind, Vec<Span>)> =
+            std::collections::BTreeSet::new();
+        for figure in rep.figures() {
+            let mut covered: Vec<Span> = figure
+                .occurrences()
+                .iter()
+                .filter_map(|o| {
+                    let hull = o.hull()?;
+                    lines.iter().copied().find(|line| line.contains(hull))
+                })
+                .collect();
+            covered.sort_unstable();
+            covered.dedup();
+            prop_assert!(
+                seen.insert((figure.kind(), covered)),
+                "the same lines reported twice under one kind"
+            );
+        }
+    }
+
+    /// A group of identical lines is a refrain, and never also an anaphora or epistrophe.
+    ///
+    /// §4.3 gives them different musical results — a literal loop against a downbeat-anchored
+    /// figure — so reporting both would turn one repetition into two.
+    #[test]
+    fn identical_lines_are_a_refrain_and_nothing_else(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        let rep = repetition::analyse(&poem);
+        let line_text = |span: Span| span.text(poem.source()).map(str::to_lowercase);
+
+        for figure in rep.figures() {
+            if figure.kind() == FigureKind::Refrain {
+                continue;
+            }
+            let lines: Vec<Option<String>> = rep
+                .stanzas()
+                .iter()
+                .flat_map(prosody_core::repetition::StanzaRepetition::lines)
+                .filter(|line| {
+                    figure
+                        .occurrences()
+                        .iter()
+                        .filter_map(prosody_core::repetition::Occurrence::hull)
+                        .any(|hull| line.line().contains(hull))
+                })
+                .map(|line| line_text(line.line()))
+                .collect();
+            prop_assert!(
+                lines.windows(2).any(|pair| pair.first() != pair.last()),
+                "identical lines reported as {:?}",
+                figure.kind()
+            );
+        }
+    }
+
+    /// I1 — repetition analysis is a pure function of the poem.
+    #[test]
+    fn i1_repetition_analysis_is_reproducible(source in repetitive_poem()) {
+        let poem = Poem::parse(source).unwrap();
+        prop_assert_eq!(repetition::analyse(&poem), repetition::analyse(&poem));
+    }
+
     /// Class membership means what it says: lines sharing a class actually rhyme, and a line
     /// alone in its class rhymes with nothing.
     ///

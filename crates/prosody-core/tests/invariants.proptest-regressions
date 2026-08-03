@@ -6,3 +6,6 @@
 # everyone who runs the test benefits from these saved cases.
 cc 35c5ce09007ea9075f192bf0247c99f8b497a9ece46208336e060a739e9140ab # shrinks to source = "oe\ne\n"
 cc d67cdfd2faeb2047345dbfb011c9a8c6090ece9bd8a704b342fab9f0f438f6d1 # shrinks to source = "euv\neč\n\nuš\n"
+cc 7e84025e40df41595f863776deefb737d93251907d54c84251a4bdd35ed6b71d # shrinks to source = "in burns and\nin burns the\n"
+cc 7e5bfcc50df772cb1066bc1709d3c28a0416b84c5fa6e34b560455f1ad41dc6a # shrinks to source = "burns burns dark\nburns burns dark\n"
+cc cc33498ef07fd4c1d2f61ea3ce2edb0000facf303d1a503b37bfcdb5a376e9f9 # shrinks to source = "and came in\nand came in\n"

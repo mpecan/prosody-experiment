@@ -15,6 +15,7 @@
 //! - [`phoneme`] — how words sound, and the [`Phonemiser`] boundary `SPEC.md` §9 asks for.
 //! - [`meter`] — stress vectors, feet, and the metrical variance `SPEC.md` §4.1 assigns roles by.
 //! - [`rhyme`] — continuous rhyme scoring and the classes `SPEC.md` §4.5 maps to scale degrees.
+//! - [`repetition`] — the figures `SPEC.md` §4.3 turns into loops, ostinati and cadences.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
 
@@ -28,6 +29,7 @@
 pub mod meter;
 pub mod parse;
 pub mod phoneme;
+pub mod repetition;
 pub mod rhyme;
 pub mod seed;
 pub mod span;
@@ -43,6 +45,7 @@ pub use phoneme::{
     Fallback, Inventory, Phoneme, PhonemeClass, Phonemiser, Pronunciation, Provenance, Stress,
     SyllabifyError, Syllable, Unpronounceable,
 };
+pub use repetition::{Figure, FigureKind, PoemRepetition, VoiceId};
 pub use rhyme::{LineRhyme, PoemRhyme, RhymeClassId, RhymeScore, StanzaRhyme};
 pub use seed::{Domain, Seed};
 pub use span::Span;
