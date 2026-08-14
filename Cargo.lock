@@ -343,6 +343,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "prosody-web"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "prosody-cmudict",
+ "prosody-core",
+ "prosody-emit",
+ "prosody-lexicon",
+ "prosody-lts",
+]
+
+[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

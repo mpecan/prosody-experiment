@@ -53,9 +53,29 @@ it is one **foot**; each bracketed group inside that is the **syllables** of tha
 
 ## Hearing it
 
-Two ways. The first needs nothing but a browser.
+Three ways. The first is the one to start with.
 
-### Path A — Strudel, in the browser
+### Path A — the local web page (easiest)
+
+```sh
+cargo run -p prosody-web
+# prosody: http://127.0.0.1:4747 — ^C to stop
+```
+
+Open it. You get the poem on the left with every palette control under it, the generated pattern
+and the annotation on the right, and Play/Stop at the top. It recompiles as you type — about a
+third of a second after you stop — and if it is already playing it switches to the new version
+without stopping, so you can rewrite a line and hear the difference immediately.
+
+The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, swing, sample bank
+and synth. Changing one of them changes what you hear and provably not what happens — the page
+recompiles and the bar, voice and event counts stay put, which is invariant I3 in front of you.
+
+It binds to `127.0.0.1` only, and deliberately: it compiles arbitrary text from a request body,
+which is exactly right on your own machine and exactly wrong on a network. Playback loads Strudel
+and its drum samples from a CDN, so the first Play needs an internet connection.
+
+### Path B — Strudel, by hand
 
 1. Compile a poem and copy the output:
    ```sh
@@ -70,7 +90,7 @@ Two ways. The first needs nothing but a browser.
 That is the whole loop. Edit the poem, recompile, paste again — or keep a terminal open with
 `--watch` and paste whenever you like something.
 
-### Path B — SuperCollider, with live reload
+### Path C — SuperCollider, with live reload
 
 This is the one that re-plays as you type. It needs
 [SuperCollider](https://supercollider.github.io/) installed.
@@ -204,6 +224,7 @@ crates/
   prosody-lexicon/    word-rarity table, built from public-domain texts
   prosody-emit/       Style, and the Strudel and OSC backends
   prosody-cli/        arguments, files, stdout, the watcher — all IO lives here
+  prosody-web/        a local page for writing a poem and hearing it, also all IO
   tree-sitter-prosody/  the grammar
 ```
 

@@ -38,6 +38,7 @@ crates/
   prosody-lts/       guessing pronunciation from spelling
   prosody-emit/      backend emitters (Strudel/Tidal text first; OSC later)
   prosody-cli/       argument parsing, file reads, stdout, the watcher. All IO lives here.
+  prosody-web/       a localhost page for writing and hearing a poem. Also all IO.
   tree-sitter-prosody/  the grammar
 ```
 
