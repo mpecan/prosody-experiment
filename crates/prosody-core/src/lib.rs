@@ -50,7 +50,7 @@ pub mod surprisal;
 pub mod voice;
 
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
-pub use arrange::{Arrangement, Cause, Placement, Slot};
+pub use arrange::{Arrangement, Cause, Lane, Part, Placement, Slot};
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
 };
@@ -70,5 +70,6 @@ pub use sound::{Distance, SoundFigure, SoundFigureKind, SoundRepetition, WordFor
 pub use span::Span;
 pub use surprisal::{Lexicon, PoemSurprisal, Rarity, Surprisal, WordSurprisal};
 pub use voice::{
-    Bar, BeatIndex, Detune, Event, Family, Pitch, ScaleDegree, Score, Subdivision, Velocity, Voice,
+    Bar, BeatIndex, Detune, Event, Family, Pitch, Placed, ScaleDegree, Score, Subdivision,
+    Velocity, Voice,
 };

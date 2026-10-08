@@ -70,7 +70,7 @@
 //! its class's degree would be a monotone, and would attribute a pitch to syllables that earned
 //! none — which invariant I4 forbids more strongly than it forbids silence.
 
-use crate::arrange::Arrangement;
+use crate::arrange::{Arrangement, Part, Placement};
 use crate::meter::FootKind;
 use crate::phoneme::{Phoneme, Provenance};
 use crate::repetition::VoiceId;
@@ -601,6 +601,42 @@ impl Score {
             .unwrap_or(0)
     }
 
+    /// What a placement sounds: its line's events — or, for a call, only those inside the call —
+    /// and the beats they span.
+    ///
+    /// Every consumer of the arrangement goes through this, so a backend never has to know a call
+    /// from a line: it renders [`Placed::events`] with each beat counted from
+    /// [`Placed::first_beat`], across [`Placed::beats`] beats, fitted to the slot.
+    #[must_use]
+    pub fn placed(&self, placement: Placement) -> Placed<'_> {
+        let bar = placement.bar().get();
+        let events: Vec<&Event> = self
+            .events
+            .iter()
+            .filter(|event| event.bar.0 == bar && placement.part().covers(event.span))
+            .collect();
+        let (first_beat, beats) = match placement.part() {
+            Part::Line => (0, self.beats_in(bar)),
+            Part::Call(_) => {
+                let first = events.iter().map(|e| e.beat.0).min().unwrap_or(0);
+                let last = events.iter().map(|e| e.beat.0).max().unwrap_or(0);
+                (
+                    first,
+                    if events.is_empty() {
+                        0
+                    } else {
+                        last - first + 1
+                    },
+                )
+            }
+        };
+        Placed {
+            events,
+            first_beat,
+            beats,
+        }
+    }
+
     /// The words that make no sound, because no pronunciation could be found for them.
     ///
     /// `SPEC.md` §9's out-of-vocabulary case, kept visible at the IR rather than only in the
@@ -609,6 +645,35 @@ impl Score {
     #[must_use]
     pub fn silent(&self) -> &[Span] {
         &self.silent
+    }
+}
+
+/// What one [`Placement`] sounds — see [`Score::placed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placed<'a> {
+    events: Vec<&'a Event>,
+    first_beat: usize,
+    beats: usize,
+}
+
+impl<'a> Placed<'a> {
+    /// The events, in playing order.
+    #[must_use]
+    pub fn events(&self) -> &[&'a Event] {
+        &self.events
+    }
+
+    /// The line beat the placement starts on: 0 for a whole line, later for a call that does not
+    /// open its line.
+    #[must_use]
+    pub const fn first_beat(&self) -> usize {
+        self.first_beat
+    }
+
+    /// How many beats it spans, counted from [`Placed::first_beat`]. Zero if it makes no sound.
+    #[must_use]
+    pub const fn beats(&self) -> usize {
+        self.beats
     }
 }
 

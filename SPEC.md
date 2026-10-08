@@ -131,6 +131,12 @@ A stanza, once stated, **keeps looping** until something stops it. One loop per 
 Bar-locked: each bar of the piece takes its length from the line arriving in it, and whatever
 loops underneath is fitted to that bar. The piece ends when the last stanza has fully arrived.
 
+**The call lane** (§4.1's second tier, decided the same day). The half-line before a line's first
+internal caesura — its *call*: "Tyger Tyger," — is lifted out once its line has been heard, and
+loops in a third lane under everything until the next line with a caesura is first heard. A refrain
+stanza stops it with the other loops. Caesurae are sparse, so each one leaves a figure that
+persists; this is what lets a poem whose stanzas share one layer sound more than one thing at once.
+
 This is structure, read from the poem, not a style parameter — which answers §9's "looping as an
 explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
 poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.

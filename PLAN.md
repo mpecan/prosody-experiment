@@ -162,10 +162,8 @@ the golden corpus genuinely does belong later; the acceptance test does not.
   decided.** It also means the Voice IR has nowhere to record loop *length*: a foundation stanza of
   `[8,6,8,6]` wants a two-bar loop and `[7,7,7,7]` a one-bar one. **M5c must decide whether to
   carry it.**
-- **§4.1's caesura tier is unimplemented.** "consider a second tier where a line-internal caesura
-  splits a voice." `Line::segments` already exposes the boundaries and the grammar already parses
-  caesura; nothing reads either. M5b added a second tier at line grain for *refrains*, which is a
-  different tier. **Deferred explicitly; decide at M5c or M7.**
+- **§4.1's caesura tier** — **resolved** as the call lane (`SPEC.md` §4.6). Only a line's *first*
+  caesura is read; a line with several gives one call.
 - **The role corpus is 16 hand-picked stanzas.** The threshold's window is (0.0364, 0.0880) and the
   test asserts the window rather than an accuracy score, precisely because a percentage over a
   self-chosen corpus grades the corpus. Two canonical free-verse pieces (H.D.'s *Oread*, a short
@@ -304,6 +302,27 @@ say what its change bought.
 ---
 
 ## Log
+
+### §4.6's call lane: a caesura leaves a figure behind
+
+The user's decision: §4.1's second tier, as a third lane. The half-line before a line's first
+internal caesura becomes its call; from the bar after its line is first heard it loops under
+everything, fitted to each bar, until the next line with a caesura is first heard. A refrain
+stanza silences it. `Placement` now carries a `Lane` (a layer, or the call lane) and a `Part`
+(the whole line, or a call's span), and `Score::placed` is the one place a placement becomes
+events and a beat extent — the backends and the scorer stopped fetching a bar's events themselves.
+
+Measured (before → after, layering): Tyger 1.000 → 1.957, Jabberwocky 1.000 → 1.667, Dickinson
+1.000 → 1.619, Hopkins 1.400 → 1.840, Poe 1.745 → 2.222, Whitman 1.798 → 2.193. Interest rose for
+every poem with a caesura (Hopkins 0.627 → 0.768, Jabberwocky 0.729 → 0.796). Explained locality
+did not move for any poem, so the lane added no unexplained edits. Wilde, Sonnet 18 and Prešeren
+have no internal caesura and are unchanged; the golden corpus's patterns and views are
+byte-identical for the same reason.
+
+Side effects worth knowing: syncopation fell where a call adds accents onto beats the line left
+unaccented (Tyger 0.223 → 0.111, Dickinson 0.524 → 0.317), and the pitched share fell because a
+call adds unpitched events. The Tyger is now 84 bars from 24 lines; length is deliberately uncapped
+for now.
 
 ### After `prosody-score` — §4.6: stanzas loop until something takes their place
 

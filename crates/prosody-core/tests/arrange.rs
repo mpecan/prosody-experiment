@@ -173,3 +173,78 @@ fn every_placed_line_has_material() {
         }
     }
 }
+
+#[test]
+fn a_call_loops_from_the_bar_after_its_line() {
+    use Cause::{Calling, Stated};
+    // `da dA, sa sA`: the caesura after `dA` makes `da dA` the line's call. It is heard in its line
+    // in bar 0, then on its own under bar 1.
+    let score = compile("da dA, sa sA\nma mA ma mA\n");
+    assert_eq!(
+        slots(&score),
+        vec![vec![(0, Stated)], vec![(1, Stated), (0, Calling)]]
+    );
+
+    let call = score.arrangement().slots()[1].placements()[1];
+    assert_eq!(call.lane(), prosody_core::Lane::Call);
+    assert_eq!(
+        call.part(),
+        prosody_core::Part::Call(prosody_core::Span::new(0, 5))
+    );
+    // One iamb of the line's two: the call spans one beat, from the line's first.
+    let placed = score.placed(call);
+    assert_eq!((placed.first_beat(), placed.beats()), (0, 1));
+    assert_eq!(placed.events().len(), 2, "`da` and `dA`, not `sa sA`");
+}
+
+#[test]
+fn the_next_call_takes_the_lane_and_the_layers_loop_beside_it() {
+    use Cause::{Calling, Looping, Stated};
+    // Stanza 1 (foundation) has a call in bar 0; stanza 2 (flourish: one syllable against six) has
+    // one in bar 2, `ta`. Bar 2 still hears stanza 1's call; from bar 3 the lane is `ta`.
+    let score = compile("da dA, sa sA\nma mA ma mA\n\nta, tA\nna nA na nA na nA\n");
+    assert_eq!(
+        slots(&score),
+        vec![
+            vec![(0, Stated)],
+            vec![(1, Stated), (0, Calling)],
+            vec![(2, Stated), (0, Looping), (0, Calling)],
+            vec![(3, Stated), (1, Looping), (2, Calling)],
+        ]
+    );
+}
+
+#[test]
+fn a_refrain_stanza_silences_the_call_lane_too() {
+    use Cause::{Calling, Looping, Overruling, Stated};
+    // Stanzas 1 and 3 are the same, so both are refrain stanzas: stated alone, no loops and no
+    // call under them. Stanza 2 in between hears stanza 1's loop and its call.
+    let score = compile(
+        "da dA, sa sA\nma mA ma mA\n\nta\nna nA na nA na nA\n\nda dA, sa sA\nma mA ma mA\n",
+    );
+    assert_eq!(
+        slots(&score),
+        vec![
+            vec![(0, Overruling)],
+            vec![(1, Overruling)],
+            vec![(2, Stated), (0, Looping), (0, Calling)],
+            vec![(3, Stated), (1, Looping), (0, Calling)],
+            vec![(4, Overruling)],
+            vec![(5, Overruling)],
+        ]
+    );
+}
+
+#[test]
+fn a_trailing_comma_is_not_a_call() {
+    // A comma that ends a line divides nothing.
+    let score = compile("da dA sa sA,\nma mA ma mA\n");
+    assert!(
+        score
+            .arrangement()
+            .slots()
+            .iter()
+            .flat_map(prosody_core::Slot::placements)
+            .all(|placement| placement.cause() != Cause::Calling)
+    );
+}

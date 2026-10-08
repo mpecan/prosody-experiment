@@ -68,12 +68,6 @@ impl Timeline {
     /// (`prosody_core::arrange`), so its syllables land between the host's beats. Positions are
     /// kept exact: a hit's beat is the whole part of its time, and `within` the remainder.
     pub(crate) fn of(score: &Score) -> Self {
-        let mut by_bar: Vec<Vec<&prosody_core::voice::Event>> = vec![Vec::new(); score.bars()];
-        for event in score.events() {
-            if let Some(bar) = by_bar.get_mut(event.bar().get()) {
-                bar.push(event);
-            }
-        }
         let mut hits = Vec::new();
         let mut bar_starts = Vec::new();
         let mut running = 0_u64;
@@ -81,12 +75,14 @@ impl Timeline {
             bar_starts.push(running);
             let slot_beats = to_u64(slot.beats()).max(1);
             for placement in slot.placements() {
-                let line = placement.bar().get();
-                let line_beats = to_u64(score.beats_in(line)).max(1);
-                for event in by_bar.get(line).into_iter().flatten() {
+                let placed = score.placed(*placement);
+                let first = placed.first_beat();
+                let line_beats = to_u64(placed.beats()).max(1);
+                for event in placed.events() {
                     let of = to_u64(event.subdivision().of()).max(1);
-                    let position =
-                        to_u64(event.beat().get()) * of + to_u64(event.subdivision().index());
+                    // Counted from the placement's first beat: a call need not open its line.
+                    let position = to_u64(event.beat().get().saturating_sub(first)) * of
+                        + to_u64(event.subdivision().index());
                     // `position / (of · line_beats)` of the slot, which lasts `slot_beats`.
                     let scaled = position * slot_beats;
                     let denominator = of * line_beats;

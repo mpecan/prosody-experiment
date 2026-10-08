@@ -309,21 +309,19 @@ impl Backend for Osc {
         // `SPEC.md` §4.2 insists on it — so their starts are accumulated rather than multiplied,
         // which is the whole reason this backend can honour an odd metre where a fixed-length
         // cycle cannot.
-        let mut by_bar: Vec<Vec<&Event>> = vec![Vec::new(); score.bars()];
-        for event in score.events() {
-            if let Some(bar) = by_bar.get_mut(event.bar().get()) {
-                bar.push(event);
-            }
-        }
         let mut messages: Vec<Message> = Vec::new();
         let mut slot_start = 0_u64;
         for slot in score.arrangement().slots() {
             let slot_beats = u64::try_from(slot.beats()).unwrap_or(1).max(1);
             for placement in slot.placements() {
-                let bar = placement.bar().get();
-                let line_beats = u64::try_from(score.beats_in(bar)).unwrap_or(1).max(1);
-                for event in by_bar.get(bar).into_iter().flatten() {
-                    let at = fitted(event, slot_start, slot_beats, line_beats);
+                // A whole line, or a call lifted out of one: either way, its own beats.
+                let placed = score.placed(*placement);
+                let extent = Extent {
+                    first: u64::try_from(placed.first_beat()).unwrap_or(0),
+                    beats: u64::try_from(placed.beats()).unwrap_or(1).max(1),
+                };
+                for event in placed.events() {
+                    let at = fitted(event, slot_start, slot_beats, extent);
                     messages.push(message(event, score, style, at));
                 }
             }
@@ -343,15 +341,26 @@ impl Backend for Osc {
     }
 }
 
-/// When an event sounds: its place within its own line, fitted to the slot it plays in.
+/// Which beats of its line a placement covers: from `first`, for `beats`.
+#[derive(Debug, Clone, Copy)]
+struct Extent {
+    first: u64,
+    beats: u64,
+}
+
+/// When an event sounds: its place within its own line — or within its call, counted from the
+/// call's first beat — fitted to the slot it plays in.
 ///
 /// Bar-locked (`prosody_core::arrange`): a line looping under a longer or shorter host is
 /// stretched or squeezed to the host's bar, so a slot's lines start and end together. A line in a
 /// slot of its own length — every first statement — lands exactly where it always did.
-fn fitted(event: &Event, slot_start: u64, slot_beats: u64, line_beats: u64) -> Onset {
+fn fitted(event: &Event, slot_start: u64, slot_beats: u64, extent: Extent) -> Onset {
     let of = u64::try_from(event.subdivision().of()).unwrap_or(1).max(1);
     let within = u64::try_from(event.subdivision().index()).unwrap_or(0);
-    let beat = u64::try_from(event.beat().get()).unwrap_or(0);
+    let beat = u64::try_from(event.beat().get())
+        .unwrap_or(0)
+        .saturating_sub(extent.first);
+    let line_beats = extent.beats;
 
     // §4.3's anaphora row: a line-initial repetition is pulled onto the pulse — its own line's
     // pulse, before fitting, so the pull is the same wherever the line sounds. This is the
@@ -833,6 +842,29 @@ mod tests {
             onsets_of(3).last().copied(),
             Some(slot_start),
             "it starts with its host"
+        );
+    }
+
+    #[test]
+    fn a_call_is_fitted_like_any_loop() {
+        // `de dA, se sA`: the call is `de dA`, one iamb. Bar 0 plays the line from beat 0; bar 1
+        // (`ne nA ne nA`, two beats, from beat 2) has the call under it, stretched across both
+        // beats — `de` on 2, `dA` halfway through, on 3.
+        let schedule = schedule("de dA, se sA\nne nA ne nA\n");
+        let onsets_of = |start: usize| -> Vec<f64> {
+            schedule
+                .messages()
+                .iter()
+                .filter(|m| m.span().start() == start)
+                .map(|m| m.at().as_beats())
+                .collect()
+        };
+        assert_eq!(onsets_of(0), vec![0.0, 2.0]);
+        assert_eq!(onsets_of(3), vec![0.5, 3.0]);
+        assert_eq!(
+            onsets_of(7).len(),
+            1,
+            "`se` is past the caesura and is not in the call"
         );
     }
 }

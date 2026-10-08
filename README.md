@@ -212,6 +212,7 @@ Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`
 | Per-stanza metrical regularity | foundation layer (pulse) vs flourish (ornament) | §4.1 |
 | A stanza, once stated | keeps looping until the next stanza of its layer transforms it, bar by bar | §4.6 |
 | A stanza made only of refrains | stops every loop and drops in alone, like a chorus | §4.6 |
+| A pause inside a line (`,` `;` `—` …) | the half-line before it loops underneath until the next one | §4.6 |
 | Foot → beat, syllable → subdivision, line → bar | rhythm | §4.2 |
 | Stress | accent / velocity | §4.2 |
 | A line repeated verbatim | *the same instrument* played again | §4.3 |
@@ -268,9 +269,9 @@ the debug view, a golden corpus, and property tests for all four invariants. 560
 
 Things that are known to be wrong, in rough order of how much they would bother a listener:
 
-- **Poems whose stanzas are all one layer never stack.** Stanzas now loop until a rival takes
-  over (§4.6), so a foundation loops under a flourish — but when every stanza is regular, each one
-  transforms the last and nothing plays underneath. A single-stanza poem never loops at all.
+- **A poem with neither alternating layers nor mid-line pauses plays one thing at a time.**
+  Stanzas loop until a rival takes over and a caesura's half-line loops underneath (§4.6), but
+  Wilde's villanelle and Sonnet 18 have neither, and a single-stanza poem never loops at all.
 - **Pitch reaches only about 8% of events.** The melody is the rhyme words and nothing else, so
   most of what you hear is percussion with sparse melodic punctuation.
 - **Polysyllabic rhyme is mis-scored.** The rhyme tail starts at the last *primary-stressed* vowel,

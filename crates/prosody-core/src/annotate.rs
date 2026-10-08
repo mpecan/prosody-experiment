@@ -536,12 +536,12 @@ fn sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
         .collect()
 }
 
-/// `stated 0 · looping 2-3 5 · arriving 4(1) 6(2) · yielding 5(1)`: each cause with the bars it
+/// `stated 0 · looping 2-3 5 · arriving 4(1) 6(2) · calling 7-12`: each cause with the bars it
 /// accounts for, runs of consecutive bars collapsed, and a transformation's pass in brackets.
 fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
     // Each cause's name, and whether a cause is that one — with its pass, where it has one.
     type Select = fn(Cause) -> Option<Option<usize>>;
-    let kinds: [(&str, Select); 5] = [
+    let kinds: [(&str, Select); 6] = [
         ("stated", |c| matches!(c, Cause::Stated).then_some(None)),
         ("overruling", |c| {
             matches!(c, Cause::Overruling).then_some(None)
@@ -555,6 +555,7 @@ fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
             _ => None,
         }),
         ("looping", |c| matches!(c, Cause::Looping).then_some(None)),
+        ("calling", |c| matches!(c, Cause::Calling).then_some(None)),
     ];
     let mut parts = Vec::new();
     for (name, select) in kinds {
@@ -709,10 +710,12 @@ mod tests {
             (3, Cause::Looping),
             (5, Cause::Looping),
             (7, Cause::Yielding { pass: 1 }),
+            (8, Cause::Calling),
+            (9, Cause::Calling),
         ];
         assert_eq!(
             describe_sounds(&sounds),
-            "stated 0 · yielding 7(1) · looping 2-3 5"
+            "stated 0 · yielding 7(1) · looping 2-3 5 · calling 8-9"
         );
     }
 

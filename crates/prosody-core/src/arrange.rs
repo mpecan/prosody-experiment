@@ -17,6 +17,19 @@
 //!
 //! The piece ends when the last stanza has fully arrived.
 //!
+//! # The call lane: §4.1's second tier
+//!
+//! §4.1 suggests "a second tier where a line-internal caesura splits a voice". Here it is a third
+//! lane beside the two layers. The half-line before a line's first internal caesura — its *call*,
+//! "Tyger Tyger," of "Tyger Tyger, burning bright" — is lifted out the first time its line is
+//! heard, and from the next bar on it loops under everything, fitted to each bar like any loop,
+//! until the next line with a caesura is first heard and its call takes over. A refrain stanza
+//! stops it with every other loop. A line is "first heard" once: a line re-hosting a pass of a
+//! transformation does not restart the lane.
+//!
+//! This is what gives a poem whose stanzas all share one layer something underneath it: caesurae
+//! are sparse, but each one leaves a figure that persists.
+//!
 //! # Bar-locked
 //!
 //! Every [`Slot`] is one bar of the piece, and its length is its *host*'s: the line arriving in
@@ -38,8 +51,11 @@
 //! - **I3 holds.** Nothing here reads a style. Looping is the poem's structure, which settles
 //!   `SPEC.md` §9's open question about looping-as-style: it is not style.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::parse::Poem;
 use crate::role::{Layer, LineBasis, PoemRoles};
+use crate::span::Span;
 use crate::voice::{Bar, Score};
 
 /// Why a line sounds in a slot.
@@ -62,14 +78,46 @@ pub enum Cause {
     },
     /// A loop carrying on in its layer under another layer's arrival.
     Looping,
+    /// The half-line before this line's first caesura, looping in the call lane.
+    Calling,
 }
 
-/// One line sounding in one slot.
+/// Which of the piece's three loops a placement belongs to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lane {
+    /// A layer's loop of whole stanzas (§4.1).
+    Layer(Layer),
+    /// The call lane: one half-line, looping.
+    Call,
+}
+
+/// How much of its line a placement sounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Part {
+    /// All of it.
+    Line,
+    /// Only the half-line before its first caesura — this span of it.
+    Call(Span),
+}
+
+impl Part {
+    /// Whether an event with this span belongs to the part.
+    #[must_use]
+    pub const fn covers(self, span: Span) -> bool {
+        match self {
+            Self::Line => true,
+            Self::Call(call) => call.contains(span),
+        }
+    }
+}
+
+/// One line — or the call of one — sounding in one slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Placement {
     bar: Bar,
-    layer: Layer,
+    lane: Lane,
     cause: Cause,
+    part: Part,
 }
 
 impl Placement {
@@ -79,10 +127,16 @@ impl Placement {
         self.bar
     }
 
-    /// Which layer's loop it belongs to here.
+    /// Which loop it belongs to here.
     #[must_use]
-    pub const fn layer(self) -> Layer {
-        self.layer
+    pub const fn lane(self) -> Lane {
+        self.lane
+    }
+
+    /// How much of the line sounds.
+    #[must_use]
+    pub const fn part(self) -> Part {
+        self.part
     }
 
     /// Why it sounds.
@@ -187,8 +241,14 @@ const fn other(layer: Layer) -> Layer {
 /// already checked both.
 #[must_use]
 pub fn run(poem: &Poem, roles: &PoemRoles, score: &Score) -> Arrangement {
-    let mut slots = Vec::new();
-    let mut loops = Loops::default();
+    let mut piece = Piece {
+        score,
+        calls: calls(poem, score),
+        slots: Vec::new(),
+        loops: Loops::default(),
+        lane: None,
+        heard: BTreeSet::new(),
+    };
     let mut first_bar = 0;
     for (index, stanza) in poem.stanzas().iter().enumerate() {
         let bars: Vec<usize> = (first_bar..first_bar + stanza.lines().len()).collect();
@@ -206,11 +266,12 @@ pub fn run(poem: &Poem, roles: &PoemRoles, score: &Score) -> Arrangement {
             .all(|line| matches!(line.basis(), LineBasis::Refrain(_)));
 
         if refrain {
-            loops = Loops::default();
+            piece.loops = Loops::default();
+            piece.lane = None;
             for &bar in &bars {
-                slots.push(slot(score, vec![placement(bar, layer, Cause::Overruling)]));
+                piece.push(placement(bar, layer, Cause::Overruling), Company::Alone);
             }
-        } else if let Some(old) = loops.of(layer).take() {
+        } else if let Some(old) = piece.loops.of(layer).take() {
             for (pass, line_up) in transformation(&old.bars, &bars) {
                 for (bar, arriving) in line_up {
                     let cause = if arriving {
@@ -218,18 +279,90 @@ pub fn run(poem: &Poem, roles: &PoemRoles, score: &Score) -> Arrangement {
                     } else {
                         Cause::Yielding { pass }
                     };
-                    slots.push(accompanied(score, &mut loops, placement(bar, layer, cause)));
+                    piece.push(placement(bar, layer, cause), Company::Loops);
                 }
             }
         } else {
             for &bar in &bars {
-                let host = placement(bar, layer, Cause::Stated);
-                slots.push(accompanied(score, &mut loops, host));
+                piece.push(placement(bar, layer, Cause::Stated), Company::Loops);
             }
         }
-        *loops.of(layer) = Some(Loop::new(bars));
+        *piece.loops.of(layer) = Some(Loop::new(bars));
     }
-    Arrangement { slots }
+    Arrangement { slots: piece.slots }
+}
+
+/// Every line's call: the half-line before its first internal caesura, if it has one that makes
+/// a sound. A trailing comma divides nothing, so a line needs two segments to have a call.
+fn calls(poem: &Poem, score: &Score) -> BTreeMap<usize, Span> {
+    poem.stanzas()
+        .iter()
+        .flat_map(crate::parse::Stanza::lines)
+        .enumerate()
+        .filter_map(|(bar, line)| {
+            let segments = line.segments();
+            let call = *segments.first()?;
+            let sounds = score
+                .events()
+                .iter()
+                .any(|event| event.bar().get() == bar && call.contains(event.span()));
+            (segments.len() > 1 && sounds).then_some((bar, call))
+        })
+        .collect()
+}
+
+/// What may sound with a host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Company {
+    /// The other layer's loop and the call lane.
+    Loops,
+    /// Nothing: a refrain stanza is stated alone.
+    Alone,
+}
+
+/// The arrangement being built.
+struct Piece<'a> {
+    score: &'a Score,
+    calls: BTreeMap<usize, Span>,
+    slots: Vec<Slot>,
+    loops: Loops,
+    /// The call lane: whose call is looping, if any.
+    lane: Option<(usize, Span)>,
+    /// Lines already heard as a host, so re-hosting one does not restart the lane.
+    heard: BTreeSet<usize>,
+}
+
+impl Piece<'_> {
+    /// Adds a slot for `host`, with whatever loops under it.
+    fn push(&mut self, host: Placement, company: Company) {
+        let mut placements = vec![host];
+        if company == Company::Loops {
+            if let Lane::Layer(layer) = host.lane
+                && let Some(running) = self.loops.of(other(layer))
+                && let Some(bar) = running.next()
+            {
+                placements.push(placement(bar, other(layer), Cause::Looping));
+            }
+            if let Some((bar, call)) = self.lane {
+                placements.push(Placement {
+                    bar: Bar::new(bar),
+                    lane: Lane::Call,
+                    cause: Cause::Calling,
+                    part: Part::Call(call),
+                });
+            }
+        }
+        self.slots.push(slot(self.score, placements));
+
+        // The lane changes *after* the bar its line is first heard in, so a call is heard in its
+        // line before it is heard on its own.
+        let bar = host.bar.get();
+        if self.heard.insert(bar)
+            && let Some(&call) = self.calls.get(&bar)
+        {
+            self.lane = Some((bar, call));
+        }
+    }
 }
 
 /// The passes that turn loop `old` into stanza `new`, each a list of `(bar, is_new)`.
@@ -253,32 +386,22 @@ fn transformation(old: &[usize], new: &[usize]) -> Vec<(usize, Vec<(usize, bool)
         .collect()
 }
 
-/// A slot for `host`, with the other layer's loop under it if one is running.
-fn accompanied(score: &Score, loops: &mut Loops, host: Placement) -> Slot {
-    let mut placements = vec![host];
-    if let Some(running) = loops.of(other(host.layer))
-        && let Some(bar) = running.next()
-    {
-        placements.push(placement(bar, other(host.layer), Cause::Looping));
-    }
-    slot(score, placements)
-}
-
 const fn placement(bar: usize, layer: Layer, cause: Cause) -> Placement {
     Placement {
         bar: Bar::new(bar),
-        layer,
+        lane: Lane::Layer(layer),
         cause,
+        part: Part::Line,
     }
 }
 
 fn slot(score: &Score, placements: Vec<Placement>) -> Slot {
     let host = placements
         .first()
-        .map_or(0, |host| score.beats_in(host.bar.get()));
+        .map_or(0, |host| score.placed(*host).beats());
     let longest = placements
         .iter()
-        .map(|placement| score.beats_in(placement.bar.get()))
+        .map(|placement| score.placed(*placement).beats())
         .max()
         .unwrap_or(0);
     let beats = if host > 0 { host } else { longest.max(1) };

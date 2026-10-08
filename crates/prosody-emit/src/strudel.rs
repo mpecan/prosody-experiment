@@ -193,18 +193,12 @@ fn mean_beats(score: &Score) -> u16 {
 /// syllables many times, and the OSC backend sends a message for every one of them. The header
 /// and the schedule must count the same piece.
 fn sounded(score: &Score) -> usize {
-    let mut per_bar = vec![0_usize; score.bars()];
-    for event in score.events() {
-        if let Some(count) = per_bar.get_mut(event.bar().get()) {
-            *count += 1;
-        }
-    }
     score
         .arrangement()
         .slots()
         .iter()
         .flat_map(prosody_core::Slot::placements)
-        .filter_map(|placement| per_bar.get(placement.bar().get()))
+        .map(|placement| score.placed(*placement).events().len())
         .sum()
 }
 
@@ -321,13 +315,25 @@ fn grid(
             .placements()
             .iter()
             .filter_map(|placement| {
-                let bar = placement.bar().get();
-                // A line's width comes from the score, not from the events in *this* pattern, so
-                // the melody and the rhythm divide it the same way and a note lands on its own
-                // syllable.
-                by_bar
-                    .get(&bar)
-                    .map(|present| line(present, score.beats_in(bar), value, absent))
+                // A whole line, or a call lifted out of one: its own events, its beats counted
+                // from where it starts. A line's width comes from the score, not from the events
+                // in *this* pattern, so the melody and the rhythm divide it the same way and a
+                // note lands on its own syllable.
+                let placed = score.placed(*placement);
+                let present: BTreeMap<usize, Vec<&Event>> = by_bar
+                    .get(&placement.bar().get())?
+                    .iter()
+                    .filter_map(|(beat, syllables)| {
+                        let covered: Vec<&Event> = syllables
+                            .iter()
+                            .copied()
+                            .filter(|event| placement.part().covers(event.span()))
+                            .collect();
+                        (!covered.is_empty())
+                            .then(|| (beat.saturating_sub(placed.first_beat()), covered))
+                    })
+                    .collect();
+                (!present.is_empty()).then(|| line(&present, placed.beats(), value, absent))
             })
             .collect();
         bars.push(match lines.len() {
@@ -1057,5 +1063,17 @@ mod tests {
         let text = render("bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n", &Style::default());
         let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
         assert!(first.starts_with("  s(\"<hh ~ hh ~>\")"), "{text}");
+    }
+
+    #[test]
+    fn a_call_is_its_own_cycle() {
+        // The first line's voice plays the whole line in cycle 0 — two iambs, two beats — and only
+        // its call, `de dA`, in cycle 1: one beat of two syllables, filling the cycle.
+        let text = render("de dA, se sA\nne nA ne nA\n", &Style::default());
+        let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
+        assert!(
+            first.starts_with("  s(\"<[[bd bd] [bd bd]] [[bd bd]]>\")"),
+            "{text}"
+        );
     }
 }
