@@ -325,6 +325,7 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 | 0 | Baseline: the machine profile over `9b9c67c` | 0.410 | — |
 | 1 | Bass: a foundation line's primary-stressed vowels pitched by height | 0.504 | yes |
 | 2 | Bar length is the stanza's period; shorter lines rest instead of stretching | 0.611 | yes |
+| 3a | *Measurement fix, no change to the sound*: the pitched synth counted as an instrument | 0.702 | yes |
 
 ---
 
@@ -333,6 +334,18 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 ---
 
 ## Log
+
+### Machine cycle 3a — the scorer was not counting the synth
+
+Not a musical change. Both backends play a pitched event on two instruments — its line's drum and
+one shared synth (Strudel's `note()` layer, the receiver's `\prosodyPitch`) — and the timeline
+counted it once. Before cycle 1 that mattered little; with the bass, half the syllables are
+pitched, so layering and recurrence were undercounting what plays. Layering and recurrence now
+count the synth as its own instrument; pitch share, entropy and syncopation still count events.
+
+Mean overall 0.611 → 0.702, with not one note changed — recorded as its own row so the ledger
+does not mistake it for progress in the music. A side effect worth knowing: the generic `interest`
+profile now scores Wilde at 1.000, so its bands have stopped discriminating at the top.
 
 ### Machine cycle 2 — a bar lasts its stanza's period
 

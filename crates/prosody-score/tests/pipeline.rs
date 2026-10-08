@@ -95,8 +95,9 @@ fn a_line_of_iambs_measures_as_worked_by_hand() {
     // One unit over two beats.
     let score = compile("da dA da dA\n").unwrap();
     assert!((value(&score, "syncopation") - 0.5).abs() < 1e-9);
-    // One line is one voice; nothing sounds alongside it and nothing returns.
-    assert!((value(&score, "layering") - 1.0).abs() < 1e-9);
+    // One line is one voice, and nothing returns. But each beat's `dA` is pitched (the bass,
+    // below), and a pitched event sounds the line's drum *and* the synth: two instruments a beat.
+    assert!((value(&score, "layering") - 2.0).abs() < 1e-9);
     assert!(value(&score, "recurrence").abs() < 1e-9);
     // A rhyme class of one is no melodic relation, so no rhyme note (PLAN.md, free verse). But
     // the one line is the foundation, so its two stressed `dA`s carry the bass: 2 of 4 events.
@@ -112,11 +113,12 @@ fn trochees_do_not_syncopate() {
 #[test]
 fn a_refrain_is_a_returning_voice() {
     // §4.3: a repeated line is the same instrument again. Bars 0 and 2 share a voice, and once
-    // bar 0 is heard it loops in the refrain lane under bar 1 (§4.6). Of the four (bar, voice)
-    // pairs — 0 in slot 0; 1 and 0 in slot 1; 0 alone in slot 2, a refrain stanza — two bring
-    // something back.
+    // bar 0 is heard it loops in the refrain lane under bar 1 (§4.6). Every bar also has a
+    // pitched `dA` or `mA` (rhyme or bass), so the synth sounds in each. The (bar, instrument)
+    // pairs: {0, synth} in slot 0; {1, 0, synth} in slot 1; {0, synth} in slot 2, a refrain
+    // stanza. Four of the seven bring something back.
     let score = compile("da dA da dA\nsa mA sa mA\n\nda dA da dA\n").unwrap();
-    assert!((value(&score, "recurrence") - 0.5).abs() < 1e-9);
+    assert!((value(&score, "recurrence") - 4.0 / 7.0).abs() < 1e-9);
 }
 
 #[test]

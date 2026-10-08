@@ -4,24 +4,44 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::timeline::Timeline;
+use crate::timeline::{Hit, Timeline};
 
-/// Mean number of distinct voices sounding in a beat, over the beats where anything sounds.
+/// An instrument a listener hears: a line's voice, or the pitched synth.
+///
+/// Both backends play a pitched event twice — its line's drum *and* a note on one shared synth
+/// (Strudel's `note()` layer; the `SuperCollider` receiver's `\prosodyPitch`). Counting it once
+/// undercounted what sounds at once and what returns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Instrument {
+    Voice(usize),
+    Synth,
+}
+
+/// The instruments one hit sounds on.
+fn instruments(hit: &Hit) -> impl Iterator<Item = Instrument> {
+    std::iter::once(Instrument::Voice(hit.voice))
+        .chain(hit.degree.is_some().then_some(Instrument::Synth))
+}
+
+/// Mean number of distinct instruments sounding in a beat, over the beats where anything sounds.
 ///
 /// `SPEC.md` §4.1 calls the foundation "drums, bass, ostinato" and the flourish "fills, stabs,
 /// one-shots, ornament" — a description of layers, which only exist if more than one thing plays
 /// at once. 1.0 means the piece is a single line of sound.
 pub(crate) fn layering(timeline: &Timeline) -> f64 {
-    let mut by_slot: BTreeMap<u64, BTreeSet<usize>> = BTreeMap::new();
+    let mut by_slot: BTreeMap<u64, BTreeSet<Instrument>> = BTreeMap::new();
     for hit in &timeline.hits {
-        by_slot.entry(hit.slot).or_default().insert(hit.voice);
+        by_slot
+            .entry(hit.slot)
+            .or_default()
+            .extend(instruments(hit));
     }
     let pairs: usize = by_slot.values().map(BTreeSet::len).sum();
     ratio(pairs, by_slot.len())
 }
 
-/// Share of what sounds that has sounded before: over every (bar, voice) pair, the ones whose
-/// voice already played in an earlier bar.
+/// Share of what sounds that has sounded before: over every (bar, instrument) pair, the ones whose
+/// instrument already played in an earlier bar.
 ///
 /// Electronic music is built from loops, and §4.3 says exact repetition "gives the loop". A piece
 /// where every bar is new material is through-composed, whatever its rhythm; one where nothing is
@@ -29,9 +49,9 @@ pub(crate) fn layering(timeline: &Timeline) -> f64 {
 /// line arrives over a running loop is half familiar — not, as a per-bar count would have it,
 /// entirely so.
 pub(crate) fn recurrence(timeline: &Timeline) -> f64 {
-    let mut by_bar: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+    let mut by_bar: BTreeMap<usize, BTreeSet<Instrument>> = BTreeMap::new();
     for hit in &timeline.hits {
-        by_bar.entry(hit.bar).or_default().insert(hit.voice);
+        by_bar.entry(hit.bar).or_default().extend(instruments(hit));
     }
     let mut seen = BTreeSet::new();
     let mut returning = 0;
@@ -236,6 +256,20 @@ mod tests {
             beats: 4,
         };
         close(recurrence(&timeline), 0.4);
+    }
+
+    #[test]
+    fn a_pitched_event_is_its_drum_and_the_synth() {
+        // One voice, two beats: beat 0 unpitched, beat 1 pitched. The pitched beat sounds the
+        // line's drum and the synth: (1 + 2) / 2 = 1.5 instruments per beat.
+        let timeline = Timeline {
+            hits: vec![hit(0, 0, (0, 1), 0), on(hit(1, 1, (0, 1), 0), 0)],
+            bar_starts: vec![0, 1],
+            beats: 2,
+        };
+        close(layering(&timeline), 1.5);
+        // Pairs: bar 0 {voice 0}; bar 1 {voice 0, synth}. Voice 0 returns: 1 of 3.
+        close(recurrence(&timeline), 1.0 / 3.0);
     }
 
     #[test]
