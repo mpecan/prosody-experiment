@@ -7,12 +7,12 @@ layering           1.167  3.000..5.000   0.272
 recurrence         0.125  0.850..0.970   0.020
 pitched            0.705  0.350..0.700   0.975
 pitch_entropy      1.540  1.000..2.300   1.000
-syncopation        0.167  0.100..0.400   1.000
-pulse              1.000  0.900..1.000   1.000
-steadiness         0.333  0.800..1.000   0.090
-interest           0.336
+syncopation        0.214  0.100..0.400   1.000
+pulse              0.643  0.900..1.000   0.078
+steadiness         1.000  0.800..1.000   1.000
+interest           0.329
 audible            1.000  24 of 24 edits
 local              1.000  24 of 24 edits
 explained          1.000  24 of 24 edits
 legibility         1.000
-overall            0.336
+overall            0.329

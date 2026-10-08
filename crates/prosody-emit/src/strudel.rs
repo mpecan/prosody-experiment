@@ -306,9 +306,9 @@ fn grid(
     }
 
     // One element per slot of the arrangement, not per line: a stanza sounds again wherever it
-    // loops or yields (`prosody_core::arrange`). A cycle is a slot, and every line in it fills the
-    // whole cycle with its own beats — which is exactly the bar-locked fitting, for free. Lines
-    // sounding together are stacked with `,`, mini-notation's "at the same time".
+    // loops or yields (`prosody_core::arrange`). A cycle is a slot; a line divides it into the
+    // slot's beats, or its own when it has more — which is the bar-locked fitting. Lines sounding
+    // together are stacked with `,`, mini-notation's "at the same time".
     let mut bars = Vec::new();
     for slot in score.arrangement().slots() {
         let lines: Vec<String> = slot
@@ -333,7 +333,10 @@ fn grid(
                             .then(|| (beat.saturating_sub(placed.first_beat()), covered))
                     })
                     .collect();
-                (!present.is_empty()).then(|| line(&present, placed.beats(), value, absent))
+                // A line shorter than the bar keeps one beat per foot and rests for the rest of
+                // the cycle (`Slot::room_for`); a longer one fills the cycle with its own beats.
+                let steps = placed.beats().max(slot.beats());
+                (!present.is_empty()).then(|| line(&present, steps, value, absent))
             })
             .collect();
         bars.push(match lines.len() {
@@ -1065,20 +1068,23 @@ mod tests {
         // Stanza 1 (`bA` / six `bA`s) is ragged, so it is the flourish; stanza 2 is regular, so
         // the foundation. The arrangement states stanza 1, then states stanza 2 with stanza 1
         // looping under it — so the first line's voice, one stressed syllable on a hi-hat, sounds
-        // in cycles 0 and 2, and rests in 1 and 3.
+        // in cycles 0 and 2, and rests in 1 and 3. In cycle 0 the bar is stanza 1's period, the
+        // three iambs of its long line, so `bA` takes the first beat and rests for two; in cycle 2
+        // the bar is stanza 2's one beat, which `bA` fills.
         let text = render("bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n", &Style::default());
         let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
-        assert!(first.starts_with("  s(\"<hh ~ hh ~>\")"), "{text}");
+        assert!(first.starts_with("  s(\"<[hh ~ ~] ~ hh ~>\")"), "{text}");
     }
 
     #[test]
     fn a_call_is_its_own_cycle() {
         // The first line's voice plays the whole line in cycle 0 — two iambs, two beats — and only
-        // its call, `de dA`, in cycle 1: one beat of two syllables, filling the cycle.
+        // its call, `de dA`, in cycle 1: one beat of two syllables, then a rest, because the bar
+        // lasts two beats and a loop that fits keeps its pace.
         let text = render("de dA, se sA\nne nA ne nA\n", &Style::default());
         let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
         assert!(
-            first.starts_with("  s(\"<[[bd bd] [bd bd]] [[bd bd]]>\")"),
+            first.starts_with("  s(\"<[[bd bd] [bd bd]] [[bd bd] ~]>\")"),
             "{text}"
         );
     }

@@ -5,8 +5,8 @@
 //! other, so this flattens that into a global beat slot plus an exact fraction within the beat —
 //! rationals, never floats, because positions are compared and merged (`CLAUDE.md` §4).
 //!
-//! It walks the arrangement the way both backends do — slot by slot, each line fitted to its slot's
-//! host — minus §4.3's downbeat anchoring, which the Strudel backend cannot express, so this is the
+//! It walks the arrangement the way both backends do — slot by slot, each line fitted into its room
+//! in the slot — minus §4.3's downbeat anchoring, which the Strudel backend cannot express, so this is the
 //! timeline both backends agree on.
 
 use std::cmp::Ordering;
@@ -78,13 +78,14 @@ impl Timeline {
                 let placed = score.placed(*placement);
                 let first = placed.first_beat();
                 let line_beats = to_u64(placed.beats()).max(1);
+                let room = to_u64(slot.room_for(placed.beats()));
                 for event in placed.events() {
                     let of = to_u64(event.subdivision().of()).max(1);
                     // Counted from the placement's first beat: a call need not open its line.
                     let position = to_u64(event.beat().get().saturating_sub(first)) * of
                         + to_u64(event.subdivision().index());
-                    // `position / (of · line_beats)` of the slot, which lasts `slot_beats`.
-                    let scaled = position * slot_beats;
+                    // `position / (of · line_beats)` of the line's room in the slot.
+                    let scaled = position * room;
                     let denominator = of * line_beats;
                     hits.push(Hit {
                         slot: running + scaled / denominator,

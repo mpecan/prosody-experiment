@@ -10,7 +10,7 @@ pitch_entropy      1.631  1.500..3.000   1.000
 syncopation        0.305  0.300..0.700   1.000
 interest           1.000
 audible            1.000  80 of 80 edits
-local              0.312  25 of 80 edits
+local              0.325  26 of 80 edits
 explained          0.975  78 of 80 edits
 legibility         0.975
 overall            0.975

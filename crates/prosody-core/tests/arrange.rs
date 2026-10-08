@@ -128,9 +128,10 @@ fn a_stanza_loops_under_the_next_and_transforms_into_its_rival() {
 }
 
 #[test]
-fn a_slot_takes_its_hosts_length() {
-    // Slot 3 hosts `ma mA ma mA ma mA` — three iambs, three beats — with stanza 1's one-beat
-    // `sa sA` fitted under it. Slot 2 hosts `ta`: one syllable, one beat.
+fn a_slot_takes_its_hosts_stanza_period() {
+    // Stanza 2 is `ta` and `ma mA ma mA ma mA` — three iambs, three beats — so its period is
+    // three, and both its bars last three beats: slot 3, hosting the long line, and slot 2,
+    // hosting `ta`, which plays one beat and rests for two. Stanza 1's lines are one beat each.
     let score = compile(THREE);
     let beats: Vec<usize> = score
         .arrangement()
@@ -138,8 +139,13 @@ fn a_slot_takes_its_hosts_length() {
         .iter()
         .map(prosody_core::Slot::beats)
         .collect();
-    assert_eq!(beats[2], 1);
+    assert_eq!(beats[..2], [1, 1]);
+    assert_eq!(beats[2], 3);
     assert_eq!(beats[3], 3);
+    // A one-beat loop fits a three-beat bar at its own pace; a longer one would be squeezed in.
+    let slot = &score.arrangement().slots()[2];
+    assert_eq!(slot.room_for(1), 1);
+    assert_eq!(slot.room_for(5), 3);
     assert_eq!(
         score.beats_in(1),
         1,

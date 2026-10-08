@@ -324,6 +324,7 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 |---|---|---|---|
 | 0 | Baseline: the machine profile over `9b9c67c` | 0.410 | — |
 | 1 | Bass: a foundation line's primary-stressed vowels pitched by height | 0.504 | yes |
+| 2 | Bar length is the stanza's period; shorter lines rest instead of stretching | 0.611 | yes |
 
 ---
 
@@ -332,6 +333,31 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 ---
 
 ## Log
+
+### Machine cycle 2 — a bar lasts its stanza's period
+
+After cycle 1, `steadiness` was furthest out: 0.00–0.85 against 0.8–1.0, because every bar took
+the length of the line arriving in it, so the meter changed nearly every bar — in Dickinson, every
+one. Machine music holds a meter.
+
+Now a bar lasts its host's stanza's *period*, the longest line of that stanza. A stanza is a loop,
+and a loop has one length; odd meters survive, since the period still comes from the poem. A line
+that fits keeps one beat per foot and rests for the rest of the bar, instead of being stretched;
+a longer loop is still squeezed in. `Slot::room_for` is the one rule all three consumers (OSC,
+Strudel, the scorer's timeline) fit a placement by.
+
+Measured: steadiness 0.79–1.00 everywhere; mean overall 0.504 → 0.611. Layering fell (Tyger 3.12 →
+2.61) and so did pulse (Prešeren 1.00 → 0.64): the rests are real silence, which those metrics
+count.
+
+Legibility fell at first (Tyger 0.811 → 0.741, Dickinson 0.831 → 0.754) through one mechanism: an
+edit to a stanza's longest line changes its period, re-timing every slot the stanza hosts, and the
+loops fitted under them. The edit test only excused changes under the *edited line's* slots. A
+first fix excused anything under the edited *stanza's* slots, and overshot — it lifted Dickinson
+to 0.908, because it also excused the role flips the user chose to keep counting. The kept fix is
+narrow: a line elsewhere is explained when its only change is the length of slots the edited
+stanza hosts — same material, same slots, same causes. With it, every poem's legibility is
+exactly its value before this iteration.
 
 ### Machine cycle 1 — a bass from vowel height
 

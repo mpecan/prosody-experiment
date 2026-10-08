@@ -55,13 +55,20 @@
 //! A refrain stanza stops the held and refrain lanes along with every other loop, and is stated
 //! alone.
 //!
-//! # Bar-locked
+//! # Bar-locked, to the stanza's period
 //!
-//! Every [`Slot`] is one bar of the piece, and its length is its *host*'s: the line arriving in
-//! it. Whatever accompanies the host is fitted into that bar, however many beats its own line
-//! has — the way a loop sits under a phrase in a track, rather than drifting against it. A
-//! backend renders a placement's events at their position *within their own line*, scaled to the
-//! slot.
+//! Every [`Slot`] is one bar of the piece, and its length is its *host's stanza's period*: the
+//! longest line of the stanza the host belongs to. A stanza is a loop, and a loop has one length —
+//! so every bar of it lasts the same, and the meter only changes where the stanza does. Odd meters
+//! survive (`SPEC.md` §4.2): a stanza of trimeter is a loop of three. (*Machine cycle 2, pending
+//! review*: until then a bar took its host line's own length, which changed the meter nearly every
+//! bar.)
+//!
+//! Inside the bar, a placement keeps its own pace when it fits — a line shorter than the bar plays
+//! at one beat per foot and rests for the remainder — and is squeezed to the bar when it is longer
+//! ([`Slot::room_for`]). A loop from a longer stanza sits under a shorter one that way, rather than
+//! drifting against it. A backend renders a placement's events at their position *within their
+//! own line*, scaled into that room.
 //!
 //! # What this does to the invariants
 //!
@@ -201,11 +208,21 @@ impl Slot {
         self.placements.first().copied()
     }
 
-    /// How many beats the slot lasts: its host line's foot count, or — when the host has no
-    /// pronounceable syllables — the longest line sounding with it, and never less than one.
+    /// How many beats the slot lasts: its host's stanza's period — the longest line of that
+    /// stanza — or, when the stanza has no pronounceable syllables, the longest line sounding with
+    /// it; never less than one.
     #[must_use]
     pub const fn beats(&self) -> usize {
         self.beats
+    }
+
+    /// How many of the slot's beats a placement of `beats` beats fills: all of its own when it
+    /// fits, at one beat per foot, and the whole slot when it is longer and must be squeezed in.
+    ///
+    /// Every consumer fits a placement into this, so they agree on where each syllable falls.
+    #[must_use]
+    pub fn room_for(&self, beats: usize) -> usize {
+        beats.clamp(1, self.beats.max(1))
     }
 }
 
@@ -278,6 +295,7 @@ const fn other(layer: Layer) -> Layer {
 pub fn run(poem: &Poem, roles: &PoemRoles, rhyme: &PoemRhyme, score: &Score) -> Arrangement {
     let mut piece = Piece {
         score,
+        periods: periods(poem, score),
         calls: calls(poem, score),
         answers: answers(rhyme),
         refrains: refrains(roles),
@@ -352,6 +370,23 @@ fn calls(poem: &Poem, score: &Score) -> BTreeMap<usize, Span> {
         .collect()
 }
 
+/// Every line's stanza period: the most beats any line of its stanza takes.
+fn periods(poem: &Poem, score: &Score) -> BTreeMap<usize, usize> {
+    let mut periods = BTreeMap::new();
+    let mut first_bar = 0;
+    for stanza in poem.stanzas() {
+        let bars = first_bar..first_bar + stanza.lines().len();
+        first_bar = bars.end;
+        let period = bars
+            .clone()
+            .map(|bar| score.beats_in(bar))
+            .max()
+            .unwrap_or(0);
+        periods.extend(bars.map(|bar| (bar, period)));
+    }
+    periods
+}
+
 /// Each line whose rhyme is answered later in its stanza, and the line that answers it: the next
 /// one in the stanza of the same class.
 fn answers(rhyme: &PoemRhyme) -> BTreeMap<usize, usize> {
@@ -401,6 +436,7 @@ enum Company {
 /// The arrangement being built.
 struct Piece<'a> {
     score: &'a Score,
+    periods: BTreeMap<usize, usize>,
     calls: BTreeMap<usize, Span>,
     answers: BTreeMap<usize, usize>,
     refrains: BTreeMap<usize, VoiceId>,
@@ -464,7 +500,8 @@ impl Piece<'_> {
                 }
             }
         }
-        self.slots.push(slot(self.score, placements));
+        let period = self.periods.get(&bar).copied().unwrap_or(0);
+        self.slots.push(slot(self.score, period, placements));
 
         // Lanes change *after* the bar their line is first heard in, so a line is heard in place
         // before it is heard underneath.
@@ -522,10 +559,8 @@ const fn lane(bar: usize, lane: Lane, cause: Cause) -> Placement {
     }
 }
 
-fn slot(score: &Score, placements: Vec<Placement>) -> Slot {
-    let host = placements
-        .first()
-        .map_or(0, |host| score.placed(*host).beats());
+fn slot(score: &Score, period: usize, placements: Vec<Placement>) -> Slot {
+    let host = period;
     let longest = placements
         .iter()
         .map(|placement| score.placed(*placement).beats())

@@ -160,7 +160,22 @@ pub fn measure(
                 let mut linked = links.get(bar).unwrap_or(&empty).clone();
                 linked.extend(hosted_by(&score, bar));
                 linked.extend(hosted_by(&edited, bar));
-                let verdict = judge(&original, &by_bar(&edited), bar, &stanza_bars, &linked);
+                // A bar lasts its stanza's period (`prosody_core::arrange`), so an edit to the
+                // stanza's longest line re-times every slot the stanza hosts. A line elsewhere
+                // whose only change is the length of those slots has been re-timed, for that
+                // reason, and nothing else.
+                let mut retimed = slots_hosted_by(&score, &stanza_bars);
+                retimed.extend(slots_hosted_by(&edited, &stanza_bars));
+                let verdict = judge(
+                    &original,
+                    &by_bar(&edited),
+                    bar,
+                    &stanza_bars,
+                    &Reasons {
+                        linked: &linked,
+                        retimed: &retimed,
+                    },
+                );
                 result.audible += usize::from(verdict.audible);
                 result.local += usize::from(verdict.local);
                 result.explained += usize::from(verdict.explained);
@@ -178,12 +193,20 @@ struct Verdict {
     explained: bool,
 }
 
+/// What may explain a change outside the edited stanza.
+struct Reasons<'a> {
+    /// Bars related to the edited one, or sounding under it.
+    linked: &'a BTreeSet<usize>,
+    /// Slots hosted by the edited stanza, whose length the edit may have changed.
+    retimed: &'a BTreeSet<usize>,
+}
+
 fn judge(
     original: &[Line],
     edited: &[Line],
     bar: usize,
     stanza: &Range<usize>,
-    linked: &BTreeSet<usize>,
+    reasons: &Reasons<'_>,
 ) -> Verdict {
     let audible = !same_bar(original, edited, bar);
     if original.len() != edited.len() {
@@ -201,8 +224,43 @@ fn judge(
     Verdict {
         audible,
         local: changed_elsewhere.is_empty(),
-        explained: changed_elsewhere.iter().all(|other| linked.contains(other)),
+        explained: changed_elsewhere.iter().all(|&other| {
+            reasons.linked.contains(&other)
+                || match (original.get(other), edited.get(other)) {
+                    (Some(before), Some(after)) => only_retimed(before, after, reasons.retimed),
+                    _ => false,
+                }
+        }),
     }
+}
+
+/// Whether a line's only change is the length of some of `slots`: the same material, in the same
+/// slots, for the same reasons.
+fn only_retimed(before: &Line, after: &Line, slots: &BTreeSet<usize>) -> bool {
+    before.heard == after.heard
+        && before.sounds.len() == after.sounds.len()
+        && before.sounds.iter().zip(&after.sounds).all(
+            |(&(slot, cause, beats), &(other_slot, other_cause, other_beats))| {
+                slot == other_slot
+                    && cause == other_cause
+                    && (beats == other_beats || slots.contains(&slot))
+            },
+        )
+}
+
+/// Every slot whose host is one of `bars`.
+fn slots_hosted_by(score: &Score, bars: &Range<usize>) -> BTreeSet<usize> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .enumerate()
+        .filter(|(_, slot)| {
+            slot.host()
+                .is_some_and(|host| bars.contains(&host.bar().get()))
+        })
+        .map(|(index, _)| index)
+        .collect()
 }
 
 /// A relation a bar can share with others — the §4.3 and §4.5 figures that legitimately carry an
@@ -375,7 +433,36 @@ fn share(part: usize, whole: usize) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::pick;
+    use std::collections::BTreeSet;
+
+    use prosody_core::Cause;
+
+    use super::{Line, only_retimed, pick};
+
+    fn sounding(sounds: &[(usize, Cause, usize)]) -> Line {
+        Line {
+            heard: Vec::new(),
+            sounds: sounds.to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_line_only_retimed_by_the_edited_stanza_is_explained() {
+        let retimed: BTreeSet<usize> = [4].into_iter().collect();
+        let before = sounding(&[(0, Cause::Stated, 2), (4, Cause::Looping, 3)]);
+        // Slot 4's length changed, and slot 4 is hosted by the edited stanza.
+        let after = sounding(&[(0, Cause::Stated, 2), (4, Cause::Looping, 4)]);
+        assert!(only_retimed(&before, &after, &retimed));
+        // Slot 0's length changed, and nothing the edit touched hosts it.
+        let elsewhere = sounding(&[(0, Cause::Stated, 3), (4, Cause::Looping, 3)]);
+        assert!(!only_retimed(&before, &elsewhere, &retimed));
+        // The same lengths, but it sounds for another reason: not a re-timing.
+        let recaused = sounding(&[(0, Cause::Stated, 2), (4, Cause::Holding, 4)]);
+        assert!(!only_retimed(&before, &recaused, &retimed));
+        // One slot fewer: it stopped sounding somewhere, which is more than a re-timing.
+        let shorter = sounding(&[(0, Cause::Stated, 2)]);
+        assert!(!only_retimed(&before, &shorter, &retimed));
+    }
 
     #[test]
     fn probes_rotate_and_never_repeat_the_word() {

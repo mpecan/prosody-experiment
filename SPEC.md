@@ -128,8 +128,11 @@ A stanza, once stated, **keeps looping** until something stops it. One loop per 
   like a chorus dropping in. A real *chord progression* would be the other natural overrule, and
   needs a harmony layer that does not exist yet.
 
-Bar-locked: each bar of the piece takes its length from the line arriving in it, and whatever
-loops underneath is fitted to that bar. The piece ends when the last stanza has fully arrived.
+Bar-locked: each bar of the piece takes its length from the stanza of the line arriving in it — the
+stanza's *period*, its longest line — so a stanza is a loop of one length and the meter changes only
+where the stanza does (*machine cycle 2, pending review*; before, a bar took its own line's length).
+A line that fits the bar keeps one beat per foot and rests for the remainder; a longer loop is
+squeezed into the bar. The piece ends when the last stanza has fully arrived.
 
 **The call lane** (§4.1's second tier, decided the same day). The half-line before a line's first
 internal caesura — its *call*: "Tyger Tyger," — is lifted out once its line has been heard, and

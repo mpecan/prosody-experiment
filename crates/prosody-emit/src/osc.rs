@@ -320,8 +320,9 @@ impl Backend for Osc {
                     first: u64::try_from(placed.first_beat()).unwrap_or(0),
                     beats: u64::try_from(placed.beats()).unwrap_or(1).max(1),
                 };
+                let room = u64::try_from(slot.room_for(placed.beats())).unwrap_or(1);
                 for event in placed.events() {
-                    let at = fitted(event, slot_start, slot_beats, extent);
+                    let at = fitted(event, slot_start, room, extent);
                     messages.push(message(event, score, style, at));
                 }
             }
@@ -351,10 +352,10 @@ struct Extent {
 /// When an event sounds: its place within its own line — or within its call, counted from the
 /// call's first beat — fitted to the slot it plays in.
 ///
-/// Bar-locked (`prosody_core::arrange`): a line looping under a longer or shorter host is
-/// stretched or squeezed to the host's bar, so a slot's lines start and end together. A line in a
-/// slot of its own length — every first statement — lands exactly where it always did.
-fn fitted(event: &Event, slot_start: u64, slot_beats: u64, extent: Extent) -> Onset {
+/// Bar-locked (`prosody_core::arrange`): a line is fitted into its `room` in the slot
+/// ([`Slot::room_for`](prosody_core::Slot::room_for)) — its own beats when it fits, so it keeps
+/// one beat per foot and rests for the rest of the bar, and the whole bar when it is longer.
+fn fitted(event: &Event, slot_start: u64, room: u64, extent: Extent) -> Onset {
     let of = u64::try_from(event.subdivision().of()).unwrap_or(1).max(1);
     let within = u64::try_from(event.subdivision().index()).unwrap_or(0);
     let beat = u64::try_from(event.beat().get())
@@ -372,7 +373,7 @@ fn fitted(event: &Event, slot_start: u64, slot_beats: u64, extent: Extent) -> On
         (beat * of + within, of)
     };
     reduced(
-        slot_start * denominator * line_beats + numerator * slot_beats,
+        slot_start * denominator * line_beats + numerator * room,
         denominator * line_beats,
     )
 }
@@ -850,8 +851,8 @@ mod tests {
     #[test]
     fn a_call_is_fitted_like_any_loop() {
         // `de dA, se sA`: the call is `de dA`, one iamb. Bar 0 plays the line from beat 0; bar 1
-        // (`ne nA ne nA`, two beats, from beat 2) has the call under it, stretched across both
-        // beats — `de` on 2, `dA` halfway through, on 3.
+        // (`ne nA ne nA`, two beats, from beat 2) has the call under it. One beat fits in two, so
+        // it keeps its pace and rests for the second (`Slot::room_for`): `de` on 2, `dA` on 2½.
         let schedule = schedule("de dA, se sA\nne nA ne nA\n");
         let onsets_of = |start: usize| -> Vec<f64> {
             schedule
@@ -862,7 +863,7 @@ mod tests {
                 .collect()
         };
         assert_eq!(onsets_of(0), vec![0.0, 2.0]);
-        assert_eq!(onsets_of(3), vec![0.5, 3.0]);
+        assert_eq!(onsets_of(3), vec![0.5, 2.5]);
         assert_eq!(
             onsets_of(7).len(),
             1,
