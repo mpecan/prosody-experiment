@@ -510,10 +510,10 @@ fn vowel_for(symbol: &str) -> &'static str {
     }
 }
 
-/// The melody: every pitched event, which is every rhyme word (`SPEC.md` §4.5).
+/// The melody and bass: every pitched event — every rhyme word (`SPEC.md` §4.5), and every
+/// primary-stressed syllable of a foundation line, by its vowel (the bass, `prosody_core::lower`).
 ///
-/// `None` when nothing rhymes, which is ordinary in free verse — a class of one expresses no
-/// melodic relation, so there is no melody to emit rather than a monotone to invent.
+/// `None` when nothing is pitched: no rhyme, and no stressed vowel in a foundation line.
 ///
 /// Built on the same [`grid`] as the rhythm, and that is the point: an earlier version derived its
 /// own subdivision from how many pitched events happened to fall in a beat, so a rhyme word in the
@@ -562,7 +562,11 @@ fn melody_layer(score: &Score, style: &Style) -> Option<(String, String)> {
     // §4.4 reaches the melody too — the rhyme word is the most prominent event in the piece, and
     // an earlier version was the only layer distinctiveness never touched.
     let _ = write!(layer, ".lpf(\"{}\")", cutoffs(score, &pitched));
-    Some((layer, "the melody — one note per rhyme word".to_owned()))
+    Some((
+        layer,
+        "the melody — a note per rhyme word, and the bass on every stressed foundation vowel"
+            .to_owned(),
+    ))
 }
 
 #[cfg(test)]
@@ -752,8 +756,9 @@ mod tests {
     #[test]
     fn a_slant_rhyme_lands_off_the_note_and_a_perfect_one_on_it() {
         // SPEC.md §4.5: "perfect rhyme → exact pitch; slant rhyme → detune or neighbour tone."
-        // A perfect rhyme prints a whole semitone number; a slant one prints a fraction.
-        let perfect = render("teA bAn\nteA bAn\n", &Style::default());
+        // A perfect rhyme prints a whole semitone number; a slant one prints a fraction. `te` is
+        // unstressed, so the rhyme word is the only note — no bass ahead of it.
+        let perfect = render("te bAn\nte bAn\n", &Style::default());
         assert!(
             !argument(&perfect, "note").contains('.'),
             "a perfect rhyme sits exactly on its degree: {perfect}"
@@ -769,7 +774,7 @@ mod tests {
         // Hand-worked: "bAn" ends `AA N` and "bon" ends `OW N`, a suffix match of 1 in 2, so the
         // detune is 1/2 of a step and a step is two semitones. Both lines share a class, so both
         // take degree 0 — the note moves only because the rhyme is imperfect.
-        let slant = render("teA bAn\nteA bon\n", &Style::default());
+        let slant = render("te bAn\nte bon\n", &Style::default());
         let value: f64 = first_note(&slant).parse().unwrap_or(f64::NAN);
         assert!(
             (value - exact).abs() > 0.5,
@@ -785,7 +790,7 @@ mod tests {
             "+++\nbank = \"casio\"\nsynth = \"subtractive\"\nroot = \"D\"\nscale = \"lydian\"\n+++",
         )
         .unwrap();
-        let text = render("teA bAn\nteA bAn\n", &style);
+        let text = render("te bAn\nte bAn\n", &style);
         // The palette's name, translated to the identifier Strudel actually knows. Passing the
         // poem's word through unchanged asked for a sample that does not exist, so §5's own
         // example header played silence.
@@ -795,7 +800,7 @@ mod tests {
         assert_eq!(first_note(&text), "38");
 
         let other = Style::parse("+++\nroot = \"C\"\nscale = \"lydian\"\n+++").unwrap();
-        let moved = render("teA bAn\nteA bAn\n", &other);
+        let moved = render("te bAn\nte bAn\n", &other);
         assert_eq!(first_note(&moved), "36", "the root moves every note");
     }
 
@@ -810,8 +815,9 @@ mod tests {
         // because this emitter also brackets a whole bar — an earlier version of this test matched
         // the bar's bracket and passed whether the melody used the subdivision or not.
         // Two monosyllables form one foot, and the rhyme is the second of them — so exactly one
-        // of the foot's two syllables is pitched, which is the case the subdivision is for.
-        let source = "bo bAn\nro bAn\n";
+        // of the foot's two syllables is pitched, which is the case the subdivision is for. The
+        // first is unstressed, so the bass (stressed foundation vowels) leaves it unpitched.
+        let source = "be bAn\nre bAn\n";
         let text = render(source, &Style::default());
         let steps_per_bar = |pattern: &str| -> Vec<usize> {
             let trimmed = pattern.trim_start_matches('<').trim_end_matches('>');

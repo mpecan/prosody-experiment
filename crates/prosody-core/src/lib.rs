@@ -70,6 +70,6 @@ pub use sound::{Distance, SoundFigure, SoundFigureKind, SoundRepetition, WordFor
 pub use span::Span;
 pub use surprisal::{Lexicon, PoemSurprisal, Rarity, Surprisal, WordSurprisal};
 pub use voice::{
-    Bar, BeatIndex, Detune, Event, Family, Pitch, Placed, ScaleDegree, Score, Subdivision,
-    Velocity, Voice,
+    Bar, BeatIndex, Detune, Event, Family, Pitch, PitchSource, Placed, ScaleDegree, Score,
+    Subdivision, Velocity, Voice,
 };

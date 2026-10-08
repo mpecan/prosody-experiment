@@ -232,7 +232,9 @@ fn the_rhyme_that_did_not_move_keeps_its_pitch() {
             .events()
             .iter()
             .filter_map(|event| {
-                let pitch = event.pitch()?;
+                // The rhyme's notes; the bass follows each stressed vowel, so the swapped word's
+                // own bass note is meant to move.
+                let pitch = event.pitch().filter(|pitch| pitch.class().is_some())?;
                 Some((
                     event.span().text(source)?.to_owned(),
                     pitch.degree().get(),

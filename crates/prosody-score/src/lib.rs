@@ -140,37 +140,119 @@ const PITCH_ENTROPY: Band = Band::new(1.5, 3.0);
 /// pure trochees 0.0; the band asks for a mixture.
 const SYNCOPATION: Band = Band::new(0.3, 0.7);
 
-/// Measures a compiled poem.
+// The machine-music profile: Kraftwerk, Daft Punk, Laibach's electronic songs, psytrance. Like
+// the bands above these are reasoned guesses, not measurements of those records.
+
+/// A kick, a bass, a riff and something on top; psytrance stacks more, but past five at this
+/// density the parts blur.
+const MACHINE_LAYERING: Band = Band::new(3.0, 5.0);
+/// A loop held for minutes, with a part arriving every eight or sixteen bars: one new (bar, voice)
+/// pair in ten to thirty.
+const MACHINE_RECURRENCE: Band = Band::new(0.85, 0.97);
+/// A bassline and a riff are pitched, the drums are not.
+const MACHINE_PITCHED: Band = Band::new(0.35, 0.7);
+/// Riffs of two to five notes; a psytrance bass is often one.
+const MACHINE_PITCH_ENTROPY: Band = Band::new(1.0, 2.3);
+/// A straight machine grid: accents mostly on the beat, the offbeat carried by the bass.
+const MACHINE_SYNCOPATION: Band = Band::new(0.1, 0.4);
+/// Four on the floor: something lands on nearly every beat.
+const MACHINE_PULSE: Band = Band::new(0.9, 1.0);
+/// The meter holds; a bar of another length is an event, not the norm.
+const MACHINE_STEADINESS: Band = Band::new(0.8, 1.0);
+
+/// What a piece is judged against: which metrics, and which bands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Profile {
+    /// Generic interest: the five metrics, each in a moderate band.
+    Interest,
+    /// Repetitive machine music — Kraftwerk, Daft Punk, Laibach's electronic songs, psytrance:
+    /// denser, more repetitive, a steady pulse and short riffs.
+    Machine,
+}
+
+impl Profile {
+    /// The profile called `name` on a command line: `interest` or `machine`.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        match name {
+            "interest" => Some(Self::Interest),
+            "machine" => Some(Self::Machine),
+            _ => None,
+        }
+    }
+}
+
+/// Measures a compiled poem for [`Profile::Interest`].
 ///
 /// The order is fixed and part of the output format, so a log of reports can be compared line by
 /// line across runs.
 #[must_use]
 pub fn measure(score: &Score) -> Vec<Metric> {
+    measure_as(score, Profile::Interest)
+}
+
+/// Measures a compiled poem against `profile`, in a fixed order: the five interest metrics, then
+/// whatever the profile adds.
+#[must_use]
+pub fn measure_as(score: &Score, profile: Profile) -> Vec<Metric> {
     let timeline = Timeline::of(score);
+    match profile {
+        Profile::Interest => interest_metrics(&timeline),
+        Profile::Machine => machine_metrics(&timeline),
+    }
+}
+
+fn machine_metrics(timeline: &Timeline) -> Vec<Metric> {
+    let bands = [
+        MACHINE_LAYERING,
+        MACHINE_RECURRENCE,
+        MACHINE_PITCHED,
+        MACHINE_PITCH_ENTROPY,
+        MACHINE_SYNCOPATION,
+    ];
+    let mut metrics: Vec<Metric> = interest_metrics(timeline)
+        .into_iter()
+        .zip(bands)
+        .map(|(metric, band)| Metric { band, ..metric })
+        .collect();
+    metrics.push(Metric {
+        name: "pulse",
+        value: metrics::pulse(timeline),
+        band: MACHINE_PULSE,
+    });
+    metrics.push(Metric {
+        name: "steadiness",
+        value: metrics::steadiness(timeline),
+        band: MACHINE_STEADINESS,
+    });
+    metrics
+}
+
+fn interest_metrics(timeline: &Timeline) -> Vec<Metric> {
     vec![
         Metric {
             name: "layering",
-            value: metrics::layering(&timeline),
+            value: metrics::layering(timeline),
             band: LAYERING,
         },
         Metric {
             name: "recurrence",
-            value: metrics::recurrence(&timeline),
+            value: metrics::recurrence(timeline),
             band: RECURRENCE,
         },
         Metric {
             name: "pitched",
-            value: metrics::pitched(&timeline),
+            value: metrics::pitched(timeline),
             band: PITCHED,
         },
         Metric {
             name: "pitch_entropy",
-            value: metrics::pitch_entropy(&timeline),
+            value: metrics::pitch_entropy(timeline),
             band: PITCH_ENTROPY,
         },
         Metric {
             name: "syncopation",
-            value: metrics::syncopation(&timeline),
+            value: metrics::syncopation(timeline),
             band: SYNCOPATION,
         },
     ]
@@ -187,8 +269,14 @@ impl Report {
     /// A report from a score's metrics and, if it was run, the edit test.
     #[must_use]
     pub fn new(score: &Score, sensitivity: Option<Sensitivity>) -> Self {
+        Self::profiled(score, sensitivity, Profile::Interest)
+    }
+
+    /// A report against `profile`.
+    #[must_use]
+    pub fn profiled(score: &Score, sensitivity: Option<Sensitivity>, profile: Profile) -> Self {
         Self {
-            metrics: measure(score),
+            metrics: measure_as(score, profile),
             sensitivity,
         }
     }

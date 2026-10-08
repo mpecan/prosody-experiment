@@ -281,10 +281,13 @@ fn i3_the_notes_move_but_the_degrees_do_not() {
     let (score, one) = score_of(&format!("{ONE}{BODY}"));
     let (_, two) = score_of(&format!("{TWO}{BODY}"));
 
+    // The rhyme notes only: the bass's degrees come from vowels, and are pinned by the same
+    // comparison of note lines below.
     let degrees: Vec<_> = score
         .events()
         .iter()
         .filter_map(|e| e.pitch())
+        .filter(|p| p.class().is_some())
         .map(|p| p.degree().get())
         .collect();
     // AABB with the first class returning: "bAn" appears twice as a refrain and once more, then

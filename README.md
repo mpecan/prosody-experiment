@@ -170,6 +170,11 @@ prints how the piece measures, as `name value` lines a script can read:
 It is the measuring half of a tuning loop. The baselines for every shipped poem are committed in
 `crates/prosody-score/tests/snapshots/`, so a mapping change shows what it did to them.
 
+`--profile machine` judges against repetitive machine music instead (Kraftwerk, Daft Punk,
+psytrance): denser layers, more repetition, short riffs, plus a steady **pulse** and **steadiness**
+of bar length. `./scripts/cycle.sh` prints that profile for every example with the mean overall —
+the number the tuning cycle in [`PLAN.md`](PLAN.md) works to raise.
+
 ---
 
 ## Writing a poem
@@ -215,6 +220,7 @@ Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`
 | A pause inside a line (`,` `;` `—` …) | the half-line before it loops underneath until the next one | §4.6 |
 | A rhyme answered later in its stanza | the line keeps sounding until its answer arrives, then resolves | §4.6 |
 | A refrain line | loops in its own lane until the next refrain line takes over | §4.6 |
+| A stressed vowel in a foundation line | a bass note by vowel height: open → root, mid → third, close → fifth | §4.6 |
 | Foot → beat, syllable → subdivision, line → bar | rhythm | §4.2 |
 | Stress | accent / velocity | §4.2 |
 | A line repeated verbatim | *the same instrument* played again | §4.3 |

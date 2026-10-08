@@ -295,6 +295,36 @@ The next iteration has no milestone to take. It should either take an open quest
 open question above a number that moves when the question is answered, so the next iteration can
 say what its change bought.
 
+### The machine cycle (branch `machine-cycle`)
+
+The user's goal: steer the output towards Daft Punk, Kraftwerk, Laibach's electronic songs, and
+psytrance — repetitive, layered machine music — through an automated measure-and-refine cycle, on
+its own branch.
+
+**The target** is `prosody-score`'s `machine` profile (`--score --profile machine`): the five
+interest metrics with genre bands, plus `pulse` (beats with an onset on them) and `steadiness`
+(bars as long as the bar before). The bands are reasoned guesses about those records, written next
+to each constant — not measurements of them. Distrust a gain your ears do not confirm.
+
+**One iteration:**
+
+1. `./scripts/cycle.sh` — the table, and the mean overall it ends with.
+2. Pick the metric furthest out of its band across the most poems. Name the poetic feature that
+   should move it — a mapping, not a knob: the cycle must not buy a number by ignoring the text.
+3. Implement it with hand-worked tests, run every gate, and re-run the script.
+4. **Keep** it only if the mean overall rose and no poem's legibility fell without an explanation
+   that names the mechanism (as the held and refrain lanes' entry does). Otherwise revert.
+5. One commit per kept iteration; a row in the ledger below; the snapshot diff read before it is
+   accepted. A reverted iteration gets a row too, so the next one does not retry it.
+
+**Every mapping this cycle adds is a spec change made on a branch, pending the user's review**
+(`CLAUDE.md` §10). Each is marked so in `SPEC.md`.
+
+| # | Change | Mean overall | Kept |
+|---|---|---|---|
+| 0 | Baseline: the machine profile over `9b9c67c` | 0.410 | — |
+| 1 | Bass: a foundation line's primary-stressed vowels pitched by height | 0.504 | yes |
+
 ---
 
 ---
@@ -302,6 +332,27 @@ say what its change bought.
 ---
 
 ## Log
+
+### Machine cycle 1 — a bass from vowel height
+
+The machine profile's baseline (0.410 mean overall) was weakest on `pitched`: about a tenth of
+events carried a note, against a band of 0.35–0.7, because only rhyme words were pitched. §4.1
+calls the foundation "drums, bass, ostinato" and the foundation had no bass.
+
+Now every primary-stressed syllable of a foundation line is pitched by its vowel's height — open
+vowels on the root, mid on the third degree, close on the fifth — because height is the vowel
+property with an acoustic claim to pitch (close vowels carry a higher intrinsic F0). §4.5's rhyme
+note wins on a rhyme word. A `Pitch` now carries its source (`PitchSource::Rhyme` or `Vowel`), so
+the edit test's rhyme link and the debug view (`bass 2 AH`) can tell them apart.
+
+Measured: pitched rose to 0.30–0.74 across the examples, pitch entropy into its band for all nine
+(Dickinson and Whitman had no melody at all, 0 bits; now ~1.56). Mean overall 0.410 → 0.504.
+Legibility did not move for any poem — a vowel edit reaches its own bass note and nothing else.
+Three hand-worked scorer tests changed for named reasons: an iamb line is now half pitched; `mI` →
+`tE` is now audible (close → mid), `mO` → `tE` still is not (mid → mid); a silenced rhyme partner
+leaves the survivor on its bass note, the same degree, so that edit became local.
+
+Steadiness (0.00–0.85) and layering (1.2–3.1 against 3–5) are now the furthest out.
 
 ### §4.6's held and refrain lanes: an open rhyme sounds until it is answered
 

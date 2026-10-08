@@ -282,7 +282,16 @@ impl Detune {
 pub struct Pitch {
     degree: ScaleDegree,
     detune: Detune,
-    class: RhymeClassId,
+    source: PitchSource,
+}
+
+/// Where a note came from, for tracing it back (invariant I4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PitchSource {
+    /// The word a rhyme rests on: its class's degree (`SPEC.md` §4.5).
+    Rhyme(RhymeClassId),
+    /// A stressed syllable of a foundation line: its vowel's height (the bass).
+    Vowel(Phoneme),
 }
 
 impl Pitch {
@@ -298,10 +307,19 @@ impl Pitch {
         self.detune
     }
 
-    /// The rhyme class this came from, for tracing it back (invariant I4).
+    /// The rhyme class this came from, if a rhyme gave it.
     #[must_use]
-    pub const fn class(self) -> RhymeClassId {
-        self.class
+    pub const fn class(self) -> Option<RhymeClassId> {
+        match self.source {
+            PitchSource::Rhyme(class) => Some(class),
+            PitchSource::Vowel(_) => None,
+        }
+    }
+
+    /// What gave it.
+    #[must_use]
+    pub const fn source(self) -> PitchSource {
+        self.source
     }
 }
 
@@ -736,7 +754,15 @@ impl Pitch {
         Self {
             degree: ScaleDegree::new(degree),
             detune,
-            class,
+            source: PitchSource::Rhyme(class),
+        }
+    }
+
+    pub(crate) const fn of_vowel(vowel: Phoneme, degree: usize) -> Self {
+        Self {
+            degree: ScaleDegree::new(degree),
+            detune: Detune::EXACT,
+            source: PitchSource::Vowel(vowel),
         }
     }
 }

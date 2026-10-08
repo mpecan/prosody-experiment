@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use prosody_core::voice::{
-    Anchor, BeatIndex, Detune, Event, ScaleDegree, Score, Subdivision, Velocity,
+    Anchor, BeatIndex, Detune, Event, Pitch, ScaleDegree, Score, Subdivision, Velocity,
 };
 use prosody_core::{
     Cause, Distance, Layer, Phoneme, Poem, RhymeClassId, Surprisal, TokenKind, VoiceId, WordVoiceId,
@@ -228,7 +228,7 @@ fn links(score: &Score) -> Vec<BTreeSet<usize>> {
         let bar = event.bar().get();
         let found = [
             Some(Link::Voice(event.voice())),
-            event.pitch().map(|pitch| Link::Rhyme(pitch.class())),
+            event.pitch().and_then(Pitch::class).map(Link::Rhyme),
             event.family().map(|family| Link::Family(family.voice())),
             event.anchor().map(Link::Anchor),
         ];

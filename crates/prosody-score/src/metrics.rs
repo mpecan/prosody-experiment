@@ -103,6 +103,48 @@ pub(crate) fn syncopation(timeline: &Timeline) -> f64 {
     ratio(total, usize::try_from(timeline.beats).unwrap_or(usize::MAX))
 }
 
+/// Share of the piece's beats with something sounding exactly on the beat.
+///
+/// The machine pulse — a kick on every beat — is what makes Kraftwerk or psytrance move, and it is
+/// the thing a line of syllables lacks: an anapaest leaves its beat to the stressed syllable, but a
+/// line that rests or a loop fitted across a bar can leave beats empty.
+pub(crate) fn pulse(timeline: &Timeline) -> f64 {
+    let on_the_beat: BTreeSet<u64> = timeline
+        .hits
+        .iter()
+        .filter(|hit| hit.within.0 == 0)
+        .map(|hit| hit.slot)
+        .collect();
+    ratio(
+        on_the_beat.len(),
+        usize::try_from(timeline.beats).unwrap_or(usize::MAX),
+    )
+}
+
+/// Share of bars as long as the bar before them.
+///
+/// Odd meters are welcome (`SPEC.md` §4.2); a meter that changes every bar is not a groove. A piece
+/// of fewer than two bars has no meter to keep, and scores zero.
+pub(crate) fn steadiness(timeline: &Timeline) -> f64 {
+    let ends = timeline
+        .bar_starts
+        .iter()
+        .skip(1)
+        .copied()
+        .chain(std::iter::once(timeline.beats));
+    let lengths: Vec<u64> = timeline
+        .bar_starts
+        .iter()
+        .zip(ends)
+        .map(|(start, end)| end.saturating_sub(*start))
+        .collect();
+    let kept = lengths
+        .windows(2)
+        .filter(|pair| pair.first() == pair.get(1))
+        .count();
+    ratio(kept, lengths.len().saturating_sub(1))
+}
+
 /// `numerator / denominator`, or zero for an empty denominator.
 fn ratio(numerator: usize, denominator: usize) -> f64 {
     if denominator == 0 {
@@ -118,7 +160,7 @@ fn as_f64(count: usize) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{layering, pitch_entropy, pitched, recurrence, syncopation};
+    use super::{layering, pitch_entropy, pitched, pulse, recurrence, steadiness, syncopation};
     use crate::timeline::tests::hit;
     use crate::timeline::{Hit, Timeline};
 
@@ -259,8 +301,41 @@ mod tests {
             pitched(&empty),
             pitch_entropy(&empty),
             syncopation(&empty),
+            pulse(&empty),
+            steadiness(&empty),
         ] {
             close(value, 0.0);
         }
+    }
+
+    #[test]
+    fn pulse_counts_beats_with_an_onset_on_them() {
+        // Iambs put an onset on every beat (the unstressed syllable): 2 of 2.
+        close(pulse(&iambs(1)), 1.0);
+        // Four beats; onsets on beat 0, halfway through beat 1, and on beat 3. Beats 0 and 3: ½.
+        let timeline = Timeline {
+            hits: vec![
+                hit(0, 0, (0, 1), 0),
+                hit(1, 0, (1, 2), 0),
+                hit(3, 0, (0, 2), 1),
+            ],
+            bar_starts: vec![0],
+            beats: 4,
+        };
+        close(pulse(&timeline), 0.5);
+    }
+
+    #[test]
+    fn steadiness_counts_bars_that_keep_the_meter() {
+        // Bars of 2, 2, 3, 3 beats: of the three changes of bar, two keep the length.
+        let timeline = Timeline {
+            hits: vec![],
+            bar_starts: vec![0, 2, 4, 7],
+            beats: 10,
+        };
+        close(steadiness(&timeline), 2.0 / 3.0);
+        // One bar: no meter to keep.
+        close(steadiness(&iambs(1)), 0.0);
+        close(steadiness(&iambs(3)), 1.0);
     }
 }

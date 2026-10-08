@@ -25,7 +25,7 @@ use prosody_emit::osc::Schedule;
 use prosody_emit::{Backend as _, Osc, Strudel, Style};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
-use prosody_score::{DEFAULT_PROBES, Report, sensitivity};
+use prosody_score::{DEFAULT_PROBES, Profile, Report, sensitivity};
 
 fn main() -> ExitCode {
     match run() {
@@ -56,6 +56,8 @@ struct Arguments {
     explain: bool,
     /// Print how interesting and how legible the piece measures, instead of the pattern.
     score: bool,
+    /// What `--score` judges the piece against.
+    profile: Profile,
     /// Which backend.
     target: Target,
     /// Recompile whenever the file changes (§7.8's live reload).
@@ -72,7 +74,8 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      options:\n\
      \x20 --explain      print the poem with each token annotated, instead of the pattern\n\
      \x20 --score        print how the piece measures (interest, legibility), instead of the pattern\n\
-     \x20 --osc          emit a schedule of OSC messages instead of Strudel text\n\
+     \x20 --profile NAME what --score judges against: interest (the default) or machine\n\
+     \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
      \x20 -              read the poem from standard input\n\
@@ -90,8 +93,16 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     let mut target = Target::Strudel;
     let mut watch = false;
     let mut send = None;
+    let mut profile = Profile::Interest;
     let mut expecting_address = false;
+    let mut expecting_profile = false;
     for argument in arguments {
+        if expecting_profile {
+            profile = Profile::named(&argument)
+                .with_context(|| format!("unknown profile `{argument}`\n\n{USAGE}"))?;
+            expecting_profile = false;
+            continue;
+        }
         if expecting_address {
             send = Some(argument);
             target = Target::Osc;
@@ -105,6 +116,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
             "--osc" => target = Target::Osc,
             "--watch" => watch = true,
             "--send" => expecting_address = true,
+            "--profile" => expecting_profile = true,
             flag if flag.starts_with('-') && flag != "-" => {
                 bail!("unknown option `{flag}`\n\n{USAGE}")
             }
@@ -122,10 +134,14 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     if expecting_address {
         bail!("--send needs an address\n\n{USAGE}");
     }
+    if expecting_profile {
+        bail!("--profile needs a name\n\n{USAGE}");
+    }
     Ok(Some(Arguments {
         source,
         explain,
         score,
+        profile,
         target,
         watch,
         send,
@@ -207,7 +223,7 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
     let (score, roles) = lower_poem(&poem, &phonemiser, &lexicon)?;
 
     if arguments.score {
-        return report(text, &score, &phonemiser, &lexicon);
+        return report(text, &score, arguments.profile, &phonemiser, &lexicon);
     }
     if arguments.explain {
         return explain(&poem, &score, &style, &roles);
@@ -265,6 +281,7 @@ fn lower_poem(
 fn report(
     text: &str,
     score: &Score,
+    profile: Profile,
     phonemiser: &impl Phonemiser,
     lexicon: &impl Lexicon,
 ) -> Result<()> {
@@ -274,7 +291,7 @@ fn report(
             .ok()
             .map(|(score, _)| score)
     });
-    emit(&Report::new(score, sensitivity).to_text())
+    emit(&Report::profiled(score, sensitivity, profile).to_text())
 }
 
 /// Sends every message of a schedule over UDP.

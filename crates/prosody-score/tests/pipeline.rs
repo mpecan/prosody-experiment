@@ -98,8 +98,9 @@ fn a_line_of_iambs_measures_as_worked_by_hand() {
     // One line is one voice; nothing sounds alongside it and nothing returns.
     assert!((value(&score, "layering") - 1.0).abs() < 1e-9);
     assert!(value(&score, "recurrence").abs() < 1e-9);
-    // A rhyme class of one is no melodic relation, so nothing is pitched (PLAN.md, free verse).
-    assert!(value(&score, "pitched").abs() < 1e-9);
+    // A rhyme class of one is no melodic relation, so no rhyme note (PLAN.md, free verse). But
+    // the one line is the foundation, so its two stressed `dA`s carry the bass: 2 of 4 events.
+    assert!((value(&score, "pitched") - 0.5).abs() < 1e-9);
 }
 
 #[test]
@@ -154,12 +155,14 @@ fn a_rhyme_across_stanzas_carries_an_edit_with_it() {
     // class of one, which is unpitched — a change in the *other* stanza. The two unstressed words
     // carry no rhyme and stay local — though silencing `da` does renumber stanza 2's word-family
     // ids, which are counted poem-wide. No backend plays those ids, so that is not heard and not a
-    // leak. Two of four are local — and all four are *explained*, because the bars the rhyme
-    // edits reach are the bars that rhymed with them.
+    // leak. And one rhyme edit is local after all: one of the two lines is the foundation, so
+    // when its partner falls silent its `A` keeps a note — the bass's open vowel, degree 0, the
+    // same degree the rhyme gave it. Three of four are local — and all four are *explained*,
+    // because the bars the rhyme edits reach are the bars that rhymed with them.
     let result = sensitivity::measure("da dA\n\nsa mA\n", &["q"], compile).unwrap();
     assert_eq!(result.edits(), 4);
     assert_eq!(result.audible(), 4);
-    assert_eq!(result.local(), 2);
+    assert_eq!(result.local(), 3);
     assert_eq!(result.explained(), 4);
 }
 
@@ -174,14 +177,15 @@ fn breaking_a_refrain_is_heard_where_the_refrain_returns() {
     // - Bar 1 or bar 2, either word: no relation crosses the break. Voices after it may be
     //   renumbered, but no backend plays the number. Local. Four.
     //
-    // Audibility: `so`/`se` → `tE` stresses an unstressed syllable, which is heard. But `mO`/`mI`
-    // → `tE` swaps a stressed, unrhymed monosyllable for another — only the vowel differs, and the
-    // IR carries a vowel only through rhyme, alliteration and surprisal, none of which moves here
-    // under a flat lexicon. The mapping cannot hear that edit, and this measure says so. Six.
+    // Audibility: `so`/`se` → `tE` stresses an unstressed syllable, which is heard. `mO`/`mI` →
+    // `tE` swaps a stressed, unrhymed monosyllable for another, so only the vowel differs — and
+    // every line here is foundation, so the vowel reaches the bass by its height. `mI` (IY, close,
+    // degree 4) → `tE` (EH, mid, degree 2) is heard. `mO` (OW, mid) → `tE` (mid) is not: the bass
+    // hears height, and nothing else here carries a vowel under a flat lexicon. Seven.
     let source = "da dA\nso mO\n\nse mI\nda dA\n";
     let result = sensitivity::measure(source, &["tE"], compile).unwrap();
     assert_eq!(result.edits(), 8);
-    assert_eq!(result.audible(), 6);
+    assert_eq!(result.audible(), 7);
     assert_eq!(result.local(), 4);
     // The four that reached across the break reached the refrain's other copy — its own voice.
     assert_eq!(result.explained(), 8);

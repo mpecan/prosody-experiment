@@ -462,6 +462,36 @@ fn the_examples_exercise_the_cases_they_claim_to() {
 }
 
 #[test]
+fn the_machine_profile_adds_pulse_and_steadiness() {
+    let (out, err, code) = run(&["--score", "--profile", "machine"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let keys: Vec<&str> = out
+        .lines()
+        .skip(1)
+        .take(7)
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "layering",
+            "recurrence",
+            "pitched",
+            "pitch_entropy",
+            "syncopation",
+            "pulse",
+            "steadiness",
+        ]
+    );
+    // The machine bands, not the interest ones: layering is judged from three voices up.
+    assert!(out.contains("3.000..5.000"), "{out}");
+
+    let (_, err, code) = run(&["--score", "--profile", "polka"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(err.contains("unknown profile `polka`"), "{err}");
+}
+
+#[test]
 fn score_reports_every_metric_and_an_edit_per_word() {
     // The scorer's output is read by scripts, so its keys are the contract: every metric, the
     // edit test, and the totals, each as `name value`.

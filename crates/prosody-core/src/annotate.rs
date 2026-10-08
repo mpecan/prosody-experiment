@@ -508,7 +508,7 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             }
             let _ = writeln!(
                 out,
-                "    {:<14} {:<10} {:<7} {:<7} {:<9} {:<7} {:<6} from",
+                "    {:<14} {:<10} {:<7} {:<9} {:<9} {:<7} {:<6} from",
                 "token", "beat", "gain", "pitch", "modulation", "sharp", "bank"
             );
             for token in line.tokens() {
@@ -607,7 +607,7 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
     if token.syllables().is_empty() {
         let _ = writeln!(
             out,
-            "    {text:<14} {:<10} {:<7} {:<7} {:<9} {:<7} {:<6} {}",
+            "    {text:<14} {:<10} {:<7} {:<9} {:<9} {:<7} {:<6} {}",
             "—",
             "—",
             "—",
@@ -631,10 +631,15 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
         let pitch = if first {
             token.pitch().map_or_else(
                 || "—".to_owned(),
-                |pitch| {
-                    if pitch.detune().is_exact() {
+                |pitch| match pitch.source() {
+                    // The bass: `bass 2 AH`, its degree and the vowel that chose it.
+                    crate::voice::PitchSource::Vowel(vowel) => {
+                        format!("bass {} {}", pitch.degree().get(), vowel.symbol())
+                    }
+                    crate::voice::PitchSource::Rhyme(_) if pitch.detune().is_exact() => {
                         format!("deg {}", pitch.degree().get())
-                    } else {
+                    }
+                    crate::voice::PitchSource::Rhyme(_) => {
                         format!("deg {}~", pitch.degree().get())
                     }
                 },
@@ -667,8 +672,10 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
 
         let mut from = vec!["meter"];
         if first {
-            if token.pitch().is_some() {
-                from.push("rhyme");
+            match token.pitch().map(crate::voice::Pitch::source) {
+                Some(crate::voice::PitchSource::Rhyme(_)) => from.push("rhyme"),
+                Some(crate::voice::PitchSource::Vowel(_)) => from.push("role"),
+                None => {}
             }
             if token.modulation().is_some() {
                 from.push("sound");
@@ -686,7 +693,7 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
 
         let _ = writeln!(
             out,
-            "    {:<14} {:<10} {:<7} {:<7} {:<9} {:<7} {:<6} {}",
+            "    {:<14} {:<10} {:<7} {:<9} {:<9} {:<7} {:<6} {}",
             if first { text } else { "" },
             format!("{bar}.{beat}.{index}/{of}"),
             format!("{:.2}", syllable.velocity().as_f64()),

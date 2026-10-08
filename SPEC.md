@@ -143,6 +143,10 @@ answer resolves it. ABAB holds each line under the next; ABBA holds the A line u
 answer must come within the stanza, so a class of one, or a rhyme answered stanzas later, is never
 held.
 
+**The bass** (*machine cycle, pending review*). Every primary-stressed syllable of a foundation
+line is pitched by its vowel's height: open → root, mid → third degree, close → fifth. Close vowels
+carry a higher intrinsic pitch, so the riff follows the vowels; a rhyme word keeps §4.5's note.
+
 **The refrain lane** — §4.3's "literal loop of that voice" at line scale. A refrain line, once
 heard, loops in its own lane until the next refrain line is first heard and takes over. No lane
 doubles a voice already sounding in the bar. A refrain stanza stops both lanes with every loop.

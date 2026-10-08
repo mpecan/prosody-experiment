@@ -787,8 +787,10 @@ mod tests {
                 })
                 .collect()
         };
-        assert_eq!(notes(&c), vec![36, 36]);
-        assert_eq!(notes(&d), vec![38, 38], "the root moves every note");
+        // Per line: `teA`'s stressed AA is the bass's open vowel, degree 0; `bAn` is the rhyme,
+        // class degree 0. Both sit on the root.
+        assert_eq!(notes(&c), vec![36, 36, 36, 36]);
+        assert_eq!(notes(&d), vec![38, 38, 38, 38], "the root moves every note");
         assert_eq!(c.messages().len(), d.messages().len(), "and nothing else");
     }
 

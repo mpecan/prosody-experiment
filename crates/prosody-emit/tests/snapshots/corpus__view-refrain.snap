@@ -19,34 +19,34 @@ stanza 0
   ──────────────────────────────────────────
   bar 0  foundation (regularity)  voice 0  seed e9a75995
   sounds stated 0
-    token          beat       gain    pitch   modulation sharp   bank   from
-    o              0.0.0/2    1.00    —       f0+0      0.25    —      meter,sound,surprisal,repetition
-    give           0.0.1/2    1.00    —       f1+0      0.56    G      meter,sound,surprisal,repetition
-    thanks         0.1.0/2    1.00    —       f2+0      0.81    —      meter,sound,surprisal,repetition
-    unto           0.1.1/2    1.00    —       f3+0      0.56    AH     meter,sound,surprisal,repetition
-                   0.2.0/3    0.33                                     meter
-    the            0.2.1/3    0.33    —       f4+0      0.12    AH     meter,sound,surprisal,repetition
-    lord           0.2.2/3    1.00    —       —         0.31    AO     meter,surprisal
-    for            0.3.0/2    1.00    —       f6+0      0.19    AO     meter,sound,surprisal
-    he             0.3.1/2    1.00    —       —         0.31    —      meter,surprisal
-    is             0.4.0/2    1.00    —       —         0.31    IH     meter,surprisal
-    good           0.4.1/2    1.00    —       —         0.44    G      meter,surprisal
+    token          beat       gain    pitch     modulation sharp   bank   from
+    o              0.0.0/2    1.00    bass 2 OW f0+0      0.25    —      meter,role,sound,surprisal,repetition
+    give           0.0.1/2    1.00    bass 4 IH f1+0      0.56    G      meter,role,sound,surprisal,repetition
+    thanks         0.1.0/2    1.00    bass 0 AE f2+0      0.81    —      meter,role,sound,surprisal,repetition
+    unto           0.1.1/2    1.00    bass 2 AH f3+0      0.56    AH     meter,role,sound,surprisal,repetition
+                   0.2.0/3    0.33                                       meter
+    the            0.2.1/3    0.33    —         f4+0      0.12    AH     meter,sound,surprisal,repetition
+    lord           0.2.2/3    1.00    bass 0 AO —         0.31    AO     meter,role,surprisal
+    for            0.3.0/2    1.00    bass 0 AO f6+0      0.19    AO     meter,role,sound,surprisal
+    he             0.3.1/2    1.00    bass 4 IY —         0.31    —      meter,role,surprisal
+    is             0.4.0/2    1.00    bass 4 IH —         0.31    IH     meter,role,surprisal
+    good           0.4.1/2    1.00    bass 4 UH —         0.44    G      meter,role,surprisal
 
   for his mercy endureth for ever
   ───────────────────────────────
   bar 1  foundation (refrain of voice 1)  voice 1  seed 19d775b9
   sounds stated 1 · yielding 3(1) · refraining 2 4
-    token          beat       gain    pitch   modulation sharp   bank   from
-    for            1.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
-    his            1.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal
-    mercy          1.1.0/2    1.00    —       f11+0     0.62    —      meter,sound,surprisal
-                   1.1.1/2    0.33                                     meter
-    endureth       1.2.0/2    1.00    —       f12+0     0.88    EH     meter,sound,surprisal,phoneme(guessed)
-                   1.2.1/2    0.33                                     meter
-                   1.3.0/2    0.33                                     meter
-    for            1.3.1/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
-    ever           1.4.0/2    1.00    deg 0   f13+0     0.31    EH     meter,rhyme,sound,surprisal
-                   1.4.1/2    0.33                                     meter
+    token          beat       gain    pitch     modulation sharp   bank   from
+    for            1.0.0/2    1.00    bass 0 AO f6+0      0.06    F      meter,role,sound,surprisal
+    his            1.0.1/2    1.00    bass 4 IH f10+0     0.44    —      meter,role,sound,surprisal
+    mercy          1.1.0/2    1.00    bass 2 ER f11+0     0.62    —      meter,role,sound,surprisal
+                   1.1.1/2    0.33                                       meter
+    endureth       1.2.0/2    1.00    bass 2 EH f12+0     0.88    EH     meter,role,sound,surprisal,phoneme(guessed)
+                   1.2.1/2    0.33                                       meter
+                   1.3.0/2    0.33                                       meter
+    for            1.3.1/2    1.00    bass 0 AO f6+0      0.06    F      meter,role,sound,surprisal
+    ever           1.4.0/2    1.00    deg 0     f13+0     0.31    EH     meter,rhyme,sound,surprisal
+                   1.4.1/2    0.33                                       meter
 
 stanza 1
 
@@ -54,32 +54,32 @@ stanza 1
   ──────────────────────────────────
   bar 2  foundation (regularity)  voice 2  seed cf56275d
   sounds arriving 2(1) 4(2)
-    token          beat       gain    pitch   modulation sharp   bank   from
-    o              2.0.0/2    1.00    —       f0+0      0.25    —      meter,sound,surprisal,repetition
-    give           2.0.1/2    1.00    —       f1+0      0.44    G      meter,sound,surprisal,repetition
-    thanks         2.1.0/2    1.00    —       f2+0      0.81    —      meter,sound,surprisal,repetition
-    unto           2.1.1/2    1.00    —       f3+0      0.56    AH     meter,sound,surprisal,repetition
-                   2.2.0/3    0.33                                     meter
-    the            2.2.1/3    0.33    —       f4+0      0.12    AH     meter,sound,surprisal,repetition
-    god            2.2.2/3    1.00    —       —         0.19    G      meter,surprisal
-    of             2.3.0/2    1.00    —       —         0.12    AH     meter,surprisal
-    gods           2.3.1/2    1.00    —       —         0.38    G      meter,surprisal
+    token          beat       gain    pitch     modulation sharp   bank   from
+    o              2.0.0/2    1.00    bass 2 OW f0+0      0.25    —      meter,role,sound,surprisal,repetition
+    give           2.0.1/2    1.00    bass 4 IH f1+0      0.44    G      meter,role,sound,surprisal,repetition
+    thanks         2.1.0/2    1.00    bass 0 AE f2+0      0.81    —      meter,role,sound,surprisal,repetition
+    unto           2.1.1/2    1.00    bass 2 AH f3+0      0.56    AH     meter,role,sound,surprisal,repetition
+                   2.2.0/3    0.33                                       meter
+    the            2.2.1/3    0.33    —         f4+0      0.12    AH     meter,sound,surprisal,repetition
+    god            2.2.2/3    1.00    bass 0 AA —         0.19    G      meter,role,surprisal
+    of             2.3.0/2    1.00    bass 2 AH —         0.12    AH     meter,role,surprisal
+    gods           2.3.1/2    1.00    bass 0 AA —         0.38    G      meter,role,surprisal
 
   for his mercy endureth for ever
   ───────────────────────────────
   bar 3  foundation (refrain of voice 1)  voice 1  seed 19d775b9
   sounds arriving 5(2) · yielding 7(1) · refraining 6 8
-    token          beat       gain    pitch   modulation sharp   bank   from
-    for            3.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
-    his            3.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal
-    mercy          3.1.0/2    1.00    —       f11+0     0.62    —      meter,sound,surprisal
-                   3.1.1/2    0.33                                     meter
-    endureth       3.2.0/2    1.00    —       f12+0     0.88    EH     meter,sound,surprisal,phoneme(guessed)
-                   3.2.1/2    0.33                                     meter
-                   3.3.0/2    0.33                                     meter
-    for            3.3.1/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
-    ever           3.4.0/2    1.00    deg 0   f13+0     0.31    EH     meter,rhyme,sound,surprisal
-                   3.4.1/2    0.33                                     meter
+    token          beat       gain    pitch     modulation sharp   bank   from
+    for            3.0.0/2    1.00    bass 0 AO f6+0      0.06    F      meter,role,sound,surprisal
+    his            3.0.1/2    1.00    bass 4 IH f10+0     0.44    —      meter,role,sound,surprisal
+    mercy          3.1.0/2    1.00    bass 2 ER f11+0     0.62    —      meter,role,sound,surprisal
+                   3.1.1/2    0.33                                       meter
+    endureth       3.2.0/2    1.00    bass 2 EH f12+0     0.88    EH     meter,role,sound,surprisal,phoneme(guessed)
+                   3.2.1/2    0.33                                       meter
+                   3.3.0/2    0.33                                       meter
+    for            3.3.1/2    1.00    bass 0 AO f6+0      0.06    F      meter,role,sound,surprisal
+    ever           3.4.0/2    1.00    deg 0     f13+0     0.31    EH     meter,rhyme,sound,surprisal
+                   3.4.1/2    0.33                                       meter
 
 stanza 2
 
@@ -87,30 +87,30 @@ stanza 2
   ────────────────────────────────────
   bar 4  foundation (regularity)  voice 3  seed 57ab2427
   sounds arriving 6(1) 8(2)
-    token          beat       gain    pitch   modulation sharp   bank   from
-    to             4.0.0/2    1.00    —       —         0.12    UW     meter,surprisal
-    him            4.0.1/2    1.00    —       —         0.31    HH     meter,surprisal
-    who            4.1.0/2    1.00    —       —         0.12    HH     meter,surprisal
-    alone          4.1.1/2    0.33    —       —         0.44    —      meter,surprisal
-                   4.2.0/2    1.00                                     meter
-    doeth          4.2.1/2    1.00    —       —         0.62    —      meter,surprisal,phoneme(guessed)
-                   4.3.0/2    0.33                                     meter
-    great          4.3.1/2    1.00    —       —         0.69    —      meter,surprisal
-    wonders        4.4.0/2    1.00    —       —         0.69    —      meter,surprisal
-                   4.4.1/2    0.33                                     meter
+    token          beat       gain    pitch     modulation sharp   bank   from
+    to             4.0.0/2    1.00    bass 4 UW —         0.12    UW     meter,role,surprisal
+    him            4.0.1/2    1.00    bass 4 IH —         0.31    HH     meter,role,surprisal
+    who            4.1.0/2    1.00    bass 4 UW —         0.12    HH     meter,role,surprisal
+    alone          4.1.1/2    0.33    bass 2 OW —         0.44    —      meter,role,surprisal
+                   4.2.0/2    1.00                                       meter
+    doeth          4.2.1/2    1.00    bass 0 AA —         0.62    —      meter,role,surprisal,phoneme(guessed)
+                   4.3.0/2    0.33                                       meter
+    great          4.3.1/2    1.00    bass 2 EY —         0.69    —      meter,role,surprisal
+    wonders        4.4.0/2    1.00    bass 2 AH —         0.69    —      meter,role,surprisal
+                   4.4.1/2    0.33                                       meter
 
   for his mercy endureth for ever
   ───────────────────────────────
   bar 5  foundation (refrain of voice 1)  voice 1  seed 19d775b9
   sounds arriving 9(2)
-    token          beat       gain    pitch   modulation sharp   bank   from
-    for            5.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
-    his            5.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal
-    mercy          5.1.0/2    1.00    —       f11+0     0.62    —      meter,sound,surprisal
-                   5.1.1/2    0.33                                     meter
-    endureth       5.2.0/2    1.00    —       f12+0     0.88    EH     meter,sound,surprisal,phoneme(guessed)
-                   5.2.1/2    0.33                                     meter
-                   5.3.0/2    0.33                                     meter
-    for            5.3.1/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
-    ever           5.4.0/2    1.00    deg 0   f13+0     0.31    EH     meter,rhyme,sound,surprisal
-                   5.4.1/2    0.33                                     meter
+    token          beat       gain    pitch     modulation sharp   bank   from
+    for            5.0.0/2    1.00    bass 0 AO f6+0      0.06    F      meter,role,sound,surprisal
+    his            5.0.1/2    1.00    bass 4 IH f10+0     0.44    —      meter,role,sound,surprisal
+    mercy          5.1.0/2    1.00    bass 2 ER f11+0     0.62    —      meter,role,sound,surprisal
+                   5.1.1/2    0.33                                       meter
+    endureth       5.2.0/2    1.00    bass 2 EH f12+0     0.88    EH     meter,role,sound,surprisal,phoneme(guessed)
+                   5.2.1/2    0.33                                       meter
+                   5.3.0/2    0.33                                       meter
+    for            5.3.1/2    1.00    bass 0 AO f6+0      0.06    F      meter,role,sound,surprisal
+    ever           5.4.0/2    1.00    deg 0     f13+0     0.31    EH     meter,rhyme,sound,surprisal
+                   5.4.1/2    0.33                                       meter

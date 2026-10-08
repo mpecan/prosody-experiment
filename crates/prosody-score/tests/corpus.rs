@@ -18,7 +18,7 @@ use prosody_core::{
 };
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
-use prosody_score::{DEFAULT_PROBES, Report, sensitivity};
+use prosody_score::{DEFAULT_PROBES, Profile, Report, sensitivity};
 
 const POEMS: &[(&str, &str)] = &[
     (
@@ -120,5 +120,11 @@ fn every_shipped_poem_measures_as_committed() {
             compile(edited, &phonemiser, &lexicon)
         });
         insta::assert_snapshot!(*name, Report::new(&score, edits).to_text());
+        // The same piece against the machine-music profile, the target of the tuning cycle
+        // (`PLAN.md`, "The machine cycle").
+        insta::assert_snapshot!(
+            format!("machine-{name}"),
+            Report::profiled(&score, edits, Profile::Machine).to_text()
+        );
     }
 }
