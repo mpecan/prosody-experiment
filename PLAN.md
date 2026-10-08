@@ -326,6 +326,7 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 | 1 | Bass: a foundation line's primary-stressed vowels pitched by height | 0.504 | yes |
 | 2 | Bar length is the stanza's period; shorter lines rest instead of stretching | 0.611 | yes |
 | 3a | *Measurement fix, no change to the sound*: the pitched synth counted as an instrument | 0.702 | yes |
+| 3b | The outro: when the poem ends, the loops play one more pass | 0.743 | yes |
 
 ---
 
@@ -334,6 +335,27 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 ---
 
 ## Log
+
+### Machine cycle 3b — the outro
+
+After 3a the bottom two were the one-stanza poems: Prešeren 0.412, Sonnet 18 0.611, both with
+recurrence near 0.5 against 0.85–0.97 — `SPEC.md` §9's "a single-stanza poem never loops, since
+nothing follows it". The rule is that a loop plays until something stops it, and the end of the
+poem had been treated as the thing that stops it.
+
+Now, when the poem runs out, the loops play one more pass: the last stanza again (`Cause::
+Repeating`), with the other layer's loop and every lane under it. Sonnet 18 0.611 → 0.733,
+Prešeren 0.412 → 0.503, Hopkins 0.757 → 0.857; mean 0.702 → 0.743. Legibility did not move for any
+poem — an outro bar is hosted by a line of the last stanza, so the edit test's existing reasons
+cover it.
+
+Writing the outro exposed a doubling: a line's call kept sounding under its own line wherever that
+line was re-hosted (the outro, and a transformation's yielding bars). The call lane now follows
+the same no-doubling rule as the held and refrain lanes — silent wherever its whole line already
+plays. The mean did not move.
+
+Most emitter unit tests used one-line poems and asserted one bar; each now asserts both passes, with
+the arithmetic in its comment.
 
 ### Machine cycle 3a — the scorer was not counting the synth
 

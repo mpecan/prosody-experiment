@@ -679,24 +679,32 @@ mod tests {
     #[test]
     fn a_foot_is_a_step_and_its_syllables_subdivide_it() {
         // SPEC.md §4.2, straight through to mini-notation. "eA" is an iamb, so one step holding
-        // two syllables; two of them is two steps.
+        // two syllables; two of them is two steps. One cycle for the line, one for the outro.
         let text = render("eA eA\n", &Style::default());
-        assert_eq!(argument(&text, "s"), "[bd bd] [bd bd]");
+        assert_eq!(
+            argument(&text, "s"),
+            "<[[bd bd] [bd bd]] [[bd bd] [bd bd]]>"
+        );
     }
 
     #[test]
     fn stress_becomes_gain_and_all_three_levels_survive() {
         // Hand-worked: `e` unstressed is a third, `i` secondary two thirds, `A` primary full.
+        // Twice: the line, then the outro.
         let text = render("eiA\n", &Style::default());
-        assert_eq!(argument(&text, "gain"), "[0.333 0.667 1.000]");
+        assert_eq!(
+            argument(&text, "gain"),
+            "<[[0.333 0.667 1.000]] [[0.333 0.667 1.000]]>"
+        );
     }
 
     #[test]
     fn a_bar_a_voice_does_not_play_is_a_rest_not_a_shift() {
         // A voice must not have its later bars pulled forward into the gap, or every line after a
         // silence plays at the wrong time.
+        // Voice 0 plays bar 0 and rests in bar 1 — in the statement and again in the outro.
         let text = render("bA\ntA\n", &Style::default());
-        assert_eq!(argument(&text, "s"), "<bd ~>", "{text}");
+        assert_eq!(argument(&text, "s"), "<bd ~ bd ~>", "{text}");
     }
 
     #[test]
@@ -871,8 +879,8 @@ mod tests {
             .filter(|token| *token != "~")
             .count();
         assert_eq!(
-            sounding, 2,
-            "one note per rhyme word, and no others: {melody}"
+            sounding, 4,
+            "one note per rhyme word, and no others — two words, two passes: {melody}"
         );
     }
 
@@ -944,8 +952,9 @@ mod tests {
     #[test]
     fn a_five_foot_line_emits_five_steps() {
         // SPEC.md §4.2: "Don't quantise to 4/4."
+        // Five syllables a pass, and two passes: the statement and the outro (§4.6).
         let text = render("bA bA bA bA bA\n", &Style::default());
-        assert_eq!(argument(&text, "s").split_whitespace().count(), 5);
+        assert_eq!(argument(&text, "s").split_whitespace().count(), 10);
     }
 
     #[test]
@@ -1038,7 +1047,12 @@ mod tests {
             .split_whitespace()
             .filter_map(|token| token.parse().ok())
             .collect();
-        assert_eq!(depths.len(), 2, "{crush}");
+        // Two words, in the statement and again in the outro.
+        assert_eq!(
+            depths,
+            [depths[0], depths[1], depths[0], depths[1]],
+            "{crush}"
+        );
         assert!(
             depths[0] > depths[1],
             "the root is untouched and the variation eroded: {crush}"
@@ -1073,7 +1087,11 @@ mod tests {
         // the bar is stanza 2's one beat, which `bA` fills.
         let text = render("bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n", &Style::default());
         let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
-        assert!(first.starts_with("  s(\"<[hh ~ ~] ~ hh ~>\")"), "{text}");
+        // The outro repeats stanza 2, and stanza 1 keeps looping under it from bar 0: `hh ~`.
+        assert!(
+            first.starts_with("  s(\"<[hh ~ ~] ~ hh ~ hh ~>\")"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -1084,7 +1102,11 @@ mod tests {
         let text = render("de dA, se sA\nne nA ne nA\n", &Style::default());
         let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
         assert!(
-            first.starts_with("  s(\"<[[bd bd] [bd bd]] [[bd bd] ~]>\")"),
+            // ...and then both again, in the outro: the line with its call silent under it, and
+            // the call under bar 1.
+            first.starts_with(
+                "  s(\"<[[bd bd] [bd bd]] [[bd bd] ~] [[bd bd] [bd bd]] [[bd bd] ~]>\")"
+            ),
             "{text}"
         );
     }

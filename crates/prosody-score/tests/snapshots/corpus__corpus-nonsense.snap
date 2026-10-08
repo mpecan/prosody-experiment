@@ -4,13 +4,13 @@ expression: "Report::new(&score, edits).to_text()"
 ---
 metric             value  band             fit
 layering           1.846  2.000..4.000   0.862
-recurrence         0.375  0.500..0.900   0.580
+recurrence         0.688  0.500..0.900   1.000
 pitched            0.500  0.300..0.800   1.000
 pitch_entropy      1.566  1.500..3.000   1.000
 syncopation        0.438  0.300..0.700   1.000
-interest           0.871
+interest           0.971
 audible            1.000  23 of 23 edits
 local              1.000  23 of 23 edits
 explained          1.000  23 of 23 edits
 legibility         1.000
-overall            0.871
+overall            0.971

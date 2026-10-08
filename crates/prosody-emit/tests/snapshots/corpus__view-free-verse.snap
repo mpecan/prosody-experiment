@@ -18,7 +18,7 @@ stanza 0
   i celebrate myself and sing myself
   ──────────────────────────────────
   bar 0  foundation (mostregular)  voice 0  seed f2849578
-  sounds stated 0 · looping 3
+  sounds stated 0 · looping 3 6
     token          beat       gain    pitch     modulation sharp   bank   from
     i              0.0.0/2    1.00    bass 0 AY f0+0      0.06    AY     meter,role,sound,surprisal,repetition
     celebrate      0.0.1/2    1.00    bass 2 EH —         0.88    S      meter,role,surprisal
@@ -49,7 +49,7 @@ stanza 0
   for every atom belonging to me as good belongs to you
   ─────────────────────────────────────────────────────
   bar 2  foundation (mostregular)  voice 2  seed da537398
-  sounds stated 2
+  sounds stated 2 · looping 5
     token          beat       gain    pitch     modulation sharp   bank   from
     for            2.0.0/2    1.00    bass 0 AO —         0.31    AO     meter,role,surprisal
     every          2.0.1/2    1.00    bass 2 EH —         0.56    —      meter,role,surprisal
@@ -74,7 +74,7 @@ stanza 1
   i loafe and invite my soul
   ──────────────────────────
   bar 3  flourish (irregularity)  voice 3  seed ccc26f4e
-  sounds stated 3
+  sounds stated 3 · repeating 5
     token          beat       gain    pitch     modulation sharp   bank   from
     i              3.0.0/2    1.00    —         f0+0      0.06    AY     meter,sound,surprisal,repetition
     loafe          3.0.1/2    1.00    —         f18+0     0.56    OW     meter,sound,surprisal,phoneme(guessed)
@@ -87,7 +87,7 @@ stanza 1
   i lean and loafe at my ease observing a spear of summer grass
   ─────────────────────────────────────────────────────────────
   bar 4  flourish (irregularity)  voice 4  seed d643e10c
-  sounds stated 4
+  sounds stated 4 · repeating 6
     token          beat       gain    pitch     modulation sharp   bank   from
     i              4.0.0/2    1.00    —         f0+0      0.19    AY     meter,sound,surprisal,repetition
     lean           4.0.1/2    1.00    —         —         0.44    L      meter,surprisal

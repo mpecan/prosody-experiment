@@ -535,7 +535,9 @@ mod tests {
         // differ in length, so the second bar of a poem whose first line has three feet starts at
         // beat 3 — not at some fixed cycle boundary. This is what the text backend cannot do:
         // there every cycle is the same span, so the *foot* stretches instead.
-        let source = "bo bA bAn teA rot\nteA\n";
+        // Two stanzas, so the bars have different periods (§4.6). The outro repeats the last
+        // stanza, one beat, so the piece ends two beats after the boundary.
+        let source = "bo bA bAn teA rot\n\nteA\n";
         let score = score_of(source);
         let first = score.beats_in(0);
         assert!(
@@ -576,8 +578,13 @@ mod tests {
             .iter()
             .map(|m| m.at().parts())
             .collect();
-        // Fractions are kept in lowest terms, so the downbeat is 0/1, not 0/2.
-        assert_eq!(onsets, vec![(0, 1), (1, 2)], "two syllables, one foot");
+        // Fractions are kept in lowest terms, so the downbeat is 0/1, not 0/2. The outro plays the
+        // one-bar poem again from beat 1.
+        assert_eq!(
+            onsets,
+            vec![(0, 1), (1, 2), (1, 1), (3, 2)],
+            "two syllables, one foot, twice"
+        );
     }
 
     #[test]
@@ -789,9 +796,9 @@ mod tests {
                 .collect()
         };
         // Per line: `teA`'s stressed AA is the bass's open vowel, degree 0; `bAn` is the rhyme,
-        // class degree 0. Both sit on the root.
-        assert_eq!(notes(&c), vec![36, 36, 36, 36]);
-        assert_eq!(notes(&d), vec![38, 38, 38, 38], "the root moves every note");
+        // class degree 0. Both sit on the root — two lines, then both again in the outro.
+        assert_eq!(notes(&c), vec![36; 8]);
+        assert_eq!(notes(&d), vec![38; 8], "the root moves every note");
         assert_eq!(c.messages().len(), d.messages().len(), "and nothing else");
     }
 
@@ -825,9 +832,10 @@ mod tests {
                 .map(|m| m.at().as_beats())
                 .collect()
         };
-        // `bA` at byte 0 sounds twice: at the start, and with `tA` (byte 22).
+        // `bA` at byte 0 sounds three times: at the start, with `tA` (byte 22), and with `tA`
+        // again in the outro, where stanza 1 keeps looping under stanza 2's last pass.
         let host = onsets_of(22);
-        assert_eq!(onsets_of(0), vec![0.0, host[0]]);
+        assert_eq!(onsets_of(0), vec![0.0, host[0], host[1]]);
 
         // The six-syllable line's words start at bytes 3, 6, … 18; under `rA` (byte 28) every
         // one of them falls inside slot 3.
@@ -835,15 +843,15 @@ mod tests {
         let slot_end =
             slot_start + f64::from(u32::try_from(score.arrangement().slots()[3].beats()).unwrap());
         for word in [3, 6, 9, 12, 15, 18] {
-            let looped = *onsets_of(word).last().unwrap();
+            // Its second sounding: the first is its own statement, the third the outro.
+            let looped = onsets_of(word)[1];
             assert!(
                 (slot_start..slot_end).contains(&looped),
                 "word at {word} sounds at {looped}, outside {slot_start}..{slot_end}"
             );
         }
-        assert_eq!(
-            onsets_of(3).last().copied(),
-            Some(slot_start),
+        assert!(
+            (onsets_of(3)[1] - slot_start).abs() < 1e-9,
             "it starts with its host"
         );
     }
@@ -862,12 +870,14 @@ mod tests {
                 .map(|m| m.at().as_beats())
                 .collect()
         };
-        assert_eq!(onsets_of(0), vec![0.0, 2.0]);
-        assert_eq!(onsets_of(3), vec![0.5, 2.5]);
+        // Then the outro repeats both bars from beat 4: the whole line at 4 — its call silent
+        // under it — and the call alone under bar 1 at 6.
+        assert_eq!(onsets_of(0), vec![0.0, 2.0, 4.0, 6.0]);
+        assert_eq!(onsets_of(3), vec![0.5, 2.5, 4.5, 6.5]);
         assert_eq!(
-            onsets_of(7).len(),
-            1,
-            "`se` is past the caesura and is not in the call"
+            onsets_of(7),
+            vec![1.0, 5.0],
+            "`se` is past the caesura and is not in the call: only its line's two passes"
         );
     }
 }

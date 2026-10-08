@@ -217,6 +217,7 @@ Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`
 | Per-stanza metrical regularity | foundation layer (pulse) vs flourish (ornament) | §4.1 |
 | A stanza, once stated | keeps looping until the next stanza of its layer transforms it, bar by bar | §4.6 |
 | A stanza's longest line | the length of every bar the stanza plays in; shorter lines rest | §4.6 |
+| The end of the poem | the loops play one more pass — an outro — and stop | §4.6 |
 | A stanza made only of refrains | stops every loop and drops in alone, like a chorus | §4.6 |
 | A pause inside a line (`,` `;` `—` …) | the half-line before it loops underneath until the next one | §4.6 |
 | A rhyme answered later in its stanza | the line keeps sounding until its answer arrives, then resolves | §4.6 |

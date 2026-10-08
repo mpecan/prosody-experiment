@@ -344,7 +344,8 @@ fn a_score_with_nothing_to_play_says_so() {
 #[test]
 fn odd_metres_survive_into_the_pattern() {
     // SPEC.md §4.2: "iambic pentameter yields five beats. Poetry naturally produces odd meters.
-    // Don't quantise to 4/4." A five-foot line must emit five steps, not four or eight.
+    // Don't quantise to 4/4." A five-foot line must emit five steps, not four or eight — in each
+    // of its two passes, the statement and the outro (§4.6).
     let (score, style) = score_of("bA bA bA bA bA\n");
     let text = Strudel::new().render(&score, &style).unwrap();
     let pattern = text
@@ -357,7 +358,7 @@ fn odd_metres_survive_into_the_pattern() {
         .to_owned();
     assert_eq!(
         pattern.split_whitespace().count(),
-        5,
+        10,
         "five feet, five steps: {pattern}"
     );
 }

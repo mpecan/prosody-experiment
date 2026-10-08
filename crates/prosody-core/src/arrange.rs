@@ -15,7 +15,10 @@
 //!   everything: every loop stops, and it is stated alone — a chorus dropping in. It then loops
 //!   like any other stanza.
 //!
-//! The piece ends when the last stanza has fully arrived.
+//! When the poem runs out, nothing has stopped the loops, so they play **one more pass**: the last
+//! stanza again, with the other layer's loop and every lane under it — an outro. Then the piece
+//! ends. (*Machine cycle 3b, pending review*: before, the piece ended as the last stanza arrived,
+//! so a one-stanza poem never looped at all.)
 //!
 //! # The call lane: §4.1's second tier
 //!
@@ -49,8 +52,9 @@
 //! after it is first heard, until the next refrain line is first heard and takes the lane over.
 //! It is the call lane's rule with a whole repeated line in place of a half-line.
 //!
-//! No lane doubles what already sounds: a held or refrain line whose voice is already in the slot
-//! — as its host, or in a layer's loop — is left out of it.
+//! No lane doubles what already sounds: a call, held or refrain line whose voice is already in the
+//! slot — as its host, or in a layer's loop — is left out of it. A call is part of its line, so it
+//! is silent wherever its whole line is playing.
 //!
 //! A refrain stanza stops the held and refrain lanes along with every other loop, and is stated
 //! alone.
@@ -118,6 +122,9 @@ pub enum Cause {
     Holding,
     /// A refrain line, looping in the refrain lane.
     Refraining,
+    /// The last stanza's loop playing one more pass after the poem has ended, because nothing
+    /// arrived to stop it.
+    Repeating,
 }
 
 /// Which of the piece's loops a placement belongs to.
@@ -307,6 +314,7 @@ pub fn run(poem: &Poem, roles: &PoemRoles, rhyme: &PoemRhyme, score: &Score) -> 
         heard: BTreeSet::new(),
     };
     let mut first_bar = 0;
+    let mut last: Option<(Layer, Vec<usize>)> = None;
     for (index, stanza) in poem.stanzas().iter().enumerate() {
         let bars: Vec<usize> = (first_bar..first_bar + stanza.lines().len()).collect();
         first_bar += stanza.lines().len();
@@ -346,7 +354,14 @@ pub fn run(poem: &Poem, roles: &PoemRoles, rhyme: &PoemRhyme, score: &Score) -> 
                 piece.push(placement(bar, layer, Cause::Stated), Company::Loops);
             }
         }
-        *piece.loops.of(layer) = Some(Loop::new(bars));
+        *piece.loops.of(layer) = Some(Loop::new(bars.clone()));
+        last = Some((layer, bars));
+    }
+    // The outro: nothing arrived to stop the loops.
+    if let Some((layer, bars)) = last {
+        for bar in bars {
+            piece.push(placement(bar, layer, Cause::Repeating), Company::Loops);
+        }
     }
     Arrangement { slots: piece.slots }
 }
@@ -481,7 +496,9 @@ impl Piece<'_> {
             {
                 placements.push(placement(bar, other(layer), Cause::Looping));
             }
-            if let Some((bar, call)) = self.lane {
+            if let Some((bar, call)) = self.lane
+                && !self.sounding(&placements, bar)
+            {
                 placements.push(Placement {
                     bar: Bar::new(bar),
                     lane: Lane::Call,

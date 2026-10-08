@@ -132,7 +132,11 @@ Bar-locked: each bar of the piece takes its length from the stanza of the line a
 stanza's *period*, its longest line — so a stanza is a loop of one length and the meter changes only
 where the stanza does (*machine cycle 2, pending review*; before, a bar took its own line's length).
 A line that fits the bar keeps one beat per foot and rests for the remainder; a longer loop is
-squeezed into the bar. The piece ends when the last stanza has fully arrived.
+squeezed into the bar.
+
+**The outro** (*machine cycle 3b, pending review*). When the poem runs out nothing has stopped the
+loops, so they play one more pass — the last stanza again, with the other layer and every lane
+under it — and then the piece ends. A one-stanza poem therefore loops once. The piece ends when the last stanza has fully arrived.
 
 **The call lane** (§4.1's second tier, decided the same day). The half-line before a line's first
 internal caesura — its *call*: "Tyger Tyger," — is lifted out once its line has been heard, and
@@ -218,7 +222,7 @@ Property tests worth having early:
 - **CMUdict is English-only.** Multilingual poems, Slovenian, Italian, German — all unsupported. Options: eSpeak-NG phonemisation (broad language coverage, permissive licence, but a different phoneme inventory and lower quality), or per-language dictionaries with a pluggable phonemiser trait. Design the trait boundary now even if only English is implemented; retrofitting a phoneme inventory abstraction later is grim.
 - **Free verse.** Poems with no regular meter make §4.1 degenerate — everything reads as high-variance flourish with no foundation. Needs a fallback: possibly a global-variance-relative threshold rather than absolute, so the *most* regular stanza in a poem always anchors.
 - **Stress detection ambiguity.** CMUdict gives lexical stress, not phrasal stress. "Content" (noun) vs "content" (adj) differ. Accept the error rate initially; do not build a POS tagger in week one.
-- **Very short poems** produce very little structure. Define minimum viable input, or make looping/development an explicit style parameter (which arguably violates I3 — think it through). *Looping is now structure (§4.6), not style — but a single-stanza poem still never loops, since nothing follows it.*
+- **Very short poems** produce very little structure. Define minimum viable input, or make looping/development an explicit style parameter (which arguably violates I3 — think it through). *Looping is now structure (§4.6), not style. A single-stanza poem loops once, in the outro (machine cycle 3b, pending review).*
 - **Aesthetic risk.** The mapping can be perfectly principled and still sound bad. Budget time for tuning the *ranges* (which is palette work, and legitimately belongs in the style layer).
 
 ---

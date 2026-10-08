@@ -119,7 +119,7 @@ stanza 2
   the winter comes and we are not beguiled
   ────────────────────────────────────────
   bar 6  foundation (regularity)  voice 5  seed 33f96152
-  sounds arriving 12(1) 15(2) 18(3) · holding 13-14 16-17 19
+  sounds arriving 12(1) 15(2) 18(3) · holding 13-14 16-17 19 · repeating 21
     token          beat       gain    pitch     modulation sharp   bank   from
     the            6.0.0/2    0.33    —         f25+0     0.12    AH     meter,sound,surprisal
     winter         6.0.1/2    1.00    bass 4 IH —         0.62    W      meter,role,surprisal
@@ -135,7 +135,7 @@ stanza 2
   we know the frost and know the bitter brine
   ───────────────────────────────────────────
   bar 7  foundation (regularity)  voice 6  seed 55288050
-  sounds arriving 16(2) 19(3)
+  sounds arriving 16(2) 19(3) · repeating 22
     token          beat       gain    pitch     modulation sharp   bank   from
     we             7.0.0/2    1.00    bass 4 IY f32+0     0.38    —      meter,role,sound,surprisal
     know           7.0.1/2    1.00    bass 2 OW f38+0     0.12    N      meter,role,sound,surprisal
@@ -151,7 +151,7 @@ stanza 2
   and then to go my ways alone and wild
   ─────────────────────────────────────
   bar 8  foundation (refrain of voice 2)  voice 2  seed ebd7d831
-  sounds arriving 20(3)
+  sounds arriving 20(3) · refraining 21-22 · repeating 23
     token          beat       gain    pitch     modulation sharp   bank   from
     and            8.0.0/2    0.33    —         f11+0     0.25    AH     meter,sound,surprisal
     then           8.0.1/2    1.00    bass 2 EH f17+0     0.38    —      meter,role,sound,surprisal

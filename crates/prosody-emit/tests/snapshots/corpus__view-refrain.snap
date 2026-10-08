@@ -86,7 +86,7 @@ stanza 2
   to him who alone doeth great wonders
   ────────────────────────────────────
   bar 4  foundation (regularity)  voice 3  seed 57ab2427
-  sounds arriving 6(1) 8(2)
+  sounds arriving 6(1) 8(2) · repeating 10
     token          beat       gain    pitch     modulation sharp   bank   from
     to             4.0.0/2    1.00    bass 4 UW —         0.12    UW     meter,role,surprisal
     him            4.0.1/2    1.00    bass 4 IH —         0.31    HH     meter,role,surprisal
@@ -102,7 +102,7 @@ stanza 2
   for his mercy endureth for ever
   ───────────────────────────────
   bar 5  foundation (refrain of voice 1)  voice 1  seed 19d775b9
-  sounds arriving 9(2)
+  sounds arriving 9(2) · refraining 10 · repeating 11
     token          beat       gain    pitch     modulation sharp   bank   from
     for            5.0.0/2    1.00    bass 0 AO f6+0      0.06    F      meter,role,sound,surprisal
     his            5.0.1/2    1.00    bass 4 IH f10+0     0.44    —      meter,role,sound,surprisal

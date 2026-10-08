@@ -103,7 +103,7 @@ fn the_layers_are_what_the_rule_assumes() {
 
 #[test]
 fn a_stanza_loops_under_the_next_and_transforms_into_its_rival() {
-    use Cause::{Arriving, Holding, Looping, Stated, Yielding};
+    use Cause::{Arriving, Holding, Looping, Repeating, Stated, Yielding};
     let score = compile(THREE);
     assert_eq!(
         slots(&score),
@@ -123,6 +123,10 @@ fn a_stanza_loops_under_the_next_and_transforms_into_its_rival() {
             vec![(1, Yielding { pass: 1 }), (3, Looping), (4, Holding)],
             vec![(4, Arriving { pass: 2 }), (2, Looping)],
             vec![(5, Arriving { pass: 2 }), (3, Looping)],
+            // The poem has ended and nothing stopped the loops: stanza 3 plays one more pass,
+            // with stanza 2 still looping under it.
+            vec![(4, Repeating), (2, Looping)],
+            vec![(5, Repeating), (3, Looping)],
         ]
     );
 }
@@ -155,7 +159,7 @@ fn a_slot_takes_its_hosts_stanza_period() {
 
 #[test]
 fn a_refrain_stanza_overrules_every_loop() {
-    use Cause::{Looping, Overruling, Refraining, Stated};
+    use Cause::{Looping, Overruling, Refraining, Repeating, Stated};
     // Stanza 3 repeats stanza 1 verbatim, so both are made of refrain lines: both overrule, and
     // stanza 3 arrives alone — the flourish loop under it stops. In between, the refrain lane
     // plays `sa sA`, stanza 1's last refrain line, except where the foundation loop already does.
@@ -169,6 +173,10 @@ fn a_refrain_stanza_overrules_every_loop() {
             vec![(3, Stated), (1, Looping)],
             vec![(4, Overruling)],
             vec![(5, Overruling)],
+            // The outro: stanza 3 again, with its last refrain line in the lane — except under
+            // itself.
+            vec![(4, Repeating), (5, Refraining)],
+            vec![(5, Repeating)],
         ]
     );
 }
@@ -187,13 +195,19 @@ fn every_placed_line_has_material() {
 
 #[test]
 fn a_call_loops_from_the_bar_after_its_line() {
-    use Cause::{Calling, Stated};
+    use Cause::{Calling, Repeating, Stated};
     // `da dA, sa sA`: the caesura after `dA` makes `da dA` the line's call. It is heard in its line
-    // in bar 0, then on its own under bar 1.
+    // in bar 0, then on its own under bar 1. In the outro it is silent under its own line, which
+    // already plays it, and returns under bar 1.
     let score = compile("da dA, sa sA\nma mA ma mA\n");
     assert_eq!(
         slots(&score),
-        vec![vec![(0, Stated)], vec![(1, Stated), (0, Calling)]]
+        vec![
+            vec![(0, Stated)],
+            vec![(1, Stated), (0, Calling)],
+            vec![(0, Repeating)],
+            vec![(1, Repeating), (0, Calling)],
+        ]
     );
 
     let call = score.arrangement().slots()[1].placements()[1];
@@ -210,27 +224,32 @@ fn a_call_loops_from_the_bar_after_its_line() {
 
 #[test]
 fn the_next_call_takes_the_lane_and_the_layers_loop_beside_it() {
-    use Cause::{Calling, Looping, Stated};
+    use Cause::{Calling, Looping, Repeating, Stated};
     // Stanza 1 (foundation) has a call in bar 0; stanza 2 (flourish: one syllable against six) has
-    // one in bar 2, `ta`. Bar 2 still hears stanza 1's call; from bar 3 the lane is `ta`.
+    // one in bar 2, `ta`. In bar 2 stanza 1's call would sound — but its whole line is looping
+    // there already, so it is left out. From bar 3 the lane is `ta`, silent again in the outro
+    // under `ta`'s own line.
     let score = compile("da dA, sa sA\nma mA ma mA\n\nta, tA\nna nA na nA na nA\n");
     assert_eq!(
         slots(&score),
         vec![
             vec![(0, Stated)],
             vec![(1, Stated), (0, Calling)],
-            vec![(2, Stated), (0, Looping), (0, Calling)],
+            vec![(2, Stated), (0, Looping)],
             vec![(3, Stated), (1, Looping), (2, Calling)],
+            vec![(2, Repeating), (0, Looping)],
+            vec![(3, Repeating), (1, Looping), (2, Calling)],
         ]
     );
 }
 
 #[test]
 fn a_refrain_stanza_silences_the_call_lane_too() {
-    use Cause::{Calling, Looping, Overruling, Refraining, Stated};
+    use Cause::{Calling, Looping, Overruling, Refraining, Repeating, Stated};
     // Stanzas 1 and 3 are the same, so both are refrain stanzas: stated alone, no loops and no
-    // call under them. Stanza 2 in between hears stanza 1's loop, its call, and its last refrain
-    // line where the loop is not already playing it.
+    // call under them. Stanza 2 in between hears stanza 1's loop, and its call and its last
+    // refrain line wherever the loop is not already playing the line they come from. The outro
+    // repeats stanza 3 with its own call and refrain line, each silent under its own line.
     let score = compile(
         "da dA, sa sA\nma mA ma mA\n\nta\nna nA na nA na nA\n\nda dA, sa sA\nma mA ma mA\n",
     );
@@ -239,10 +258,12 @@ fn a_refrain_stanza_silences_the_call_lane_too() {
         vec![
             vec![(0, Overruling)],
             vec![(1, Overruling)],
-            vec![(2, Stated), (0, Looping), (0, Calling), (1, Refraining)],
+            vec![(2, Stated), (0, Looping), (1, Refraining)],
             vec![(3, Stated), (1, Looping), (0, Calling)],
             vec![(4, Overruling)],
             vec![(5, Overruling)],
+            vec![(4, Repeating), (5, Refraining)],
+            vec![(5, Repeating), (4, Calling)],
         ]
     );
 }
@@ -263,9 +284,10 @@ fn a_trailing_comma_is_not_a_call() {
 
 #[test]
 fn an_open_rhyme_holds_until_its_answer() {
-    use Cause::{Holding, Stated};
+    use Cause::{Holding, Repeating, Stated};
     // ABAB: the A line holds under the B line, and the B line under the second A. Each stops in
-    // the bar its answer arrives.
+    // the bar its answer arrives. Every line has been answered by the end, so the outro holds
+    // nothing.
     let score = compile("da dA\nda dO\nsa sA\nsa sO\n");
     assert_eq!(
         slots(&score),
@@ -274,6 +296,10 @@ fn an_open_rhyme_holds_until_its_answer() {
             vec![(1, Stated), (0, Holding)],
             vec![(2, Stated), (1, Holding)],
             vec![(3, Stated)],
+            vec![(0, Repeating)],
+            vec![(1, Repeating)],
+            vec![(2, Repeating)],
+            vec![(3, Repeating)],
         ]
     );
     let held = score.arrangement().slots()[1].placements()[1];
@@ -283,7 +309,7 @@ fn an_open_rhyme_holds_until_its_answer() {
 
 #[test]
 fn an_enclosed_rhyme_holds_across_the_pair_inside_it() {
-    use Cause::{Holding, Stated};
+    use Cause::{Holding, Repeating, Stated};
     // ABBA: the B pair answers itself at once, so only the A line is ever held, under both Bs.
     let score = compile("da dA\nda dO\nsa sO\nsa sA\n");
     assert_eq!(
@@ -293,6 +319,10 @@ fn an_enclosed_rhyme_holds_across_the_pair_inside_it() {
             vec![(1, Stated), (0, Holding)],
             vec![(2, Stated), (0, Holding)],
             vec![(3, Stated)],
+            vec![(0, Repeating)],
+            vec![(1, Repeating)],
+            vec![(2, Repeating)],
+            vec![(3, Repeating)],
         ]
     );
 }
@@ -312,7 +342,7 @@ fn a_rhyme_answered_only_in_another_stanza_is_not_held() {
 
 #[test]
 fn a_refrain_line_loops_until_the_next_takes_over_and_nothing_doubles() {
-    use Cause::{Holding, Refraining, Stated};
+    use Cause::{Holding, Refraining, Repeating, Stated};
     // Two refrains, `dO da` (bars 0, 4) and `sO so` (bars 2, 5), and three rhyme pairs: 0–4,
     // 1–3, 2–5. Bar 0 is both a refrain and held; it sounds once, in the refrain lane, until bar 2
     // takes that lane and bar 0 is left to the held lane. A refrain is silent under its own voice.
@@ -326,6 +356,13 @@ fn a_refrain_line_loops_until_the_next_takes_over_and_nothing_doubles() {
             vec![(3, Stated), (2, Refraining), (0, Holding)],
             vec![(4, Stated), (2, Refraining)],
             vec![(5, Stated), (4, Refraining)],
+            // The outro: the lane ends on `sO so` (bar 5), silent under bars 2 and 5, its voice.
+            vec![(0, Repeating), (5, Refraining)],
+            vec![(1, Repeating), (5, Refraining)],
+            vec![(2, Repeating)],
+            vec![(3, Repeating), (5, Refraining)],
+            vec![(4, Repeating), (5, Refraining)],
+            vec![(5, Repeating)],
         ]
     );
 }

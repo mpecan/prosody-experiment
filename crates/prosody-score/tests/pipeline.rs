@@ -90,15 +90,18 @@ fn value(score: &Score, name: &str) -> f64 {
 
 #[test]
 fn a_line_of_iambs_measures_as_worked_by_hand() {
-    // `da dA da dA`: two iambs, one beat each, accents on both offbeats. The first accent is
-    // followed by the unaccented second beat — one level stronger — and the second by nothing.
-    // One unit over two beats.
+    // `da dA da dA`: two iambs, one beat each, accents on both offbeats — played twice, since
+    // the outro repeats the last stanza (§4.6). Per bar, the first accent is followed by the
+    // unaccented second beat, one level stronger: one unit. The second accent of bar 0 is followed
+    // by bar 1's unaccented downbeat, two levels stronger; that of bar 1 by nothing. 1 + 2 + 1 + 0
+    // units over four beats: 1.0 — the metrics module's `iambs(2)`, worked the same way.
     let score = compile("da dA da dA\n").unwrap();
-    assert!((value(&score, "syncopation") - 0.5).abs() < 1e-9);
-    // One line is one voice, and nothing returns. But each beat's `dA` is pitched (the bass,
-    // below), and a pitched event sounds the line's drum *and* the synth: two instruments a beat.
+    assert!((value(&score, "syncopation") - 1.0).abs() < 1e-9);
+    // One line is one voice. Each beat's `dA` is pitched (the bass, below), and a pitched event
+    // sounds the line's drum *and* the synth: two instruments a beat. In the outro both return:
+    // 2 of the 4 (bar, instrument) pairs.
     assert!((value(&score, "layering") - 2.0).abs() < 1e-9);
-    assert!(value(&score, "recurrence").abs() < 1e-9);
+    assert!((value(&score, "recurrence") - 0.5).abs() < 1e-9);
     // A rhyme class of one is no melodic relation, so no rhyme note (PLAN.md, free verse). But
     // the one line is the foundation, so its two stressed `dA`s carry the bass: 2 of 4 events.
     assert!((value(&score, "pitched") - 0.5).abs() < 1e-9);
@@ -116,9 +119,10 @@ fn a_refrain_is_a_returning_voice() {
     // bar 0 is heard it loops in the refrain lane under bar 1 (§4.6). Every bar also has a
     // pitched `dA` or `mA` (rhyme or bass), so the synth sounds in each. The (bar, instrument)
     // pairs: {0, synth} in slot 0; {1, 0, synth} in slot 1; {0, synth} in slot 2, a refrain
-    // stanza. Four of the seven bring something back.
+    // stanza; {0, synth} again in slot 3, the outro, its lane silent under its own voice. Six of
+    // the nine bring something back.
     let score = compile("da dA da dA\nsa mA sa mA\n\nda dA da dA\n").unwrap();
-    assert!((value(&score, "recurrence") - 4.0 / 7.0).abs() < 1e-9);
+    assert!((value(&score, "recurrence") - 6.0 / 9.0).abs() < 1e-9);
 }
 
 #[test]
