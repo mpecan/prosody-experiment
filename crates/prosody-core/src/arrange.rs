@@ -30,6 +30,31 @@
 //! This is what gives a poem whose stanzas all share one layer something underneath it: caesurae
 //! are sparse, but each one leaves a figure that persists.
 //!
+//! # The held lane: a rhyme left open keeps sounding
+//!
+//! §4.5 makes rhyme melody; this makes it suspension. A line whose rhyme is answered later *in its
+//! own stanza* is held — it keeps sounding, fitted to each bar, from the bar after it is first heard
+//! until the bar its answer is first heard, where it stops: the answer resolves it. In ABAB the A
+//! line holds under the B line, then the B line under the second A; in ABBA the A line holds under
+//! both Bs. Several lines can be open at once, and each is its own placement.
+//!
+//! An answer has to come within the stanza. A rhyme class is poem-wide (§4.5, so a refrain can
+//! return to its pitch), but a line answered thirty lines later is not a suspension anyone hears
+//! as one, and holding it that long would bury everything else. A line in a class of one is never
+//! answered, so never held.
+//!
+//! # The refrain lane: §4.3's "literal loop of that voice"
+//!
+//! A refrain line — one whose text occurs more than once — loops in a lane of its own from the bar
+//! after it is first heard, until the next refrain line is first heard and takes the lane over.
+//! It is the call lane's rule with a whole repeated line in place of a half-line.
+//!
+//! No lane doubles what already sounds: a held or refrain line whose voice is already in the slot
+//! — as its host, or in a layer's loop — is left out of it.
+//!
+//! A refrain stanza stops the held and refrain lanes along with every other loop, and is stated
+//! alone.
+//!
 //! # Bar-locked
 //!
 //! Every [`Slot`] is one bar of the piece, and its length is its *host*'s: the line arriving in
@@ -54,6 +79,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::parse::Poem;
+use crate::repetition::VoiceId;
+use crate::rhyme::PoemRhyme;
 use crate::role::{Layer, LineBasis, PoemRoles};
 use crate::span::Span;
 use crate::voice::{Bar, Score};
@@ -80,15 +107,23 @@ pub enum Cause {
     Looping,
     /// The half-line before this line's first caesura, looping in the call lane.
     Calling,
+    /// A line whose rhyme its stanza has not answered yet, held in the held lane.
+    Holding,
+    /// A refrain line, looping in the refrain lane.
+    Refraining,
 }
 
-/// Which of the piece's three loops a placement belongs to.
+/// Which of the piece's loops a placement belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Lane {
     /// A layer's loop of whole stanzas (§4.1).
     Layer(Layer),
     /// The call lane: one half-line, looping.
     Call,
+    /// The held lane: lines waiting for their rhyme.
+    Held,
+    /// The refrain lane: one refrain line, looping.
+    Refrain,
 }
 
 /// How much of its line a placement sounds.
@@ -237,16 +272,20 @@ const fn other(layer: Layer) -> Layer {
 
 /// Arranges a lowered poem (see the module documentation for the rule).
 ///
-/// `roles` must describe `poem`; `score` must be its lowering. Lowering calls this itself, having
-/// already checked both.
+/// `roles` and `rhyme` must describe `poem`; `score` must be its lowering. Lowering calls this
+/// itself, having already checked all three.
 #[must_use]
-pub fn run(poem: &Poem, roles: &PoemRoles, score: &Score) -> Arrangement {
+pub fn run(poem: &Poem, roles: &PoemRoles, rhyme: &PoemRhyme, score: &Score) -> Arrangement {
     let mut piece = Piece {
         score,
         calls: calls(poem, score),
+        answers: answers(rhyme),
+        refrains: refrains(roles),
         slots: Vec::new(),
         loops: Loops::default(),
         lane: None,
+        held: BTreeSet::new(),
+        refrain: None,
         heard: BTreeSet::new(),
     };
     let mut first_bar = 0;
@@ -268,6 +307,8 @@ pub fn run(poem: &Poem, roles: &PoemRoles, score: &Score) -> Arrangement {
         if refrain {
             piece.loops = Loops::default();
             piece.lane = None;
+            piece.held.clear();
+            piece.refrain = None;
             for &bar in &bars {
                 piece.push(placement(bar, layer, Cause::Overruling), Company::Alone);
             }
@@ -311,10 +352,47 @@ fn calls(poem: &Poem, score: &Score) -> BTreeMap<usize, Span> {
         .collect()
 }
 
+/// Each line whose rhyme is answered later in its stanza, and the line that answers it: the next
+/// one in the stanza of the same class.
+fn answers(rhyme: &PoemRhyme) -> BTreeMap<usize, usize> {
+    let mut answers = BTreeMap::new();
+    let mut first_bar = 0;
+    for stanza in rhyme.stanzas() {
+        let lines = stanza.lines();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(class) = line.class() else {
+                continue;
+            };
+            let answer = lines
+                .iter()
+                .enumerate()
+                .skip(index + 1)
+                .find(|(_, later)| later.class() == Some(class));
+            if let Some((later, _)) = answer {
+                answers.insert(first_bar + index, first_bar + later);
+            }
+        }
+        first_bar += lines.len();
+    }
+    answers
+}
+
+/// Every refrain line, by bar, with the voice it repeats.
+fn refrains(roles: &PoemRoles) -> BTreeMap<usize, VoiceId> {
+    roles
+        .lines()
+        .enumerate()
+        .filter_map(|(bar, (_, line))| match line.basis() {
+            LineBasis::Refrain(voice) => Some((bar, voice)),
+            LineBasis::Inherited(_) => None,
+        })
+        .collect()
+}
+
 /// What may sound with a host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Company {
-    /// The other layer's loop and the call lane.
+    /// The other layer's loop and the call, held and refrain lanes.
     Loops,
     /// Nothing: a refrain stanza is stated alone.
     Alone,
@@ -324,17 +402,41 @@ enum Company {
 struct Piece<'a> {
     score: &'a Score,
     calls: BTreeMap<usize, Span>,
+    answers: BTreeMap<usize, usize>,
+    refrains: BTreeMap<usize, VoiceId>,
     slots: Vec<Slot>,
     loops: Loops,
     /// The call lane: whose call is looping, if any.
     lane: Option<(usize, Span)>,
-    /// Lines already heard as a host, so re-hosting one does not restart the lane.
+    /// The held lane: lines waiting for their answer.
+    held: BTreeSet<usize>,
+    /// The refrain lane: which refrain line is looping, if any.
+    refrain: Option<usize>,
+    /// Lines already heard as a host, so re-hosting one does not restart a lane.
     heard: BTreeSet<usize>,
 }
 
 impl Piece<'_> {
+    /// Whether `bar`'s line — or another line of its voice — already sounds among `placements`.
+    /// A lane never doubles what is already playing.
+    fn sounding(&self, placements: &[Placement], bar: usize) -> bool {
+        let voice = self.refrains.get(&bar);
+        placements.iter().any(|placement| {
+            let other = placement.bar.get();
+            other == bar || (voice.is_some() && self.refrains.get(&other) == voice)
+        })
+    }
+
     /// Adds a slot for `host`, with whatever loops under it.
     fn push(&mut self, host: Placement, company: Company) {
+        let bar = host.bar.get();
+        let first = !self.heard.contains(&bar);
+        if first {
+            // An answer resolves its line in the bar it arrives in: the two do not sound together.
+            let answers = &self.answers;
+            self.held.retain(|opener| answers.get(opener) != Some(&bar));
+        }
+
         let mut placements = vec![host];
         if company == Company::Loops {
             if let Lane::Layer(layer) = host.lane
@@ -351,16 +453,32 @@ impl Piece<'_> {
                     part: Part::Call(call),
                 });
             }
+            if let Some(refrain) = self.refrain
+                && !self.sounding(&placements, refrain)
+            {
+                placements.push(lane(refrain, Lane::Refrain, Cause::Refraining));
+            }
+            for &opener in &self.held {
+                if !self.sounding(&placements, opener) {
+                    placements.push(lane(opener, Lane::Held, Cause::Holding));
+                }
+            }
         }
         self.slots.push(slot(self.score, placements));
 
-        // The lane changes *after* the bar its line is first heard in, so a call is heard in its
-        // line before it is heard on its own.
-        let bar = host.bar.get();
-        if self.heard.insert(bar)
-            && let Some(&call) = self.calls.get(&bar)
-        {
-            self.lane = Some((bar, call));
+        // Lanes change *after* the bar their line is first heard in, so a line is heard in place
+        // before it is heard underneath.
+        if first {
+            self.heard.insert(bar);
+            if let Some(&call) = self.calls.get(&bar) {
+                self.lane = Some((bar, call));
+            }
+            if self.refrains.contains_key(&bar) {
+                self.refrain = Some(bar);
+            }
+            if self.answers.contains_key(&bar) {
+                self.held.insert(bar);
+            }
         }
     }
 }
@@ -390,6 +508,15 @@ const fn placement(bar: usize, layer: Layer, cause: Cause) -> Placement {
     Placement {
         bar: Bar::new(bar),
         lane: Lane::Layer(layer),
+        cause,
+        part: Part::Line,
+    }
+}
+
+const fn lane(bar: usize, lane: Lane, cause: Cause) -> Placement {
+    Placement {
+        bar: Bar::new(bar),
+        lane,
         cause,
         part: Part::Line,
     }

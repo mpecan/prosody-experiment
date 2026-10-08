@@ -213,6 +213,8 @@ Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`
 | A stanza, once stated | keeps looping until the next stanza of its layer transforms it, bar by bar | §4.6 |
 | A stanza made only of refrains | stops every loop and drops in alone, like a chorus | §4.6 |
 | A pause inside a line (`,` `;` `—` …) | the half-line before it loops underneath until the next one | §4.6 |
+| A rhyme answered later in its stanza | the line keeps sounding until its answer arrives, then resolves | §4.6 |
+| A refrain line | loops in its own lane until the next refrain line takes over | §4.6 |
 | Foot → beat, syllable → subdivision, line → bar | rhythm | §4.2 |
 | Stress | accent / velocity | §4.2 |
 | A line repeated verbatim | *the same instrument* played again | §4.3 |
@@ -265,13 +267,13 @@ are enforced rather than merely intended.
 ## State of it
 
 Everything `SPEC.md` asks for is built: all the mappings, both backends, the live-reload watcher,
-the debug view, a golden corpus, and property tests for all four invariants. 560 tests.
+the debug view, a golden corpus, and property tests for all four invariants. 581 tests.
 
 Things that are known to be wrong, in rough order of how much they would bother a listener:
 
-- **A poem with neither alternating layers nor mid-line pauses plays one thing at a time.**
-  Stanzas loop until a rival takes over and a caesura's half-line loops underneath (§4.6), but
-  Wilde's villanelle and Sonnet 18 have neither, and a single-stanza poem never loops at all.
+- **A poem with no alternating layers, pauses, in-stanza rhymes or refrains plays one thing at a
+  time.** Stanzas loop, and calls, open rhymes and refrains each get a lane underneath (§4.6), but
+  unrhymed one-stanza verse still has nothing to stack.
 - **Pitch reaches only about 8% of events.** The melody is the rhyme words and nothing else, so
   most of what you hear is percussion with sparse melodic punctuation.
 - **Polysyllabic rhyme is mis-scored.** The rhyme tail starts at the last *primary-stressed* vowel,

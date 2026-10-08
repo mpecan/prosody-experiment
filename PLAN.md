@@ -303,6 +303,33 @@ say what its change bought.
 
 ## Log
 
+### §4.6's held and refrain lanes: an open rhyme sounds until it is answered
+
+The user chose both, for the poems that still played one thing at a time (Wilde, Sonnet 18). A line
+whose rhyme is answered later in its stanza is held under every bar until its answer is first
+heard; a refrain line loops in its own lane until the next refrain line is first heard. No lane
+doubles a voice already in the bar, which matters where a refrain is also a held rhyme or is
+already in a layer's loop. `arrange::run` now reads the rhyme analysis.
+
+Measured (layering, before → after): Wilde 1.000 → 1.869, Sonnet 18 1.000 → 1.275, Prešeren 1.000
+→ 1.167, the villanelle 1.000 → 2.238, Tyger 1.957 → 3.124, Poe 2.222 → 2.941, Hopkins 1.840 →
+2.520. Interest: Wilde 0.804 → 0.972, Sonnet 18 0.535 → 0.625, villanelle 0.651 → 0.725; Poe fell
+0.688 → 0.664 (layering is near the band's top, pitch entropy fell). Whitman, free verse, nonsense,
+one-line and Slovenian are unchanged — no in-stanza rhymes, no refrain lines.
+
+Sonnet 18 gains less than hoped: only 4 of its 14 bars hold anything. Two of its B rhymes
+(`temperate`/`date`, `dimm'd`/`untrimm'd`) fall below the class threshold, so their quatrains hold
+only the A line for one bar, and the closing couplet answers itself at once.
+
+Explained locality fell where refrains are probed: Wilde 0.918 → 0.820, Tyger 0.860 → 0.811.
+Checked edit by edit against the previous commit: every new unexplained edit replaces a word of a
+refrain line, which stops it being a refrain, so it no longer takes the lane over and the *other*
+refrain loops on in its place. That is a real, audible, poem-wide consequence of "until the next
+takes over"; kept as measured, like the role flips.
+
+The Tyger's refrain lane holds `In the forests of the night` from bar 3 to bar 68 — its refrains
+sit at the poem's two ends. Length and persistence are uncapped for now, by decision.
+
 ### §4.6's call lane: a caesura leaves a figure behind
 
 The user's decision: §4.1's second tier, as a third lane. The half-line before a line's first

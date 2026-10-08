@@ -35,7 +35,7 @@ stanza 0
   for his mercy endureth for ever
   ───────────────────────────────
   bar 1  foundation (refrain of voice 1)  voice 1  seed 19d775b9
-  sounds stated 1 · yielding 3(1)
+  sounds stated 1 · yielding 3(1) · refraining 2 4
     token          beat       gain    pitch   modulation sharp   bank   from
     for            1.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
     his            1.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal
@@ -68,7 +68,7 @@ stanza 1
   for his mercy endureth for ever
   ───────────────────────────────
   bar 3  foundation (refrain of voice 1)  voice 1  seed 19d775b9
-  sounds arriving 5(2) · yielding 7(1)
+  sounds arriving 5(2) · yielding 7(1) · refraining 6 8
     token          beat       gain    pitch   modulation sharp   bank   from
     for            3.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
     his            3.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal

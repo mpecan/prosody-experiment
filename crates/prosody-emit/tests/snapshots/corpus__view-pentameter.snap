@@ -18,7 +18,7 @@ stanza 0
   shall i compare thee to a summers day
   ─────────────────────────────────────
   bar 0  foundation (regularity)  voice 0  seed 2b7991e4
-  sounds stated 0
+  sounds stated 0 · holding 1
     token          beat       gain    pitch   modulation sharp   bank   from
     shall          0.0.0/2    1.00    —       —         0.50    —      meter,surprisal
     i              0.0.1/2    1.00    —       —         0.19    —      meter,surprisal

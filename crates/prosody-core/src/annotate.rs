@@ -541,7 +541,7 @@ fn sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
 fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
     // Each cause's name, and whether a cause is that one — with its pass, where it has one.
     type Select = fn(Cause) -> Option<Option<usize>>;
-    let kinds: [(&str, Select); 6] = [
+    let kinds: [(&str, Select); 8] = [
         ("stated", |c| matches!(c, Cause::Stated).then_some(None)),
         ("overruling", |c| {
             matches!(c, Cause::Overruling).then_some(None)
@@ -556,6 +556,10 @@ fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
         }),
         ("looping", |c| matches!(c, Cause::Looping).then_some(None)),
         ("calling", |c| matches!(c, Cause::Calling).then_some(None)),
+        ("holding", |c| matches!(c, Cause::Holding).then_some(None)),
+        ("refraining", |c| {
+            matches!(c, Cause::Refraining).then_some(None)
+        }),
     ];
     let mut parts = Vec::new();
     for (name, select) in kinds {

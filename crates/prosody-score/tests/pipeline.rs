@@ -110,10 +110,12 @@ fn trochees_do_not_syncopate() {
 
 #[test]
 fn a_refrain_is_a_returning_voice() {
-    // §4.3: a repeated line is the same instrument again. Bars 0 and 2 share a voice, so one of
-    // the three bars brings something back.
+    // §4.3: a repeated line is the same instrument again. Bars 0 and 2 share a voice, and once
+    // bar 0 is heard it loops in the refrain lane under bar 1 (§4.6). Of the four (bar, voice)
+    // pairs — 0 in slot 0; 1 and 0 in slot 1; 0 alone in slot 2, a refrain stanza — two bring
+    // something back.
     let score = compile("da dA da dA\nsa mA sa mA\n\nda dA da dA\n").unwrap();
-    assert!((value(&score, "recurrence") - 1.0 / 3.0).abs() < 1e-9);
+    assert!((value(&score, "recurrence") - 0.5).abs() < 1e-9);
 }
 
 #[test]

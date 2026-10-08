@@ -111,7 +111,7 @@ pub fn run(analyses: Analyses<'_>) -> Result<Score, DifferentPoems> {
     events.sort_by_key(Event::order);
     let score = Score::new(voices, events, bars, silent(analyses));
     // Last, because it reads the finished material: a slot's length is its host line's beats.
-    let arrangement = crate::arrange::run(analyses.poem, analyses.roles, &score);
+    let arrangement = crate::arrange::run(analyses.poem, analyses.roles, analyses.rhyme, &score);
     Ok(score.with_arrangement(arrangement))
 }
 

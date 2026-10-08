@@ -137,6 +137,16 @@ loops in a third lane under everything until the next line with a caesura is fir
 stanza stops it with the other loops. Caesurae are sparse, so each one leaves a figure that
 persists; this is what lets a poem whose stanzas share one layer sound more than one thing at once.
 
+**The held lane** (decided the same day). A line whose rhyme is answered later in its own stanza
+keeps sounding until the answer arrives, and stops there: an open rhyme is a suspension, and its
+answer resolves it. ABAB holds each line under the next; ABBA holds the A line under both Bs. An
+answer must come within the stanza, so a class of one, or a rhyme answered stanzas later, is never
+held.
+
+**The refrain lane** — §4.3's "literal loop of that voice" at line scale. A refrain line, once
+heard, loops in its own lane until the next refrain line is first heard and takes over. No lane
+doubles a voice already sounding in the bar. A refrain stanza stops both lanes with every loop.
+
 This is structure, read from the poem, not a style parameter — which answers §9's "looping as an
 explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
 poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.
