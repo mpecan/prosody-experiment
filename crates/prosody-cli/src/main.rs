@@ -18,11 +18,14 @@ use prosody_core::annotate;
 use prosody_core::lower::{self, Analyses};
 use prosody_core::role::PoemRoles;
 use prosody_core::voice::Score;
-use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
+use prosody_core::{
+    Fallback, Lexicon, Phonemiser, Poem, meter, repetition, rhyme, role, sound, surprisal,
+};
 use prosody_emit::osc::Schedule;
 use prosody_emit::{Backend as _, Osc, Strudel, Style};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
+use prosody_score::{DEFAULT_PROBES, Report, sensitivity};
 
 fn main() -> ExitCode {
     match run() {
@@ -51,6 +54,8 @@ struct Arguments {
     source: Option<PathBuf>,
     /// Print the analysis instead of the pattern.
     explain: bool,
+    /// Print how interesting and how legible the piece measures, instead of the pattern.
+    score: bool,
     /// Which backend.
     target: Target,
     /// Recompile whenever the file changes (§7.8's live reload).
@@ -66,6 +71,7 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \n\
      options:\n\
      \x20 --explain      print the poem with each token annotated, instead of the pattern\n\
+     \x20 --score        print how the piece measures (interest, legibility), instead of the pattern\n\
      \x20 --osc          emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
@@ -80,6 +86,7 @@ fn parse_arguments() -> Result<Option<Arguments>> {
 fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments>> {
     let mut source = None;
     let mut explain = false;
+    let mut score = false;
     let mut target = Target::Strudel;
     let mut watch = false;
     let mut send = None;
@@ -94,6 +101,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
         match argument.as_str() {
             "-h" | "--help" => return Ok(None),
             "--explain" => explain = true,
+            "--score" => score = true,
             "--osc" => target = Target::Osc,
             "--watch" => watch = true,
             "--send" => expecting_address = true,
@@ -117,6 +125,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     Ok(Some(Arguments {
         source,
         explain,
+        score,
         target,
         watch,
         send,
@@ -195,23 +204,11 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
         .context("the phonemisers disagree about their inventory")?;
     let lexicon = EnglishLexicon::new();
 
-    let meter = meter::scan(&poem, &phonemiser);
-    let rhyme = rhyme::analyse(&poem, &phonemiser);
-    let repetition = repetition::analyse(&poem);
-    let sound = sound::analyse(&poem, &phonemiser);
-    let surprisal = surprisal::analyse(&poem, &phonemiser, &lexicon);
-    let roles = role::assign(&meter, &repetition).context("role assignment")?;
-    let score = lower::run(Analyses {
-        poem: &poem,
-        meter: &meter,
-        rhyme: &rhyme,
-        repetition: &repetition,
-        sound: &sound,
-        surprisal: &surprisal,
-        roles: &roles,
-    })
-    .context("lowering the poem to a score")?;
+    let (score, roles) = lower_poem(&poem, &phonemiser, &lexicon)?;
 
+    if arguments.score {
+        return report(text, &score, &phonemiser, &lexicon);
+    }
     if arguments.explain {
         return explain(&poem, &score, &style, &roles);
     }
@@ -233,6 +230,51 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
             emit(&schedule.to_text())
         }
     }
+}
+
+/// Runs every analysis pass and lowers the result — the whole pipeline between a parsed poem and a
+/// backend.
+fn lower_poem(
+    poem: &Poem,
+    phonemiser: &impl Phonemiser,
+    lexicon: &impl Lexicon,
+) -> Result<(Score, PoemRoles)> {
+    let meter = meter::scan(poem, phonemiser);
+    let rhyme = rhyme::analyse(poem, phonemiser);
+    let repetition = repetition::analyse(poem);
+    let sound = sound::analyse(poem, phonemiser);
+    let surprisal = surprisal::analyse(poem, phonemiser, lexicon);
+    let roles = role::assign(&meter, &repetition).context("role assignment")?;
+    let score = lower::run(Analyses {
+        poem,
+        meter: &meter,
+        rhyme: &rhyme,
+        repetition: &repetition,
+        sound: &sound,
+        surprisal: &surprisal,
+        roles: &roles,
+    })
+    .context("lowering the poem to a score")?;
+    Ok((score, roles))
+}
+
+/// Prints how the piece measures: the interest metrics and the one-word edit test.
+///
+/// The edit test recompiles the poem once per word, through exactly the pipeline above, so what it
+/// measures is what `prosody` itself would play.
+fn report(
+    text: &str,
+    score: &Score,
+    phonemiser: &impl Phonemiser,
+    lexicon: &impl Lexicon,
+) -> Result<()> {
+    let sensitivity = sensitivity::measure(text, DEFAULT_PROBES, |edited| {
+        let poem = Poem::parse(edited.to_owned()).ok()?;
+        lower_poem(&poem, phonemiser, lexicon)
+            .ok()
+            .map(|(score, _)| score)
+    });
+    emit(&Report::new(score, sensitivity).to_text())
 }
 
 /// Sends every message of a schedule over UDP.

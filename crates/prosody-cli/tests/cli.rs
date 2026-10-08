@@ -460,3 +460,36 @@ fn the_examples_exercise_the_cases_they_claim_to() {
         );
     }
 }
+
+#[test]
+fn score_reports_every_metric_and_an_edit_per_word() {
+    // The scorer's output is read by scripts, so its keys are the contract: every metric, the
+    // edit test, and the totals, each as `name value`.
+    let (out, err, code) = run(&["--score"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let keys: Vec<&str> = out
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "layering",
+            "recurrence",
+            "pitched",
+            "pitch_entropy",
+            "syncopation",
+            "interest",
+            "audible",
+            "local",
+            "explained",
+            "legibility",
+            "overall",
+        ]
+    );
+    // The couplet has no punctuation, so its words are its whitespace-separated tokens, and the
+    // edit test swaps each of them once.
+    let words = COUPLET.split_whitespace().count();
+    assert!(out.contains(&format!("of {words} edits")), "{out}");
+}

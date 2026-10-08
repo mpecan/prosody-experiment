@@ -269,8 +269,9 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 - **Free verse degeneracy** (`SPEC.md` §9): absolute vs. global-variance-relative threshold for
   role assignment. Deferred to M5, must be decided there.
-- **Short poems & looping-as-style** (`SPEC.md` §9): arguably violates I3. Unresolved. Do not
-  add a looping style parameter without raising this.
+- **Short poems & looping-as-style** (`SPEC.md` §9): **resolved** — looping is structure
+  (`SPEC.md` §4.6), not style. Still open for short poems: a single-stanza poem never loops, because
+  nothing follows it to take over.
 - **Non-English input** (`SPEC.md` §9): only the trait boundary is in scope; no second
   phonemiser implementation planned.
 
@@ -292,6 +293,10 @@ poem-wide, pitch reaches only the rhyme words — and were raised rather than de
 
 The next iteration has no milestone to take. It should either take an open question, or stop.
 
+**Since then: `prosody-score`**, the measuring half of a tuning loop (see the log). It gives every
+open question above a number that moves when the question is answered, so the next iteration can
+say what its change bought.
+
 ---
 
 ---
@@ -299,6 +304,77 @@ The next iteration has no milestone to take. It should either take an open quest
 ---
 
 ## Log
+
+### After `prosody-score` — §4.6: stanzas loop until something takes their place
+
+The user's decision, recorded in `SPEC.md` §4.6: a stanza keeps looping until a competing stanza
+of its layer transforms it (one bar per pass) or a refrain stanza overrules every loop.
+Bar-locked; the piece ends when the last stanza has arrived. New pass `prosody_core::arrange`,
+run at the end of lowering, producing `Score::arrangement()` — slots of placed lines, each with its
+`Cause`. Each line's *material* is untouched, so the I1–I4 property suite passed unchanged; the
+backends, the debug view (`sounds …` per line) and the scorer now walk slots instead of lines.
+
+Measured (scorer snapshots, before → after): every multi-stanza poem's recurrence rose from ~0 to
+0.6–0.75; interest e.g. Wilde 0.668 → 0.804, Jabberwocky 0.527 → 0.729. Layering left 1.0 only where
+layers alternate — Whitman 1.80, Poe 1.75, Hopkins 1.40.
+
+What it did not fix, and why:
+
+- **All-foundation poems morph but never stack.** Tyger, Wilde, Dickinson, Jabberwocky and the
+  villanelle have every stanza in one layer, so each takes over the last and nothing sounds under
+  it. Same-layer competition is the rule chosen; layering for these needs a second source of
+  simultaneity (a caesura tier, §4.1's unbuilt second tier, is the obvious one).
+- **Single-stanza poems are unchanged** — nothing follows them.
+- **The role threshold now matters far more.** Explained locality fell for Dickinson
+  1.000 → 0.831; all 11 unexplained edits of 65 flip a stanza between layers, which now re-routes
+  the whole arrangement after it rather than swapping one sample. Raises the priority of
+  *Role locality under a global threshold* below.
+- **Long stanzas make long pieces.** A transformation takes as many passes as the new stanza has
+  lines, so an `n`-line stanza replacing an `m`-line loop lasts about `n · max(n, m)` bars.
+
+Not done: the overruling *chord progression* — no harmony layer exists; deferred by the user's
+choice of refrain stanzas as the overrule for now.
+
+### After M9 — `prosody-score`: measuring whether it is interesting, and whether it still listens
+
+Goal: an automatic score a feedback loop can optimise against, without the loop drifting into
+`SPEC.md` §1's failure mode. New crate, depends only on `prosody-core`, scores the `Score` IR —
+structure, before any palette — and `prosody --score` prints it.
+
+**Two halves, multiplied.** *Interest*: five counts over the timeline (layering, recurrence, share
+pitched, pitch entropy, Longuet-Higgins–Lee syncopation on accents), each judged against a band
+rather than maximised, since listener preference peaks at moderate complexity. The fit is
+`1/(1+d)²` and the aggregate a geometric mean — the first version used `1/(1+d)` and an arithmetic
+mean and rated a piece with no layers at all 0.75. *Legibility*: every word swapped for a probe, the
+whole poem recompiled, and each edit judged *audible* (own bar changed), *local* (nothing outside
+the stanza changed — I2 strictly) and *explained* (everything that changed outside the stanza
+shared a voice, rhyme class, word family or anchor with the edited bar). Legibility uses
+*explained*: strict locality scored the refrain corpus poem 0.349, every one of its 28 leaks being
+§4.3 doing its job, and a loop chasing it would learn to write poems without refrains.
+
+**What an edit is compared on** is what a backend renders. Ids numbered by first appearance —
+`VoiceId`, `WordVoiceId`, `RhymeClassId` — are not compared; which bars share a voice is.
+Otherwise breaking a refrain early renumbers every later voice and the measure calls silence
+audible.
+
+**Baseline** (committed as snapshots over the golden corpus and the nine examples):
+
+- **Layering is exactly 1.000 for every poem.** One line is one voice in one bar, so nothing ever
+  sounds alongside anything. This, not palette, caps what any tuning can reach.
+- Recurrence is 0 for most poems; only refrains return. Pitched share 0–24%.
+- Explained locality is 1.0 for strict-metre poems; lowest for Whitman (0.826), Blake (0.888),
+  Wilde (0.918). Checked Whitman by hand: editing almost any word of stanza 1 flips stanza 2 from
+  flourish to foundation — the *role locality under a global threshold* question below, now
+  measured. The hand-worked test `a_degree_renumbering_is_an_unexplained_leak` pins the other
+  known cause.
+- New finding: swapping one unrhymed stressed monosyllable for another is **inaudible** — the IR
+  carries a vowel only through rhyme, alliteration and surprisal. Pinned in
+  `breaking_a_refrain_is_heard_where_the_refrain_returns`.
+
+**Rejected / deferred.** Audio-level scoring (rendering through `SuperCollider` NRT and an aesthetics
+model) — needs the structural problems above fixed first or it only re-measures them. The bands are
+provisional; calibrating them against pairwise listener preferences is the next step for the
+scorer itself.
 
 ### After M9 — examples, and checking the output actually plays
 

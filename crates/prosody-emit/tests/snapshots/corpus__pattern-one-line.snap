@@ -3,7 +3,7 @@ source: crates/prosody-emit/tests/corpus.rs
 expression: pattern
 ---
 // compiled from a poem by prosody
-// 1 bars, 1 voices, 9 events
+// 1 bars from 1 lines, 1 voices, 9 events
 //   bank = tr909
 //   root = c
 //   scale = minor

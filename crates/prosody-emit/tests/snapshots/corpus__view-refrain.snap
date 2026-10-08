@@ -11,12 +11,14 @@ passes
   rhyme       §4.5
   phoneme     §7.2
   seed        I2
+  arrange     §4.1
 
 stanza 0
 
   o give thanks unto the lord for he is good
   ──────────────────────────────────────────
   bar 0  foundation (regularity)  voice 0  seed e9a75995
+  sounds stated 0
     token          beat       gain    pitch   modulation sharp   bank   from
     o              0.0.0/2    1.00    —       f0+0      0.25    —      meter,sound,surprisal,repetition
     give           0.0.1/2    1.00    —       f1+0      0.56    G      meter,sound,surprisal,repetition
@@ -33,6 +35,7 @@ stanza 0
   for his mercy endureth for ever
   ───────────────────────────────
   bar 1  foundation (refrain of voice 1)  voice 1  seed 19d775b9
+  sounds stated 1 · yielding 3(1)
     token          beat       gain    pitch   modulation sharp   bank   from
     for            1.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
     his            1.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal
@@ -50,6 +53,7 @@ stanza 1
   o give thanks unto the god of gods
   ──────────────────────────────────
   bar 2  foundation (regularity)  voice 2  seed cf56275d
+  sounds arriving 2(1) 4(2)
     token          beat       gain    pitch   modulation sharp   bank   from
     o              2.0.0/2    1.00    —       f0+0      0.25    —      meter,sound,surprisal,repetition
     give           2.0.1/2    1.00    —       f1+0      0.44    G      meter,sound,surprisal,repetition
@@ -64,6 +68,7 @@ stanza 1
   for his mercy endureth for ever
   ───────────────────────────────
   bar 3  foundation (refrain of voice 1)  voice 1  seed 19d775b9
+  sounds arriving 5(2) · yielding 7(1)
     token          beat       gain    pitch   modulation sharp   bank   from
     for            3.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
     his            3.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal
@@ -81,6 +86,7 @@ stanza 2
   to him who alone doeth great wonders
   ────────────────────────────────────
   bar 4  foundation (regularity)  voice 3  seed 57ab2427
+  sounds arriving 6(1) 8(2)
     token          beat       gain    pitch   modulation sharp   bank   from
     to             4.0.0/2    1.00    —       —         0.12    UW     meter,surprisal
     him            4.0.1/2    1.00    —       —         0.31    HH     meter,surprisal
@@ -96,6 +102,7 @@ stanza 2
   for his mercy endureth for ever
   ───────────────────────────────
   bar 5  foundation (refrain of voice 1)  voice 1  seed 19d775b9
+  sounds arriving 9(2)
     token          beat       gain    pitch   modulation sharp   bank   from
     for            5.0.0/2    1.00    —       f6+0      0.06    F      meter,sound,surprisal
     his            5.0.1/2    1.00    —       f10+0     0.44    —      meter,sound,surprisal

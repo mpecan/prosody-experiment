@@ -32,6 +32,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use crate::arrange::Cause;
 use crate::meter::FootKind;
 use crate::parse::{Poem, Token};
 use crate::phoneme::{Phoneme, Provenance};
@@ -62,6 +63,8 @@ pub enum Pass {
     Phoneme,
     /// Per-unit seeding.
     Seed,
+    /// Which bars of the piece a line sounds in: stated, looping, transforming, overruling.
+    Arrange,
 }
 
 impl Pass {
@@ -77,6 +80,7 @@ impl Pass {
             Self::Rhyme => "rhyme",
             Self::Phoneme => "phoneme",
             Self::Seed => "seed",
+            Self::Arrange => "arrange",
         }
     }
 
@@ -84,7 +88,7 @@ impl Pass {
     #[must_use]
     pub const fn section(self) -> &'static str {
         match self {
-            Self::Role => "§4.1",
+            Self::Role | Self::Arrange => "§4.1",
             Self::Meter => "§4.2",
             Self::Repetition | Self::Sound => "§4.3",
             Self::Surprisal => "§4.4",
@@ -95,7 +99,7 @@ impl Pass {
     }
 
     /// Every pass, for the legend.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Role,
         Self::Meter,
         Self::Repetition,
@@ -104,6 +108,7 @@ impl Pass {
         Self::Rhyme,
         Self::Phoneme,
         Self::Seed,
+        Self::Arrange,
     ];
 }
 
@@ -220,6 +225,7 @@ pub struct AnnotatedLine {
     basis: Option<LineBasis>,
     voice: Option<crate::repetition::VoiceId>,
     seed: Option<Seed>,
+    sounds: Vec<(usize, Cause)>,
     tokens: Vec<Annotation>,
 }
 
@@ -258,6 +264,12 @@ impl AnnotatedLine {
     #[must_use]
     pub const fn seed(&self) -> Option<Seed> {
         self.seed
+    }
+
+    /// Every bar of the piece it sounds in, and why ([`Pass::Arrange`]), in playing order.
+    #[must_use]
+    pub fn sounds(&self) -> &[(usize, Cause)] {
+        &self.sounds
     }
 
     /// Its tokens, in source order.
@@ -373,6 +385,10 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                         basis: line_roles.get(&line.span()).map(|(_, basis)| *basis),
                         voice,
                         seed: voice.and_then(|id| score.voice(id)).map(|v| v.seed()),
+                        sounds: bars
+                            .get(&line.span())
+                            .map(|&bar| sounds_of(score, bar))
+                            .unwrap_or_default(),
                         tokens,
                     }
                 })
@@ -487,6 +503,9 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
                 line.seed()
                     .map_or_else(|| "-".to_owned(), |seed| format!("{seed}")[..8].to_owned()),
             );
+            if !line.sounds().is_empty() {
+                let _ = writeln!(out, "  sounds {}", describe_sounds(line.sounds()));
+            }
             let _ = writeln!(
                 out,
                 "    {:<14} {:<10} {:<7} {:<7} {:<9} {:<7} {:<6} from",
@@ -499,6 +518,82 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
         let _ = writeln!(out);
     }
     out
+}
+
+/// Every slot of the arrangement a source bar sounds in.
+fn sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .enumerate()
+        .flat_map(|(index, slot)| {
+            slot.placements()
+                .iter()
+                .filter(move |placement| placement.bar().get() == bar)
+                .map(move |placement| (index, placement.cause()))
+        })
+        .collect()
+}
+
+/// `stated 0 · looping 2-3 5 · arriving 4(1) 6(2) · yielding 5(1)`: each cause with the bars it
+/// accounts for, runs of consecutive bars collapsed, and a transformation's pass in brackets.
+fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
+    // Each cause's name, and whether a cause is that one — with its pass, where it has one.
+    type Select = fn(Cause) -> Option<Option<usize>>;
+    let kinds: [(&str, Select); 5] = [
+        ("stated", |c| matches!(c, Cause::Stated).then_some(None)),
+        ("overruling", |c| {
+            matches!(c, Cause::Overruling).then_some(None)
+        }),
+        ("arriving", |c| match c {
+            Cause::Arriving { pass } => Some(Some(pass)),
+            _ => None,
+        }),
+        ("yielding", |c| match c {
+            Cause::Yielding { pass } => Some(Some(pass)),
+            _ => None,
+        }),
+        ("looping", |c| matches!(c, Cause::Looping).then_some(None)),
+    ];
+    let mut parts = Vec::new();
+    for (name, select) in kinds {
+        let picked: Vec<(usize, Option<usize>)> = sounds
+            .iter()
+            .filter_map(|&(slot, cause)| select(cause).map(|pass| (slot, pass)))
+            .collect();
+        if picked.is_empty() {
+            continue;
+        }
+        let mut words: Vec<String> = Vec::new();
+        let mut run: Option<(usize, usize)> = None;
+        let flush = |run: Option<(usize, usize)>, words: &mut Vec<String>| {
+            if let Some((first, last)) = run {
+                words.push(if first == last {
+                    first.to_string()
+                } else {
+                    format!("{first}-{last}")
+                });
+            }
+        };
+        for (slot, pass) in picked {
+            if let Some(pass) = pass {
+                flush(run.take(), &mut words);
+                words.push(format!("{slot}({pass})"));
+                continue;
+            }
+            run = match run {
+                Some((first, last)) if last + 1 == slot => Some((first, slot)),
+                other => {
+                    flush(other, &mut words);
+                    Some((slot, slot))
+                }
+            };
+        }
+        flush(run, &mut words);
+        parts.push(format!("{name} {}", words.join(" ")));
+    }
+    parts.join(" · ")
 }
 
 /// One token's row, or several when it sounds more than one syllable.
@@ -601,7 +696,26 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pass, render, run};
+    use super::{Pass, describe_sounds, render, run};
+    use crate::arrange::Cause;
+
+    #[test]
+    fn where_a_line_sounds_reads_as_runs_per_cause() {
+        // A line stated at bar 0, looping at 2, 3 and 5, then yielding on the first pass of a
+        // transformation at bar 7.
+        let sounds = [
+            (0, Cause::Stated),
+            (2, Cause::Looping),
+            (3, Cause::Looping),
+            (5, Cause::Looping),
+            (7, Cause::Yielding { pass: 1 }),
+        ];
+        assert_eq!(
+            describe_sounds(&sounds),
+            "stated 0 · yielding 7(1) · looping 2-3 5"
+        );
+    }
+
     use crate::lower::{self, Analyses};
     use crate::phoneme::arpabet::ARPABET;
     use crate::phoneme::{

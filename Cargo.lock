@@ -289,6 +289,7 @@ dependencies = [
  "prosody-emit",
  "prosody-lexicon",
  "prosody-lts",
+ "prosody-score",
 ]
 
 [[package]]
@@ -340,6 +341,17 @@ dependencies = [
  "prosody-cmudict",
  "prosody-core",
  "prosody-lexicon",
+]
+
+[[package]]
+name = "prosody-score"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "prosody-cmudict",
+ "prosody-core",
+ "prosody-lexicon",
+ "prosody-lts",
 ]
 
 [[package]]

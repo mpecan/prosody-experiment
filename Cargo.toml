@@ -29,6 +29,7 @@ prosody-cmudict = { path = "crates/prosody-cmudict" }
 prosody-lexicon = { path = "crates/prosody-lexicon" }
 prosody-lts = { path = "crates/prosody-lts" }
 prosody-emit = { path = "crates/prosody-emit" }
+prosody-score = { path = "crates/prosody-score" }
 prosody-web = { path = "crates/prosody-web" }
 
 # See CLAUDE.md §3. Lints live here, not in per-file `#![allow]`.

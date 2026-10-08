@@ -109,7 +109,10 @@ pub fn run(analyses: Analyses<'_>) -> Result<Score, DifferentPoems> {
     // pass already emits in this order; sorting anyway means a later pass may reorder freely
     // without the backend's output depending on the order it happened to choose.
     events.sort_by_key(Event::order);
-    Ok(Score::new(voices, events, bars, silent(analyses)))
+    let score = Score::new(voices, events, bars, silent(analyses));
+    // Last, because it reads the finished material: a slot's length is its host line's beats.
+    let arrangement = crate::arrange::run(analyses.poem, analyses.roles, &score);
+    Ok(score.with_arrangement(arrangement))
 }
 
 /// Which instruments the poem needs.

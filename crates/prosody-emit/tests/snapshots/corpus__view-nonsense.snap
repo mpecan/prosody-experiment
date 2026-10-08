@@ -11,12 +11,14 @@ passes
   rhyme       §4.5
   phoneme     §7.2
   seed        I2
+  arrange     §4.1
 
 stanza 0
 
   twas brillig and the slithy toves
   ─────────────────────────────────
   bar 0  foundation (regularity)  voice 0  seed 319e3915
+  sounds stated 0
     token          beat       gain    pitch   modulation sharp   bank   from
     twas           0.0.0/2    1.00    —       —         0.69    T      meter,surprisal
     brillig        0.0.1/2    1.00    —       —         0.88    IH     meter,surprisal,phoneme(guessed)
@@ -30,6 +32,7 @@ stanza 0
   did gyre and gimble in the wabe
   ───────────────────────────────
   bar 1  foundation (regularity)  voice 1  seed 7ecfd827
+  sounds stated 1
     token          beat       gain    pitch   modulation sharp   bank   from
     did            1.0.0/2    1.00    —       —         0.12    IH     meter,surprisal
     gyre           1.0.1/2    1.00    —       —         0.62    JH     meter,surprisal,phoneme(guessed)
@@ -43,6 +46,7 @@ stanza 0
   all mimsy were the borogoves
   ────────────────────────────
   bar 2  foundation (regularity)  voice 2  seed 9d1d791b
+  sounds stated 2
     token          beat       gain    pitch   modulation sharp   bank   from
     all            2.0.0/2    1.00    —       —         0.31    —      meter,surprisal
     mimsy          2.0.1/2    1.00    —       —         1.00    —      meter,surprisal,phoneme(guessed)
@@ -56,6 +60,7 @@ stanza 0
   and the mome raths outgrabe
   ───────────────────────────
   bar 3  foundation (regularity)  voice 3  seed c2558f27
+  sounds stated 3
     token          beat       gain    pitch   modulation sharp   bank   from
     and            3.0.0/2    0.33    —       f2+0      0.25    AH     meter,sound,surprisal
     the            3.0.1/2    0.33    —       f3+0      0.12    AH     meter,sound,surprisal

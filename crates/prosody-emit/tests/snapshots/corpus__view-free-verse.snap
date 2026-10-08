@@ -11,12 +11,14 @@ passes
   rhyme       §4.5
   phoneme     §7.2
   seed        I2
+  arrange     §4.1
 
 stanza 0
 
   i celebrate myself and sing myself
   ──────────────────────────────────
   bar 0  foundation (mostregular)  voice 0  seed f2849578
+  sounds stated 0 · looping 3
     token          beat       gain    pitch   modulation sharp   bank   from
     i              0.0.0/2    1.00    —       f0+0      0.06    AY     meter,sound,surprisal,repetition
     celebrate      0.0.1/2    1.00    —       —         0.88    S      meter,surprisal
@@ -32,6 +34,7 @@ stanza 0
   and what i assume you shall assume
   ──────────────────────────────────
   bar 1  foundation (mostregular)  voice 1  seed ad83ec51
+  sounds stated 1 · looping 4
     token          beat       gain    pitch   modulation sharp   bank   from
     and            1.0.0/2    0.33    —       f3+0      0.25    AH     meter,sound,surprisal
     what           1.0.1/2    1.00    —       —         0.38    AH     meter,surprisal
@@ -46,6 +49,7 @@ stanza 0
   for every atom belonging to me as good belongs to you
   ─────────────────────────────────────────────────────
   bar 2  foundation (mostregular)  voice 2  seed da537398
+  sounds stated 2
     token          beat       gain    pitch   modulation sharp   bank   from
     for            2.0.0/2    1.00    —       —         0.31    AO     meter,surprisal
     every          2.0.1/2    1.00    —       —         0.56    —      meter,surprisal
@@ -70,6 +74,7 @@ stanza 1
   i loafe and invite my soul
   ──────────────────────────
   bar 3  flourish (irregularity)  voice 3  seed ccc26f4e
+  sounds stated 3
     token          beat       gain    pitch   modulation sharp   bank   from
     i              3.0.0/2    1.00    —       f0+0      0.06    AY     meter,sound,surprisal,repetition
     loafe          3.0.1/2    1.00    —       f18+0     0.56    OW     meter,sound,surprisal,phoneme(guessed)
@@ -82,6 +87,7 @@ stanza 1
   i lean and loafe at my ease observing a spear of summer grass
   ─────────────────────────────────────────────────────────────
   bar 4  flourish (irregularity)  voice 4  seed d643e10c
+  sounds stated 4
     token          beat       gain    pitch   modulation sharp   bank   from
     i              4.0.0/2    1.00    —       f0+0      0.19    AY     meter,sound,surprisal,repetition
     lean           4.0.1/2    1.00    —       —         0.44    L      meter,surprisal

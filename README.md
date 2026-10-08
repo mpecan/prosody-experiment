@@ -35,7 +35,7 @@ You get something like:
 
 ```js
 // compiled from a poem by prosody
-// 12 bars, 12 voices, 85 events
+// 36 bars from 12 lines, 12 voices, 255 events
 //   bank = tr909
 //   root = c
 //   scale = minor
@@ -46,7 +46,8 @@ stack(
   .cpm(40.333)
 ```
 
-Each `stack` layer is one voice; each `<…>` element is one **line** of the poem; each step inside
+Each `stack` layer is one voice; each `<…>` element is one **bar of the piece** — a line, or a loop of
+earlier lines under it; each step inside
 it is one **foot**; each bracketed group inside that is the **syllables** of that foot.
 
 ---
@@ -148,6 +149,29 @@ shows `attribution lost`, that is a bug: an event exists that traces to nothing.
 
 ---
 
+## Measuring it
+
+```sh
+cargo run -p prosody-cli -- --score examples/wilde-theocritus.poem
+./examples/run.sh --score      # every example
+```
+
+prints how the piece measures, as `name value` lines a script can read:
+
+- **interest**: layering, recurrence, how much is pitched, melodic entropy and syncopation, each
+  judged against a band rather than maximised. People like moderate complexity, so overshooting
+  scores worse too. The bands are provisional.
+- **legibility**: every word is swapped for a probe word in turn and the poem recompiled. *audible*
+  is how often that edit was heard in its own bar; *explained* is how often everything it changed
+  elsewhere had a reason (a shared refrain, rhyme, word family or figure). *local* is the strict
+  version, with no change outside the stanza at all.
+- **overall** = interest × legibility, so a better sound cannot be bought by ignoring the poem.
+
+It is the measuring half of a tuning loop. The baselines for every shipped poem are committed in
+`crates/prosody-score/tests/snapshots/`, so a mapping change shows what it did to them.
+
+---
+
 ## Writing a poem
 
 Any plain text file. Punctuation, capitals and em-dashes are all fine — they are parsed and
@@ -186,6 +210,8 @@ Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`
 | Poetic feature | Musical result | `SPEC.md` |
 |---|---|---|
 | Per-stanza metrical regularity | foundation layer (pulse) vs flourish (ornament) | §4.1 |
+| A stanza, once stated | keeps looping until the next stanza of its layer transforms it, bar by bar | §4.6 |
+| A stanza made only of refrains | stops every loop and drops in alone, like a chorus | §4.6 |
 | Foot → beat, syllable → subdivision, line → bar | rhythm | §4.2 |
 | Stress | accent / velocity | §4.2 |
 | A line repeated verbatim | *the same instrument* played again | §4.3 |
@@ -223,6 +249,7 @@ crates/
   prosody-lts/        guessing pronunciation from spelling, for words it lacks
   prosody-lexicon/    word-rarity table, built from public-domain texts
   prosody-emit/       Style, and the Strudel and OSC backends
+  prosody-score/      how interesting a compiled poem is, and whether it still listens to the poem
   prosody-cli/        arguments, files, stdout, the watcher — all IO lives here
   prosody-web/        a local page for writing a poem and hearing it, also all IO
   tree-sitter-prosody/  the grammar
@@ -237,10 +264,13 @@ are enforced rather than merely intended.
 ## State of it
 
 Everything `SPEC.md` asks for is built: all the mappings, both backends, the live-reload watcher,
-the debug view, a golden corpus, and property tests for all four invariants. 527 tests.
+the debug view, a golden corpus, and property tests for all four invariants. 560 tests.
 
 Things that are known to be wrong, in rough order of how much they would bother a listener:
 
+- **Poems whose stanzas are all one layer never stack.** Stanzas now loop until a rival takes
+  over (§4.6), so a foundation loops under a flourish — but when every stanza is regular, each one
+  transforms the last and nothing plays underneath. A single-stanza poem never loops at all.
 - **Pitch reaches only about 8% of events.** The melody is the rhyme words and nothing else, so
   most of what you hear is percussion with sparse melodic punctuation.
 - **Polysyllabic rhyme is mis-scored.** The rhyme tail starts at the last *primary-stressed* vowel,

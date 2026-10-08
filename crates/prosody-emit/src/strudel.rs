@@ -172,17 +172,40 @@ const fn strudel_synth(synth: Named) -> &'static str {
     }
 }
 
-/// How many beats a bar holds, on average across the poem.
+/// How many beats a bar holds, on average across the piece — over the arrangement's slots, since a
+/// cycle is a slot.
 ///
 /// Bars genuinely differ in length — `SPEC.md` §4.2 insists on it — but a cycle is a fixed span,
 /// so one number has to stand for the piece when converting beats to cycles. Integer arithmetic,
 /// so the tempo stays byte-stable (`CLAUDE.md` §4).
 fn mean_beats(score: &Score) -> u16 {
-    if score.bars() == 0 {
+    let slots = score.arrangement().slots();
+    if slots.is_empty() {
         return 1;
     }
-    let total: usize = (0..score.bars()).map(|bar| score.beats_in(bar)).sum();
-    u16::try_from(total / score.bars()).unwrap_or(1).max(1)
+    let total: usize = slots.iter().map(prosody_core::Slot::beats).sum();
+    u16::try_from(total / slots.len()).unwrap_or(1).max(1)
+}
+
+/// How many events the piece plays: every line's syllables, once for each slot it sounds in.
+///
+/// Not `score.events().len()`, which counts each line's material once — a looping stanza plays its
+/// syllables many times, and the OSC backend sends a message for every one of them. The header
+/// and the schedule must count the same piece.
+fn sounded(score: &Score) -> usize {
+    let mut per_bar = vec![0_usize; score.bars()];
+    for event in score.events() {
+        if let Some(count) = per_bar.get_mut(event.bar().get()) {
+            *count += 1;
+        }
+    }
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .flat_map(prosody_core::Slot::placements)
+        .filter_map(|placement| per_bar.get(placement.bar().get()))
+        .sum()
 }
 
 /// The comment block: what the poem is, and what the palette did to it.
@@ -194,10 +217,11 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     out.push_str("// compiled from a poem by prosody\n");
     let _ = writeln!(
         out,
-        "// {} bars, {} voices, {} events",
+        "// {} bars from {} lines, {} voices, {} events",
+        score.arrangement().slots().len(),
         score.bars(),
         score.voices().len(),
-        score.events().len()
+        sounded(score)
     );
     for (key, value) in style.describe() {
         let _ = writeln!(out, "//   {key} = {value}");
@@ -287,55 +311,29 @@ fn grid(
             .push(event);
     }
 
+    // One element per slot of the arrangement, not per line: a stanza sounds again wherever it
+    // loops or yields (`prosody_core::arrange`). A cycle is a slot, and every line in it fills the
+    // whole cycle with its own beats — which is exactly the bar-locked fitting, for free. Lines
+    // sounding together are stacked with `,`, mini-notation's "at the same time".
     let mut bars = Vec::new();
-    for bar in 0..score.bars() {
-        // The bar's width comes from the score, not from the events in *this* pattern, so the
-        // melody and the rhythm divide the bar the same way and a note lands on its own syllable.
-        let beats = score.beats_in(bar);
-        let Some(present) = by_bar.get(&bar) else {
-            bars.push("~".to_owned());
-            continue;
-        };
-        let mut steps = Vec::new();
-        for beat in 0..beats {
-            match present.get(&beat) {
-                None => steps.push(absent.to_owned()),
-                // A foot divided into one part is the whole beat. More than one, and the beat is
-                // subdivided — *even when this pattern has only one value for it*, which is the
-                // melody's usual case: a rhyme word is the second syllable of a final iambic foot,
-                // so its note belongs in the second half of the beat, not across the whole of it.
-                Some(syllables)
-                    if syllables.len() == 1
-                        && syllables.first().is_some_and(|e| e.subdivision().of() == 1) =>
-                {
-                    steps.push(
-                        syllables
-                            .first()
-                            .map_or_else(|| absent.to_owned(), |e| value(e)),
-                    );
-                }
-                Some(syllables) => {
-                    // A foot's syllables subdivide its beat. Where this pattern has no value for
-                    // one of them — an unpitched syllable in the melody — it rests, so the ones
-                    // that do sound keep their place inside the foot.
-                    let width = syllables
-                        .first()
-                        .map_or(syllables.len(), |e| e.subdivision().of())
-                        .max(syllables.len());
-                    let mut inner = vec![absent.to_owned(); width];
-                    for event in syllables {
-                        if let Some(slot) = inner.get_mut(event.subdivision().index()) {
-                            *slot = value(event);
-                        }
-                    }
-                    steps.push(format!("[{}]", inner.join(" ")));
-                }
-            }
-        }
-        bars.push(if steps.is_empty() {
-            "~".to_owned()
-        } else {
-            steps.join(" ")
+    for slot in score.arrangement().slots() {
+        let lines: Vec<String> = slot
+            .placements()
+            .iter()
+            .filter_map(|placement| {
+                let bar = placement.bar().get();
+                // A line's width comes from the score, not from the events in *this* pattern, so
+                // the melody and the rhythm divide it the same way and a note lands on its own
+                // syllable.
+                by_bar
+                    .get(&bar)
+                    .map(|present| line(present, score.beats_in(bar), value, absent))
+            })
+            .collect();
+        bars.push(match lines.len() {
+            0 => "~".to_owned(),
+            1 => lines.into_iter().next().unwrap_or_else(|| "~".to_owned()),
+            _ => format!("[{}]", lines.join(", ")),
         });
     }
 
@@ -354,6 +352,57 @@ fn grid(
                 .collect::<Vec<_>>()
                 .join(" ")
         ),
+    }
+}
+
+/// One line's events in this pattern, as the steps of one cycle: a step per beat, subdivided by
+/// its syllables.
+fn line(
+    present: &BTreeMap<usize, Vec<&Event>>,
+    beats: usize,
+    value: &dyn Fn(&Event) -> String,
+    absent: &str,
+) -> String {
+    let mut steps = Vec::new();
+    for beat in 0..beats {
+        match present.get(&beat) {
+            None => steps.push(absent.to_owned()),
+            // A foot divided into one part is the whole beat. More than one, and the beat is
+            // subdivided — *even when this pattern has only one value for it*, which is the
+            // melody's usual case: a rhyme word is the second syllable of a final iambic foot,
+            // so its note belongs in the second half of the beat, not across the whole of it.
+            Some(syllables)
+                if syllables.len() == 1
+                    && syllables.first().is_some_and(|e| e.subdivision().of() == 1) =>
+            {
+                steps.push(
+                    syllables
+                        .first()
+                        .map_or_else(|| absent.to_owned(), |e| value(e)),
+                );
+            }
+            Some(syllables) => {
+                // A foot's syllables subdivide its beat. Where this pattern has no value for
+                // one of them — an unpitched syllable in the melody — it rests, so the ones
+                // that do sound keep their place inside the foot.
+                let width = syllables
+                    .first()
+                    .map_or(syllables.len(), |e| e.subdivision().of())
+                    .max(syllables.len());
+                let mut inner = vec![absent.to_owned(); width];
+                for event in syllables {
+                    if let Some(slot) = inner.get_mut(event.subdivision().index()) {
+                        *slot = value(event);
+                    }
+                }
+                steps.push(format!("[{}]", inner.join(" ")));
+            }
+        }
+    }
+    if steps.is_empty() {
+        "~".to_owned()
+    } else {
+        steps.join(" ")
     }
 }
 
@@ -935,10 +984,11 @@ mod tests {
         let text = render(source, &Style::default());
         assert!(
             text.contains(&format!(
-                "// {} bars, {} voices, {} events",
+                "// {} bars from {} lines, {} voices, {} events",
+                score.arrangement().slots().len(),
                 score.bars(),
                 score.voices().len(),
-                score.events().len()
+                super::sounded(&score)
             )),
             "{text}"
         );
@@ -996,5 +1046,16 @@ mod tests {
         // CLAUDE.md §6: a fallback must be visible. A listener would otherwise hear a short line.
         let text = render("bA zz\n", &Style::default());
         assert!(text.contains("no pronunciation"), "{text}");
+    }
+
+    #[test]
+    fn a_stanza_keeps_playing_under_the_next() {
+        // Stanza 1 (`bA` / six `bA`s) is ragged, so it is the flourish; stanza 2 is regular, so
+        // the foundation. The arrangement states stanza 1, then states stanza 2 with stanza 1
+        // looping under it — so the first line's voice, one stressed syllable on a hi-hat, sounds
+        // in cycles 0 and 2, and rests in 1 and 3.
+        let text = render("bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n", &Style::default());
+        let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
+        assert!(first.starts_with("  s(\"<hh ~ hh ~>\")"), "{text}");
     }
 }

@@ -21,6 +21,8 @@
 //! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
 //! - [`voice`] — the IR of §3: sounding events, with nothing a style could supply.
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
+//! - [`arrange`] — laying that IR out in time: stanzas loop until a competing stanza transforms
+//!   them or a refrain stanza overrules them.
 //! - [`annotate`] — §8's debug view: the poem, with what each token became written under it.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
@@ -33,6 +35,7 @@
 )]
 
 pub mod annotate;
+pub mod arrange;
 pub mod lower;
 pub mod meter;
 pub mod parse;
@@ -47,6 +50,7 @@ pub mod surprisal;
 pub mod voice;
 
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
+pub use arrange::{Arrangement, Cause, Placement, Slot};
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
 };

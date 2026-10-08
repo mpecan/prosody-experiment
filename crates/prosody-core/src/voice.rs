@@ -70,6 +70,7 @@
 //! its class's degree would be a monotone, and would attribute a pitch to syllables that earned
 //! none — which invariant I4 forbids more strongly than it forbids silence.
 
+use crate::arrange::Arrangement;
 use crate::meter::FootKind;
 use crate::phoneme::{Phoneme, Provenance};
 use crate::repetition::VoiceId;
@@ -513,6 +514,7 @@ pub struct Score {
     events: Vec<Event>,
     bars: usize,
     silent: Vec<Span>,
+    arrangement: Arrangement,
 }
 
 impl Score {
@@ -528,7 +530,24 @@ impl Score {
             events,
             bars,
             silent,
+            arrangement: Arrangement::default(),
         }
+    }
+
+    /// The same score, laid out in time by [`crate::arrange`].
+    pub(crate) fn with_arrangement(mut self, arrangement: Arrangement) -> Self {
+        self.arrangement = arrangement;
+        self
+    }
+
+    /// Which lines sound in which bar of the piece, and why ([`crate::arrange`]).
+    ///
+    /// The events above are each line's material, placed within *its own* bar; this says where
+    /// those bars sound — a stanza stated, looping under another, or transforming into the next.
+    /// A backend plays the piece by walking these slots, not the bars.
+    #[must_use]
+    pub const fn arrangement(&self) -> &Arrangement {
+        &self.arrangement
     }
 
     /// Every instrument, ordered by [`VoiceId`].
@@ -554,7 +573,10 @@ impl Score {
         self.events.iter().filter(move |event| event.voice == id)
     }
 
-    /// How many bars long the piece is — one per line (`SPEC.md` §4.2).
+    /// How many lines the score has material for — one bar each (`SPEC.md` §4.2).
+    ///
+    /// The piece's length is [`Score::arrangement`]'s slot count, which is longer once stanzas
+    /// loop.
     ///
     /// Counted while lowering, not inferred from the last event: a final line whose words the
     /// phonemiser cannot pronounce produces no events, and a piece that ends in silence is still

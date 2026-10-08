@@ -115,6 +115,26 @@ Treat rhyme as an **equivalence relation**. Rhyme class → scale degree, assign
 
 Then the elegant part: **perfect rhyme → exact pitch; slant rhyme → detune or neighbour tone.** Rhyme precision maps to pitch precision. Score rhyme quality continuously (nucleus + coda phoneme match) rather than boolean.
 
+### 4.6 Arrangement — stanzas loop until something takes their place
+
+*Decided 2026-10-08, after the scorer measured every poem as a single line of sound.*
+
+A stanza, once stated, **keeps looping** until something stops it. One loop per layer (§4.1):
+
+- **A competing stanza** — the next stanza of the *same* layer — transforms the running loop into
+  itself, one bar per pass: `|B1 A2 A3 A4|B1 B2 A3 A4|B1 B2 B3 A4|B1 B2 B3 B4|`. The other layer's
+  loop keeps playing underneath.
+- **A refrain stanza** — every line a refrain — overrules: all loops stop and it is stated alone,
+  like a chorus dropping in. A real *chord progression* would be the other natural overrule, and
+  needs a harmony layer that does not exist yet.
+
+Bar-locked: each bar of the piece takes its length from the line arriving in it, and whatever
+loops underneath is fitted to that bar. The piece ends when the last stanza has fully arrived.
+
+This is structure, read from the poem, not a style parameter — which answers §9's "looping as an
+explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
+poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.
+
 ---
 
 ## 5. Style header
@@ -175,7 +195,7 @@ Property tests worth having early:
 - **CMUdict is English-only.** Multilingual poems, Slovenian, Italian, German — all unsupported. Options: eSpeak-NG phonemisation (broad language coverage, permissive licence, but a different phoneme inventory and lower quality), or per-language dictionaries with a pluggable phonemiser trait. Design the trait boundary now even if only English is implemented; retrofitting a phoneme inventory abstraction later is grim.
 - **Free verse.** Poems with no regular meter make §4.1 degenerate — everything reads as high-variance flourish with no foundation. Needs a fallback: possibly a global-variance-relative threshold rather than absolute, so the *most* regular stanza in a poem always anchors.
 - **Stress detection ambiguity.** CMUdict gives lexical stress, not phrasal stress. "Content" (noun) vs "content" (adj) differ. Accept the error rate initially; do not build a POS tagger in week one.
-- **Very short poems** produce very little structure. Define minimum viable input, or make looping/development an explicit style parameter (which arguably violates I3 — think it through).
+- **Very short poems** produce very little structure. Define minimum viable input, or make looping/development an explicit style parameter (which arguably violates I3 — think it through). *Looping is now structure (§4.6), not style — but a single-stanza poem still never loops, since nothing follows it.*
 - **Aesthetic risk.** The mapping can be perfectly principled and still sound bad. Budget time for tuning the *ranges* (which is palette work, and legitimately belongs in the style layer).
 
 ---

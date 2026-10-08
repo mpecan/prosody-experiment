@@ -11,12 +11,14 @@ passes
   rhyme       §4.5
   phoneme     §7.2
   seed        I2
+  arrange     §4.1
 
 stanza 0
 
   shall i compare thee to a summers day
   ─────────────────────────────────────
   bar 0  foundation (regularity)  voice 0  seed 2b7991e4
+  sounds stated 0
     token          beat       gain    pitch   modulation sharp   bank   from
     shall          0.0.0/2    1.00    —       —         0.50    —      meter,surprisal
     i              0.0.1/2    1.00    —       —         0.19    —      meter,surprisal
@@ -32,6 +34,7 @@ stanza 0
   thou art more lovely and more temperate
   ───────────────────────────────────────
   bar 1  foundation (regularity)  voice 1  seed a3b7c74a
+  sounds stated 1
     token          beat       gain    pitch   modulation sharp   bank   from
     thou           1.0.0/2    1.00    —       —         0.38    —      meter,surprisal
     art            1.0.1/2    1.00    —       —         0.44    —      meter,surprisal
@@ -46,6 +49,7 @@ stanza 0
   rough winds do shake the darling buds of may
   ────────────────────────────────────────────
   bar 2  foundation (regularity)  voice 2  seed acc1ab1e
+  sounds stated 2
     token          beat       gain    pitch   modulation sharp   bank   from
     rough          2.0.0/2    1.00    —       —         0.56    AH     meter,surprisal
     winds          2.0.1/2    1.00    —       —         0.62    —      meter,surprisal
@@ -61,6 +65,7 @@ stanza 0
   and summers lease hath all too short a date
   ───────────────────────────────────────────
   bar 3  foundation (regularity)  voice 3  seed 5b7e03ac
+  sounds stated 3
     token          beat       gain    pitch   modulation sharp   bank   from
     and            3.0.0/2    0.33    —       f12+0     0.25    AH     meter,sound,surprisal
     summers        3.0.1/2    1.00    —       f6+0      0.75    AH     meter,sound,surprisal

@@ -60,8 +60,9 @@ pub enum OscError {
 /// A time in beats from the start of the piece, exact.
 ///
 /// A rational rather than a float because onsets are compared and sorted, and `CLAUDE.md` §4 keeps
-/// floats out of both. The denominator is the subdivision of the beat the event falls in, so it is
-/// small and exact — a triplet is a third, not 0.333.
+/// floats out of both. Kept in lowest terms; the denominator is at most the subdivision of the beat
+/// times the line's beat count (when a looped line is fitted under a host of another length), so it
+/// stays small and exact — a triplet is a third, not 0.333.
 #[derive(Debug, Clone, Copy)]
 pub struct Onset {
     numerator: u64,
@@ -80,18 +81,6 @@ impl Onset {
     #[must_use]
     pub const fn parts(self) -> (u64, u64) {
         (self.numerator, self.denominator)
-    }
-
-    /// This onset pulled onto the beat it falls in.
-    ///
-    /// `SPEC.md` §4.3's "downbeat-anchored": an anaphora's words land on the pulse rather than
-    /// wherever their syllable happened to sit inside the foot.
-    #[must_use]
-    const fn on_the_beat(self) -> Self {
-        Self {
-            numerator: self.numerator / self.denominator,
-            denominator: 1,
-        }
     }
 }
 
@@ -315,21 +304,31 @@ impl Backend for Osc {
             return Err(OscError::Silent);
         }
 
-        // Where each bar starts, in beats. Bars differ in length — `SPEC.md` §4.2 insists on it —
-        // so they are accumulated rather than multiplied, which is the whole reason this backend
-        // can honour an odd metre where a fixed-length cycle cannot.
-        let mut bar_starts = Vec::with_capacity(score.bars());
-        let mut running = 0_u64;
-        for bar in 0..score.bars() {
-            bar_starts.push(running);
-            running += u64::try_from(score.beats_in(bar)).unwrap_or(0);
+        // Walk the arrangement, not the bars: a stanza may sound many times, looping under others
+        // or transforming into a rival (`prosody_core::arrange`). Slots differ in length —
+        // `SPEC.md` §4.2 insists on it — so their starts are accumulated rather than multiplied,
+        // which is the whole reason this backend can honour an odd metre where a fixed-length
+        // cycle cannot.
+        let mut by_bar: Vec<Vec<&Event>> = vec![Vec::new(); score.bars()];
+        for event in score.events() {
+            if let Some(bar) = by_bar.get_mut(event.bar().get()) {
+                bar.push(event);
+            }
         }
-
-        let mut messages: Vec<Message> = score
-            .events()
-            .iter()
-            .map(|event| message(event, score, style, &bar_starts))
-            .collect();
+        let mut messages: Vec<Message> = Vec::new();
+        let mut slot_start = 0_u64;
+        for slot in score.arrangement().slots() {
+            let slot_beats = u64::try_from(slot.beats()).unwrap_or(1).max(1);
+            for placement in slot.placements() {
+                let bar = placement.bar().get();
+                let line_beats = u64::try_from(score.beats_in(bar)).unwrap_or(1).max(1);
+                for event in by_bar.get(bar).into_iter().flatten() {
+                    let at = fitted(event, slot_start, slot_beats, line_beats);
+                    messages.push(message(event, score, style, at));
+                }
+            }
+            slot_start += slot_beats;
+        }
         // One total order before anything is sent (`CLAUDE.md` §4). Ties break by span, so two
         // events at the same instant always leave in the same order.
         messages.sort_by(|a, b| a.at.cmp(&b.at).then(a.span.start().cmp(&b.span.start())));
@@ -344,26 +343,51 @@ impl Backend for Osc {
     }
 }
 
-/// One event, scheduled.
-fn message(event: &Event, score: &Score, style: &Style, bar_starts: &[u64]) -> Message {
-    let bar_start = bar_starts.get(event.bar().get()).copied().unwrap_or(0);
+/// When an event sounds: its place within its own line, fitted to the slot it plays in.
+///
+/// Bar-locked (`prosody_core::arrange`): a line looping under a longer or shorter host is
+/// stretched or squeezed to the host's bar, so a slot's lines start and end together. A line in a
+/// slot of its own length — every first statement — lands exactly where it always did.
+fn fitted(event: &Event, slot_start: u64, slot_beats: u64, line_beats: u64) -> Onset {
     let of = u64::try_from(event.subdivision().of()).unwrap_or(1).max(1);
     let within = u64::try_from(event.subdivision().index()).unwrap_or(0);
     let beat = u64::try_from(event.beat().get()).unwrap_or(0);
 
-    let at = Onset {
-        numerator: (bar_start + beat) * of + within,
-        denominator: of,
-    };
-    // §4.3's anaphora row: a line-initial repetition is pulled onto the pulse. This is the mapping
-    // the text backend could not express, because there a step's position in the cycle already
-    // fixes its time and there is nowhere to move it to.
-    let at = if event.anchor() == Some(Anchor::Downbeat) {
-        at.on_the_beat()
+    // §4.3's anaphora row: a line-initial repetition is pulled onto the pulse — its own line's
+    // pulse, before fitting, so the pull is the same wherever the line sounds. This is the
+    // mapping the text backend could not express, because there a step's position in the cycle
+    // already fixes its time and there is nowhere to move it to.
+    let (numerator, denominator) = if event.anchor() == Some(Anchor::Downbeat) {
+        (beat, 1)
     } else {
-        at
+        (beat * of + within, of)
     };
+    reduced(
+        slot_start * denominator * line_beats + numerator * slot_beats,
+        denominator * line_beats,
+    )
+}
 
+const fn reduced(numerator: u64, denominator: u64) -> Onset {
+    let divisor = gcd(numerator, denominator);
+    let divisor = if divisor == 0 { 1 } else { divisor };
+    Onset {
+        numerator: numerator / divisor,
+        denominator: denominator / divisor,
+    }
+}
+
+const fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let rest = a % b;
+        a = b;
+        b = rest;
+    }
+    a
+}
+
+/// One event, scheduled at `at`.
+fn message(event: &Event, score: &Score, style: &Style, at: Onset) -> Message {
     // §4.3's epistrophe row: a cadence rings on where its neighbours are clipped.
     let sustain = if event.anchor() == Some(Anchor::Cadence) {
         2.0
@@ -542,7 +566,8 @@ mod tests {
             .iter()
             .map(|m| m.at().parts())
             .collect();
-        assert_eq!(onsets, vec![(0, 2), (1, 2)], "two syllables, one foot");
+        // Fractions are kept in lowest terms, so the downbeat is 0/1, not 0/2.
+        assert_eq!(onsets, vec![(0, 1), (1, 2)], "two syllables, one foot");
     }
 
     #[test]
@@ -769,5 +794,45 @@ mod tests {
     #[test]
     fn scheduling_is_reproducible() {
         assert_eq!(schedule("bo bAn\nteA rot\n"), schedule("bo bAn\nteA rot\n"));
+    }
+
+    #[test]
+    fn a_looped_line_is_fitted_into_its_hosts_bar() {
+        // As in the Strudel test: stanza 2 is stated with stanza 1 looping under it, so slot 2
+        // hosts `tA nA` with `bA` under it, and slot 3 hosts `rA sA` with the six-syllable line
+        // under it. Bar-locked: a looped line starts with its host, and all of it fits inside the
+        // host's bar however many beats it has of its own.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let score = score_of(source);
+        let schedule = schedule(source);
+        let onsets_of = |start: usize| -> Vec<f64> {
+            schedule
+                .messages()
+                .iter()
+                .filter(|m| m.span().start() == start)
+                .map(|m| m.at().as_beats())
+                .collect()
+        };
+        // `bA` at byte 0 sounds twice: at the start, and with `tA` (byte 22).
+        let host = onsets_of(22);
+        assert_eq!(onsets_of(0), vec![0.0, host[0]]);
+
+        // The six-syllable line's words start at bytes 3, 6, … 18; under `rA` (byte 28) every
+        // one of them falls inside slot 3.
+        let slot_start = onsets_of(28)[0];
+        let slot_end =
+            slot_start + f64::from(u32::try_from(score.arrangement().slots()[3].beats()).unwrap());
+        for word in [3, 6, 9, 12, 15, 18] {
+            let looped = *onsets_of(word).last().unwrap();
+            assert!(
+                (slot_start..slot_end).contains(&looped),
+                "word at {word} sounds at {looped}, outside {slot_start}..{slot_end}"
+            );
+        }
+        assert_eq!(
+            onsets_of(3).last().copied(),
+            Some(slot_start),
+            "it starts with its host"
+        );
     }
 }

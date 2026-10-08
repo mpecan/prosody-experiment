@@ -11,12 +11,14 @@ passes
   rhyme       §4.5
   phoneme     §7.2
   seed        I2
+  arrange     §4.1
 
 stanza 0
 
   a little while to walk with thee dear child
   ───────────────────────────────────────────
   bar 0  foundation (refrain of voice 0)  voice 0  seed f60fbb1d
+  sounds stated 0
     token          beat       gain    pitch   modulation sharp   bank   from
     a              0.0.0/2    0.33    —       f0+0      0.00    —      meter,sound,surprisal
     little         0.0.1/2    1.00    —       f1+0      0.12    IH     meter,sound,surprisal
@@ -32,6 +34,7 @@ stanza 0
   to lean on thee and feel thy hand in mine
   ─────────────────────────────────────────
   bar 1  foundation (regularity)  voice 1  seed febcb5dd
+  sounds stated 1 · yielding 4(1)
     token          beat       gain    pitch   modulation sharp   bank   from
     to             1.0.0/2    1.00    —       f3+0      0.25    —      meter,sound,surprisal
     lean           1.0.1/2    1.00    —       —         0.31    IY     meter,surprisal
@@ -47,6 +50,7 @@ stanza 0
   and then to go my ways alone and wild
   ─────────────────────────────────────
   bar 2  foundation (refrain of voice 2)  voice 2  seed ebd7d831
+  sounds stated 2 · yielding 5(1) 8(2)
     token          beat       gain    pitch   modulation sharp   bank   from
     and            2.0.0/2    0.33    —       f11+0     0.25    AH     meter,sound,surprisal
     then           2.0.1/2    1.00    —       f17+0     0.38    —      meter,sound,surprisal
@@ -64,6 +68,7 @@ stanza 1
   for even now the winds are growing wild
   ───────────────────────────────────────
   bar 3  foundation (regularity)  voice 3  seed b8597d4a
+  sounds arriving 3(1) 6(2) 9(3)
     token          beat       gain    pitch   modulation sharp   bank   from
     for            3.0.0/2    1.00    —       —         0.44    —      meter,surprisal
     even           3.0.1/2    1.00    —       —         0.44    —      meter,surprisal
@@ -79,6 +84,7 @@ stanza 1
   and all the ways are darkening as we twine
   ──────────────────────────────────────────
   bar 4  foundation (regularity)  voice 4  seed 6524ba7f
+  sounds arriving 7(2) 10(3) · yielding 13(1)
     token          beat       gain    pitch   modulation sharp   bank   from
     and            4.0.0/3    0.33    —       f11+0     0.25    AH     meter,sound,surprisal
     all            4.0.1/3    1.00    —       —         0.31    —      meter,surprisal
@@ -95,6 +101,7 @@ stanza 1
   a little while to walk with thee dear child
   ───────────────────────────────────────────
   bar 5  foundation (refrain of voice 0)  voice 0  seed f60fbb1d
+  sounds arriving 11(3) · yielding 14(1) 17(2)
     token          beat       gain    pitch   modulation sharp   bank   from
     a              5.0.0/2    0.33    —       f0+0      0.00    —      meter,sound,surprisal
     little         5.0.1/2    1.00    —       f1+0      0.12    IH     meter,sound,surprisal
@@ -112,6 +119,7 @@ stanza 2
   the winter comes and we are not beguiled
   ────────────────────────────────────────
   bar 6  foundation (regularity)  voice 5  seed 33f96152
+  sounds arriving 12(1) 15(2) 18(3)
     token          beat       gain    pitch   modulation sharp   bank   from
     the            6.0.0/2    0.33    —       f25+0     0.12    AH     meter,sound,surprisal
     winter         6.0.1/2    1.00    —       —         0.62    W      meter,surprisal
@@ -127,6 +135,7 @@ stanza 2
   we know the frost and know the bitter brine
   ───────────────────────────────────────────
   bar 7  foundation (regularity)  voice 6  seed 55288050
+  sounds arriving 16(2) 19(3)
     token          beat       gain    pitch   modulation sharp   bank   from
     we             7.0.0/2    1.00    —       f32+0     0.38    —      meter,sound,surprisal
     know           7.0.1/2    1.00    —       f38+0     0.12    N      meter,sound,surprisal
@@ -142,6 +151,7 @@ stanza 2
   and then to go my ways alone and wild
   ─────────────────────────────────────
   bar 8  foundation (refrain of voice 2)  voice 2  seed ebd7d831
+  sounds arriving 20(3)
     token          beat       gain    pitch   modulation sharp   bank   from
     and            8.0.0/2    0.33    —       f11+0     0.25    AH     meter,sound,surprisal
     then           8.0.1/2    1.00    —       f17+0     0.38    —      meter,sound,surprisal
