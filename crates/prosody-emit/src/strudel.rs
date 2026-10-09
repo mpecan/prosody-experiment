@@ -333,9 +333,14 @@ fn grid(
                             .then(|| (beat.saturating_sub(placed.first_beat()), covered))
                     })
                     .collect();
-                // A line shorter than the bar keeps one beat per foot and rests for the rest of
-                // the cycle (`Slot::room_for`); a longer one fills the cycle with its own beats.
-                let steps = placed.beats().max(slot.beats());
+                // A line given less than the whole bar keeps one beat per foot and rests for the
+                // rest of the cycle; one given all of it fills the cycle with its own beats,
+                // squeezed or stretched (`Slot::room_for`).
+                let steps = if slot.room_for(placed.beats()) < slot.beats() {
+                    slot.beats()
+                } else {
+                    placed.beats()
+                };
                 (!present.is_empty()).then(|| line(&present, steps, value, absent))
             })
             .collect();

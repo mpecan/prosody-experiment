@@ -72,6 +72,14 @@ The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, s
 and synth. Changing one of them changes what you hear and provably not what happens — the page
 recompiles and the bar, voice and event counts stay put, which is invariant I3 in front of you.
 
+Under the palette is **Mappings — changes what happens**: the candidate mappings still under
+review (the held and refrain lanes, the bass, the stanza period, the outro), each with a checkbox
+for two settings, A and B. A starts with everything on, B with everything off. The **hearing A | B**
+switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
+adds. The **Score A vs B** tab measures both settings side by side (see [Measuring it](#measuring-it))
+with the difference between them, under the machine or the interest profile. The page remembers
+your two settings.
+
 It binds to `127.0.0.1` only, and deliberately: it compiles arbitrary text from a request body,
 which is exactly right on your own machine and exactly wrong on a network. Playback loads Strudel
 and its drum samples from a CDN, so the first Play needs an internet connection.
@@ -175,6 +183,10 @@ psytrance): denser layers, more repetition, short riffs, plus a steady **pulse**
 of bar length. `./scripts/cycle.sh` prints that profile for every example with the mean overall —
 the number the tuning cycle in [`PLAN.md`](PLAN.md) works to raise.
 
+`--without held,refrain,bass,period,outro` (any of them) leaves candidate mappings out, for the
+pattern and for `--score` alike; `./scripts/cycle.sh machine bass` scores every example without the
+bass.
+
 ---
 
 ## Writing a poem
@@ -275,7 +287,7 @@ are enforced rather than merely intended.
 ## State of it
 
 Everything `SPEC.md` asks for is built: all the mappings, both backends, the live-reload watcher,
-the debug view, a golden corpus, and property tests for all four invariants. 581 tests.
+the debug view, a golden corpus, and property tests for all four invariants. 603 tests.
 
 Things that are known to be wrong, in rough order of how much they would bother a listener:
 

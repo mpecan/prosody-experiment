@@ -492,6 +492,25 @@ fn the_machine_profile_adds_pulse_and_steadiness() {
 }
 
 #[test]
+fn a_mapping_can_be_left_out() {
+    // `COUPLET`'s two stanzas are one regular foundation, so with every mapping its stressed
+    // vowels carry a bass note, and the outro plays the last stanza again.
+    let (full, err, code) = run(&[], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let (bare, err, code) = run(&["--without", "bass,outro"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_ne!(full, bare);
+    // Two stanzas in one layer: two bars stated, two passes of two transforming, two of outro —
+    // eight bars, and six without the outro.
+    assert!(full.contains("// 8 bars from 4 lines"), "{full}");
+    assert!(bare.contains("// 6 bars from 4 lines"), "{bare}");
+
+    let (_, err, code) = run(&["--without", "bass,polka"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(err.contains("unknown mapping `polka`"), "{err}");
+}
+
+#[test]
 fn score_reports_every_metric_and_an_edit_per_word() {
     // The scorer's output is read by scripts, so its keys are the contract: every metric, the
     // edit test, and the totals, each as `name value`.

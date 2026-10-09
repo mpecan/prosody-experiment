@@ -136,7 +136,7 @@ squeezed into the bar.
 
 **The outro** (*machine cycle 3b, pending review*). When the poem runs out nothing has stopped the
 loops, so they play one more pass — the last stanza again, with the other layer and every lane
-under it — and then the piece ends. A one-stanza poem therefore loops once. The piece ends when the last stanza has fully arrived.
+under it — and then the piece ends. A one-stanza poem therefore loops once.
 
 **The call lane** (§4.1's second tier, decided the same day). The half-line before a line's first
 internal caesura — its *call*: "Tyger Tyger," — is lifted out once its line has been heard, and
@@ -157,6 +157,16 @@ carry a higher intrinsic pitch, so the riff follows the vowels; a rhyme word kee
 **The refrain lane** — §4.3's "literal loop of that voice" at line scale. A refrain line, once
 heard, loops in its own lane until the next refrain line is first heard and takes over. No lane
 doubles a voice already sounding in the bar. A refrain stanza stops both lanes with every loop.
+
+**Auditioning the candidates.** Every mapping above marked *pending review*, and the held and
+refrain lanes, can be left out of a lowering (`prosody_core::mapping`; `--without` on the CLI; the
+A/B table on the web page), so the piece can be heard and measured with and without each. This is
+a separate argument to the lowering, not part of the style: it changes structure, and I3 keeps the
+style out of structure. Every invariant holds within one setting. All on is the piece as specified,
+and the default everywhere. Left out, each falls back to what preceded it: no held or refrain lane,
+no bass, a bar as long as its own line with everything under it stretched or squeezed to fit, and
+a piece that ends as the last stanza arrives. A mapping joins the list when a design iteration
+proposes it, so the comparison stays available as long as the question is open.
 
 This is structure, read from the poem, not a style parameter — which answers §9's "looping as an
 explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*

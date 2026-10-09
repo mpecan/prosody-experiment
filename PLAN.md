@@ -336,6 +336,37 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 
 ## Log
 
+### Auditioning the candidates — A/B on the web page
+
+The user asked for a way to evaluate each candidate mapping in the frontend, and to keep it as a
+long-term artefact. `prosody_core::mapping` names five — the held lane, the refrain lane, the bass,
+the stanza period, the outro — and `lower::run_with` takes the set to apply; `lower::run` is all of
+them. It is deliberately not part of `Style` (I3). Left out, each restores what preceded it; for the
+stanza period that needed `Slot`'s `Fit::Stretched`, since before cycle 2 a placement was stretched
+across the bar rather than resting. Two fixes that are not candidates have no switch: the call lane
+no longer doubling its own line (a bug fix), and 3a (measurement only).
+
+The web page gets an A/B table of checkboxes, a switch that swaps the playing pattern live, and a
+**Score A vs B** tab fed by a new `/score` endpoint (JSON; the machine profile by default). The CLI
+gets `--without`, and `cycle.sh` a second argument passing it through.
+
+Tests: one per switch with the arrangement worked by hand; a property test that any of the 32
+settings is reproducible and only ever removes material; web tests for the query, the score JSON
+and the shorter piece without the outro.
+
+Each mapping left out, machine profile, mean overall over the nine examples (all on: 0.743):
+
+| left out | mean overall |
+|---|---|
+| held lane | 0.723 |
+| refrain lane | **0.755** |
+| bass | 0.564 |
+| stanza period | 0.604 |
+| outro | 0.702 |
+
+The refrain lane — from options 1 and 2, before this cycle — scores *better* left out under the
+machine profile. It was judged under the interest profile; whether it stays is for listening.
+
 ### Machine cycle 3b — the outro
 
 After 3a the bottom two were the one-stanza poems: Prešeren 0.412, Sonnet 18 0.611, both with

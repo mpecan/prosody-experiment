@@ -16,6 +16,7 @@ use anyhow::{Context as _, Result, bail};
 use prosody_cmudict::CmuDict;
 use prosody_core::annotate;
 use prosody_core::lower::{self, Analyses};
+use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::role::PoemRoles;
 use prosody_core::voice::Score;
 use prosody_core::{
@@ -58,6 +59,8 @@ struct Arguments {
     score: bool,
     /// What `--score` judges the piece against.
     profile: Profile,
+    /// Which candidate mappings apply: all of them, less any named by `--without`.
+    mappings: Mappings,
     /// Which backend.
     target: Target,
     /// Recompile whenever the file changes (§7.8's live reload).
@@ -75,6 +78,8 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20 --explain      print the poem with each token annotated, instead of the pattern\n\
      \x20 --score        print how the piece measures (interest, legibility), instead of the pattern\n\
      \x20 --profile NAME what --score judges against: interest (the default) or machine\n\
+     \x20 --without LIST leave out candidate mappings, comma-separated: held, refrain, bass,\n\
+     \x20                period, outro\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
@@ -96,7 +101,18 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     let mut profile = Profile::Interest;
     let mut expecting_address = false;
     let mut expecting_profile = false;
+    let mut mappings = Mappings::all();
+    let mut expecting_mappings = false;
     for argument in arguments {
+        if expecting_mappings {
+            for name in argument.split(',').filter(|name| !name.is_empty()) {
+                let mapping = Mapping::named(name)
+                    .with_context(|| format!("unknown mapping `{name}`\n\n{USAGE}"))?;
+                mappings = mappings.without(mapping);
+            }
+            expecting_mappings = false;
+            continue;
+        }
         if expecting_profile {
             profile = Profile::named(&argument)
                 .with_context(|| format!("unknown profile `{argument}`\n\n{USAGE}"))?;
@@ -117,6 +133,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
             "--watch" => watch = true,
             "--send" => expecting_address = true,
             "--profile" => expecting_profile = true,
+            "--without" => expecting_mappings = true,
             flag if flag.starts_with('-') && flag != "-" => {
                 bail!("unknown option `{flag}`\n\n{USAGE}")
             }
@@ -137,11 +154,15 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     if expecting_profile {
         bail!("--profile needs a name\n\n{USAGE}");
     }
+    if expecting_mappings {
+        bail!("--without needs a list of mappings\n\n{USAGE}");
+    }
     Ok(Some(Arguments {
         source,
         explain,
         score,
         profile,
+        mappings,
         target,
         watch,
         send,
@@ -220,10 +241,11 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
         .context("the phonemisers disagree about their inventory")?;
     let lexicon = EnglishLexicon::new();
 
-    let (score, roles) = lower_poem(&poem, &phonemiser, &lexicon)?;
+    let mappings = &arguments.mappings;
+    let (score, roles) = lower_poem(&poem, &phonemiser, &lexicon, mappings)?;
 
     if arguments.score {
-        return report(text, &score, arguments.profile, &phonemiser, &lexicon);
+        return report(text, &score, arguments, &phonemiser, &lexicon);
     }
     if arguments.explain {
         return explain(&poem, &score, &style, &roles);
@@ -254,6 +276,7 @@ fn lower_poem(
     poem: &Poem,
     phonemiser: &impl Phonemiser,
     lexicon: &impl Lexicon,
+    mappings: &Mappings,
 ) -> Result<(Score, PoemRoles)> {
     let meter = meter::scan(poem, phonemiser);
     let rhyme = rhyme::analyse(poem, phonemiser);
@@ -261,15 +284,18 @@ fn lower_poem(
     let sound = sound::analyse(poem, phonemiser);
     let surprisal = surprisal::analyse(poem, phonemiser, lexicon);
     let roles = role::assign(&meter, &repetition).context("role assignment")?;
-    let score = lower::run(Analyses {
-        poem,
-        meter: &meter,
-        rhyme: &rhyme,
-        repetition: &repetition,
-        sound: &sound,
-        surprisal: &surprisal,
-        roles: &roles,
-    })
+    let score = lower::run_with(
+        Analyses {
+            poem,
+            meter: &meter,
+            rhyme: &rhyme,
+            repetition: &repetition,
+            sound: &sound,
+            surprisal: &surprisal,
+            roles: &roles,
+        },
+        mappings,
+    )
     .context("lowering the poem to a score")?;
     Ok((score, roles))
 }
@@ -281,17 +307,17 @@ fn lower_poem(
 fn report(
     text: &str,
     score: &Score,
-    profile: Profile,
+    arguments: &Arguments,
     phonemiser: &impl Phonemiser,
     lexicon: &impl Lexicon,
 ) -> Result<()> {
     let sensitivity = sensitivity::measure(text, DEFAULT_PROBES, |edited| {
         let poem = Poem::parse(edited.to_owned()).ok()?;
-        lower_poem(&poem, phonemiser, lexicon)
+        lower_poem(&poem, phonemiser, lexicon, &arguments.mappings)
             .ok()
             .map(|(score, _)| score)
     });
-    emit(&Report::profiled(score, sensitivity, profile).to_text())
+    emit(&Report::profiled(score, sensitivity, arguments.profile).to_text())
 }
 
 /// Sends every message of a schedule over UDP.

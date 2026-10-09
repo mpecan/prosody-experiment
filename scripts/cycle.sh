@@ -5,12 +5,15 @@
 #
 #   ./scripts/cycle.sh            the machine-music profile
 #   ./scripts/cycle.sh interest   the generic one
+#   ./scripts/cycle.sh machine bass,outro
+#                                 the machine profile with those candidate mappings left out
 #
 # Exits non-zero if any example fails to score.
 set -eu
 
 here=$(dirname "$0")
 profile=${1:-machine}
+without=${2:-}
 cargo build --quiet --locked --manifest-path "$here/../Cargo.toml" -p prosody-cli
 bin="$here/../target/debug/prosody"
 
@@ -18,7 +21,7 @@ printf '%-22s %6s %6s %6s %6s %6s %6s %6s | %6s %6s %6s\n' \
     poem layer recur pitch entr sync pulse steady inter legib overall
 for poem in "$here"/../examples/*.poem; do
     name=$(basename "$poem" .poem | cut -c1-22)
-    "$bin" --score --profile "$profile" "$poem" | awk -v name="$name" '
+    "$bin" --score --profile "$profile" ${without:+--without "$without"} "$poem" | awk -v name="$name" '
         { v[$1] = $2 }
         END {
             printf "%-22s %6s %6s %6s %6s %6s %6s %6s | %6s %6s %6s\n", name,

@@ -364,6 +364,7 @@ dependencies = [
  "prosody-emit",
  "prosody-lexicon",
  "prosody-lts",
+ "prosody-score",
 ]
 
 [[package]]

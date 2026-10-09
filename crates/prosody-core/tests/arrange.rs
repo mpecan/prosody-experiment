@@ -8,6 +8,7 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test code; see CLAUDE.md §3
 
 use prosody_core::lower::{self, Analyses};
+use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{
     Inventory, Phonemiser, Pronunciation, Stress, Unpronounceable, syllabify,
@@ -50,20 +51,31 @@ impl Lexicon for Flat {
 }
 
 fn compile(source: &str) -> Score {
+    compile_with(source, &Mappings::all())
+}
+
+fn compile_with(source: &str, mappings: &Mappings) -> Score {
     let poem = Poem::parse(source.to_owned()).unwrap();
     let meter = meter::scan(&poem, &Toy);
     let repetition = repetition::analyse(&poem);
     let roles = role::assign(&meter, &repetition).unwrap();
-    lower::run(Analyses {
-        poem: &poem,
-        meter: &meter,
-        rhyme: &rhyme::analyse(&poem, &Toy),
-        repetition: &repetition,
-        sound: &sound::analyse(&poem, &Toy),
-        surprisal: &surprisal::analyse(&poem, &Toy, &Flat),
-        roles: &roles,
-    })
+    lower::run_with(
+        Analyses {
+            poem: &poem,
+            meter: &meter,
+            rhyme: &rhyme::analyse(&poem, &Toy),
+            repetition: &repetition,
+            sound: &sound::analyse(&poem, &Toy),
+            surprisal: &surprisal::analyse(&poem, &Toy, &Flat),
+            roles: &roles,
+        },
+        mappings,
+    )
     .unwrap()
+}
+
+fn without(mapping: Mapping) -> Mappings {
+    Mappings::all().without(mapping)
 }
 
 /// Each slot as `(bar, cause)` pairs, host first.
@@ -364,5 +376,107 @@ fn a_refrain_line_loops_until_the_next_takes_over_and_nothing_doubles() {
             vec![(4, Repeating), (5, Refraining)],
             vec![(5, Repeating)],
         ]
+    );
+}
+
+// Each candidate mapping switched off on its own (`prosody_core::mapping`): the piece falls back to
+// what it was before that mapping was added, and nothing else moves.
+
+#[test]
+fn without_the_held_lane_an_open_rhyme_is_not_held() {
+    use Cause::{Repeating, Stated};
+    // The ABAB of `an_open_rhyme_holds_until_its_answer`, with the lane gone: each line alone.
+    let score = compile_with("da dA\nda dO\nsa sA\nsa sO\n", &without(Mapping::HeldLane));
+    assert_eq!(
+        slots(&score),
+        vec![
+            vec![(0, Stated)],
+            vec![(1, Stated)],
+            vec![(2, Stated)],
+            vec![(3, Stated)],
+            vec![(0, Repeating)],
+            vec![(1, Repeating)],
+            vec![(2, Repeating)],
+            vec![(3, Repeating)],
+        ]
+    );
+}
+
+#[test]
+fn without_the_refrain_lane_a_refrain_is_only_held() {
+    use Cause::{Holding, Repeating, Stated};
+    // The fixture of `a_refrain_line_loops_until_the_next_takes_over_and_nothing_doubles`. Rhyme
+    // pairs 0–4, 1–3 and 2–5 still hold, now with nothing in the refrain lane to stand in for
+    // bar 0: it holds from bar 1, joined by bar 1 under bar 2 and bar 2 under bar 3, where bar 1
+    // is answered. Bar 4 answers bar 0 and bar 5 answers bar 2, so the outro holds nothing.
+    let score = compile_with(
+        "dO da\nma mA\nsO so\nna nA\ndO da\nsO so\n",
+        &without(Mapping::RefrainLane),
+    );
+    assert_eq!(
+        slots(&score),
+        vec![
+            vec![(0, Stated)],
+            vec![(1, Stated), (0, Holding)],
+            vec![(2, Stated), (0, Holding), (1, Holding)],
+            vec![(3, Stated), (0, Holding), (2, Holding)],
+            vec![(4, Stated), (2, Holding)],
+            vec![(5, Stated)],
+            vec![(0, Repeating)],
+            vec![(1, Repeating)],
+            vec![(2, Repeating)],
+            vec![(3, Repeating)],
+            vec![(4, Repeating)],
+            vec![(5, Repeating)],
+        ]
+    );
+}
+
+#[test]
+fn without_the_bass_only_rhyme_words_are_pitched() {
+    // `da dA` alone rhymes with nothing, so its only note is the bass on the stressed `dA`.
+    let pitched = |score: &Score| {
+        score
+            .events()
+            .iter()
+            .filter(|e| e.pitch().is_some())
+            .count()
+    };
+    assert_eq!(pitched(&compile("da dA\n")), 1);
+    assert_eq!(
+        pitched(&compile_with("da dA\n", &without(Mapping::Bass))),
+        0
+    );
+    // A rhyme keeps its note: `dA` and `sA` rhyme, so each line's last word is pitched.
+    let rhymed = compile_with("da dA\nsa sA\n", &without(Mapping::Bass));
+    assert_eq!(pitched(&rhymed), 2);
+}
+
+#[test]
+fn without_the_stanza_period_a_bar_lasts_its_own_line() {
+    // `THREE`'s stanza 2 is `ta` (one beat) and `ma mA ma mA ma mA` (three). Each bar now takes
+    // its host's length, so `ta`'s bar is one beat — and stanza 1's loop under it, a one-beat
+    // line, fills it. Under the three-beat bar the same one-beat loop is stretched across all
+    // three, rather than playing one and resting for two.
+    let score = compile_with(THREE, &without(Mapping::StanzaPeriod));
+    let slots = score.arrangement().slots();
+    let beats: Vec<usize> = slots.iter().map(prosody_core::Slot::beats).collect();
+    assert_eq!(beats[..4], [1, 1, 1, 3]);
+    assert_eq!(slots[3].room_for(1), 3);
+    assert_eq!(slots[3].room_for(5), 3);
+}
+
+#[test]
+fn without_the_outro_the_piece_ends_with_the_poem() {
+    let full = compile(THREE);
+    let score = compile_with(THREE, &without(Mapping::Outro));
+    let ended = slots(&score);
+    // `THREE`'s last stanza has two lines, so the outro was its last two slots.
+    assert_eq!(ended, slots(&full)[..slots(&full).len() - 2]);
+    assert!(
+        ended
+            .iter()
+            .flatten()
+            .all(|(_, cause)| *cause != Cause::Repeating)
     );
 }

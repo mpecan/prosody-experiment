@@ -16,6 +16,7 @@ use proptest::prelude::{
     Strategy, prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, proptest,
 };
 use prosody_core::lower::{self, Analyses};
+use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
 use prosody_core::repetition::FigureKind;
@@ -238,6 +239,11 @@ fn roles_of(source: &str) -> role::PoemRoles {
 
 /// A poem, lowered with the test phonemiser and lexicon.
 fn score_of(source: &str) -> Score {
+    score_with(source, &Mappings::all())
+}
+
+/// A poem, lowered with the test phonemiser and lexicon, applying only `mappings`.
+fn score_with(source: &str, mappings: &Mappings) -> Score {
     let poem = Poem::parse(source.to_owned()).unwrap();
     let meter = meter::scan(&poem, &EverySyllableStressed);
     let rhyme = rhyme::analyse(&poem, &EverySyllableStressed);
@@ -245,16 +251,28 @@ fn score_of(source: &str) -> Score {
     let sound = sound::analyse(&poem, &EverySyllableStressed);
     let surprisal = surprisal::analyse(&poem, &EverySyllableStressed, &LengthLexicon);
     let roles = role::assign(&meter, &repetition).unwrap();
-    lower::run(Analyses {
-        poem: &poem,
-        meter: &meter,
-        rhyme: &rhyme,
-        repetition: &repetition,
-        sound: &sound,
-        surprisal: &surprisal,
-        roles: &roles,
-    })
+    lower::run_with(
+        Analyses {
+            poem: &poem,
+            meter: &meter,
+            rhyme: &rhyme,
+            repetition: &repetition,
+            sound: &sound,
+            surprisal: &surprisal,
+            roles: &roles,
+        },
+        mappings,
+    )
     .unwrap()
+}
+
+/// A set of mappings, one bit of `bits` per [`Mapping`]: a set bit switches it off.
+fn mappings_from(bits: u8) -> Mappings {
+    Mapping::ALL
+        .into_iter()
+        .enumerate()
+        .filter(|(index, _)| bits & (1 << index) != 0)
+        .fold(Mappings::all(), |set, (_, mapping)| set.without(mapping))
 }
 
 /// Every line span in the poem, in source order.
@@ -1428,6 +1446,40 @@ proptest! {
     #[test]
     fn i1_lowering_is_reproducible(source in poem_source()) {
         prop_assert_eq!(score_of(&source), score_of(&source));
+    }
+
+    /// I1 — and of the mappings it applies: switching some off is just as reproducible.
+    #[test]
+    fn i1_lowering_is_reproducible_under_any_mappings(source in poem_source(), bits in 0_u8..32) {
+        let mappings = mappings_from(bits);
+        prop_assert_eq!(score_with(&source, &mappings), score_with(&source, &mappings));
+    }
+
+    /// Switching a mapping off takes away; it never invents material. Every set plays the same
+    /// syllables of the same words, and places no line the full piece does not place too.
+    #[test]
+    fn switching_mappings_off_invents_nothing(source in poem_source(), bits in 0_u8..32) {
+        let full = score_of(&source);
+        let some = score_with(&source, &mappings_from(bits));
+        let shape = |score: &Score| -> Vec<(usize, usize, Span)> {
+            score
+                .events()
+                .iter()
+                .map(|event| (event.bar().get(), event.beat().get(), event.span()))
+                .collect()
+        };
+        prop_assert_eq!(shape(&full), shape(&some));
+        prop_assert!(some.arrangement().slots().len() <= full.arrangement().slots().len());
+        let placed = |score: &Score| -> std::collections::BTreeSet<usize> {
+            score
+                .arrangement()
+                .slots()
+                .iter()
+                .flat_map(prosody_core::Slot::placements)
+                .map(|placement| placement.bar().get())
+                .collect()
+        };
+        prop_assert!(placed(&some).is_subset(&placed(&full)));
     }
 
     /// I4 — every event names a word that exists in the poem.

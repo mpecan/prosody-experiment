@@ -73,6 +73,32 @@
   }
   pre.wrapped { white-space: pre-wrap; word-break: break-all; }
   .hidden { display: none; }
+
+  .ab { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .ab span { padding: .4rem .6rem; color: var(--dim); font-size: .8rem; }
+  .ab button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: .4rem .8rem; }
+  .ab button[aria-pressed=true] { background: var(--accent); color: #191423; }
+
+  .mappings table { grid-column: 1 / -1; border-collapse: collapse; font-size: .8rem; }
+  .mappings th { color: var(--dim); font-weight: 600; text-align: center; padding: 0 .5rem; }
+  .mappings td { padding: .15rem .5rem; vertical-align: top; }
+  .mappings td:first-child { padding-left: 0; }
+  .mappings td.check { text-align: center; width: 2.5rem; }
+  .mappings code { font-family: var(--mono); color: var(--ink); }
+  .mappings .what { color: var(--dim); }
+  .mappings input { width: auto; }
+
+  #score { flex: 1; overflow: auto; padding: 1rem 1.2rem; }
+  #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
+  #score table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  #score th { color: var(--dim); font-weight: 600; text-align: right; padding: .2rem .7rem; }
+  #score th:first-child, #score td:first-child { text-align: left; padding-left: 0; }
+  #score td { text-align: right; padding: .2rem .7rem; border-top: 1px solid var(--line); }
+  #score td.out { color: var(--warn); }
+  #score td.up { color: #9be3a5; }
+  #score td.down { color: var(--warn); }
+  #score tr.total td { font-weight: 700; }
+  #score p { color: var(--dim); font-size: .8rem; max-width: 46rem; }
 </style>
 </head>
 <body>
@@ -81,6 +107,11 @@
   <h1>prosody <span>— a poem is the score</span></h1>
   <button id="play" class="primary">▶ Play</button>
   <button id="stop" disabled>■ Stop</button>
+  <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
+    <span>hearing</span>
+    <button id="hearA" aria-pressed="true">A</button>
+    <button id="hearB" aria-pressed="false">B</button>
+  </span>
   <span id="status">ready</span>
 </header>
 
@@ -115,15 +146,48 @@
         into bars. Everything else here is colour.
       </p>
     </div>
+    <div class="palette mappings">
+      <h2>Mappings — changes what happens</h2>
+      <table>
+        <thead><tr><th></th><th>A</th><th>B</th></tr></thead>
+        <tbody id="mappings"></tbody>
+      </table>
+      <p>
+        Candidate mappings still under review. Untick one to leave it out of that setting, then
+        switch between A and B while it plays; the Score tab measures both.
+      </p>
+    </div>
   </section>
 
   <section>
     <nav>
       <button id="tabPattern" aria-selected="true">Pattern</button>
       <button id="tabExplain" aria-selected="false">What each word became</button>
+      <button id="tabScore" aria-selected="false">Score A vs B</button>
     </nav>
     <pre id="pattern" class="wrapped"></pre>
     <pre id="explain" class="hidden"></pre>
+    <div id="score" class="hidden">
+      <div class="bar">
+        <label>Judged against
+          <select id="profile">
+            <option value="machine">machine — Kraftwerk, Daft Punk, psytrance</option>
+            <option value="interest">interest — generic</option>
+          </select>
+        </label>
+      </div>
+      <table>
+        <thead><tr><th>metric</th><th>band</th><th>A</th><th>B</th><th>B − A</th></tr></thead>
+        <tbody id="scoreRows"></tbody>
+      </table>
+      <p>
+        A value outside its band is marked; its fit falls with the distance. Interest is the
+        geometric mean of the fits; legibility comes from recompiling the poem with each word
+        swapped, and asks whether every change is heard where the word is. Overall is the two
+        multiplied. The bands are reasoned guesses, not measurements of records — trust your ears
+        over them.
+      </p>
+    </div>
   </section>
 </main>
 
@@ -138,6 +202,7 @@ const OPTIONS = {
   bank: __BANKS__,
   synth: __SYNTHS__,
 };
+const MAPPINGS = __MAPPINGS__;   // [name, what it does], in the order the core lists them
 for (const [id, values] of Object.entries(OPTIONS)) {
   $(id).innerHTML = values.map((v) => `<option>${v}</option>`).join('');
 }
@@ -152,15 +217,105 @@ let playing = false;
 let latestPattern = '';
 let timer = null;
 
+// The two settings being compared, as the mappings each leaves out. A is the piece as specified
+// and B the piece before any candidate mapping, until the writer says otherwise.
+let settings = { A: [], B: MAPPINGS.map(([name]) => name) };
+let hearing = 'A';
+let patterns = { A: '', B: '' };
+let scores = { A: null, B: null };
+try {
+  const saved = JSON.parse(localStorage.getItem('prosody.settings') || 'null');
+  if (saved && Array.isArray(saved.A) && Array.isArray(saved.B)) settings = saved;
+} catch (error) { /* no storage: start from the defaults */ }
+
+$('mappings').innerHTML = MAPPINGS.map(([name, what]) => `
+  <tr>
+    <td><code>${name}</code> <span class="what">— ${what}</span></td>
+    <td class="check"><input type="checkbox" data-side="A" data-name="${name}"></td>
+    <td class="check"><input type="checkbox" data-side="B" data-name="${name}"></td>
+  </tr>`).join('');
+for (const box of document.querySelectorAll('#mappings input')) {
+  box.checked = !settings[box.dataset.side].includes(box.dataset.name);
+  box.addEventListener('change', () => {
+    const side = box.dataset.side;
+    settings[side] = [...document.querySelectorAll(`#mappings input[data-side=${side}]`)]
+      .filter((other) => !other.checked)
+      .map((other) => other.dataset.name);
+    try { localStorage.setItem('prosody.settings', JSON.stringify(settings)); } catch (error) {}
+    schedule();
+  });
+}
+
 function status(text, bad = false) {
   $('status').textContent = text;
   $('status').classList.toggle('bad', bad);
 }
 
-function query() {
+function query(side = hearing) {
   const p = new URLSearchParams();
   for (const id of controls) p.set(id, $(id).value);
+  p.set('off', settings[side].join(','));
+  p.set('profile', $('profile').value);
   return p.toString();
+}
+
+function showPattern() {
+  latestPattern = patterns[hearing];
+  $('pattern').textContent = latestPattern;
+}
+
+function hear(side) {
+  hearing = side;
+  $('hearA').setAttribute('aria-pressed', side === 'A');
+  $('hearB').setAttribute('aria-pressed', side === 'B');
+  showPattern();
+  if (playing && latestPattern) play();
+  else status(side + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', ''));
+  fetch('/explain?' + query(), { method: 'POST', body: $('poem').value })
+    .then((response) => response.text())
+    .then((text) => { $('explain').textContent = text; })
+    .catch(() => {});
+}
+
+async function measure(poem) {
+  const one = async (side) => {
+    const response = await fetch('/score?' + query(side), { method: 'POST', body: poem });
+    return response.ok ? response.json() : null;
+  };
+  $('scoreRows').innerHTML = '<tr><td colspan="5">measuring…</td></tr>';
+  try {
+    [scores.A, scores.B] = await Promise.all([one('A'), one('B')]);
+  } catch (error) {
+    scores = { A: null, B: null };
+  }
+  renderScores();
+}
+
+function renderScores() {
+  const { A, B } = scores;
+  if (!A || !B) {
+    $('scoreRows').innerHTML = '<tr><td colspan="5">nothing to measure</td></tr>';
+    return;
+  }
+  const delta = (a, b) => {
+    if (a == null || b == null) return '<td></td>';
+    const d = b - a;
+    const shown = (d > 0 ? '+' : '') + d.toFixed(3);
+    return `<td class="${d > 0.0005 ? 'up' : d < -0.0005 ? 'down' : ''}">${Math.abs(d) < 0.0005 ? '·' : shown}</td>`;
+  };
+  const cell = (metric) =>
+    `<td class="${metric.fit < 1 ? 'out' : ''}" title="fit ${metric.fit.toFixed(3)}">${metric.value.toFixed(3)}</td>`;
+  const rows = A.metrics.map((metric, index) => {
+    const other = B.metrics[index];
+    return `<tr><td>${metric.name}</td><td>${metric.low.toFixed(2)}–${metric.high.toFixed(2)}</td>`
+      + cell(metric) + cell(other) + delta(metric.value, other.value) + '</tr>';
+  });
+  for (const key of ['interest', 'legibility', 'overall']) {
+    const show = (value) => (value == null ? '—' : value.toFixed(3));
+    rows.push(`<tr class="total"><td>${key}</td><td></td><td>${show(A[key])}</td>`
+      + `<td>${show(B[key])}</td>${delta(A[key], B[key])}</tr>`);
+  }
+  $('scoreRows').innerHTML = rows.join('');
 }
 
 async function compile() {
@@ -168,29 +323,37 @@ async function compile() {
   const poem = $('poem').value;
   if (!poem.trim()) {
     latestPattern = '';
+    patterns = { A: '', B: '' };
+    scores = { A: null, B: null };
     $('pattern').textContent = '';
     $('explain').textContent = '';
+    renderScores();
     status('nothing to compile');
     return;
   }
   status('compiling…');
   try {
-    const [pattern, explain] = await Promise.all([
-      fetch('/pattern?' + query(), { method: 'POST', body: poem }),
+    const [patternA, patternB, explain] = await Promise.all([
+      fetch('/pattern?' + query('A'), { method: 'POST', body: poem }),
+      fetch('/pattern?' + query('B'), { method: 'POST', body: poem }),
       fetch('/explain?' + query(), { method: 'POST', body: poem }),
     ]);
-    const patternText = await pattern.text();
+    const texts = { A: await patternA.text(), B: await patternB.text() };
     $('explain').textContent = await explain.text();
-    if (!pattern.ok) {
-      $('pattern').textContent = patternText;
+    const failed = !patternA.ok ? texts.A : !patternB.ok ? texts.B : null;
+    if (failed !== null) {
+      $('pattern').textContent = failed;
       latestPattern = '';
-      status(patternText.split('\n')[0], true);
+      patterns = { A: '', B: '' };
+      status(failed.split('\n')[0], true);
       return;
     }
-    $('pattern').textContent = patternText;
-    latestPattern = patternText;
+    patterns = texts;
+    showPattern();
+    measure(poem);
+    const patternText = latestPattern;
     const summary = patternText.split('\n')[1] || '';
-    status(summary.replace('// ', '') + (playing ? ' · playing' : ''));
+    status(hearing + ' · ' + summary.replace('// ', '') + (playing ? ' · playing' : ''));
     if (playing) play();          // live reload: keep going with the new version
   } catch (error) {
     status('server unreachable — is `prosody-web` still running?', true);
@@ -223,7 +386,7 @@ async function play() {
     playing = true;
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
-    status((latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing');
+    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing');
   } catch (error) {
     status('Strudel refused the pattern: ' + error.message, true);
   }
@@ -248,11 +411,15 @@ for (const id of controls) {
 }
 $('tabPattern').addEventListener('click', () => showTab('pattern'));
 $('tabExplain').addEventListener('click', () => showTab('explain'));
+$('tabScore').addEventListener('click', () => showTab('score'));
+$('hearA').addEventListener('click', () => hear('A'));
+$('hearB').addEventListener('click', () => hear('B'));
+$('profile').addEventListener('input', () => measure($('poem').value));
 function showTab(which) {
-  $('pattern').classList.toggle('hidden', which !== 'pattern');
-  $('explain').classList.toggle('hidden', which !== 'explain');
-  $('tabPattern').setAttribute('aria-selected', which === 'pattern');
-  $('tabExplain').setAttribute('aria-selected', which === 'explain');
+  for (const tab of ['pattern', 'explain', 'score']) {
+    $(tab).classList.toggle('hidden', which !== tab);
+    $('tab' + tab[0].toUpperCase() + tab.slice(1)).setAttribute('aria-selected', which === tab);
+  }
 }
 
 compile();

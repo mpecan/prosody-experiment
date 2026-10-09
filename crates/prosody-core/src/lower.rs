@@ -30,6 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::mapping::{Mapping, Mappings};
 use crate::meter::PoemMeter;
 use crate::parse::Poem;
 use crate::phoneme::Phoneme;
@@ -89,19 +90,31 @@ impl Analyses<'_> {
     }
 }
 
-/// Lowers a poem to a [`Score`] (`SPEC.md` §7.5).
+/// Lowers a poem to a [`Score`] (`SPEC.md` §7.5), with every mapping.
 ///
 /// # Errors
 ///
 /// [`DifferentPoems`] if the analyses did not all come from the same poem.
 pub fn run(analyses: Analyses<'_>) -> Result<Score, DifferentPoems> {
+    run_with(analyses, &Mappings::all())
+}
+
+/// Lowers a poem to a [`Score`], applying only the candidate mappings in `mappings`
+/// ([`crate::mapping`]).
+///
+/// # Errors
+///
+/// [`DifferentPoems`] if the analyses did not all come from the same poem.
+pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, DifferentPoems> {
     if !analyses.agree() {
         return Err(DifferentPoems);
     }
 
     let by_line = lines_by_voice(analyses);
     let (mut events, bars, nuclei) = rhythm(analyses, &by_line);
-    bass(&mut events, &nuclei, analyses);
+    if mappings.has(Mapping::Bass) {
+        bass(&mut events, &nuclei, analyses);
+    }
     melody(&mut events, analyses);
     colour(&mut events, analyses);
     figures(&mut events, analyses);
@@ -113,7 +126,13 @@ pub fn run(analyses: Analyses<'_>) -> Result<Score, DifferentPoems> {
     events.sort_by_key(Event::order);
     let score = Score::new(voices, events, bars, silent(analyses));
     // Last, because it reads the finished material: a slot's length is its host line's beats.
-    let arrangement = crate::arrange::run(analyses.poem, analyses.roles, analyses.rhyme, &score);
+    let arrangement = crate::arrange::run(
+        analyses.poem,
+        analyses.roles,
+        analyses.rhyme,
+        &score,
+        mappings,
+    );
     Ok(score.with_arrangement(arrangement))
 }
 

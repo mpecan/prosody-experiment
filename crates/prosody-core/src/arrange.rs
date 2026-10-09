@@ -84,11 +84,16 @@
 //!   stanza of its layer arrives, so an edit that moves a later stanza between layers re-times an
 //!   earlier one. That is what "loops until something takes its place" means, and it was decided
 //!   as such rather than discovered; `prosody-score`'s edit test measures how often it happens.
+//! - **Some of this can be switched off.** The held and refrain lanes, the stanza period and the
+//!   outro are candidates still under review, so [`Mappings`] can leave each one out, to hear the
+//!   piece without it ([`crate::mapping`]). Without the stanza period a bar takes its host line's
+//!   own length and everything under it is stretched or squeezed to that ([`Fit::Stretched`]).
 //! - **I3 holds.** Nothing here reads a style. Looping is the poem's structure, which settles
 //!   `SPEC.md` §9's open question about looping-as-style: it is not style.
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::mapping::{Mapping, Mappings};
 use crate::parse::Poem;
 use crate::repetition::VoiceId;
 use crate::rhyme::PoemRhyme;
@@ -199,7 +204,19 @@ impl Placement {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slot {
     beats: usize,
+    fit: Fit,
     placements: Vec<Placement>,
+}
+
+/// How a placement shorter than its slot fills it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Fit {
+    /// At its own pace, one beat per foot, resting for the remainder: the bar is its stanza's
+    /// period, so a shorter line is a line that ends early.
+    Paced,
+    /// Stretched across the whole slot: the bar is its host line's own length, so whatever sounds
+    /// under it is fitted to that, longer or shorter. Only when [`Mapping::StanzaPeriod`] is off.
+    Stretched,
 }
 
 impl Slot {
@@ -224,12 +241,16 @@ impl Slot {
     }
 
     /// How many of the slot's beats a placement of `beats` beats fills: all of its own when it
-    /// fits, at one beat per foot, and the whole slot when it is longer and must be squeezed in.
+    /// fits, at one beat per foot, and the whole slot when it is longer and must be squeezed in —
+    /// or, under [`Fit::Stretched`], always the whole slot.
     ///
     /// Every consumer fits a placement into this, so they agree on where each syllable falls.
     #[must_use]
     pub fn room_for(&self, beats: usize) -> usize {
-        beats.clamp(1, self.beats.max(1))
+        match self.fit {
+            Fit::Paced => beats.clamp(1, self.beats.max(1)),
+            Fit::Stretched => self.beats.max(1),
+        }
     }
 }
 
@@ -299,13 +320,28 @@ const fn other(layer: Layer) -> Layer {
 /// `roles` and `rhyme` must describe `poem`; `score` must be its lowering. Lowering calls this
 /// itself, having already checked all three.
 #[must_use]
-pub fn run(poem: &Poem, roles: &PoemRoles, rhyme: &PoemRhyme, score: &Score) -> Arrangement {
+pub fn run(
+    poem: &Poem,
+    roles: &PoemRoles,
+    rhyme: &PoemRhyme,
+    score: &Score,
+    mappings: &Mappings,
+) -> Arrangement {
     let mut piece = Piece {
         score,
-        periods: periods(poem, score),
+        periods: if mappings.has(Mapping::StanzaPeriod) {
+            Some(periods(poem, score))
+        } else {
+            None
+        },
         calls: calls(poem, score),
-        answers: answers(rhyme),
+        answers: if mappings.has(Mapping::HeldLane) {
+            answers(rhyme)
+        } else {
+            BTreeMap::new()
+        },
         refrains: refrains(roles),
+        refrain_lane: mappings.has(Mapping::RefrainLane),
         slots: Vec::new(),
         loops: Loops::default(),
         lane: None,
@@ -358,7 +394,7 @@ pub fn run(poem: &Poem, roles: &PoemRoles, rhyme: &PoemRhyme, score: &Score) -> 
         last = Some((layer, bars));
     }
     // The outro: nothing arrived to stop the loops.
-    if let Some((layer, bars)) = last {
+    if let Some((layer, bars)) = last.filter(|_| mappings.has(Mapping::Outro)) {
         for bar in bars {
             piece.push(placement(bar, layer, Cause::Repeating), Company::Loops);
         }
@@ -451,10 +487,13 @@ enum Company {
 /// The arrangement being built.
 struct Piece<'a> {
     score: &'a Score,
-    periods: BTreeMap<usize, usize>,
+    /// Every line's stanza period, or `None` when a bar takes its host line's own length.
+    periods: Option<BTreeMap<usize, usize>>,
     calls: BTreeMap<usize, Span>,
     answers: BTreeMap<usize, usize>,
     refrains: BTreeMap<usize, VoiceId>,
+    /// Whether a refrain line takes the refrain lane once heard.
+    refrain_lane: bool,
     slots: Vec<Slot>,
     loops: Loops,
     /// The call lane: whose call is looping, if any.
@@ -517,8 +556,8 @@ impl Piece<'_> {
                 }
             }
         }
-        let period = self.periods.get(&bar).copied().unwrap_or(0);
-        self.slots.push(slot(self.score, period, placements));
+        self.slots
+            .push(slot(self.score, self.periods.as_ref(), placements));
 
         // Lanes change *after* the bar their line is first heard in, so a line is heard in place
         // before it is heard underneath.
@@ -527,7 +566,7 @@ impl Piece<'_> {
             if let Some(&call) = self.calls.get(&bar) {
                 self.lane = Some((bar, call));
             }
-            if self.refrains.contains_key(&bar) {
+            if self.refrain_lane && self.refrains.contains_key(&bar) {
                 self.refrain = Some(bar);
             }
             if self.answers.contains_key(&bar) {
@@ -576,15 +615,32 @@ const fn lane(bar: usize, lane: Lane, cause: Cause) -> Placement {
     }
 }
 
-fn slot(score: &Score, period: usize, placements: Vec<Placement>) -> Slot {
-    let host = period;
+/// A slot for `placements`, as long as its host's stanza period — or, without periods, as its
+/// host line.
+fn slot(
+    score: &Score,
+    periods: Option<&BTreeMap<usize, usize>>,
+    placements: Vec<Placement>,
+) -> Slot {
+    let (host, fit) = match (periods, placements.first()) {
+        (Some(periods), Some(first)) => (
+            periods.get(&first.bar.get()).copied().unwrap_or(0),
+            Fit::Paced,
+        ),
+        (None, Some(first)) => (score.placed(*first).beats(), Fit::Stretched),
+        (_, None) => (0, Fit::Paced),
+    };
     let longest = placements
         .iter()
         .map(|placement| score.placed(*placement).beats())
         .max()
         .unwrap_or(0);
     let beats = if host > 0 { host } else { longest.max(1) };
-    Slot { beats, placements }
+    Slot {
+        beats,
+        fit,
+        placements,
+    }
 }
 
 #[cfg(test)]
