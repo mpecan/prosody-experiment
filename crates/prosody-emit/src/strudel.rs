@@ -40,6 +40,8 @@
 //! | which sample, which instrument, tempo, swing | [`Style`] | §5 |
 //! | `.room` floor, `.roomsize`, `.delay`, `.shape`, `.compressor`, `.postgain` | [`Style::mix`] | §5, §9 "tuning the ranges" |
 //! | `.nudge`, `.velocity` — the human stray | each line's own seed, scaled by [`Style::mix`] | §6 I2 |
+//! | the chord lane: which bar has a chord, on which degree | `Score::chord_in` — the harmony mapping | §4.6, candidate |
+//! | the chord lane's sound, tones, register, level | [`Style::chord_sound`], [`Voicing`], the melody's octave less one, `chord_gain` | §5 |
 //!
 //! # Three pitched and percussive roles
 //!
@@ -57,9 +59,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use prosody_core::VoiceId;
 use prosody_core::role::Layer;
 use prosody_core::voice::{Event, PitchSource, Score, Voice};
+use prosody_core::{Chord, Harmony, Silence, VoiceId};
 use rand_core::Rng as _;
 
 use crate::style::{Kit, Named, RideFallback, Style, Voicing};
@@ -129,6 +131,7 @@ impl Backend for Strudel {
                 tempo.get(),
             ));
         }
+        layers.extend(chord_layer(score, style, &density));
 
         out.push_str("stack(\n");
         for (index, (code, note)) in layers.iter().enumerate() {
@@ -140,15 +143,18 @@ impl Backend for Strudel {
         }
         out.push_str(")\n");
 
-        let _ = writeln!(
-            out,
-            "  .cpm({})",
-            fmt_param(cycles_per_minute(score, style))
-        );
         if style.swing().hundredths() > 0 {
             // `swingBy(x, n)` slices the *cycle* into `n` and delays the back half of each
             // slice. A cycle is a bar, so the slices must be its beats — with `n = 2` this was a
             // rubato across half a line rather than a shuffle between syllables.
+            //
+            // It must come *before* `.cpm`. `cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6
+            // `pattern.mjs`, which `@strudel/web` 1.3.0 pins), so after it a cycle is the
+            // scheduler's one second, not a bar: `swingBy` then sliced the second into `n`, out
+            // of step with the bar's beats — onsets moved to irregular times, and a held chord's
+            // onset could fall in no slice's front half (never sounding) or be split across two
+            // (sounding twice). Swinging first slices the bar, and `cpm` then speeds the swung
+            // bar up as a whole.
             let _ = writeln!(
                 out,
                 "  .swingBy({}, {})",
@@ -156,6 +162,11 @@ impl Backend for Strudel {
                 mean_beats(score).max(1)
             );
         }
+        let _ = writeln!(
+            out,
+            "  .cpm({})",
+            fmt_param(cycles_per_minute(score, style))
+        );
         Ok(out)
     }
 }
@@ -392,6 +403,10 @@ fn sounded(score: &Score) -> usize {
         .sum()
 }
 
+/// The palette keys the header lists only when the piece has a chord lane: they colour nothing
+/// else, and a pattern without the harmony mapping reads as it did before they existed.
+const LISTED_WITH_CHORDS: &[&str] = &["chord_sound", "chord_gain"];
+
 /// The palette keys the header lists only when they are not at their default (see [`header`]).
 const LISTED_WHEN_SET: &[&str] = &[
     "bass_octave",
@@ -470,8 +485,12 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     // Keys added after the corpus was recorded are listed only when they are set away from their
     // default, so a pattern that does not use them reads exactly as it did before they existed.
     let defaults = Style::default().describe();
+    let has_chords = score.chords().next().is_some();
     for (key, value) in style.describe() {
         if LISTED_WHEN_SET.contains(&key) && defaults.get(key) == Some(&value) {
+            continue;
+        }
+        if LISTED_WITH_CHORDS.contains(&key) && !has_chords {
             continue;
         }
         let _ = writeln!(out, "//   {key} = {value}");
@@ -515,6 +534,9 @@ fn header(out: &mut String, score: &Score, style: &Style) {
         strudel_instrument(style.melody(), Pitched::Melody),
         strudel_instrument(style.bass(), Pitched::Bass)
     );
+    if has_chords {
+        chords_header(out, score, style);
+    }
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
         let _ = writeln!(
@@ -1165,6 +1187,162 @@ fn pitched_layer(
         layers.push((layer, lane.label(name)));
     }
     layers
+}
+
+/// The scale-degree offsets a chord of the chord lane stacks on its root: the triad under
+/// [`Voicing::Note`] — one tone would be no chord — and the seventh chord under
+/// [`Voicing::Seventh`], every other degree of the style's scale either way.
+const fn chord_tones(voicing: Voicing) -> &'static [usize] {
+    match voicing {
+        Voicing::Note => &[0, 2, 4],
+        Voicing::Seventh => &[0, 2, 4, 6],
+    }
+}
+
+/// One chord's tones, as a mini-notation stack: its root folded into one octave of the style's
+/// scale, then [`chord_tones`] above it, an octave below the melody's.
+///
+/// Folding is register, so palette: the core counts V of degree 5 as degree 9, which in a
+/// seven-note scale is degree 2 an octave up; the chord lane sounds it in the same octave as every
+/// other chord, so the harmony moves by its roots rather than climbing with the degree numbers.
+fn chord_note(chord: Chord, style: &Style) -> String {
+    let scale = style.scale();
+    let root = chord.root().get() % scale.len().max(1);
+    let base = style.melody_octave().midi_c() - 12 + i32::from(style.root().semitones());
+    let tones: Vec<String> = chord_tones(style.voicing())
+        .iter()
+        .map(|above| format!("{}", base + scale.degree(root + above)))
+        .collect();
+    format!("[{}]", tones.join(","))
+}
+
+/// The Strudel sound the chord lane plays: a soundfont as named, a synth name as the melody would
+/// play it — a chord is keys, not a bass.
+fn chord_instrument(style: &Style) -> &'static str {
+    strudel_instrument(style.chord_sound(), Pitched::Melody)
+}
+
+/// One pattern element per slot of the arrangement, as [`grid_by_slot`] writes them.
+fn per_slot(elements: Vec<String>) -> String {
+    match elements.len() {
+        0 => "~".to_owned(),
+        1 => elements
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "~".to_owned()),
+        _ => format!("<{}>", elements.join(" ")),
+    }
+}
+
+/// The chord lane: one chord a slot, held for the bar, wherever the arrangement plays a foundation
+/// line the harmony mapping gave a chord (`SPEC.md` §4.6, [`Score::chord_in`]); a rest elsewhere.
+///
+/// `None` when the score has no chord — the mapping is off, or nothing in the poem earned one — so
+/// a piece without the harmony is byte for byte what it was.
+///
+/// Which slots have a chord, and on which degree, is the score's. Everything here is palette: the
+/// instrument (`chord_sound`), how many tones ([`chord_tones`], from the [`Voicing`]), the
+/// register (an octave below the melody, between it and the bass), the level (`chord_gain`,
+/// shared between the tones like the melody's, times the bar's density level) and a soft
+/// envelope, so a held chord swells in under the syllables rather than striking with them.
+fn chord_layer(score: &Score, style: &Style, density: &[f64]) -> Option<(String, String)> {
+    let chords: Vec<Option<Chord>> = score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| score.chord_in(slot))
+        .collect();
+    if chords.iter().all(Option::is_none) {
+        return None;
+    }
+    let notes = per_slot(
+        chords
+            .iter()
+            .map(|chord| chord.map_or_else(|| "~".to_owned(), |chord| chord_note(chord, style)))
+            .collect(),
+    );
+    let gains = per_slot(
+        chords
+            .iter()
+            .enumerate()
+            .map(|(slot, chord)| {
+                chord.map_or_else(
+                    || "~".to_owned(),
+                    |_| fmt_param(density.get(slot).copied().unwrap_or(1.0)),
+                )
+            })
+            .collect(),
+    );
+    let mix = style.mix();
+    let mut layer = format!(
+        "  note(\"{notes}\").sound(\"{}\").gain(\"{gains}\")",
+        chord_instrument(style)
+    );
+    let _ = write!(
+        layer,
+        ".attack(0.050).release(0.600).lpf({}).room({})",
+        mix.high_cut(),
+        fmt_param(mix.reverb().as_f64())
+    );
+    let tones = u32::try_from(chord_tones(style.voicing()).len()).unwrap_or(1);
+    layer.push_str(&bus(
+        style,
+        mix.chord_gain(),
+        1.0 / f64::from(tones.max(1)).sqrt(),
+    ));
+    Some((
+        layer,
+        "the chords — one a bar of a foundation stanza, from the harmony mapping".to_owned(),
+    ))
+}
+
+/// The header's account of the chord lane: what plays it, and each line's chord or rest.
+fn chords_header(out: &mut String, score: &Score, style: &Style) {
+    let scale = style.scale();
+    let heptatonic = scale.len() == 7;
+    let voiced = match style.voicing() {
+        Voicing::Note if heptatonic => "triads",
+        Voicing::Note => "three-tone chords on every other degree",
+        Voicing::Seventh if heptatonic => "seventh chords",
+        Voicing::Seventh => "four-tone chords on every other degree",
+    };
+    let _ = writeln!(
+        out,
+        "//   chords: on {}, as {voiced} in {} an octave below the melody, each root folded into \
+         one octave; one a bar of a foundation stanza (SPEC.md §4.6, the harmony mapping)",
+        chord_instrument(style),
+        scale.name()
+    );
+    // The core counts a chord's function in seven steps — V is four degrees above, IV three — so
+    // the numerals name a dominant and a subdominant only in a seven-note scale. In any other
+    // scale the same steps land elsewhere (in a five-note one, "V" folds onto the degree just
+    // below its root), and the header says so rather than letting the numerals mislead.
+    if !heptatonic {
+        let _ = writeln!(
+            out,
+            "//   chords: {} has {} notes, not 7, so the numerals below count steps of it, not \
+             functions: V is not a dominant nor IV a subdominant here",
+            scale.name(),
+            scale.len()
+        );
+    }
+    // Line by line, counting from 1 as a reader does: `V/4` is V on degree 4, `-` a rest. Flourish
+    // lines carry no harmony and are left out.
+    let lines: Vec<String> = score
+        .harmony()
+        .iter()
+        .filter_map(|harmony| match harmony {
+            Harmony::Chord(chord) => Some(format!(
+                "{}:{}/{}",
+                chord.bar().get() + 1,
+                chord.function().numeral(),
+                chord.root().get()
+            )),
+            Harmony::Rest(rest) if rest.why() == Silence::Flourish => None,
+            Harmony::Rest(rest) => Some(format!("{}:-", rest.bar().get() + 1)),
+        })
+        .collect();
+    let _ = writeln!(out, "//   chords by line: {}", lines.join(" "));
 }
 
 #[cfg(test)]
@@ -2355,5 +2533,200 @@ mod tests {
                 proptest::prop_assert_eq!(was.get(line.as_str()), now.get(line.as_str()), "{}", line);
             }
         }
+    }
+
+    /// A poem lowered with the harmony's `variant` chosen.
+    fn harmonised(source: &str, variant: prosody_core::Variant) -> Score {
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let rhyme = rhyme::analyse(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let sound = sound::analyse(&poem, &Spelled);
+        let surprisal = surprisal::analyse(&poem, &Spelled, &ByLength);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings = prosody_core::Mappings::all()
+            .with(prosody_core::Mapping::Harmony.choose(variant).unwrap());
+        lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme,
+                repetition: &repetition,
+                sound: &sound,
+                surprisal: &surprisal,
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap()
+    }
+
+    /// ABAB of stressed one-syllable words: A (AA) is degree 0, B (OW) degree 1. One foundation
+    /// stanza, so the piece is four bars stated and the outro's four again.
+    const ABAB: &str = "dA bA\nro bo\nsA tA\nno do\n";
+
+    /// The chord lane's line of the pattern.
+    fn chord_line(text: &str) -> &str {
+        text.lines()
+            .find(|line| line.contains("// the chords"))
+            .unwrap_or_else(|| panic!("no chord lane in:\n{text}"))
+    }
+
+    #[test]
+    fn without_the_harmony_there_is_no_chord_lane_and_no_chord_keys() {
+        let text = render(ABAB, &Style::default());
+        assert!(!text.contains("the chords"), "{text}");
+        assert!(
+            !text.contains("chord_sound") && !text.contains("chord_gain"),
+            "{text}"
+        );
+        assert!(!text.contains("chords"), "{text}");
+    }
+
+    #[test]
+    fn rhyme_plays_abab_as_alternating_triads() {
+        // Default palette: C minor, the melody at octave 4 (MIDI 60), so chords from 48. `note`
+        // voicing stacks a triad: degree 0 is C Eb G (48 51 55), degree 1 is D F Ab (50 53 56).
+        let text = Strudel::new()
+            .render(
+                &harmonised(ABAB, prosody_core::Variant::Rhyme),
+                &Style::default(),
+            )
+            .unwrap();
+        let line = chord_line(&text);
+        let one = "[48,51,55] [50,53,56]";
+        assert!(
+            line.starts_with(&format!(
+                "  note(\"<{one} {one} {one} {one}>\").sound(\"gm_pad_warm\")"
+            )),
+            "{line}"
+        );
+        // Every slot has a chord at the bar's own level; the lane's level 0.40 is shared by the
+        // three tones: 0.4 / √3.
+        assert!(
+            line.contains(".gain(\"<1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000>\")"),
+            "{line}"
+        );
+        assert!(line.contains(".postgain(0.231)"), "{line}");
+        assert!(text.contains("//   chord_sound = gm_pad_warm\n"), "{text}");
+        assert!(text.contains("//   chord_gain = 0.40\n"), "{text}");
+        assert!(
+            text.contains("//   chords by line: 1:I/0 2:I/1 3:I/0 4:I/1\n"),
+            "{text}"
+        );
+        assert!(text.contains("as triads in minor"), "{text}");
+    }
+
+    #[test]
+    fn cadence_voiced_as_sevenths_folds_its_roots_into_one_octave() {
+        // Cadence on ABAB: V/4, V/5, I/0, and the turnaround V/8 — degree 8 is degree 1 folded
+        // into the octave. Sevenths in C minor from 48: degree 4 is G Bb D F (55 58 62 65),
+        // 5 is Ab C Eb G (56 60 63 67), 0 is C Eb G Bb (48 51 55 58), 1 is D F Ab C (50 53 56 60).
+        let style = Style::parse("+++\nvoicing = \"seventh\"\n+++").unwrap();
+        let text = Strudel::new()
+            .render(&harmonised(ABAB, prosody_core::Variant::Cadence), &style)
+            .unwrap();
+        let line = chord_line(&text);
+        let one = "[55,58,62,65] [56,60,63,67] [48,51,55,58] [50,53,56,60]";
+        assert!(
+            line.starts_with(&format!("  note(\"<{one} {one}>\")")),
+            "{line}"
+        );
+        // Four tones share the level: 0.4 / 2.
+        assert!(line.contains(".postgain(0.200)"), "{line}");
+        assert!(
+            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/0 4:V/8\n"),
+            "{text}"
+        );
+        assert!(text.contains("as seventh chords in minor"), "{text}");
+    }
+
+    #[test]
+    fn a_bar_without_a_chord_rests_in_the_chord_lane() {
+        // `ro bAn` rhymes with nothing: under rhyme its bar rests, and the header says `-`.
+        let text = Strudel::new()
+            .render(
+                &harmonised("dA bA\nro bAn\nsA tA\n", prosody_core::Variant::Rhyme),
+                &Style::default(),
+            )
+            .unwrap();
+        let line = chord_line(&text);
+        assert!(
+            line.starts_with("  note(\"<[48,51,55] ~ [48,51,55] [48,51,55] ~ [48,51,55]>\")"),
+            "{line}"
+        );
+        assert!(
+            line.contains(".gain(\"<1.000 ~ 1.000 1.000 ~ 1.000>\")"),
+            "{line}"
+        );
+        assert!(
+            text.contains("//   chords by line: 1:I/0 2:- 3:I/0\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_chord_lane_follows_the_palette_and_never_its_structure() {
+        // I3: another palette changes the chord lane's sound, register and level, and not which
+        // slots have a chord.
+        let score = harmonised(ABAB, prosody_core::Variant::Both);
+        let plain = Strudel::new().render(&score, &Style::default()).unwrap();
+        let other = Style::parse(
+            "+++\npreset = \"jazz\"\nchord_sound = \"gm_vibraphone\"\nchord_gain = 1.2\n\
+             melody_octave = 5\nroot = \"E\"\n+++",
+        )
+        .unwrap();
+        let coloured = Strudel::new().render(&score, &other).unwrap();
+        let rests = |text: &str| -> Vec<bool> {
+            argument(chord_line(text), "note")
+                .trim_matches(['<', '>'])
+                .split(' ')
+                .map(|step| step == "~")
+                .collect()
+        };
+        assert_eq!(rests(&plain), rests(&coloured));
+        assert_ne!(
+            argument(chord_line(&plain), "note"),
+            argument(chord_line(&coloured), "note")
+        );
+        assert!(chord_line(&coloured).contains(".sound(\"gm_vibraphone\")"));
+    }
+
+    #[test]
+    fn swing_slices_the_bar_so_it_comes_before_the_tempo() {
+        // `.cpm` is `_fast(cpm / 60)`: after it a cycle is the scheduler's second, not a bar, so
+        // a `.swingBy` chained after it sliced the wrong span and moved, dropped and doubled
+        // onsets. The swing must be applied to the stack itself, and the tempo last.
+        let score = harmonised(ABAB, prosody_core::Variant::Both);
+        let swung = Style::parse(
+            "+++
+swing = 0.33
++++",
+        )
+        .unwrap();
+        let text = Strudel::new().render(&score, &swung).unwrap();
+        let tail: Vec<&str> = text.lines().rev().take(3).collect();
+        assert_eq!(tail[2], ")", "{text}");
+        assert!(tail[1].starts_with("  .swingBy(0.330, "), "{text}");
+        assert!(tail[0].starts_with("  .cpm("), "{text}");
+    }
+
+    #[test]
+    fn outside_a_seven_note_scale_the_header_says_the_numerals_are_not_functions() {
+        let score = harmonised(ABAB, prosody_core::Variant::Cadence);
+        let seven = Strudel::new().render(&score, &Style::default()).unwrap();
+        assert!(seven.contains(" as triads in "), "{seven}");
+        assert!(!seven.contains("not functions"), "{seven}");
+        let five = Style::parse("+++\nscale = \"pentatonic_minor\"\n+++").unwrap();
+        let text = Strudel::new().render(&score, &five).unwrap();
+        assert!(!text.contains(" as triads in "), "{text}");
+        assert!(
+            text.contains(" as three-tone chords on every other degree in pentatonic_minor "),
+            "{text}"
+        );
+        assert!(
+            text.contains("pentatonic_minor has 5 notes, not 7, so the numerals below count steps"),
+            "{text}"
+        );
     }
 }

@@ -33,6 +33,10 @@ pub enum Mapping {
     StanzaPeriod,
     /// §4.6's outro: the loops play one more pass when the poem runs out.
     Outro,
+    /// §4.6's harmony layer: a chord per bar of a foundation stanza, from its rhyme class
+    /// ([`Variant::Rhyme`], H1), from rhyme closure ([`Variant::Cadence`], H2), or both
+    /// ([`Variant::Both`]). Off by default: the proposal is a candidate (`crate::harmony`).
+    Harmony,
     /// §4.7's reading: when each line of the poem is spoken over the music. Decided in the
     /// emitter (`prosody_emit::reading`), not in the lowering, which never reads it.
     Reading,
@@ -50,6 +54,14 @@ pub enum Variant {
     /// The reading's stanza variant: a stanza's lines spoken one a bar, in order, from the
     /// stanza's first hosting slot.
     Stanza,
+    /// The harmony's H1: each line's rhyme class is its bar's chord, on the class's degree.
+    Rhyme,
+    /// The harmony's H2: an open rhyme is the dominant of its degree, its answer the tonic, a
+    /// line with no rhyme in its stanza the subdominant, and the stanza's last bar a turnaround.
+    Cadence,
+    /// The harmony's H1 and H2 together: H2 where it applies (open and closing lines, the
+    /// turnaround), H1 in every other bar.
+    Both,
 }
 
 impl Variant {
@@ -61,6 +73,9 @@ impl Variant {
             Self::On => "on",
             Self::Arrives => "arrives",
             Self::Stanza => "stanza",
+            Self::Rhyme => "rhyme",
+            Self::Cadence => "cadence",
+            Self::Both => "both",
         }
     }
 }
@@ -71,14 +86,24 @@ const SWITCH: &[Variant] = &[Variant::Off, Variant::On];
 /// The reading's variants: off, line by line where each arrives, or a stanza at a time.
 const READING: &[Variant] = &[Variant::Off, Variant::Arrives, Variant::Stanza];
 
+/// The harmony's variants: none, the rhyme scheme as harmonic rhythm (H1), rhyme closure as
+/// tension and release (H2), or H2 where it applies and H1 elsewhere.
+const HARMONY: &[Variant] = &[
+    Variant::Off,
+    Variant::Rhyme,
+    Variant::Cadence,
+    Variant::Both,
+];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
         Self::StanzaPeriod,
         Self::Outro,
+        Self::Harmony,
         Self::Reading,
     ];
 
@@ -91,6 +116,7 @@ impl Mapping {
             Self::Bass => "bass",
             Self::StanzaPeriod => "period",
             Self::Outro => "outro",
+            Self::Harmony => "harmony",
             Self::Reading => "reading",
         }
     }
@@ -110,6 +136,10 @@ impl Mapping {
             Self::Bass => "stressed foundation vowels play a bass note by height",
             Self::StanzaPeriod => "every bar of a stanza lasts its longest line",
             Self::Outro => "the loops play one more pass at the end",
+            Self::Harmony => {
+                "a chord per foundation bar: its rhyme class (rhyme), open rhymes as V and \
+                 answers as I (cadence), or cadence where it applies and rhyme elsewhere (both)"
+            }
             Self::Reading => {
                 "the poem read aloud: each line where it arrives, or a stanza a bar at a time"
             }
@@ -124,6 +154,7 @@ impl Mapping {
                 SWITCH
             }
             Self::Reading => READING,
+            Self::Harmony => HARMONY,
         }
     }
 
@@ -136,6 +167,9 @@ impl Mapping {
             }
             // SPEC.md §4.7: each line is read where it is first heard — the reading as it shipped.
             Self::Reading => Variant::Arrives,
+            // A candidate the user approved for comparison, not yet the piece as specified: off
+            // keeps every existing pattern and score as it was (`PLAN.md`, the harmony proposal).
+            Self::Harmony => Variant::Off,
         }
     }
 
@@ -292,13 +326,15 @@ mod tests {
 
     #[test]
     fn the_defaults_are_todays_piece() {
-        // The five machine-cycle switches are on, the reading reads each line where it arrives.
+        // The five machine-cycle switches are on, the reading reads each line where it arrives,
+        // and the harmony — a candidate not yet in the piece — is off.
         let all = Mappings::all();
         for mapping in Mapping::ALL {
-            assert!(all.has(mapping), "{mapping:?}");
+            assert_eq!(all.has(mapping), mapping != Mapping::Harmony, "{mapping:?}");
         }
         assert_eq!(all.get(Mapping::Bass), Variant::On);
         assert_eq!(all.get(Mapping::Reading), Variant::Arrives);
+        assert_eq!(all.get(Mapping::Harmony), Variant::Off);
         assert_eq!(all.changed().count(), 0);
     }
 
@@ -308,6 +344,10 @@ mod tests {
         assert!(Mapping::Reading.choose(Variant::On).is_none());
         assert!(Mapping::Reading.choose_named("on").is_none());
         assert!(Mapping::Outro.choose_named("polka").is_none());
+        assert!(Mapping::Harmony.choose(Variant::On).is_none());
+        assert!(Mapping::Reading.choose_named("cadence").is_none());
+        let both = Mapping::Harmony.choose_named("both").unwrap();
+        assert_eq!(both.variant(), Variant::Both);
         let stanza = Mapping::Reading.choose_named("stanza").unwrap();
         assert_eq!(
             (stanza.mapping(), stanza.variant()),
@@ -348,9 +388,9 @@ mod tests {
 
     #[test]
     fn every_combination_is_listed_once() {
-        // Five on/off switches and a three-way reading: 2^5 × 3 = 96.
+        // Five on/off switches, a four-way harmony and a three-way reading: 2^5 × 4 × 3 = 384.
         let every = Mappings::every();
-        assert_eq!(every.len(), 96);
+        assert_eq!(every.len(), 384);
         for (index, one) in every.iter().enumerate() {
             assert!(!every[index + 1..].contains(one), "{one:?} twice");
         }

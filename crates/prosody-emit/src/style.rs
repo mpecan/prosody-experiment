@@ -241,6 +241,7 @@ const SOUND_KEYS: &[&str] = &[
     "voicing",
     "bass_octave",
     "melody_octave",
+    "chord_sound",
     "reverb",
     "room_size",
     "delay",
@@ -251,6 +252,7 @@ const SOUND_KEYS: &[&str] = &[
     "drums_gain",
     "bass_gain",
     "melody_gain",
+    "chord_gain",
     "density_level",
 ];
 
@@ -653,6 +655,7 @@ pub struct Style {
     bank: Named,
     bass: Named,
     melody: Named,
+    chord_sound: Named,
     kit: Kit,
     ride_fallback: RideFallback,
     voicing: Voicing,
@@ -724,6 +727,7 @@ pub struct Mix {
     drums_gain: Amount,
     bass_gain: Amount,
     melody_gain: Amount,
+    chord_gain: Amount,
     density_level: Amount,
 }
 
@@ -792,6 +796,14 @@ impl Mix {
         self.melody_gain
     }
 
+    /// The chord lane's level, `0.1..=2` — never zero; see `read_level`. The lane sounds only when
+    /// the harmony mapping is chosen (`SPEC.md` §4.6); the backend shares it between a chord's
+    /// tones, as it does the melody's.
+    #[must_use]
+    pub const fn chord_gain(self) -> Amount {
+        self.chord_gain
+    }
+
     /// How far levels follow density, `0..=1`; zero is the fixed levels above.
     ///
     /// Every gain in a bar is divided by *n* to this power, where *n* is how many lines sound in
@@ -811,6 +823,7 @@ impl Mix {
 struct Preset {
     bass: &'static str,
     melody: &'static str,
+    chords: &'static str,
     kit: Kit,
     voicing: Voicing,
     mix: Mix,
@@ -862,9 +875,10 @@ fn dorian() -> Scale {
 /// and peaked at 1.6 to 2.9 before the master; the compressor alone let drum onsets through above
 /// full scale.
 fn preset_palette(name: &str) -> Option<Preset> {
-    let sound = |bass, melody, mix| Preset {
+    let sound = |bass, melody, chords, mix| Preset {
         bass,
         melody,
+        chords,
         kit: Kit::Machine,
         voicing: Voicing::Note,
         mix,
@@ -874,6 +888,9 @@ fn preset_palette(name: &str) -> Option<Preset> {
         "default" => Some(sound(
             "gm_acoustic_bass",
             "gm_epiano1",
+            // A pad under the electric piano's rhyme notes, so a chord is heard as harmony and
+            // not as a louder melody: the two share a register's neighbourhood.
+            "gm_pad_warm",
             Mix {
                 reverb: Amount(25),
                 room_size: 20,
@@ -885,12 +902,15 @@ fn preset_palette(name: &str) -> Option<Preset> {
                 drums_gain: Amount(28),
                 bass_gain: Amount(32),
                 melody_gain: Amount(75),
+                chord_gain: Amount(40),
                 density_level: Amount(0),
             },
         )),
         "warm" => Some(sound(
             "gm_fretless_bass",
             "gm_vibraphone",
+            // Electric piano comping under the vibraphone.
+            "gm_epiano1",
             Mix {
                 reverb: Amount(45),
                 room_size: 40,
@@ -902,12 +922,14 @@ fn preset_palette(name: &str) -> Option<Preset> {
                 drums_gain: Amount(24),
                 bass_gain: Amount(24),
                 melody_gain: Amount(60),
+                chord_gain: Amount(35),
                 // Measured (PLAN.md, *sound and voice, step 4.2*): the Wilde villanelle peaked at
                 // 0.80 before the master at 0, 0.61 at 0.5 — out of the soft clipper's knee.
                 density_level: Amount(50),
             },
         )),
         "raw" => Some(sound(
+            "triangle",
             "triangle",
             "triangle",
             Mix {
@@ -921,6 +943,7 @@ fn preset_palette(name: &str) -> Option<Preset> {
                 drums_gain: Amount(100),
                 bass_gain: Amount(100),
                 melody_gain: Amount(100),
+                chord_gain: Amount(100),
                 density_level: Amount(0),
             },
         )),
@@ -956,6 +979,8 @@ fn jazz() -> Preset {
     Preset {
         bass: "gm_acoustic_bass",
         melody: "gm_epiano1",
+        // The Rhodes comps the changes too, an octave under its rhyme chords.
+        chords: "gm_epiano1",
         kit: Kit::Ride,
         voicing: Voicing::Seventh,
         mix: Mix {
@@ -969,6 +994,7 @@ fn jazz() -> Preset {
             drums_gain: Amount(22),
             bass_gain: Amount(40),
             melody_gain: Amount(75),
+            chord_gain: Amount(45),
             // Measured: the Wilde villanelle peaked at 0.72 before the master at 0, 0.51 at 0.5.
             // A ride rings on, so a bar of three lines' rides stacks up longer than three kicks.
             density_level: Amount(50),
@@ -999,6 +1025,7 @@ impl Default for Style {
             bank: Named { name: "tr909" },
             bass: Named { name: "triangle" },
             melody: Named { name: "triangle" },
+            chord_sound: Named { name: "triangle" },
             kit: Kit::Machine,
             ride_fallback: RideFallback::OpenHat,
             voicing: Voicing::Note,
@@ -1015,6 +1042,7 @@ impl Default for Style {
                 drums_gain: Amount(100),
                 bass_gain: Amount(100),
                 melody_gain: Amount(100),
+                chord_gain: Amount(100),
                 density_level: Amount(0),
             },
         };
@@ -1064,6 +1092,14 @@ impl Style {
     #[must_use]
     pub const fn melody(&self) -> Named {
         self.melody
+    }
+
+    /// The instrument the chord lane plays — one of [`SYNTHS`] or [`SOUNDFONTS`]. The lane sounds
+    /// only when the harmony mapping is chosen (`SPEC.md` §4.6): which chord, and when, is the
+    /// poem's; what it sounds like is this.
+    #[must_use]
+    pub const fn chord_sound(&self) -> Named {
+        self.chord_sound
     }
 
     /// Which sound each drum layer plays.
@@ -1117,6 +1153,9 @@ impl Style {
         self.bass = Named { name: preset.bass };
         self.melody = Named {
             name: preset.melody,
+        };
+        self.chord_sound = Named {
+            name: preset.chords,
         };
         self.kit = preset.kit;
         self.voicing = preset.voicing;
@@ -1219,6 +1258,9 @@ impl Style {
                 }
                 ("voicing", toml::Value::String(name)) => style.voicing = Voicing::parse(name)?,
                 ("melody", toml::Value::String(name)) => style.melody = instrument(key, name)?,
+                ("chord_sound", toml::Value::String(name)) => {
+                    style.chord_sound = instrument(key, name)?;
+                }
                 ("swing", value) => {
                     style.swing = Swing(narrow(read_scaled(key, value, 100.0, 0, 100)?));
                 }
@@ -1233,6 +1275,7 @@ impl Style {
                 ("drums_gain", value) => mix.drums_gain = read_level(key, value)?,
                 ("bass_gain", value) => mix.bass_gain = read_level(key, value)?,
                 ("melody_gain", value) => mix.melody_gain = read_level(key, value)?,
+                ("chord_gain", value) => mix.chord_gain = read_level(key, value)?,
                 ("density_level", value) => mix.density_level = read_amount(key, value, 1)?,
                 ("room_size", value) => {
                     mix.room_size = narrow(read_scaled(key, value, 10.0, 1, 100)?);
@@ -1240,7 +1283,7 @@ impl Style {
                 ("high_cut", value) => mix.high_cut = read_scaled(key, value, 1.0, 1000, 20000)?,
                 (
                     "scale" | "root" | "bank" | "bass" | "melody" | "kit" | "voicing"
-                    | "ride_fallback",
+                    | "ride_fallback" | "chord_sound",
                     _,
                 ) => {
                     return Err(wrong(key, "a string"));
@@ -1281,6 +1324,7 @@ impl Style {
         fields.insert("bank", self.bank.get().to_owned());
         fields.insert("bass", self.bass.get().to_owned());
         fields.insert("melody", self.melody.get().to_owned());
+        fields.insert("chord_sound", self.chord_sound.get().to_owned());
         fields.insert("kit", self.kit.name().to_owned());
         fields.insert("voicing", self.voicing.name().to_owned());
         fields.insert("ride_fallback", self.ride_fallback.name().to_owned());
@@ -1300,6 +1344,7 @@ impl Style {
         fields.insert("drums_gain", mix.drums_gain.describe());
         fields.insert("bass_gain", mix.bass_gain.describe());
         fields.insert("melody_gain", mix.melody_gain.describe());
+        fields.insert("chord_gain", mix.chord_gain.describe());
         fields
     }
 }
@@ -1429,6 +1474,35 @@ mod tests {
         +++\n";
 
     #[test]
+    fn the_chord_lane_has_an_instrument_and_a_level_per_preset() {
+        // Palette for the harmony mapping's chord lane (`SPEC.md` §4.6): a pad under the default
+        // epiano, the epiano under warm's vibraphone and in jazz, a triangle in raw.
+        let expect = [
+            ("default", "gm_pad_warm", 40),
+            ("warm", "gm_epiano1", 35),
+            ("raw", "triangle", 100),
+            ("jazz", "gm_epiano1", 45),
+        ];
+        for (name, sound, gain) in expect {
+            let style = Style::preset(name).unwrap();
+            assert_eq!(style.chord_sound().get(), sound, "{name}");
+            assert_eq!(style.mix().chord_gain().hundredths(), gain, "{name}");
+            assert!(super::preset_keys(name).unwrap().contains(&"chord_sound"));
+            assert!(super::preset_keys(name).unwrap().contains(&"chord_gain"));
+        }
+        let style =
+            Style::parse("+++\nchord_sound = \"gm_vibraphone\"\nchord_gain = 0.8\n+++").unwrap();
+        assert_eq!(style.chord_sound().get(), "gm_vibraphone");
+        assert_eq!(style.mix().chord_gain().hundredths(), 80);
+        // `synth` sets the bass and melody, not the chords.
+        let synth = Style::parse("+++\nsynth = \"fm\"\n+++").unwrap();
+        assert_eq!(synth.chord_sound().get(), "gm_pad_warm");
+        assert!(Style::parse("+++\nchord_sound = \"kazoo\"\n+++").is_err());
+        assert!(Style::parse("+++\nchord_gain = 0\n+++").is_err());
+        assert!(Style::parse("+++\nchord_sound = 3\n+++").is_err());
+    }
+
+    #[test]
     fn the_spec_example_reads() {
         // SPEC.md §5's block, verbatim.
         let style = Style::parse(HEADER).unwrap();
@@ -1497,6 +1571,8 @@ mod tests {
                 "bass",
                 "bass_gain",
                 "bass_octave",
+                "chord_gain",
+                "chord_sound",
                 "compress",
                 "delay",
                 "density_level",
@@ -1550,7 +1626,8 @@ mod tests {
             for (key, value) in style.describe() {
                 let value = match key {
                     "tempo_range" => format!("[{}]", value.replace("..", ", ")),
-                    "scale" | "bank" | "bass" | "melody" | "kit" | "voicing" | "ride_fallback" => {
+                    "scale" | "bank" | "bass" | "melody" | "kit" | "voicing" | "ride_fallback"
+                    | "chord_sound" => {
                         format!("\"{value}\"")
                     }
                     "root" => format!("\"{}\"", value.replace('s', "#").to_uppercase()),

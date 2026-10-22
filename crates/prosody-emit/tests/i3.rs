@@ -83,6 +83,11 @@ const TWO: &str = "+++\n[style]\nscale = \"lydian\"\nroot = \"A\"\n\
                    tempo_range = [70, 72]\nswing = 0\nbank = \"casio\"\nsynth = \"sawtooth\"\n+++\n";
 
 fn score_of(source: &str) -> (Score, Style) {
+    score_with(source, &prosody_core::Mappings::all())
+}
+
+/// [`score_of`], with these candidate mappings.
+fn score_with(source: &str, mappings: &prosody_core::Mappings) -> (Score, Style) {
     let poem = Poem::parse(source.to_owned()).unwrap();
     let style =
         Style::parse_optional(poem.frontmatter().and_then(|s| s.text(poem.source()))).unwrap();
@@ -92,15 +97,18 @@ fn score_of(source: &str) -> (Score, Style) {
     let sound = sound::analyse(&poem, &Spelled);
     let surprisal = surprisal::analyse(&poem, &Spelled, &Flat);
     let roles = role::assign(&meter, &repetition).unwrap();
-    let score = lower::run(Analyses {
-        poem: &poem,
-        meter: &meter,
-        rhyme: &rhyme,
-        repetition: &repetition,
-        sound: &sound,
-        surprisal: &surprisal,
-        roles: &roles,
-    })
+    let score = lower::run_with(
+        Analyses {
+            poem: &poem,
+            meter: &meter,
+            rhyme: &rhyme,
+            repetition: &repetition,
+            sound: &sound,
+            surprisal: &surprisal,
+            roles: &roles,
+        },
+        mappings,
+    )
     .unwrap();
     (score, style)
 }
@@ -435,6 +443,37 @@ proptest::proptest! {
             return Ok(());
         };
         proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+    }
+
+    /// I3 with the harmony layer on (`SPEC.md` §4.6): the chord lane is one more pattern, and no
+    /// palette moves a chord, adds one or rests one — its instrument, tones, register and level
+    /// are palette, which slots have a chord is the score's.
+    #[test]
+    fn i3_no_palette_can_change_the_chord_lane(
+        body in poem(),
+        one in palette(),
+        two in palette(),
+        harmony in proptest::sample::select(vec![
+            prosody_core::Variant::Rhyme,
+            prosody_core::Variant::Cadence,
+            prosody_core::Variant::Both,
+        ]),
+    ) {
+        let mappings = prosody_core::Mappings::all()
+            .with(prosody_core::Mapping::Harmony.choose(harmony).unwrap());
+        let (score, style_one) = score_with(&format!("{one}{body}"), &mappings);
+        let (_, style_two) = score_with(&format!("{two}{body}"), &mappings);
+        let backend = Strudel::new();
+        let (Ok(a), Ok(b)) = (
+            backend.render(&score, &style_one),
+            backend.render(&score, &style_two),
+        ) else {
+            return Ok(());
+        };
+        proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+        let lane = |text: &str| text.lines().filter(|l| l.contains("// the chords")).count();
+        proptest::prop_assert_eq!(lane(&a), lane(&b));
+        proptest::prop_assert_eq!(lane(&a), usize::from(score.chords().next().is_some()));
     }
 
     /// The chord voicing, isolated: one palette rendered with each rhyme note alone and again with

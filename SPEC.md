@@ -125,8 +125,9 @@ A stanza, once stated, **keeps looping** until something stops it. One loop per 
   itself, one bar per pass: `|B1 A2 A3 A4|B1 B2 A3 A4|B1 B2 B3 A4|B1 B2 B3 B4|`. The other layer's
   loop keeps playing underneath.
 - **A refrain stanza** — every line a refrain — overrules: all loops stop and it is stated alone,
-  like a chorus dropping in. A real *chord progression* would be the other natural overrule, and
-  needs a harmony layer that does not exist yet.
+  like a chorus dropping in. A real *chord progression* would be the other natural overrule; the
+  harmony layer below now exists as a candidate, but it does not overrule anything — its chords
+  follow the foundation's loops.
 
 Bar-locked: each bar of the piece takes its length from the stanza of the line arriving in it — the
 stanza's *period*, its longest line — so a stanza is a loop of one length and the meter changes only
@@ -158,17 +159,54 @@ carry a higher intrinsic pitch, so the riff follows the vowels; a rhyme word kee
 heard, loops in its own lane until the next refrain line is first heard and takes over. No lane
 doubles a voice already sounding in the bar. A refrain stanza stops both lanes with every loop.
 
+**The harmony layer** (*sound and voice step 5, candidate approved for comparison, off by
+default*). Every bar of a **foundation** stanza gets one chord, held for the bar, in a chord lane of
+its own. Its span is the rhyme word of the line the bar hosts — the line's last pronounceable word
+(I4). The lowering decides which bars have a chord, on which degree, with which function; the
+emitter voices it (palette, §5). A chord is a fact about its line, and sounds wherever the
+arrangement plays that line in the foundation layer — stated, arriving, yielding, looping under a
+flourish host, repeating in the outro — and never in the call, held or refrain lanes, so a bar has
+at most one chord. Three variants of `Mapping::Harmony`, from `PLAN.md`'s proposal:
+
+- **`rhyme` (H1) — the rhyme scheme is the harmonic rhythm.** A line's chord is I on its rhyme
+  class's degree (§4.5's numbering, so the chord's root is the rhyme note's degree): ABAB →
+  i–ii–i–ii, AABB → i–i–ii–ii. A line that rhymes with nothing has no degree, so its bar has no
+  chord.
+- **`cadence` (H2) — rhyme closure is tension and release.** A line whose rhyme is answered later
+  in its stanza (the held lane's test) is open: V of its degree (*d*+4). Its answer closes: I on the
+  degree. A line that is both — the middle A of AAA — is open, since its class is still unresolved.
+  A line with no rhyme within its stanza is IV of the stanza's key (*k*+3), the key being the degree
+  of the stanza's first in-stanza rhyme, or 0. The stanza's last bar (of two or more) is the
+  **turnaround**: V of the stanza's own first chord, replacing whatever that bar had. The I it
+  resolves to is the loop's first bar, played next on every pass.
+- **`both`** — H2 where it applies (open and closing lines, the turnaround), H1 in every other bar;
+  so a line rhymed only across stanzas takes I on its degree, and an unrhymed line no chord.
+
+A flourish stanza carries no harmony. Degrees are counted like a rhyme class's and may run past
+the scale's length (V of degree 5 is degree 9); the emitter folds a root into one octave. The
+proposal's turnaround resolved onto the *next* stanza's first chord, which would make stanza *n*'s
+last bar depend on stanza *n*+1's first rhyme; this one loops back onto its own stanza, so it never
+crosses a stanza boundary. **Disclosed against I2:** a chord still depends on §4.5's poem-wide
+degree numbering (as the melody's note does), and on the rhyme analysis, whose classes are
+poem-wide — an edit elsewhere can give a line a partner in another stanza (H1 then gives it a
+chord) or merge two of a stanza's classes through a third word. The I2 property for the harmony is
+scoped to exactly that: when a stanza's rhyme pattern and layer are unchanged by an edit to another
+stanza, its harmony — which bars have chords, which function by which rule, which rests and why —
+is unchanged. The OSC schedule has no chord message, and says how many chords it leaves out.
+
 **Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
 lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list
 of named variants, always including `off`, and a default. A `Mappings` value chooses one variant
 per mapping, and only a variant the mapping lists can be chosen. Today the five above are
-`off`/`on`, default `on`; the reading is `off`/`arrives`/`stanza`, default `arrives`. They are
+`off`/`on`, default `on`; the harmony is `off`/`rhyme`/`cadence`/`both`, default `off`; the reading
+is `off`/`arrives`/`stanza`, default `arrives`. They are
 chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
 `set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
 page's A/B table, so the piece can be heard and measured under each choice. This is a separate
 argument to the lowering, not part of the style: it changes structure, and I3 keeps the style out
 of structure. Every invariant holds within one choice. Every default is the piece as specified,
-and the default everywhere. Left out, each falls back to what preceded it: no held or refrain lane,
+and the default everywhere — except the harmony, a candidate whose default is `off`, so a piece
+that does not choose it is the piece it was. Left out, each falls back to what preceded it: no held or refrain lane,
 no bass, a bar as long as its own line with everything under it stretched or squeezed to fit, and
 a piece that ends as the last stanza arrives. A mapping joins the list when a design iteration
 proposes it, so the comparison stays available as long as the question is open.
@@ -321,6 +359,35 @@ Three more keys, every one palette:
 The pattern header lists these four keys only when they differ from their default, so a pattern
 that does not use them reads byte for byte as before; when `density_level` is set, the header also
 names the factor for each line count the piece has. The explain view always lists them.
+
+*Extended 2026-10-22 (sound and voice, step 5 — the harmony layer's palette).* Two more keys,
+both palette: **`chord_sound`** (any instrument `bass` and `melody` take; `gm_pad_warm` by default,
+`gm_epiano1` under `warm` and `jazz`, `triangle` under `raw`) and **`chord_gain`** (`0.1..=2`;
+0.40, `warm` 0.35, `raw` 1, `jazz` 0.45 — estimates, not measured mixes). They colour the chord
+lane of §4.6's harmony layer and nothing else. The chord itself is voiced by `voicing`: under
+`note` the triad on the chord's root (one tone would be no chord), under `seventh` the seventh
+chord, every other degree of the style's scale either way, an octave below `melody_octave`, its
+level shared between the tones like the melody's and times the bar's `density_level` factor, with a
+soft attack and release. No palette value can add, move or remove a chord; an I3 property checks
+it. The pattern header lists the two keys, and every line's chord, only when the piece has a chord.
+
+The chord's numerals (I, IV, V) are counted in seven steps — V is four degrees above its root, IV
+three — so they name a dominant and a subdominant only in a seven-note scale. Under
+`pentatonic_minor`, `whole_tone` or `chromatic` the same steps land elsewhere (in five notes "V"
+folds onto the degree just below the root), and the header says so (`… has 5 notes, not 7, so the
+numerals below count steps of it, not functions`) and calls the chords "three-tone chords on every
+other degree" rather than triads. Which bars have a chord and on which degree stays the poem's.
+
+The root sounds folded into one octave of the scale; the scorer, which reads the score before any
+palette, cannot know that fold, so a chord's root is left out of its pitch entropy (the melody's
+alone) — counting the unfolded roots credited the harmony with variety nobody hears. A chord still
+counts as pitched and as an instrument of its own.
+
+*Fixed 2026-10-22 (step 5 review): swing is applied to the bar.* `swingBy(x, n)` slices a cycle
+into `n`; `.cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6), after which a cycle is the
+scheduler's second, not a bar. The pattern chained `.cpm(c).swingBy(x, n)`, so swing sliced the
+second — onsets moved to irregular times, and a held chord could be skipped or struck twice. It is
+now `.swingBy(x, n).cpm(c)`: the bar's beats are swung, then the bar is set to the tempo.
 
 ---
 

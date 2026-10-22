@@ -146,6 +146,9 @@
       <label>Melody
         <select id="melody"></select>
       </label>
+      <label>Chords
+        <select id="chord_sound" title="The instrument of the chord lane, which plays only when a side's harmony mapping is not off"></select>
+      </label>
       <label>Kit
         <select id="kit" title="Which drum carries each layer: kick and hat, or ride and snare"></select>
       </label>
@@ -200,6 +203,9 @@
       </label>
       <label>Melody level <span id="melody_gainOut"></span>
         <input id="melody_gain" type="range" min="0.1" max="2" step="0.01">
+      </label>
+      <label>Chords level <span id="chord_gainOut"></span>
+        <input id="chord_gain" type="range" min="0.1" max="2" step="0.01" title="The chord lane's level, shared between a chord's tones; heard only with the harmony mapping on">
       </label>
       <label>Levels follow density <span id="density_levelOut"></span>
         <input id="density_level" type="range" min="0" max="1" step="0.01" title="Each bar's gains divided by n to this power, n = the lines sounding in it: 0 fixed levels, 0.5 by √n, 1 by n">
@@ -289,12 +295,12 @@
 <script>
 const $ = (id) => document.getElementById(id);
 // Every palette control's id is its key in the style header, and every value is in header units.
-const SOUND = ['bass', 'melody', 'kit', 'ride_fallback', 'voicing', 'bass_octave', 'melody_octave', 'reverb',
-  'room_size', 'delay', 'high_cut', 'drive', 'compress', 'humanise', 'drums_gain', 'bass_gain', 'melody_gain',
-  'density_level'];
+const SOUND = ['bass', 'melody', 'kit', 'ride_fallback', 'voicing', 'bass_octave', 'melody_octave',
+  'chord_sound', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress', 'humanise', 'drums_gain',
+  'bass_gain', 'melody_gain', 'chord_gain', 'density_level'];
 const controls = ['scale', 'root', 'bank', 'low', 'high', 'swing', ...SOUND];
 const SLIDERS = ['swing', 'bass_octave', 'melody_octave', 'reverb', 'room_size', 'delay', 'high_cut', 'drive',
-  'compress', 'humanise', 'drums_gain', 'bass_gain', 'melody_gain', 'density_level'];
+  'compress', 'humanise', 'drums_gain', 'bass_gain', 'melody_gain', 'chord_gain', 'density_level'];
 
 const OPTIONS = {
   scale: __SCALES__,
@@ -302,6 +308,7 @@ const OPTIONS = {
   bank: __BANKS__,
   bass: __INSTRUMENTS__,
   melody: __INSTRUMENTS__,
+  chord_sound: __INSTRUMENTS__,
   kit: __KITS__,
   voicing: __VOICINGS__,
   ride_fallback: __RIDE_FALLBACKS__,

@@ -16,7 +16,7 @@ use proptest::prelude::{
     Strategy, prop_assert, prop_assert_eq, prop_assert_ne, prop_assume, proptest,
 };
 use prosody_core::lower::{self, Analyses};
-use prosody_core::mapping::{Mapping, Mappings};
+use prosody_core::mapping::{Mapping, Mappings, Variant};
 use prosody_core::phoneme::arpabet::ARPABET;
 use prosody_core::phoneme::{Inventory, Phonemiser, Pronunciation, Unpronounceable};
 use prosody_core::repetition::FigureKind;
@@ -279,6 +279,65 @@ fn every_choice() -> Vec<Mappings> {
 /// Any one way of choosing the mappings.
 fn any_mappings() -> impl Strategy<Value = Mappings> {
     proptest::sample::select(every_choice())
+}
+
+/// Any harmony variant that makes chords.
+fn harmony_variant() -> impl Strategy<Value = Variant> {
+    proptest::sample::select(vec![Variant::Rhyme, Variant::Cadence, Variant::Both])
+}
+
+/// Every line of a stanza's harmony, relative to the stanza: its bar and its span's offset from
+/// the stanza's start, and what it is — the function and which rule, or the rest and why. The
+/// degrees are left out: they are §4.5's poem-wide numbering, as the melody's pitch is (see
+/// `i2_an_edit_leaves_other_stanzas_events_alone`).
+fn harmony_shape(score: &Score, within: Span) -> Vec<(usize, usize, String)> {
+    let inside: Vec<(usize, Span, String)> = score
+        .harmony()
+        .iter()
+        .filter_map(|harmony| {
+            let (span, what) = match harmony {
+                prosody_core::Harmony::Chord(chord) => {
+                    let rule = match chord.reason() {
+                        prosody_core::Reason::Class(_) => "class",
+                        prosody_core::Reason::Opens(_) => "opens",
+                        prosody_core::Reason::Closes(_) => "closes",
+                        prosody_core::Reason::Unanswered { .. } => "unanswered",
+                        prosody_core::Reason::Turnaround { .. } => "turnaround",
+                    };
+                    (
+                        chord.span(),
+                        format!("{} {rule}", chord.function().numeral()),
+                    )
+                }
+                prosody_core::Harmony::Rest(rest) => (rest.line(), format!("{:?}", rest.why())),
+            };
+            within
+                .contains(span)
+                .then(|| (harmony.bar().get(), span, what))
+        })
+        .collect();
+    let first = inside.first().map_or(0, |(bar, ..)| *bar);
+    inside
+        .into_iter()
+        .map(|(bar, span, what)| (bar - first, span.start() - within.start(), what))
+        .collect()
+}
+
+/// What the harmony reads from a stanza's rhyme analysis: per line, whether it rhymes with
+/// anything in the poem, and the first line of the stanza in its class.
+fn rhyme_pattern(poem: &Poem, stanza: usize) -> Vec<(bool, Option<usize>)> {
+    let rhyme = rhyme::analyse(poem, &EverySyllableStressed);
+    let lines = rhyme.stanzas()[stanza].lines();
+    lines
+        .iter()
+        .map(|line| {
+            (
+                line.score().is_some(),
+                line.class()
+                    .and_then(|class| lines.iter().position(|other| other.class() == Some(class))),
+            )
+        })
+        .collect()
 }
 
 /// Every line span in the poem, in source order.
@@ -1622,6 +1681,96 @@ proptest! {
         prop_assert_eq!(
             shape(&score_of(&source), last),
             shape(&score_of(poem.source()), moved)
+        );
+    }
+
+    /// I4 — every chord traces to its line's rhyme word: a word of the poem, the last pronounceable
+    /// word of the line whose bar the chord is, in a foundation stanza.
+    #[test]
+    fn i4_every_chord_traces_to_its_lines_rhyme_word(
+        source in poem_source(),
+        harmony in harmony_variant(),
+    ) {
+        let poem = Poem::parse(source.clone()).unwrap();
+        let mappings = Mappings::all().with(Mapping::Harmony.choose(harmony).unwrap());
+        let score = score_with(&source, &mappings);
+        let rhymes = rhyme::analyse(&poem, &EverySyllableStressed);
+        let lines: Vec<_> = rhymes
+            .stanzas()
+            .iter()
+            .flat_map(prosody_core::StanzaRhyme::lines)
+            .collect();
+        let roles = roles_of(&source);
+        let layers: Vec<Layer> = roles
+            .stanzas()
+            .iter()
+            .flat_map(|stanza| stanza.lines().iter().map(move |_| stanza.layer()))
+            .collect();
+        prop_assert_eq!(score.harmony().len(), lines.len(), "one entry per line");
+        for chord in score.chords() {
+            let bar = chord.bar().get();
+            prop_assert!(chord.span().text(poem.source()).is_some());
+            prop_assert_eq!(Some(chord.span()), lines[bar].word());
+            prop_assert_eq!(layers[bar], Layer::Foundation);
+        }
+        // Off, there is no harmony at all.
+        prop_assert!(score_of(&source).harmony().is_empty());
+    }
+
+    /// The harmony adds chords and changes nothing else: every event and every slot of the
+    /// arrangement is what the same choices make with the harmony off.
+    #[test]
+    fn the_harmony_changes_nothing_but_the_chords(
+        source in poem_source(),
+        mappings in any_mappings(),
+    ) {
+        let off = score_with(&source, &mappings.clone().without(Mapping::Harmony));
+        let some = score_with(&source, &mappings);
+        prop_assert_eq!(off.events(), some.events());
+        prop_assert_eq!(off.voices(), some.voices());
+        prop_assert_eq!(off.arrangement(), some.arrangement());
+        prop_assert!(off.harmony().is_empty());
+    }
+
+    /// I2 — editing one stanza leaves another stanza's harmony alone: which bars have chords, with
+    /// which function by which rule, and which rest and why.
+    ///
+    /// Scoped, as `SPEC.md` §4.6 discloses. The degrees are §4.5's poem-wide numbering and are not
+    /// compared, as the melody's pitch is not. And the harmony reads the rhyme analysis, whose
+    /// classes are poem-wide: an edit elsewhere can give a line a partner in another stanza (so H1
+    /// rhymes it) or merge two of this stanza's classes through a third word. Those cases are
+    /// assumed away — when the stanza's rhyme pattern and layer are unchanged, its harmony must be.
+    /// The turnaround is not one of them: it leads back to its own stanza's first chord.
+    #[test]
+    fn i2_an_edit_leaves_other_stanzas_harmony_alone(
+        source in poem_source(),
+        pick in 0_usize..4096,
+        text in replacement(),
+        harmony in harmony_variant(),
+    ) {
+        let mut poem = Poem::parse(source.clone()).unwrap();
+        prop_assume!(poem.stanzas().len() > 1);
+        let stanzas = poem.stanzas().len();
+        let last = poem.stanzas()[stanzas - 1].span();
+        let edited = poem.stanzas()[0].span();
+        let pattern = rhyme_pattern(&poem, stanzas - 1);
+        let layer = roles_of(&source).stanzas()[stanzas - 1].layer();
+
+        let inside: Vec<Span> = token_spans(&poem)
+            .into_iter()
+            .filter(|s| edited.contains(*s))
+            .collect();
+        prop_assume!(!inside.is_empty());
+        poem.apply(inside[pick % inside.len()], text).unwrap();
+        prop_assume!(poem.stanzas().len() == stanzas);
+        prop_assume!(rhyme_pattern(&poem, stanzas - 1) == pattern);
+        prop_assume!(roles_of(poem.source()).stanzas()[stanzas - 1].layer() == layer);
+        let moved = poem.stanzas()[stanzas - 1].span();
+
+        let mappings = Mappings::all().with(Mapping::Harmony.choose(harmony).unwrap());
+        prop_assert_eq!(
+            harmony_shape(&score_with(&source, &mappings), last),
+            harmony_shape(&score_with(poem.source(), &mappings), moved)
         );
     }
 

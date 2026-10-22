@@ -115,7 +115,8 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
     if mappings.has(Mapping::Bass) {
         bass(&mut events, &nuclei, analyses);
     }
-    melody(&mut events, analyses);
+    let degrees = degrees(analyses.rhyme);
+    melody(&mut events, analyses, &degrees);
     colour(&mut events, analyses);
     figures(&mut events, analyses);
     let voices = voices(analyses, &by_line, &events);
@@ -124,7 +125,10 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
     // pass already emits in this order; sorting anyway means a later pass may reorder freely
     // without the backend's output depending on the order it happened to choose.
     events.sort_by_key(Event::order);
-    let score = Score::new(voices, events, bars, silent(analyses));
+    // The harmony layer reads the rhyme and the roles and nothing the arrangement decides: a chord
+    // is a fact about its line, and `Score::chord_in` finds it wherever the line sounds.
+    let harmony = crate::harmony::run(analyses.rhyme, analyses.roles, &degrees, mappings);
+    let score = Score::new(voices, events, bars, silent(analyses)).with_harmony(harmony);
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,
@@ -313,27 +317,12 @@ fn height_degree(vowel: Phoneme) -> Option<usize> {
 ///
 /// A line in a class of one has no pitch at all: it rhymes with nothing, so there is no melodic
 /// relation for a degree to express, and giving it one would invent a melody the poem never wrote.
-fn melody(events: &mut [Event], analyses: Analyses<'_>) {
-    // Degrees are numbered over the classes that actually sound, in order of first appearance.
-    //
-    // `RhymeClassId` counts *every* line, including the ones that rhyme with nothing and are
-    // therefore never pitched — so using it directly meant a poem's first heard note could be
-    // degree 5, with degrees 0 to 4 belonging to unrhymed lines nobody hears. §4.5 says "assigned
-    // in order of first appearance", and what appears is what sounds.
-    let sounding: Vec<_> = analyses
-        .rhyme
-        .stanzas()
-        .iter()
-        .flat_map(crate::rhyme::StanzaRhyme::lines)
-        .filter_map(|line| Some((line.class()?, line.word()?, line.score()?)))
-        .collect();
-
-    let mut degrees: BTreeMap<crate::rhyme::RhymeClassId, usize> = BTreeMap::new();
-    for (class, ..) in &sounding {
-        let next = degrees.len();
-        degrees.entry(*class).or_insert(next);
-    }
-
+fn melody(
+    events: &mut [Event],
+    analyses: Analyses<'_>,
+    degrees: &BTreeMap<crate::rhyme::RhymeClassId, usize>,
+) {
+    let sounding = sounding(analyses.rhyme);
     let pitches: BTreeMap<Span, Pitch> = sounding
         .iter()
         .filter_map(|(class, word, score)| {
@@ -350,6 +339,35 @@ fn melody(events: &mut [Event], analyses: Analyses<'_>) {
             *event = event.with_pitch(pitch);
         }
     }
+}
+
+/// Every line that rhymes with something: its class, its rhyme word and how well it rhymes.
+fn sounding(
+    rhyme: &PoemRhyme,
+) -> Vec<(crate::rhyme::RhymeClassId, Span, crate::rhyme::RhymeScore)> {
+    rhyme
+        .stanzas()
+        .iter()
+        .flat_map(crate::rhyme::StanzaRhyme::lines)
+        .filter_map(|line| Some((line.class()?, line.word()?, line.score()?)))
+        .collect()
+}
+
+/// Each sounding rhyme class's scale degree (`SPEC.md` §4.5), shared by the melody and the
+/// harmony so a chord on a class's degree is the class's note.
+///
+/// Degrees are numbered over the classes that actually sound, in order of first appearance.
+/// `RhymeClassId` counts *every* line, including the ones that rhyme with nothing and are
+/// therefore never pitched — so using it directly meant a poem's first heard note could be degree
+/// 5, with degrees 0 to 4 belonging to unrhymed lines nobody hears. §4.5 says "assigned in order of
+/// first appearance", and what appears is what sounds.
+fn degrees(rhyme: &PoemRhyme) -> BTreeMap<crate::rhyme::RhymeClassId, usize> {
+    let mut degrees: BTreeMap<crate::rhyme::RhymeClassId, usize> = BTreeMap::new();
+    for (class, ..) in sounding(rhyme) {
+        let next = degrees.len();
+        degrees.entry(class).or_insert(next);
+    }
+    degrees
 }
 
 /// Marks the structural figures `SPEC.md` §4.3 names but the voice and family rows do not carry.

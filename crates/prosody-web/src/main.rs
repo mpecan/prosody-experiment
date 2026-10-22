@@ -310,6 +310,7 @@ const NAMED_KEYS: &[&str] = &[
     "kit",
     "voicing",
     "ride_fallback",
+    "chord_sound",
 ];
 
 /// The palette keys the page sends that are numbers, in header units.
@@ -325,6 +326,7 @@ const NUMBER_KEYS: &[&str] = &[
     "drums_gain",
     "bass_gain",
     "melody_gain",
+    "chord_gain",
     "density_level",
     "bass_octave",
     "melody_octave",
@@ -800,6 +802,49 @@ mod tests {
         let music =
             |query: &[(&str, &str)]| super::compile(&request(query, SEED), &Output::Pattern).body;
         assert_eq!(music(&[]), music(&[("set", "reading:off")]));
+    }
+
+    #[test]
+    fn the_harmony_is_a_selector_that_adds_a_chord_lane() {
+        // On the page: four variants, off by default.
+        let html = page().unwrap();
+        assert!(
+            html.contains("[\"off\",\"rhyme\",\"cadence\",\"both\"],\"off\"]"),
+            "the harmony selector"
+        );
+        assert!(html.contains("id=\"chord_sound\"") && html.contains("id=\"chord_gain\""));
+        // Off — the default — the pattern has no chord lane.
+        let music =
+            |query: &[(&str, &str)]| super::compile(&request(query, SEED), &Output::Pattern);
+        assert!(!music(&[]).body.contains("the chords"));
+        for variant in ["rhyme", "cadence", "both"] {
+            let set = format!("harmony:{variant}");
+            let response = music(&[("set", &set), ("chord_sound", "gm_vibraphone")]);
+            assert_eq!(response.status, 200, "{}", response.body);
+            assert!(response.body.contains("// the chords"), "{}", response.body);
+            assert!(
+                response.body.contains(".sound(\"gm_vibraphone\")"),
+                "{variant}"
+            );
+            assert!(response.body.contains("//   chords by line: "), "{variant}");
+            // The explain view names the choice and gives every line's harmony.
+            let explain = super::compile(&request(&[("set", &set)], SEED), &Output::Explain);
+            assert!(
+                explain
+                    .body
+                    .contains(&format!("mappings      harmony={variant}")),
+                "{}",
+                explain.body
+            );
+            assert!(
+                explain.body.contains("  harmony     §4.6"),
+                "{}",
+                explain.body
+            );
+            assert!(explain.body.contains("\n  harmony "), "{}", explain.body);
+        }
+        let wrong = music(&[("set", "harmony:polka")]);
+        assert_eq!(wrong.status, 400, "{}", wrong.body);
     }
 
     #[test]

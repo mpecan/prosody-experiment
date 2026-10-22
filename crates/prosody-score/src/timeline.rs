@@ -26,8 +26,11 @@ pub(crate) struct Hit {
     pub(crate) voice: usize,
     /// Struck at full force: a primary stress (`SPEC.md` §4.2's "stress → accent").
     pub(crate) accent: bool,
-    /// Its scale degree, if it is a rhyme word's syllable (§4.5).
+    /// Its scale degree, if it is a rhyme word's syllable (§4.5), or a chord's root.
     pub(crate) degree: Option<usize>,
+    /// A chord of the harmony layer (§4.6) rather than a syllable: it sounds on its own
+    /// instrument, not its line's voice.
+    pub(crate) chord: bool,
 }
 
 /// How deep in the metrical hierarchy a position sits. Shallower is stronger.
@@ -94,8 +97,23 @@ impl Timeline {
                         voice: event.voice().get(),
                         accent: event.velocity() == Velocity::PRIMARY,
                         degree: event.pitch().map(|pitch| pitch.degree().get()),
+                        chord: false,
                     });
                 }
+            }
+            // The harmony layer (§4.6): one chord a slot, on the bar's first beat, held for the
+            // bar. A timeline is onsets, so it is one hit — the held chord is not counted again in
+            // the bar's later beats.
+            if let Some(chord) = score.chord_in(slot) {
+                hits.push(Hit {
+                    slot: running,
+                    bar: index,
+                    within: (0, 1),
+                    voice: 0,
+                    accent: false,
+                    degree: Some(chord.root().get()),
+                    chord: true,
+                });
             }
             running += slot_beats;
         }
@@ -181,6 +199,7 @@ pub(crate) mod tests {
             voice,
             accent: false,
             degree: None,
+            chord: false,
         }
     }
 

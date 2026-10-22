@@ -96,10 +96,11 @@ The **example poems…** menu at the top loads any poem in `examples/`, together
 header asks for (the defaults when it has none).
 
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
-review (the held and refrain lanes, the bass, the stanza period, the outro, the reading), each a
-selector of named variants — always including `off` — with one menu per setting, A and B. The
-first five are `off`/`on`; the reading is `off`, `arrives` or `stanza`. A starts with every mapping
-at its default (marked "(default)" in the menu), B with every one off; a menu not at its default
+review (the held and refrain lanes, the bass, the stanza period, the outro, the harmony, the
+reading), each a selector of named variants — always including `off` — with one menu per setting,
+A and B. The first five are `off`/`on`; the harmony is `off` (its default), `rhyme`, `cadence` or
+`both` (see [the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives` or `stanza`.
+A starts with every mapping at its default (marked "(default)" in the menu), B with every one off; a menu not at its default
 has a bold border. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
 adds. The **Score A vs B** tab measures both settings side by side (see [Measuring it](#measuring-it))
@@ -181,7 +182,9 @@ because a tempo is palette and the rhythm is not.
 
 The schedule sends every pitch from MIDI 36 and every velocity unscaled, so `bass_octave`,
 `melody_octave` and `density_level` do not reach it. A header that sets one gets a
-`# not applied here: …` line under the first, and `--send` says the same on stderr.
+`# not applied here: …` line under the first, and `--send` says the same on stderr. It has no chord
+message either: under the harmony mapping the schedule's text says `# not scheduled here: N chords
+of the harmony layer`, and `--send` says so on stderr.
 
 ---
 
@@ -244,13 +247,36 @@ the score, before the palette, so swing is neither rewarded nor penalised — a 
 as its straight twin does. Its bands are reasoned guesses, like the machine profile's.
 
 `--set name=variant,…` chooses a candidate mapping's variant — `held`, `refrain`, `bass`,
-`period` and `outro` take `off` or `on` (default `on`), `reading` takes `off`, `arrives` or
-`stanza` (default `arrives`) — for the pattern and for `--score` alike; an unknown name or variant
+`period` and `outro` take `off` or `on` (default `on`), `harmony` takes `off`, `rhyme`, `cadence` or
+`both` (default `off`), `reading` takes `off`, `arrives` or `stanza` (default `arrives`) — for the pattern and for `--score` alike; an unknown name or variant
 is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`.
 `--explain` lists every choice that is not a default. The reading is not in the CLI's pattern, so
 `reading=…` changes only that list. `./scripts/cycle.sh machine bass` scores every example without
 the bass, and `./scripts/cycle.sh machine bass=off,period=off` passes its list to `--set` (any list
-containing `=` does).
+containing `=` does); `./scripts/cycle.sh jazz harmony=cadence` scores the harmony.
+
+### The harmony layer
+
+*A candidate, off by default* (`SPEC.md` §4.6, `--set harmony=…`, or the `harmony` menu on the
+page). Every bar of a foundation stanza gets one chord, held for the bar, in a lane of its own; its
+span is the rhyme word of the line the bar hosts, and it plays wherever that line sounds in the
+foundation layer — stated, looping under a flourish, in the outro — never in the call, held or
+refrain lanes.
+
+| variant | the chord of a line's bar |
+|---|---|
+| `rhyme` (H1) | I on its rhyme class's degree: ABAB → i–ii–i–ii, AABB → i–i–ii–ii; a line that rhymes with nothing has no chord |
+| `cadence` (H2) | a rhyme answered later in its stanza → V of its degree; its answer → I on the degree; a line with no rhyme in its stanza → IV of the stanza's key (its first in-stanza rhyme's degree, or 0); the stanza's last bar → V of the stanza's *own* first chord, a turnaround the loop resolves |
+| `both` | H2 for open and closing lines and the turnaround, H1 for every other bar |
+
+The pattern's header lists `chord_sound` and `chord_gain` and every line's chord (`chords by line:
+1:V/4 2:I/0 …`, `-` a rest) when there is one; `--explain` shows each line's chord, its degree and
+the rule that chose it, or why the bar has none.
+
+The numerals are counted in seven steps, so in a scale of another size (`pentatonic_minor`,
+`whole_tone`, `chromatic`) V is not a dominant, and the header says so. `--score` counts a chord as
+pitched and as an instrument of its own, but leaves its root out of melodic entropy: the root is
+folded into one octave by the palette's scale, which the scorer does not see.
 
 ---
 
@@ -296,6 +322,7 @@ The rest of the header, every key optional:
 | `kit` | which drum each layer plays: `machine` (kick on the foundation, hat on the flourish) or `ride` (ride and snare; on `tr808` and `tr707`, which have no ride, the open hat keeps time instead and the pattern's header says so) | | `machine` |
 | `ride_fallback` | what keeps time under `kit = "ride"` on a bank with no ride (`tr808`, `tr707`): `open_hat` or `crash`; named on the pattern header's `plays:` line | | `open_hat` |
 | `voicing` | each rhyme word as one `note`, or as the `seventh` chord on its degree in the scale (the level is shared between the tones; in a scale without seven notes it stacks every other degree all the same — fourths in `pentatonic_minor`) | | `note` |
+| `chord_sound` | the chord lane's instrument (heard only with the harmony mapping on): any name `bass` and `melody` take | | `gm_pad_warm` (`warm`, `jazz`: `gm_epiano1`; `raw`: `triangle`) |
 | `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_fretless_bass`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
 | `reverb` | reverb send (the drums take half, plus §4.4's rise with distinctiveness; the bass three tenths) | 0–1 | 0.25 |
 | `room_size` | reverb length, seconds | 0.1–10 | 2.0 |
@@ -305,6 +332,7 @@ The rest of the header, every key optional:
 | `compress` | compression on every layer | 0–1 | 0.30 |
 | `humanise` | how late (up to 30 ms) and how much softer (up to 30%) each syllable strays, from its line's seed | 0–1 | 0.20 |
 | `drums_gain`, `bass_gain`, `melody_gain` | each role's level — never zero, so a role cannot be muted | 0.1–2 | 0.28, 0.32, 0.75 |
+| `chord_gain` | the chord lane's level, shared between a chord's tones (a triad under `voicing = "note"`, a seventh chord under `"seventh"`, an octave below the melody) | 0.1–2 | 0.40 (`warm` 0.35, `raw` 1, `jazz` 0.45) |
 | `bass_octave`, `melody_octave` | the octave each pitched role plays in, whole numbers (octave 4 starts at middle C, MIDI 60) | 1–3, 3–5 | 2, 4 (MIDI 36, 60) |
 | `density_level` | levels follow density: every gain in a bar × *n*^−level, *n* = the lines sounding in that bar (0.5 → ÷√*n*, 1 → ÷*n*; a bar of one line never changes). Only gain values move | 0–1 | 0 (`warm`, `jazz`: 0.5) |
 
@@ -323,6 +351,7 @@ The rest of the header, every key optional:
 | A rhyme answered later in its stanza | the line keeps sounding until its answer arrives, then resolves | §4.6 |
 | A refrain line | loops in its own lane until the next refrain line takes over | §4.6 |
 | A stressed vowel in a foundation line | a bass note by vowel height: open → root, mid → third, close → fifth | §4.6 |
+| A foundation line's rhyme (candidate, `harmony`, off by default) | its bar's chord: the class's degree, or V/I/IV by whether the rhyme is open, answered or alone in its stanza, with a turnaround in the last bar | §4.6 |
 | Foot → beat, syllable → subdivision, line → bar | rhythm | §4.2 |
 | Stress | accent / velocity | §4.2 |
 | A line repeated verbatim | *the same instrument* played again | §4.3 |

@@ -81,6 +81,7 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20 --profile NAME what --score judges against: interest (the default), machine or jazz\n\
      \x20 --set LIST     choose candidate mappings' variants, comma-separated name=variant:\n\
      \x20                held, refrain, bass, period, outro = off|on (default on);\n\
+     \x20                harmony = off|rhyme|cadence|both (default off);\n\
      \x20                reading = off|arrives|stanza (default arrives)\n\
      \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
@@ -377,6 +378,12 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
     // A header key the schedule does not apply is said out loud, not dropped (`CLAUDE.md` §6).
     for (key, value) in schedule.unapplied() {
         eprintln!("prosody: {key} = {value} is not applied to an OSC schedule");
+    }
+    if schedule.unsent_chords() > 0 {
+        eprintln!(
+            "prosody: {} chords of the harmony layer are not sent: OSC has no chord message",
+            schedule.unsent_chords()
+        );
     }
     Ok(())
 }

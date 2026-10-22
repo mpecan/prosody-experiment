@@ -336,7 +336,9 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 
 ## Proposal — pending the user's decision: the structural half of jazz
 
-**Not implemented. Nothing below is in the code.** Sound and voice step 3 built the jazz *palette*
+**The harmony half is now a candidate** (`Mapping::Harmony`: `rhyme` = H1, `cadence` = H2, `both`;
+off by default — see the log, *sound and voice, step 5*). The walking bass is still not
+implemented. Sound and voice step 3 built the jazz *palette*
 (the log entry below). What makes jazz jazz beyond its colours — chords that move, and a bass
 that walks between them — adds events and decides where they fall, so it is structure (I3) and a
 change to what a poetic feature maps to (`CLAUDE.md` §10). Two options for each, for the user to
@@ -396,6 +398,202 @@ answer first, and it is a §4.2 question.
 ---
 
 ## Log
+
+### Sound and voice, step 5, review fixes
+
+- **Swing now slices the bar, not the second.** The pattern ended `.cpm(c).swingBy(x, n)`.
+  `.cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6 `pattern.mjs`, pinned by `@strudel/web`
+  1.3.0), so after it a cycle is the scheduler's second, and `swingBy` sliced *that* into `n`.
+  The result was out of step with the bar's beats. This was on HEAD before the harmony and is a
+  likely source of the off-rhythm beats the user heard. It is now `.swingBy(x, n).cpm(c)`. The only
+  snapshot that moved is `corpus__pattern-villanelle-jazz` (the two lines swap), and a unit test pins
+  the order. In Chromium, the evaluated pattern was queried in 0.05 s windows as the scheduler does,
+  with the old order rebuilt from the same text for comparison. Under the old order, `s("hh*8")` at
+  32 cpm with swing 1/3 over 4 had 6 onsets at irregular times; it now has 8 (0, .313, .469, .781,
+  …). For Theocritus at swing 0.33 under harmony=both, the old order dropped the chords of bars 2,
+  15, 17, 28 and 30, doubled bars 3, 14, 16, 27, 29 and 31, and put 15 bars off the bar line. Now
+  every bar that should have a chord starts exactly once, on the bar line. The same holds under
+  rhyme and cadence. For The Tyger at swing 0.08, every odd bar was off the bar line before; now
+  none is. During real playback, a hook on `gm_pad_warm`'s trigger saw 9 chord onsets, 27 tones,
+  one bar (1.487 s) or two (across a rest) apart, with no doubles.
+- **Chord roots are out of melodic entropy.** The scorer counted unfolded roots (V/9 and V/16 as two
+  pitches), but the emitter folds them into one octave of a scale the scorer cannot see. A chord
+  still counts as pitched and as its own instrument. Entropy is now identical with the harmony on
+  and off. The step-5 tables below are re-measured. Machine: off 0.743, rhyme 0.761, cadence
+  0.775, both 0.763. Jazz: off 0.740, rhyme 0.736, cadence 0.731, both 0.735. Before the fix, jazz
+  read 0.739, 0.767 and 0.755: cadence's lead there came from the miscount.
+- **The header no longer calls non-triads triads.** Under a scale that does not have seven notes,
+  the chords are "three-tone chords on every other degree". A second `chords:` line says that the
+  numerals count steps of that scale and are not functions: in five notes, "V" is not a dominant.
+- **Verification trap:** measure from `target/release` only after `cargo build --release
+  --workspace --locked`. Building only the web crate leaves a stale CLI without `harmony`.
+
+### Sound and voice, step 5 — the harmony layer, as a candidate
+
+The user approved the proposal's H1 and H2 as variants to compare by ear. `Mapping::Harmony`
+joins `prosody_core::mapping` with `off` (the default), `rhyme` (H1), `cadence` (H2) and `both`
+(H2 where it applies — open and closing lines, the turnaround — and H1 in every other bar). Off,
+nothing changes: no snapshot moved, the machine cycle reads 0.743 and the jazz cycle 0.740.
+
+- **Structure in the core** (`prosody_core::harmony`, called from `lower::run_with`). One entry per
+  line: a `Chord` (bar, span = the line's rhyme word, root degree, `Function` I/IV/V, `Reason`) or a
+  `Rest` (`Unrhymed`, `Wordless`, `Flourish`). Degrees are the melody's (§4.5's numbering, shared
+  through `lower::degrees`). `Score::chord_in(slot)` is the one place a slot's chord is chosen: the
+  chord of the whole line sounding in the foundation layer there — host or loop under a flourish —
+  never a call, held or refrain lane. Every rule follows the proposal table; the choices it left
+  open are in `SPEC.md` §4.6: open beats closing (AAAA → V V V I), the key for IV is the stanza's
+  first in-stanza rhyme's degree (else 0), and the turnaround replaces the last bar's chord.
+- **The turnaround is I2-safe**: V of the stanza's *own* first chord, the bar the loop plays next,
+  not of the next stanza's (which would make stanza *n*'s last bar depend on stanza *n*+1). The
+  cross-stanza form is a question for the user, not code.
+- **Palette in the emitter.** `chord_sound` and `chord_gain` (style keys, page controls, preset
+  defaults: default `gm_pad_warm` 0.40, warm `gm_epiano1` 0.35, raw `triangle` 1, jazz `gm_epiano1`
+  0.45 — estimates). The chord lane is one `note("<…>")` pattern, one stacked chord or `~` a slot:
+  a triad under `voicing = "note"`, a seventh chord under `"seventh"`, the root folded into one
+  octave of the scale, an octave below the melody, the level shared between the tones and times the
+  bar's density factor, attack 0.05 and release 0.6. The header lists `chord_sound`, `chord_gain`, a
+  `chords:` line and `chords by line: 1:V/4 2:I/0 …` only when the piece has a chord. OSC has no
+  chord message: its text and `--send` say how many chords are not scheduled.
+- **Visible.** The debug view (`--explain`, the page's explain tab) adds `harmony V deg 5 (V of deg
+  1) · cadence: B opens, answered later in its stanza` under each line, or `harmony no chord · rhyme:
+  the line rhymes with nothing, so it has no degree`, and lists the `harmony §4.6` pass only when the
+  layer is on. The scorer counts a chord as one onset a bar on its own instrument, pitched (but
+  not in melodic entropy — see the review fixes above).
+- **Tests.** Hand-worked (`crates/prosody-core/tests/harmony.rs`): ABAB → rhyme 0 1 0 1; cadence
+  V/4 V/5 I/0 V/8; the mixed fixture under all three variants; open-wins; a one-line stanza; spans;
+  flourish rests; the chord a slot plays under a held lane and under a flourish host. Emitter:
+  triads and folded sevenths by MIDI number, rests, the header, palette-only changes; OSC
+  disclosure; style keys; CLI and page end to end. Properties: I4 (every chord is its line's rhyme
+  word, in a foundation stanza), the harmony changes nothing but the chords (events, voices,
+  arrangement identical under any mappings), I2 for the harmony (scoped as `SPEC.md` §4.6
+  discloses; a mutation making the turnaround depend on the stanza's bar offset failed it), I3 for
+  the chord lane, and the I1 and invents-nothing properties now draw from all 384 combinations.
+- **Checked in Chromium on port 4883**, The Tyger and Theocritus, each variant chosen on side A:
+  the pattern evaluates and plays with no console errors or warnings; the chord lane queried from
+  the evaluated pattern gives 15 chord-tone onsets in the first 8 cycles of The Tyger (5 bars × 3
+  tones); `gm_pad_warm`
+  (`0890_JCLive_sf2_file.js`) loads 200. Peak / RMS at the superdough destination gain over 8 s:
+  The Tyger (rhyme) whole piece 0.783 / 0.127, chord lane alone 0.225 / 0.043; Theocritus
+  (cadence) 0.703 / 0.118 and 0.179 / 0.045. No one has heard it.
+
+**Measured** (`./scripts/cycle.sh <profile> harmony=<variant>`, after the review fixes below:
+a chord's root no longer counts toward pitch entropy). Legibility does not move: the edit
+test compares events, and a chord is not one — so these numbers say what the chords add to
+interest (layering, recurrence, the pitched share), not whether an edit's harmony change is
+audible. Entropy is now the same with the harmony on as off, by construction.
+
+`machine`, harmony off:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  0.681  2.063  0.017  0.994  1.000 |  0.933  0.811  0.757
+carroll-jabberwocky     2.563  0.890  0.513  1.651  0.600  0.887  1.000 |  0.790  0.957  0.755
+dickinson-because       2.408  0.883  0.664  1.573  0.362  0.887  1.000 |  0.898  0.831  0.746
+hopkins-pied-beauty     3.085  0.800  0.442  1.745  0.163  0.953  0.933 |  0.905  0.946  0.857
+poe-annabel-lee         3.700  0.896  0.492  1.847  0.154  0.841  0.811 |  0.876  0.914  0.801
+preseren-zdravljica     1.972  0.724  0.683  1.542  0.214  0.643  1.000 |  0.503  1.000  0.503
+shakespeare-sonnet-18   2.129  0.750  0.745  1.854  0.364  0.993  1.000 |  0.733  1.000  0.733
+whitman-song-of-myself  2.615  0.859  0.307  1.546  0.150  0.894  1.000 |  0.904  0.837  0.757
+wilde-theocritus        2.689  0.892  0.713  2.099  0.341  0.944  0.844 |  0.950  0.820  0.779
+mean overall 0.743 over 9 poems
+```
+`machine`, harmony=rhyme:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.697  2.063  0.017  0.994  1.000 |  0.933  0.811  0.757
+carroll-jabberwocky     2.718  0.900  0.535  1.651  0.600  0.887  1.000 |  0.805  0.957  0.770
+dickinson-because       2.444  0.879  0.668  1.573  0.362  0.887  1.000 |  0.901  0.831  0.749
+hopkins-pied-beauty     3.280  0.829  0.465  1.745  0.163  0.953  0.933 |  0.955  0.946  0.904
+poe-annabel-lee         3.867  0.908  0.507  1.847  0.154  0.841  0.811 |  0.876  0.914  0.801
+preseren-zdravljica     2.083  0.727  0.698  1.542  0.214  0.643  1.000 |  0.510  1.000  0.510
+shakespeare-sonnet-18   2.273  0.800  0.759  1.854  0.364  0.993  1.000 |  0.792  1.000  0.792
+whitman-song-of-myself  2.664  0.859  0.316  1.546  0.150  0.894  1.000 |  0.916  0.837  0.767
+wilde-theocritus        2.950  0.911  0.731  2.099  0.341  0.944  0.844 |  0.969  0.820  0.795
+mean overall 0.761 over 9 poems
+```
+`machine`, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.697  2.063  0.017  0.994  1.000 |  0.933  0.811  0.757
+carroll-jabberwocky     2.845  0.911  0.550  1.651  0.600  0.887  1.000 |  0.818  0.957  0.782
+dickinson-because       2.690  0.907  0.694  1.573  0.362  0.887  1.000 |  0.928  0.831  0.771
+hopkins-pied-beauty     3.280  0.829  0.465  1.745  0.163  0.953  0.933 |  0.955  0.946  0.904
+poe-annabel-lee         3.911  0.911  0.511  1.847  0.154  0.841  0.811 |  0.876  0.914  0.801
+preseren-zdravljica     2.361  0.791  0.729  1.542  0.214  0.643  1.000 |  0.560  1.000  0.560
+shakespeare-sonnet-18   2.331  0.818  0.765  1.854  0.364  0.993  1.000 |  0.820  1.000  0.820
+whitman-song-of-myself  2.755  0.879  0.332  1.546  0.150  0.894  1.000 |  0.938  0.837  0.785
+wilde-theocritus        2.966  0.913  0.732  2.099  0.341  0.944  0.844 |  0.971  0.820  0.796
+mean overall 0.775 over 9 poems
+```
+`machine`, harmony=both:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.697  2.063  0.017  0.994  1.000 |  0.933  0.811  0.757
+carroll-jabberwocky     2.746  0.903  0.538  1.651  0.600  0.887  1.000 |  0.808  0.957  0.772
+dickinson-because       2.444  0.879  0.668  1.573  0.362  0.887  1.000 |  0.901  0.831  0.749
+hopkins-pied-beauty     3.280  0.829  0.465  1.745  0.163  0.953  0.933 |  0.955  0.946  0.904
+poe-annabel-lee         3.867  0.908  0.507  1.847  0.154  0.841  0.811 |  0.876  0.914  0.801
+preseren-zdravljica     2.139  0.743  0.705  1.542  0.214  0.643  1.000 |  0.521  1.000  0.521
+shakespeare-sonnet-18   2.273  0.800  0.759  1.854  0.364  0.993  1.000 |  0.792  1.000  0.792
+whitman-song-of-myself  2.706  0.869  0.324  1.546  0.150  0.894  1.000 |  0.926  0.837  0.775
+wilde-theocritus        2.950  0.911  0.731  2.099  0.341  0.944  0.844 |  0.969  0.820  0.795
+mean overall 0.763 over 9 poems
+```
+`jazz`, harmony off:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  0.681  2.063  0.017  0.994  1.000 |  0.742  0.811  0.602
+carroll-jabberwocky     2.563  0.890  0.513  1.651  0.600  0.887  1.000 |  0.887  0.957  0.848
+dickinson-because       2.408  0.883  0.664  1.573  0.362  0.887  1.000 |  0.839  0.831  0.697
+hopkins-pied-beauty     3.085  0.800  0.442  1.745  0.163  0.953  0.933 |  0.825  0.946  0.781
+poe-annabel-lee         3.700  0.896  0.492  1.847  0.154  0.841  0.811 |  0.790  0.914  0.722
+preseren-zdravljica     1.972  0.724  0.683  1.542  0.214  0.643  1.000 |  0.732  1.000  0.732
+shakespeare-sonnet-18   2.129  0.750  0.745  1.854  0.364  0.993  1.000 |  0.923  1.000  0.923
+whitman-song-of-myself  2.615  0.859  0.307  1.546  0.150  0.894  1.000 |  0.742  0.837  0.622
+wilde-theocritus        2.689  0.892  0.713  2.099  0.341  0.944  0.844 |  0.890  0.820  0.729
+mean overall 0.740 over 9 poems
+```
+`jazz`, harmony=rhyme:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.697  2.063  0.017  0.994  1.000 |  0.735  0.811  0.597
+carroll-jabberwocky     2.718  0.900  0.535  1.651  0.600  0.887  1.000 |  0.877  0.957  0.838
+dickinson-because       2.444  0.879  0.668  1.573  0.362  0.887  1.000 |  0.843  0.831  0.700
+hopkins-pied-beauty     3.280  0.829  0.465  1.745  0.163  0.953  0.933 |  0.825  0.946  0.781
+poe-annabel-lee         3.867  0.908  0.507  1.847  0.154  0.841  0.811 |  0.780  0.914  0.713
+preseren-zdravljica     2.083  0.727  0.698  1.542  0.214  0.643  1.000 |  0.735  1.000  0.735
+shakespeare-sonnet-18   2.273  0.800  0.759  1.854  0.364  0.993  1.000 |  0.923  1.000  0.923
+whitman-song-of-myself  2.664  0.859  0.316  1.546  0.150  0.894  1.000 |  0.746  0.837  0.625
+wilde-theocritus        2.950  0.911  0.731  2.099  0.341  0.944  0.844 |  0.871  0.820  0.714
+mean overall 0.736 over 9 poems
+```
+`jazz`, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.697  2.063  0.017  0.994  1.000 |  0.735  0.811  0.597
+carroll-jabberwocky     2.845  0.911  0.550  1.651  0.600  0.887  1.000 |  0.865  0.957  0.828
+dickinson-because       2.690  0.907  0.694  1.573  0.362  0.887  1.000 |  0.816  0.831  0.678
+hopkins-pied-beauty     3.280  0.829  0.465  1.745  0.163  0.953  0.933 |  0.825  0.946  0.781
+poe-annabel-lee         3.911  0.911  0.511  1.847  0.154  0.841  0.811 |  0.777  0.914  0.710
+preseren-zdravljica     2.361  0.791  0.729  1.542  0.214  0.643  1.000 |  0.735  1.000  0.735
+shakespeare-sonnet-18   2.331  0.818  0.765  1.854  0.364  0.993  1.000 |  0.923  1.000  0.923
+whitman-song-of-myself  2.755  0.879  0.332  1.546  0.150  0.894  1.000 |  0.733  0.837  0.614
+wilde-theocritus        2.966  0.913  0.732  2.099  0.341  0.944  0.844 |  0.870  0.820  0.713
+mean overall 0.731 over 9 poems
+```
+`jazz`, harmony=both:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.697  2.063  0.017  0.994  1.000 |  0.735  0.811  0.597
+carroll-jabberwocky     2.746  0.903  0.538  1.651  0.600  0.887  1.000 |  0.874  0.957  0.836
+dickinson-because       2.444  0.879  0.668  1.573  0.362  0.887  1.000 |  0.843  0.831  0.700
+hopkins-pied-beauty     3.280  0.829  0.465  1.745  0.163  0.953  0.933 |  0.825  0.946  0.781
+poe-annabel-lee         3.867  0.908  0.507  1.847  0.154  0.841  0.811 |  0.780  0.914  0.713
+preseren-zdravljica     2.139  0.743  0.705  1.542  0.214  0.643  1.000 |  0.735  1.000  0.735
+shakespeare-sonnet-18   2.273  0.800  0.759  1.854  0.364  0.993  1.000 |  0.923  1.000  0.923
+whitman-song-of-myself  2.706  0.869  0.324  1.546  0.150  0.894  1.000 |  0.739  0.837  0.619
+wilde-theocritus        2.950  0.911  0.731  2.099  0.341  0.944  0.844 |  0.871  0.820  0.714
+mean overall 0.735 over 9 poems
+```
 
 ### Sound and voice, step 4.2, review fixes
 

@@ -218,6 +218,7 @@ pub struct Schedule {
     messages: Vec<Message>,
     beats_per_minute: u16,
     unapplied: Vec<(&'static str, String)>,
+    unsent_chords: usize,
 }
 
 /// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
@@ -259,6 +260,14 @@ impl Schedule {
     #[must_use]
     pub fn unapplied(&self) -> &[(&'static str, String)] {
         &self.unapplied
+    }
+
+    /// How many chords of the harmony layer (`SPEC.md` §4.6) the arrangement plays that this
+    /// schedule does not send: it has no chord message yet, and says so rather than dropping them
+    /// silently (`CLAUDE.md` §6). Zero unless the harmony mapping is chosen.
+    #[must_use]
+    pub const fn unsent_chords(&self) -> usize {
+        self.unsent_chords
     }
 
     /// How long the piece lasts, in beats.
@@ -305,6 +314,13 @@ impl Schedule {
                 out,
                 "# not applied here: {} (pitch is sent from MIDI 36, velocity unscaled)",
                 keys.join(", ")
+            );
+        }
+        if self.unsent_chords > 0 {
+            let _ = writeln!(
+                out,
+                "# not scheduled here: {} chords of the harmony layer (there is no chord message)",
+                self.unsent_chords
             );
         }
         for message in &self.messages {
@@ -377,6 +393,12 @@ impl Backend for Osc {
                 .at_density(score.events().len(), score.bars())
                 .get(),
             unapplied: unapplied(style),
+            unsent_chords: score
+                .arrangement()
+                .slots()
+                .iter()
+                .filter(|slot| score.chord_in(slot).is_some())
+                .count(),
         })
     }
 }
@@ -655,6 +677,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn chords_the_schedule_cannot_send_are_named_not_dropped() {
+        // ABAB, one foundation stanza: four bars stated and four in the outro, every one with a
+        // chord under harmony = rhyme. None is sent, and the text says how many.
+        let source = "dA bA\nro bo\nsA tA\nno do\n";
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings = prosody_core::Mappings::all().with(
+            prosody_core::Mapping::Harmony
+                .choose(prosody_core::Variant::Rhyme)
+                .unwrap(),
+        );
+        let score = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &Flat),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap();
+        let with = Osc::new().render(&score, &Style::default()).unwrap();
+        assert_eq!(with.unsent_chords(), 8);
+        assert!(
+            with.to_text()
+                .contains("# not scheduled here: 8 chords of the harmony layer"),
+            "{}",
+            with.to_text()
+        );
+        // The messages are the ones the piece without the harmony sends.
+        let without = schedule(source);
+        assert_eq!(without.unsent_chords(), 0);
+        assert_eq!(with.messages(), without.messages());
+        assert!(!without.to_text().contains("not scheduled"));
     }
 
     #[test]

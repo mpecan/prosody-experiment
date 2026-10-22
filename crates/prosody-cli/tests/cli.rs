@@ -705,3 +705,54 @@ fn score_reports_every_metric_and_an_edit_per_word() {
     let words = COUPLET.split_whitespace().count();
     assert!(out.contains(&format!("of {words} edits")), "{out}");
 }
+
+#[test]
+fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
+    // The couplet's stanzas are night/light and sea/me: A on degree 0, B on degree 1, each pair
+    // in one stanza. rhyme: each line's class's degree. cadence: the first line of each pair
+    // opens (V of its degree), and the second — the stanza's last bar — turns round onto the
+    // first chord (V of that root). both: the same, since every line opens or turns round.
+    for (variant, expected) in [
+        ("rhyme", "1:I/0 2:I/0 3:I/1 4:I/1"),
+        ("cadence", "1:V/4 2:V/8 3:V/5 4:V/9"),
+        ("both", "1:V/4 2:V/8 3:V/5 4:V/9"),
+    ] {
+        let set = format!("harmony={variant}");
+        let (out, err, code) = run(&["--set", &set], COUPLET);
+        assert_eq!(code, Some(0), "{err}");
+        assert!(
+            out.contains(&format!("//   chords by line: {expected}\n")),
+            "{variant}:\n{out}"
+        );
+        assert!(out.contains("// the chords"), "{out}");
+        if let Some(node) = node() {
+            let file = std::env::temp_dir().join(format!("prosody-harmony-{variant}.js"));
+            std::fs::write(&file, &out).expect("writing the pattern");
+            let checked = Command::new(&node)
+                .arg("--check")
+                .arg(&file)
+                .output()
+                .expect("node should run");
+            let _ = std::fs::remove_file(&file);
+            assert!(
+                checked.status.success(),
+                "node rejected {variant}:\n{}",
+                String::from_utf8_lossy(&checked.stderr)
+            );
+        }
+        let (explained, err, code) = run(&["--explain", "--set", &set], COUPLET);
+        assert_eq!(code, Some(0), "{err}");
+        assert!(
+            explained.contains(&format!("  harmony       {variant}\n")),
+            "{explained}"
+        );
+        assert!(explained.contains("  harmony V deg 4 (V of deg 0)") || variant == "rhyme");
+    }
+    // Off — the default — nothing about chords at all.
+    let (out, _, _) = run(&[], COUPLET);
+    assert!(!out.contains("chord"), "{out}");
+    // The OSC schedule cannot send a chord, and says how many it leaves out.
+    let (osc, err, code) = run(&["--osc", "--set", "harmony=rhyme"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(osc.contains("# not scheduled here: "), "{osc}");
+}

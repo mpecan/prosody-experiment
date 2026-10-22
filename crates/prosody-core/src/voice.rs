@@ -70,7 +70,8 @@
 //! its class's degree would be a monotone, and would attribute a pitch to syllables that earned
 //! none — which invariant I4 forbids more strongly than it forbids silence.
 
-use crate::arrange::{Arrangement, Part, Placement};
+use crate::arrange::{Arrangement, Lane, Part, Placement, Slot};
+use crate::harmony::{Chord, Harmony};
 use crate::meter::FootKind;
 use crate::phoneme::{Phoneme, Provenance};
 use crate::repetition::VoiceId;
@@ -533,6 +534,7 @@ pub struct Score {
     bars: usize,
     silent: Vec<Span>,
     arrangement: Arrangement,
+    harmony: Vec<Harmony>,
 }
 
 impl Score {
@@ -549,7 +551,49 @@ impl Score {
             bars,
             silent,
             arrangement: Arrangement::default(),
+            harmony: Vec::new(),
         }
+    }
+
+    /// The same score, with each line's harmony ([`crate::harmony`]).
+    pub(crate) fn with_harmony(mut self, harmony: Vec<Harmony>) -> Self {
+        self.harmony = harmony;
+        self
+    }
+
+    /// What the harmony layer made of each line, in bar order: a chord, or a rest and why — or
+    /// nothing at all when [`Mapping::Harmony`](crate::mapping::Mapping::Harmony) is off.
+    #[must_use]
+    pub fn harmony(&self) -> &[Harmony] {
+        &self.harmony
+    }
+
+    /// Every chord, in bar order.
+    pub fn chords(&self) -> impl Iterator<Item = Chord> + '_ {
+        self.harmony.iter().filter_map(|harmony| harmony.chord())
+    }
+
+    /// The harmony of one line, by its bar.
+    #[must_use]
+    pub fn harmony_of(&self, bar: usize) -> Option<Harmony> {
+        self.harmony
+            .iter()
+            .find(|harmony| harmony.bar().get() == bar)
+            .copied()
+    }
+
+    /// The chord a slot of the arrangement plays: the chord of the whole line sounding in the
+    /// foundation layer there — its host, or the foundation's loop under a flourish host — if
+    /// that line has one. Never a line in the call, held or refrain lane: one chord a bar.
+    ///
+    /// The one place this is decided, so every backend and the scorer agree on it.
+    #[must_use]
+    pub fn chord_in(&self, slot: &Slot) -> Option<Chord> {
+        let foundation = slot.placements().iter().find(|placement| {
+            placement.lane() == Lane::Layer(crate::role::Layer::Foundation)
+                && placement.part() == Part::Line
+        })?;
+        self.harmony_of(foundation.bar().get())?.chord()
     }
 
     /// The same score, laid out in time by [`crate::arrange`].

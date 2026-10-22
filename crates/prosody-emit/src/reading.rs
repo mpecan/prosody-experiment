@@ -173,7 +173,11 @@ impl Reading {
         let what = match self.variant {
             Variant::Stanza => "each stanza read a line a bar from where it is first heard",
             Variant::Off => "switched off, nothing spoken",
-            Variant::Arrives | Variant::On => "each line spoken in the bar it is first heard",
+            // The harmony's variants are not the reading's: `Mapping::choose` never stores them
+            // for it, so they fall with the default.
+            Variant::Arrives | Variant::On | Variant::Rhyme | Variant::Cadence | Variant::Both => {
+                "each line spoken in the bar it is first heard"
+            }
         };
         let mut out = format!(
             "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
@@ -250,7 +254,10 @@ pub fn plan(
     let placed: Vec<(usize, usize)> = match variant {
         Variant::Off => Vec::new(),
         Variant::Stanza => by_stanza(poem, &arrivals, slots),
-        Variant::Arrives | Variant::On => arrivals,
+        // As above: only the reading's own variants can reach here.
+        Variant::Arrives | Variant::On | Variant::Rhyme | Variant::Cadence | Variant::Both => {
+            arrivals
+        }
     };
 
     let mut cues = Vec::new();

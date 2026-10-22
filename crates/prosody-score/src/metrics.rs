@@ -6,21 +6,27 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::timeline::{Hit, Timeline};
 
-/// An instrument a listener hears: a line's voice, or the pitched synth.
+/// An instrument a listener hears: a line's voice, the pitched synth, or the chord lane.
 ///
 /// Both backends play a pitched event twice — its line's drum *and* a note on one shared synth
 /// (Strudel's `note()` layer; the `SuperCollider` receiver's `\prosodyPitch`). Counting it once
-/// undercounted what sounds at once and what returns.
+/// undercounted what sounds at once and what returns. A chord (§4.6's harmony layer) is no
+/// syllable: it sounds on its own lane alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Instrument {
     Voice(usize),
     Synth,
+    Chords,
 }
 
 /// The instruments one hit sounds on.
-fn instruments(hit: &Hit) -> impl Iterator<Item = Instrument> {
+fn instruments(hit: &Hit) -> Vec<Instrument> {
+    if hit.chord {
+        return vec![Instrument::Chords];
+    }
     std::iter::once(Instrument::Voice(hit.voice))
         .chain(hit.degree.is_some().then_some(Instrument::Synth))
+        .collect()
 }
 
 /// Mean number of distinct instruments sounding in a beat, over the beats where anything sounds.
@@ -79,9 +85,21 @@ pub(crate) fn pitched(timeline: &Timeline) -> f64 {
 /// The simplest stand-in for melodic information content (Pearce's `IDyOM` measures the same thing
 /// conditioned on context). Zero bits is a drone or no melody at all; a few bits is a tune.
 /// Summed in degree order, so the result is the same on every run (`CLAUDE.md` §4).
+///
+/// The melody's degrees only: a chord's root is left out. The core numbers a root poem-wide, and
+/// the backend folds it into one octave of the palette's scale — so two roots the score counts as
+/// different (V/9 and V/16 in a seven-note scale) sound as one chord. The fold needs the scale's
+/// length, which is palette, and this crate reads the score before any palette; counting the
+/// unfolded roots credited the harmony with variety nobody hears. A chord still counts as pitched
+/// and as its own instrument, which the score does decide.
 pub(crate) fn pitch_entropy(timeline: &Timeline) -> f64 {
     let mut counts: BTreeMap<usize, usize> = BTreeMap::new();
-    for degree in timeline.hits.iter().filter_map(|hit| hit.degree) {
+    for degree in timeline
+        .hits
+        .iter()
+        .filter(|hit| !hit.chord)
+        .filter_map(|hit| hit.degree)
+    {
         *counts.entry(degree).or_default() += 1;
     }
     let total: usize = counts.values().sum();
@@ -216,6 +234,51 @@ mod tests {
             bar_starts: (0..bars as u64).map(|bar| 2 * bar).collect(),
             beats: 2 * bars as u64,
         }
+    }
+
+    #[test]
+    fn a_chord_is_its_own_instrument_and_a_pitch() {
+        // Beat 0: a drum hit of voice 0 and a chord on degree 4 — two instruments, not three
+        // (a chord is no syllable, so it plays no voice's drum). Beat 1: voice 0 again.
+        // Layering (2 + 1) / 2 = 1.5; pitched 1 of 3; one degree, so zero bits.
+        let mut chord = on(hit(0, 0, (0, 1), 0), 4);
+        chord.chord = true;
+        let timeline = Timeline {
+            hits: vec![hit(0, 0, (0, 1), 0), chord, hit(1, 0, (0, 1), 0)],
+            bar_starts: vec![0],
+            beats: 2,
+        };
+        close(layering(&timeline), 1.5);
+        close(pitched(&timeline), 1.0 / 3.0);
+        close(pitch_entropy(&timeline), 0.0);
+        // Recurrence: one bar, so nothing has sounded before.
+        close(recurrence(&timeline), 0.0);
+    }
+
+    #[test]
+    fn a_chords_root_adds_no_melodic_entropy() {
+        // The backend folds a chord's root into one octave of a scale the scorer cannot see, so
+        // roots 4, 11 and 18 — distinct numbers, one sound in a seven-note scale — must not read
+        // as three pitches. Melody: degrees 0 and 1, one each, so exactly one bit; the chords
+        // leave it there, though they still count as pitched (5 of 5).
+        let chord = |slot, degree| {
+            let mut hit = on(hit(slot, 0, (0, 1), 0), degree);
+            hit.chord = true;
+            hit
+        };
+        let timeline = Timeline {
+            hits: vec![
+                on(hit(0, 0, (0, 1), 0), 0),
+                on(hit(1, 0, (0, 1), 0), 1),
+                chord(0, 4),
+                chord(1, 11),
+                chord(1, 18),
+            ],
+            bar_starts: vec![0],
+            beats: 2,
+        };
+        close(pitch_entropy(&timeline), 1.0);
+        close(pitched(&timeline), 1.0);
     }
 
     #[test]

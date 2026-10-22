@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use crate::arrange::Cause;
+use crate::harmony::{Harmony, Reason, Silence};
 use crate::meter::FootKind;
 use crate::parse::{Poem, Token};
 use crate::phoneme::{Phoneme, Provenance};
@@ -65,6 +66,8 @@ pub enum Pass {
     Seed,
     /// Which bars of the piece a line sounds in: stated, looping, transforming, overruling.
     Arrange,
+    /// Which chord a line's bar has, or why it has none — only when the harmony layer is on.
+    Harmony,
 }
 
 impl Pass {
@@ -81,6 +84,7 @@ impl Pass {
             Self::Phoneme => "phoneme",
             Self::Seed => "seed",
             Self::Arrange => "arrange",
+            Self::Harmony => "harmony",
         }
     }
 
@@ -89,6 +93,7 @@ impl Pass {
     pub const fn section(self) -> &'static str {
         match self {
             Self::Role | Self::Arrange => "§4.1",
+            Self::Harmony => "§4.6",
             Self::Meter => "§4.2",
             Self::Repetition | Self::Sound => "§4.3",
             Self::Surprisal => "§4.4",
@@ -98,8 +103,9 @@ impl Pass {
         }
     }
 
-    /// Every pass, for the legend.
-    pub const ALL: [Self; 9] = [
+    /// Every pass, for the legend. The legend lists [`Pass::Harmony`] only when the poem has a
+    /// harmony, so a view without one reads as it did before the layer existed.
+    pub const ALL: [Self; 10] = [
         Self::Role,
         Self::Meter,
         Self::Repetition,
@@ -109,6 +115,7 @@ impl Pass {
         Self::Phoneme,
         Self::Seed,
         Self::Arrange,
+        Self::Harmony,
     ];
 }
 
@@ -226,6 +233,7 @@ pub struct AnnotatedLine {
     voice: Option<crate::repetition::VoiceId>,
     seed: Option<Seed>,
     sounds: Vec<(usize, Cause)>,
+    harmony: Option<Harmony>,
     tokens: Vec<Annotation>,
 }
 
@@ -270,6 +278,13 @@ impl AnnotatedLine {
     #[must_use]
     pub fn sounds(&self) -> &[(usize, Cause)] {
         &self.sounds
+    }
+
+    /// Its bar's chord, or why it has none ([`Pass::Harmony`]) — `None` when the harmony layer
+    /// is off.
+    #[must_use]
+    pub const fn harmony(&self) -> Option<Harmony> {
+        self.harmony
     }
 
     /// Its tokens, in source order.
@@ -356,6 +371,9 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         .map(|(_, line)| (line.span(), (line.layer(), line.basis())))
         .collect();
 
+    // Every line's bar, counted the way the score counts them — one per line in reading order —
+    // so a line with no events still finds its harmony.
+    let mut next_bar = 0_usize;
     let stanzas = poem
         .stanzas()
         .iter()
@@ -364,6 +382,8 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                 .lines()
                 .iter()
                 .map(|line| {
+                    let index = next_bar;
+                    next_bar += 1;
                     let tokens: Vec<Annotation> = line
                         .words()
                         .map(|token| annotate(*token, &by_token, &silent, &family_sizes))
@@ -389,6 +409,7 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                             .get(&line.span())
                             .map(|&bar| sounds_of(score, bar))
                             .unwrap_or_default(),
+                        harmony: score.harmony_of(index),
                         tokens,
                     }
                 })
@@ -468,7 +489,11 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
     let mut out = String::new();
 
     let _ = writeln!(out, "passes");
+    let harmonised = annotated.lines().any(|line| line.harmony().is_some());
     for pass in Pass::ALL {
+        if pass == Pass::Harmony && !harmonised {
+            continue;
+        }
         let _ = writeln!(out, "  {:<11} {}", pass.name(), pass.section());
     }
     let _ = writeln!(out);
@@ -506,6 +531,9 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             if !line.sounds().is_empty() {
                 let _ = writeln!(out, "  sounds {}", describe_sounds(line.sounds()));
             }
+            if let Some(harmony) = line.harmony() {
+                let _ = writeln!(out, "  harmony {}", describe_harmony(harmony));
+            }
             let _ = writeln!(
                 out,
                 "    {:<14} {:<10} {:<7} {:<9} {:<9} {:<7} {:<6} from",
@@ -518,6 +546,53 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
         let _ = writeln!(out);
     }
     out
+}
+
+/// `V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza`: which chord, on which
+/// degree, and the rule that chose it — or `no chord · ` and why not.
+fn describe_harmony(harmony: Harmony) -> String {
+    match harmony {
+        Harmony::Chord(chord) => {
+            let numeral = chord.function().numeral();
+            let root = chord.root().get();
+            let of = chord.of().get();
+            let chord_text = if of == root {
+                format!("{numeral} deg {root}")
+            } else {
+                format!("{numeral} deg {root} ({numeral} of deg {of})")
+            };
+            let why = match chord.reason() {
+                Reason::Class(class) => {
+                    format!("rhyme: class {}, on its degree", class.letter())
+                }
+                Reason::Opens(class) => format!(
+                    "cadence: {} opens, answered later in its stanza",
+                    class.letter()
+                ),
+                Reason::Closes(class) => format!(
+                    "cadence: {} closes, answering an earlier line of its stanza",
+                    class.letter()
+                ),
+                Reason::Unanswered { key } => format!(
+                    "cadence: no rhyme in its stanza, so IV of the stanza's key, deg {}",
+                    key.get()
+                ),
+                Reason::Turnaround { onto } => format!(
+                    "cadence: the stanza's last bar, turning round onto its first chord, deg {}",
+                    onto.get()
+                ),
+            };
+            format!("{chord_text} · {why}")
+        }
+        Harmony::Rest(rest) => format!(
+            "no chord · {}",
+            match rest.why() {
+                Silence::Unrhymed => "rhyme: the line rhymes with nothing, so it has no degree",
+                Silence::Wordless => "no pronounceable word to carry a chord (I4)",
+                Silence::Flourish => "a flourish stanza carries no harmony",
+            }
+        ),
+    }
 }
 
 /// Every slot of the arrangement a source bar sounds in.
@@ -785,6 +860,10 @@ mod tests {
     }
 
     fn view(source: &str) -> (String, super::Annotated) {
+        view_with(source, &crate::mapping::Mappings::all())
+    }
+
+    fn view_with(source: &str, mappings: &crate::mapping::Mappings) -> (String, super::Annotated) {
         let poem = Poem::parse(source.to_owned()).unwrap();
         let meter = meter::scan(&poem, &Spelled);
         let rhyme = rhyme::analyse(&poem, &Spelled);
@@ -792,15 +871,18 @@ mod tests {
         let sound = sound::analyse(&poem, &Spelled);
         let surprisal = surprisal::analyse(&poem, &Spelled, &ByLength);
         let roles = role::assign(&meter, &repetition).unwrap();
-        let score = lower::run(Analyses {
-            poem: &poem,
-            meter: &meter,
-            rhyme: &rhyme,
-            repetition: &repetition,
-            sound: &sound,
-            surprisal: &surprisal,
-            roles: &roles,
-        })
+        let score = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme,
+                repetition: &repetition,
+                sound: &sound,
+                surprisal: &surprisal,
+                roles: &roles,
+            },
+            mappings,
+        )
         .unwrap();
         let annotated = run(&poem, &score, &roles);
         (render(&poem, &annotated), annotated)
@@ -873,12 +955,73 @@ mod tests {
     fn the_view_names_the_pass_that_decided_each_value() {
         // The half that turns "that sounds wrong" into "that pass is wrong".
         let (text, _) = view(RICH);
-        for pass in Pass::ALL {
+        // The harmony pass is listed only when the harmony layer is on; see its own test.
+        for pass in Pass::ALL.into_iter().filter(|pass| *pass != Pass::Harmony) {
             assert!(text.contains(pass.name()), "{} missing", pass.name());
             assert!(text.contains(pass.section()), "{} missing", pass.section());
         }
         // ...and a pitched token says the rhyme pass put it there.
         assert!(text.contains("meter,rhyme"), "{text}");
+    }
+
+    /// Choosing the harmony's `variant`.
+    fn harmony(variant: crate::mapping::Variant) -> crate::mapping::Mappings {
+        crate::mapping::Mappings::all()
+            .with(crate::mapping::Mapping::Harmony.choose(variant).unwrap())
+    }
+
+    #[test]
+    fn the_view_says_which_chord_each_bar_has_and_why() {
+        // ABAB of one-syllable stressed words, every line two of them: a foundation stanza. A is
+        // degree 0 and B degree 1. Under cadence: A opens (V of 0 = deg 4), B opens (V of 1 =
+        // deg 5), A closes (I on 0), and the last bar turns round onto the first chord (V of 4).
+        let source = "dA bA\nro bo\nsA tA\nno do\n";
+        let (text, annotated) = view_with(source, &harmony(crate::mapping::Variant::Cadence));
+        let rows: Vec<&str> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("  harmony "))
+            .filter(|row| !row.starts_with(' '))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                "V deg 4 (V of deg 0) · cadence: A opens, answered later in its stanza",
+                "V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza",
+                "I deg 0 · cadence: A closes, answering an earlier line of its stanza",
+                "V deg 8 (V of deg 4) · cadence: the stanza's last bar, turning round onto \
+                 its first chord, deg 4",
+            ]
+        );
+        assert!(text.contains("  harmony     §4.6"), "{text}");
+        assert_eq!(
+            annotated.lines().filter(|l| l.harmony().is_some()).count(),
+            4
+        );
+    }
+
+    #[test]
+    fn the_view_says_why_a_bar_has_no_chord() {
+        // H1: `ro bAn` ends on AA N, which nothing else ends on — a class of one, so no chord.
+        let source = "dA bA\nro bAn\nsA tA\n";
+        let (text, _) = view_with(source, &harmony(crate::mapping::Variant::Rhyme));
+        assert!(
+            text.contains(
+                "harmony no chord · rhyme: the line rhymes with nothing, so it has no degree"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("harmony I deg 0 · rhyme: class A, on its degree"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn without_the_harmony_the_view_is_as_it_was() {
+        // Off is the default: no harmony row and no harmony in the legend.
+        let (text, annotated) = view("dA bA\nro bo\nsA tA\nno do\n");
+        assert!(!text.contains("harmony"), "{text}");
+        assert!(annotated.lines().all(|line| line.harmony().is_none()));
     }
 
     #[test]
