@@ -94,6 +94,21 @@ adds. The **Score A vs B** tab measures both settings side by side (see [Measuri
 with the difference between them, under the machine or the interest profile. The page remembers
 your two settings.
 
+Under the mappings is **Reading — the poem spoken over the music**, on by default: each line is
+spoken once, in your browser's own voice (`speechSynthesis`), in the bar where it is first heard —
+its stanza stated, dropping in as a refrain stanza, or replacing a bar of the old loop — and never
+where it only loops, is held, refrains in its lane or repeats in the outro. Strudel's own clock
+fires each line, so it stays on the bar; a line still being spoken when the next is due is cut
+off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
+0.6–1.6. Pick a voice from the menu (the page remembers it), and untick **duck** to stop the music
+dipping while a line is read. The Pattern tab shows the cue pattern under the music's, and the
+browser console logs every line as it is cued: which bar, which bytes, which rate. Picking a
+preset or switching A/B while playing starts the piece again from bar 1, so the reading begins at
+the first line. A live edit keeps playing from where it is, and the reading carries on from there.
+It is a
+candidate mapping and a page-only one — the CLI's pattern and strudel.cc know nothing of it
+(`SPEC.md` §4.7).
+
 It binds to `127.0.0.1` only, and deliberately: it compiles arbitrary text from a request body,
 which is exactly right on your own machine and exactly wrong on a network. Playback loads Strudel,
 the drum-machine samples (the map strudel.cc uses) and the General MIDI soundfonts from CDNs, so

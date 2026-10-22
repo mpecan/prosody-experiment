@@ -21,7 +21,7 @@ use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
 use prosody_emit::style::{BANKS, PRESETS as PALETTES, SOUNDFONTS, SYNTHS};
-use prosody_emit::{Backend as _, Scale, Strudel, Style};
+use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
 use prosody_score::{DEFAULT_PROBES, Profile, Report, sensitivity};
@@ -229,6 +229,7 @@ fn main() -> Result<()> {
             ("POST", "/pattern") => compile(request, &Output::Pattern),
             ("POST", "/explain") => compile(request, &Output::Explain),
             ("POST", "/score") => compile(request, &Output::Score),
+            ("POST", "/reading") => compile(request, &Output::Reading),
             _ => Response::problem(404, "no such thing here\n".to_owned()),
         }
     })
@@ -242,6 +243,9 @@ enum Output {
     Explain,
     /// The measurements, as JSON, so the page can set two settings side by side.
     Score,
+    /// The reading's cues and cue pattern, as JSON (`prosody_emit::reading`): the page speaks
+    /// them on Strudel's clock, when it is asked to.
+    Reading,
 }
 
 /// Compiles the request body under the palette in its query string.
@@ -397,7 +401,36 @@ fn render(source: &str, output: &Output, mappings: &Mappings, profile: Profile) 
             });
             Ok(report_json(&Report::profiled(&score, sensitivity, profile)))
         }
+        Output::Reading => reading::plan(&poem, &score, &style)
+            .map(|reading| reading_json(&reading))
+            .context("planning the reading"),
     }
+}
+
+/// A reading as JSON: the cue pattern to evaluate, and each cue — the line it speaks, by index
+/// and by span, its text and its rate — for the page to look up when the cue fires.
+fn reading_json(reading: &Reading) -> String {
+    let cues: Vec<String> = reading
+        .cues()
+        .iter()
+        .map(|cue| {
+            format!(
+                "{{\"slot\":{},\"line\":{},\"start\":{},\"end\":{},\"syllables\":{},\"rate\":{},\"text\":{}}}",
+                cue.slot(),
+                cue.line(),
+                cue.span().start(),
+                cue.span().end(),
+                cue.syllables(),
+                prosody_emit::fmt_param(cue.rate()),
+                json_string(cue.text()),
+            )
+        })
+        .collect();
+    format!(
+        "{{\"pattern\":{},\"cues\":[{}]}}\n",
+        json_string(&reading.pattern()),
+        cues.join(",")
+    )
 }
 
 /// Every analysis pass and the lowering, under `mappings`.
@@ -601,6 +634,40 @@ mod tests {
         assert_ne!(full.body, bare.body);
         let unknown = super::compile(&request(&[("profile", "polka")], SEED), &Output::Score);
         assert_eq!(unknown.status, 400);
+    }
+
+    #[test]
+    fn the_reading_speaks_every_line_once_in_order() {
+        // The seed poem has eight lines; the reading speaks each once, in reading order, and the
+        // first cue is the first line, with the bytes it came from (I4).
+        let response = super::compile(&request(&[], SEED), &Output::Reading);
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = &response.body;
+        assert!(body.starts_with("{\"pattern\":\"// the reading"), "{body}");
+        for line in 0..8 {
+            assert!(
+                body.contains(&format!("\"line\":{line},")),
+                "line {line}: {body}"
+            );
+        }
+        assert!(!body.contains("\"line\":8,"), "{body}");
+        // Spans are in the compiled source, after the 41-byte header the controls write
+        // (`+++`, `[style]`, `tempo_range = [110, 130]`, `+++`, each with its newline). The line is
+        // 28 bytes and seven syllables: Ty-ger Ty-ger burn-ing bright.
+        assert!(
+            body.contains("\"line\":0,\"start\":41,\"end\":69,\"syllables\":7,"),
+            "{body}"
+        );
+        assert!(
+            body.contains("\"text\":\"Tyger Tyger, burning bright,\"}"),
+            "{body}"
+        );
+        let lines: Vec<usize> = body
+            .split("\"line\":")
+            .skip(1)
+            .filter_map(|rest| rest.split(',').next()?.parse().ok())
+            .collect();
+        assert_eq!(lines, (0..8).collect::<Vec<_>>(), "in reading order");
     }
 
     #[test]

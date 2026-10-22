@@ -336,6 +336,69 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 
 ## Log
 
+### Sound and voice, step 2 — review fixes to the reading
+
+Three findings from review, all on the page side of the reading (`SPEC.md` §4.7):
+
+- **A pasted line separator stopped the piece.** The cue pattern copies each line's text into a
+  `//` comment, and JavaScript ends a comment at U+2028/U+2029 as well as at a newline, so the
+  rest of the line ran as code and Play failed. `reading::comment_safe` now writes those, and
+  every control character, as `\u{…}` escapes in the comment. The text the page speaks, carried
+  in the cue's JSON, is the exact source and is not escaped. The page also evaluates the cue
+  pattern in its own `try`, so a reading that cannot be cued costs the reading and the music
+  still plays.
+- **A preset or A/B switch started the reading mid-poem.** Strudel's scheduler keeps its cycle
+  count across `setPattern` (`@strudel/core` 1.2.6 `cyclist.mjs`: only `stop()` resets `lastEnd`
+  and only `start()` resets the counters), so the new piece came in partway through. Those two
+  switches now `hush()` and start again at cycle 0. Live edits deliberately keep the clock
+  running, and that is documented.
+- **A stale line could be read over the new music.** Every `play()` starts a new reading
+  generation. Cues and pending timers from an older generation are dropped, and `quietReading()`
+  cancels the line being spoken, at the moment the new pattern starts.
+
+### Sound and voice, step 2 — the poem read aloud over the music (page-side candidate)
+
+A prototype, to learn whether spoken lines over the music work. `prosody_emit::reading` plans
+it: each line once, in the slot where it is first heard as a host (`Stated`, `Arriving`,
+`Overruling`), never on loops, yields, the call/held/refrain lanes or the outro (`SPEC.md` §4.7).
+It is a **separate artefact**, not part of the Strudel pattern text: Strudel cannot speak, a cue
+pattern pasted into strudel.cc would ask the default output for a sound named nothing, and keeping
+it apart leaves the CLI output and every corpus snapshot untouched (none changed). It lives in the
+emitter rather than the page because it must land on the pattern's own clock — the same `.cpm`,
+now one helper, `cycles_per_minute`, shared by both.
+
+The page fetches `/reading` per setting (the arrangement depends on the mappings) and gets JSON:
+the cue pattern `n("<0 1 ~ 2 …>").cpm(…)` with a comment per cue (bar, line, bytes, syllables,
+rate), and the cues themselves. It evaluates the cue pattern, attaches `onTrigger(fn, true)` —
+checked in `@strudel/core` 1.2.6's `pattern.mjs` and `repl.mjs`: the callback receives
+`(hap, currentTime, cps, targetTime)` and `true` suppresses the default output — waits out
+`targetTime − currentTime` as Strudel's own `onTriggerTime` does, and speaks the line through
+`speechSynthesis`, cancelling one still running. Controls: on/off (default on, remembered), a
+voice menu from `getVoices()`, and a duck (the master to 0.6 while a line is spoken, a `GainNode`
+ahead of the master compressor). Rate: syllables at four a second fitted to 85% of the bar,
+bounded 0.6–1.6.
+
+Found on the way, both in the browser:
+
+- **`speak`, `duck` and `silence` are Strudel globals.** `initStrudel` puts them on the global
+  scope over any page function of the same name; the first version's `speak` was silently
+  replaced by Strudel's pattern function and said nothing, with no error. Renamed `readLine`,
+  `readingDuck`, `quietReading`.
+- **The piece plays at half its stated tempo** — a pre-existing defect, *not fixed here*.
+  Strudel 1.2.6's `.cpm(x)` is `fast(x / 60)`, assuming a scheduler at 1 cycle a second, but the
+  scheduler starts at 0.5 and nothing changes it, so a bar at `.cpm(x)` lasts `120 / x` seconds.
+  Measured: the Blake seed is `.cpm(30.250)`, and its cues fired 3.97 s apart, not 1.98 s. The
+  same holds for a pattern pasted into strudel.cc. Fixing it (emit `.cpm(2x)`, or have the page set
+  the scheduler to 1 cps) doubles the speed of everything heard and changes every snapshot, so it
+  is left for the user to decide. The reading is fitted to the bar as it actually sounds
+  (`reading::SCHEDULER_CPS`), which is why every Blake line currently reads at the 0.6 floor.
+
+Verified in Chromium through Playwright: the page loads, both readings fetch, Play evaluates the
+stacked pattern with no console errors or warnings, the cues log lines 1–5 one bar apart and line
+6 at bar 10 (the transformation's next arrival), the utterances start (180 voices were available),
+the duck reaches 0.60 and returns, unticking the reading while it plays stops the cues, and Stop
+cancels speech. No one has heard it.
+
 ### Sound and voice, step 1 — it sounds like instruments now (palette only)
 
 The user listens through the web page. Making it sound good there turned up two defects first,

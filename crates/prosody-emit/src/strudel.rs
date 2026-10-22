@@ -131,11 +131,10 @@ impl Backend for Strudel {
         }
         out.push_str(")\n");
 
-        let beats = mean_beats(score).max(1);
         let _ = writeln!(
             out,
             "  .cpm({})",
-            fmt_param(f64::from(tempo.get()) / f64::from(beats))
+            fmt_param(cycles_per_minute(score, style))
         );
         if style.swing().hundredths() > 0 {
             // `swingBy(x, n)` slices the *cycle* into `n` and delays the back half of each
@@ -327,6 +326,17 @@ fn bus(style: &Style, level: crate::style::Amount) -> String {
     }
     let _ = write!(calls, ".postgain({})", fmt_param(level.as_f64()));
     calls
+}
+
+/// How many cycles — slots of the arrangement — the piece plays a minute.
+///
+/// One number for every consumer that has to land on the same clock: the pattern's own `.cpm`,
+/// and the reading ([`crate::reading`]), whose cues must fall on the bars they name.
+pub(crate) fn cycles_per_minute(score: &Score, style: &Style) -> f64 {
+    let tempo = style
+        .tempo_range()
+        .at_density(score.events().len(), score.bars());
+    f64::from(tempo.get()) / f64::from(mean_beats(score).max(1))
 }
 
 /// How many beats a bar holds, on average across the piece — over the arrangement's slots, since a

@@ -89,6 +89,8 @@
   .mappings code { font-family: var(--mono); color: var(--ink); }
   .mappings .what { color: var(--dim); }
   .mappings input { width: auto; }
+  .reading .check span { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .82rem; }
+  .reading input[type=checkbox] { width: auto; }
 
   #score { flex: 1; overflow: auto; padding: 1rem 1.2rem; }
   #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
@@ -200,6 +202,19 @@
         switch between A and B while it plays; the Score tab measures both.
       </p>
     </div>
+    <div class="palette reading">
+      <h2>Reading — the poem spoken over the music</h2>
+      <label class="check"><span><input id="readAloud" type="checkbox" checked> read each line aloud</span></label>
+      <label>Voice
+        <select id="voice"><option value="">browser default</option></select>
+      </label>
+      <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
+      <p>
+        A candidate mapping, on this page only: each line is spoken once, in the bar where it is
+        first heard, fitted to that bar at the piece's tempo. Loops, held and refrain lanes and the
+        outro are never read. Strudel's clock fires each line; your browser's voice speaks it.
+      </p>
+    </div>
   </section>
 
   <section>
@@ -307,11 +322,18 @@ $('preset').addEventListener('input', () => {
   $('poem').value = preset.poem;
   setControls(preset.palette, controls);
   $('poem').scrollTop = 0;
+  fromTheTop = true;   // a new poem starts at its first bar, so the reading starts at its first line
   compile();
 });
 
 let strudelReady = false;
 let playing = false;
+// Set when the next play() must restart Strudel's clock at cycle 0 rather than hand the running
+// scheduler a new pattern: after a preset or an A/B switch. Strudel keeps its cycle count across
+// `setPattern`, so without the restart the new piece (at its own `.cpm`) starts partway through
+// and its reading begins at whatever line that bar first hosts. A live edit keeps the clock
+// running instead — the writer is listening in place — and the reading carries on from there.
+let fromTheTop = false;
 let latestPattern = '';
 let timer = null;
 
@@ -320,6 +342,9 @@ let timer = null;
 let settings = { A: [], B: MAPPINGS.map(([name]) => name) };
 let hearing = 'A';
 let patterns = { A: '', B: '' };
+// The reading of each setting (`prosody_emit::reading`): a cue pattern and the lines it speaks.
+// Fetched beside the patterns, because which bar a line arrives in depends on the mappings.
+let readings = { A: null, B: null };
 let scores = { A: null, B: null };
 try {
   const saved = JSON.parse(localStorage.getItem('prosody.settings') || 'null');
@@ -359,7 +384,12 @@ function query(side = hearing) {
 
 function showPattern() {
   latestPattern = patterns[hearing];
-  $('pattern').textContent = latestPattern;
+  const reading = readings[hearing];
+  // The cue pattern is shown under the music, apart from it: it is not part of what a writer
+  // pastes into strudel.cc, where nothing would speak it.
+  $('pattern').textContent = latestPattern + (reading && $('readAloud').checked
+    ? '\n// ---- spoken by this page, not part of the pattern above ----\n' + reading.pattern
+    : '');
 }
 
 function hear(side) {
@@ -367,7 +397,7 @@ function hear(side) {
   $('hearA').setAttribute('aria-pressed', side === 'A');
   $('hearB').setAttribute('aria-pressed', side === 'B');
   showPattern();
-  if (playing && latestPattern) play();
+  if (playing && latestPattern) { fromTheTop = true; play(); }
   else status(side + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', ''));
   fetch('/explain?' + query(), { method: 'POST', body: $('poem').value })
     .then((response) => response.text())
@@ -422,6 +452,7 @@ async function compile() {
   if (!poem.trim()) {
     latestPattern = '';
     patterns = { A: '', B: '' };
+    readings = { A: null, B: null };
     scores = { A: null, B: null };
     $('pattern').textContent = '';
     $('explain').textContent = '';
@@ -431,11 +462,17 @@ async function compile() {
   }
   status('compiling…');
   try {
-    const [patternA, patternB, explain] = await Promise.all([
+    const [patternA, patternB, explain, readingA, readingB] = await Promise.all([
       fetch('/pattern?' + query('A'), { method: 'POST', body: poem }),
       fetch('/pattern?' + query('B'), { method: 'POST', body: poem }),
       fetch('/explain?' + query(), { method: 'POST', body: poem }),
+      fetch('/reading?' + query('A'), { method: 'POST', body: poem }),
+      fetch('/reading?' + query('B'), { method: 'POST', body: poem }),
     ]);
+    readings = {
+      A: readingA.ok ? await readingA.json() : null,
+      B: readingB.ok ? await readingB.json() : null,
+    };
     const texts = { A: await patternA.text(), B: await patternB.text() };
     $('explain').textContent = await explain.text();
     const failed = !patternA.ok ? texts.A : !patternB.ok ? texts.B : null;
@@ -534,8 +571,10 @@ function limitTheMaster() {
   // The shaper's curve spans −1…1; scaling by 1/CLIP_RANGE first lets it cover ±CLIP_RANGE.
   const into = new GainNode(ctx, { gain: 1 / CLIP_RANGE });
   const clip = new WaveShaperNode(ctx, { curve: softClipCurve(), oversample: 'none' });
+  // The reading's duck goes first, so the glue and the ceiling see the ducked sum.
+  duckGain = new GainNode(ctx, { gain: 1 });
   gain.disconnect();
-  gain.connect(glue).connect(into).connect(clip).connect(ctx.destination);
+  gain.connect(duckGain).connect(glue).connect(into).connect(clip).connect(ctx.destination);
   limited = gain;
 }
 
@@ -568,6 +607,98 @@ async function warmUp(code) {
   }));
 }
 
+// ---- The reading ----
+//
+// Its functions are named `readLine`, `readingDuck` and `quietReading` because `initStrudel` puts
+// Strudel's own `speak`, `duck` and `silence` on the global scope, over any page function of
+// that name: a `speak` here was silently replaced by Strudel's pattern function and said nothing.
+//
+// Each cue is an event of the reading's own pattern, `n("<0 1 ~ 2 …>").cpm(…)`, one element per
+// bar at the music's cycles per minute, so Strudel's scheduler fires it as the bar begins. Its
+// callback is attached with `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the
+// `true` makes it the cue's only output, so the default webaudio output never tries to sound an
+// event with no `s`). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
+// audio-context seconds — so the speech waits out the difference, as Strudel's own
+// `onTriggerTime` does.
+let voices = [];
+const pendingSpeech = new Set();
+// Which cue pattern is current. Every play() starts a new generation; a cue from an older one —
+// a hap Strudel had already scheduled from the previous pattern, or its pending timer — is
+// dropped, so a line of the previous poem or setting is never read over the new music.
+let readingGeneration = 0;
+let generations = 0;   // handed out one per play(), so two overlapping plays never share one
+let duckGain = null;
+const DUCK = 0.6;   // the music under a spoken line, as a fraction of its level
+
+function listVoices() {
+  if (!('speechSynthesis' in window)) return;
+  voices = speechSynthesis.getVoices();
+  const chosen = $('voice').value || (() => { try { return localStorage.getItem('prosody.voice') || ''; } catch (e) { return ''; } })();
+  $('voice').innerHTML = '<option value="">browser default</option>'
+    + voices.map((v) => `<option value="${v.name.replace(/"/g, '&quot;')}">${v.name} (${v.lang})</option>`).join('');
+  if (voices.some((v) => v.name === chosen)) $('voice').value = chosen;
+}
+
+function cuesOf(reading, generation) {
+  const byLine = new Map(reading.cues.map((cue) => [cue.line, cue]));
+  return (0, eval)(reading.pattern).onTrigger((hap, currentTime, cps, targetTime) => {
+    if (generation !== readingGeneration) return;
+    const cue = byLine.get(Number(hap.value?.n));
+    if (!cue) return;
+    const wait = Math.max(0, targetTime - currentTime);
+    // The trace: which line, from which bytes, at which cycle of Strudel's clock.
+    console.log(`[reading] cycle ${hap.whole.begin.valueOf()} (bar ${cue.slot + 1}): line ${cue.line + 1}`
+      + ` bytes ${cue.start}..${cue.end}, rate ${cue.rate}, in ${wait.toFixed(3)} s: ${cue.text}`);
+    const timer = setTimeout(() => {
+      pendingSpeech.delete(timer);
+      if (generation === readingGeneration) readLine(cue);
+    }, wait * 1000);
+    pendingSpeech.add(timer);
+  }, true);
+}
+
+function readLine(cue) {
+  if (!('speechSynthesis' in window)) return;
+  // A line still being read when the next is due is cut off, so the reading stays on the bar.
+  speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(cue.text);
+  utterance.rate = cue.rate;
+  const voice = voices.find((v) => v.name === $('voice').value);
+  if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
+  utterance.onstart = () => readingDuck(true);
+  utterance.onend = () => readingDuck(false);
+  utterance.onerror = () => readingDuck(false);
+  speechSynthesis.speak(utterance);
+}
+
+function readingDuck(down) {
+  if (!duckGain) return;
+  const now = getAudioContext().currentTime;
+  const level = down && $('duck').checked ? DUCK : 1;
+  duckGain.gain.cancelScheduledValues(now);
+  duckGain.gain.setTargetAtTime(level, now, 0.08);
+}
+
+function quietReading() {
+  for (const timer of pendingSpeech) clearTimeout(timer);
+  pendingSpeech.clear();
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  readingDuck(false);
+}
+
+listVoices();
+if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', listVoices);
+try { $('readAloud').checked = localStorage.getItem('prosody.read') !== 'off'; } catch (e) {}
+$('readAloud').addEventListener('change', () => {
+  try { localStorage.setItem('prosody.read', $('readAloud').checked ? 'on' : 'off'); } catch (e) {}
+  showPattern();
+  if (!$('readAloud').checked) quietReading();
+  if (playing) play();
+});
+$('voice').addEventListener('change', () => {
+  try { localStorage.setItem('prosody.voice', $('voice').value); } catch (e) {}
+});
+
 async function play() {
   if (!latestPattern) return;
   if (!strudelReady) {
@@ -585,16 +716,33 @@ async function play() {
     // `initStrudel` puts in global scope. Mini-notation inside `s("…")` and `note("…")` is parsed
     // by those functions, so no transpiler step is needed.
     const code = latestPattern;
-    const pattern = (0, eval)(code);
+    const music = (0, eval)(code);
+    const reading = readings[hearing];
+    const generation = ++generations;
+    // The reading is evaluated apart from the music: a cue pattern Strudel refuses costs the
+    // reading, never the piece.
+    let cues = null, unread = '';
+    if (reading && reading.cues.length && $('readAloud').checked) {
+      try { cues = cuesOf(reading, generation); } catch (error) {
+        unread = ' · the reading could not be cued: ' + error.message;
+        console.warn('[reading] cue pattern refused:', error);
+      }
+    }
+    const pattern = cues ? stack(music, cues) : music;
     limitTheMaster();
     status('loading the instruments this pattern uses…');
     await warmUp(code);
     if (code !== latestPattern) return;   // a newer version arrived while loading; it plays itself
+    // From here the old pattern's cues are stale: drop the queued ones and the line being read.
+    readingGeneration = generation;
+    quietReading();
+    if (fromTheTop && playing && typeof hush === 'function') hush();   // restart at cycle 0
+    fromTheTop = false;
     pattern.play();
     playing = true;
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
-    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing');
+    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread, !!unread);
   } catch (error) {
     status('Strudel refused the pattern: ' + error.message, true);
   }
@@ -602,6 +750,8 @@ async function play() {
 
 function stop() {
   if (typeof hush === 'function') hush();
+  readingGeneration = ++generations;   // nothing the stopped pattern cued is read
+  quietReading();
   playing = false;
   $('stop').disabled = true;
   $('play').textContent = '▶ Play';

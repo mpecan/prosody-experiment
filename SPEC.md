@@ -172,6 +172,41 @@ This is structure, read from the poem, not a style parameter — which answers �
 explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
 poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.
 
+### 4.7 The reading — the poem spoken where each line arrives
+
+*Candidate, page-side, pending review (sound and voice, step 2).* A prototype to learn whether
+spoken lines over the music work. Each line is spoken once, by the browser's speech synthesiser,
+in the slot where it is **first heard as a host** — `Stated`, `Arriving` or `Overruling` (§4.6) —
+and never where it loops, yields, calls, holds, refrains in its lane or repeats in the outro. So
+the reading follows the poem in order, and every utterance is the source text under one line's
+span (I4). A refrain stanza is new lines of the poem, so it is read again where it drops in.
+
+This **is a new mapping** — it adds sound events, the spoken words — and so it is structure, not
+palette: no style field can move a cue (I3). But it is decided entirely in the emitter and the
+page, from the arrangement the core already made, and changes nothing the core produces. It is
+therefore not in `prosody_core::mapping`'s list: `prosody_emit::reading` plans it as a separate
+artefact (a cue pattern and the lines it speaks), not part of the Strudel pattern text the CLI
+prints, and the page has its own on/off switch, on by default. *How fast* a line is read is a
+parameter, fitted from the palette's tempo: the rate at which the line's syllables, at four a
+second at rate 1, fill 85% of its bar, bounded to 0.6–1.6. The voice is the listener's choice. A
+light duck (the music to 0.6 while a line is spoken) is page-side and optional.
+
+Two things it does not promise. The audio of the speech is the browser's, so it is not
+bit-identical across machines — the *cues* are (I1). And speech is not on the grid: it starts on
+the bar's first beat and runs at its own pace; a line still speaking when the next is due is cut
+off rather than allowed to drift.
+
+"In order" holds from the first bar. Strudel's scheduler keeps its cycle count when it is handed a
+new pattern, so a change while playing would start the new piece partway through. The page
+therefore restarts the clock at bar 1 when the poem is replaced by a preset or the listener
+switches A/B, and reads from the first line. A live edit keeps the clock running, because the
+writer is listening in place: the reading carries on from the bar the clock has reached, and any
+line before that bar waits until the arrangement loops round. A line already queued or being
+spoken from the previous version is dropped when the new one starts. The cue pattern's comments
+escape line terminators and control characters (a pasted U+2028 would otherwise end the comment
+early), and the page evaluates the cue pattern separately, so a reading it cannot cue never stops
+the music.
+
 ---
 
 ## 5. Style header
