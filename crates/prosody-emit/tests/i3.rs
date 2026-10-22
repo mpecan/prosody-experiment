@@ -207,6 +207,11 @@ fn i3_but_the_style_does_reach_the_output() {
 /// five separate mutations letting the style delete events, reorder the melody, silence bars, or
 /// double the tempo all passed a suite that only checked substrings and inequality.
 ///
+/// A chord — one step whose tones are stacked with `,`, `[62,65,69,72]` — is one value: it is one
+/// event of the score voiced as several tones (`prosody_emit::Voicing`), and its tones all take
+/// that event's one gain, cutoff and stray. [`chords_are_one_event`] checks that claim directly
+/// rather than letting this function take it on trust.
+///
 /// Per layer, the *set* of distinct shapes among its patterns. A palette may add a parameter
 /// pattern — `humanise` adds `.nudge` and `.velocity`, and zero leaves them out — but every one
 /// is laid on the layer's own grid, so it adds no shape the layer did not already have. A palette
@@ -222,6 +227,7 @@ fn arrangement(text: &str) -> Vec<std::collections::BTreeSet<String>> {
                 if in_pattern {
                     // Keep the shape — brackets, rests, separators — and blank the values.
                     for token in part.split_whitespace() {
+                        let token = collapse_chords(token);
                         let shape: String = token
                             .chars()
                             .map(|c| match c {
@@ -248,6 +254,40 @@ fn arrangement(text: &str) -> Vec<std::collections::BTreeSet<String>> {
             shapes
         })
         .collect()
+}
+
+/// A token with every chord in it — `[` numbers joined by `,` `]` — written as the single value `v`.
+fn collapse_chords(token: &str) -> String {
+    let mut out = String::new();
+    let mut rest = token;
+    while let Some(open) = rest.find('[') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        let body_end = after
+            .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ',' || c == '-'))
+            .unwrap_or(after.len());
+        let body = &after[..body_end];
+        if body.contains(',') && after[body_end..].starts_with(']') {
+            out.push('v');
+            rest = &after[body_end + 1..];
+        } else {
+            out.push('[');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[test]
+fn chords_collapse_to_one_value_and_nothing_else_does() {
+    assert_eq!(collapse_chords("[62,65,69,72]"), "v");
+    assert_eq!(collapse_chords("[~"), "[~");
+    assert_eq!(collapse_chords("[62,65,69,72]]"), "v]");
+    assert_eq!(collapse_chords("<[~"), "<[~");
+    assert_eq!(collapse_chords("[60.500,63.500]"), "v");
+    // A bracket of steps is structure, not a chord, and survives.
+    assert_eq!(collapse_chords("[60"), "[60");
 }
 
 #[test]
@@ -397,6 +437,44 @@ proptest::proptest! {
         proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
     }
 
+    /// The chord voicing, isolated: one palette rendered with each rhyme note alone and again with
+    /// it voiced as a seventh chord. The claim `Voicing` makes against I3 is that this changes the
+    /// realisation of each pitched event and nothing else — same events, same positions — so:
+    ///
+    /// - every line but the melody's is byte for byte the same, header comments aside;
+    /// - the melody's pattern has the same steps, and where one has a note the other has a chord
+    ///   whose lowest tone *is* that note, with the 3rd, 5th and 7th above it — four tones,
+    ///   always, so a chord never stands for more than one event;
+    /// - and the melody's other parameters are identical but for the level, shared between the
+    ///   tones.
+    #[test]
+    fn i3_chords_are_one_event_voiced_and_change_nothing_else(body in poem(), one in palette()) {
+        let single = one.replace("voicing = \"seventh\"", "voicing = \"note\"");
+        let seventh = one.replace("voicing = \"note\"", "voicing = \"seventh\"");
+        let (score, style_single) = score_of(&format!("{single}{body}"));
+        let (_, style_seventh) = score_of(&format!("{seventh}{body}"));
+        let backend = Strudel::new();
+        let (Ok(a), Ok(b)) = (
+            backend.render(&score, &style_single),
+            backend.render(&score, &style_seventh),
+        ) else {
+            return Ok(());
+        };
+        proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+        let music = |text: &str| -> Vec<String> {
+            text.lines().filter(|l| !l.starts_with("//")).map(str::to_owned).collect()
+        };
+        let (a_lines, b_lines) = (music(&a), music(&b));
+        proptest::prop_assert_eq!(a_lines.len(), b_lines.len());
+        for (x, y) in a_lines.iter().zip(&b_lines) {
+            if !x.contains("// the melody") {
+                proptest::prop_assert_eq!(x, y);
+                continue;
+            }
+            chords_are_one_event(x, y, &style_seventh)?;
+        }
+    }
+
     /// ...and the score the arrangement comes from is untouched too.
     #[test]
     fn i3_no_palette_can_change_the_score(body in poem(), one in palette(), two in palette()) {
@@ -426,6 +504,58 @@ proptest::proptest! {
         proptest::prop_assert_eq!(shape(&bare), shape(&with_one));
         proptest::prop_assert_eq!(shape(&with_one), shape(&with_two));
     }
+}
+
+/// One melody lane under `note` and `seventh` voicing: step for step, a note becomes the chord built
+/// on it, and only the level changes beside it.
+fn chords_are_one_event(
+    single: &str,
+    seventh: &str,
+    style: &Style,
+) -> Result<(), proptest::test_runner::TestCaseError> {
+    let pattern = |line: &str| line.split('"').nth(1).unwrap_or_default().to_owned();
+    // Steps, in order: rests and notes, brackets and alternation stripped.
+    let steps = |text: &str| -> Vec<String> {
+        text.split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+            .map(|t| t.trim_start_matches('[').trim_end_matches(']').to_owned())
+            .filter(|t| !t.is_empty())
+            .collect()
+    };
+    let (notes, chords) = (steps(&pattern(single)), steps(&pattern(seventh)));
+    proptest::prop_assert_eq!(notes.len(), chords.len());
+    for (note, chord) in notes.iter().zip(&chords) {
+        if note == "~" {
+            proptest::prop_assert_eq!(chord, "~");
+            continue;
+        }
+        let tones: Vec<f64> = chord.split(',').map(|t| t.parse().unwrap()).collect();
+        proptest::prop_assert_eq!(tones.len(), 4, "{} -> {}", note, chord);
+        proptest::prop_assert_eq!(chord.split(',').next().unwrap(), note.as_str());
+        // Each tone above the root is two scale steps higher: a third, so 3 or 4 semitones in a
+        // seven-note scale, and never less than 1 or more than 5 in any scale this build knows.
+        for pair in tones.windows(2) {
+            let step = pair[1] - pair[0];
+            proptest::prop_assert!((1.0..=5.0).contains(&step), "{} in {}", step, chord);
+        }
+        if style.scale().len() == 7 {
+            let span = tones[3] - tones[0];
+            proptest::prop_assert!((9.0..=11.0).contains(&span), "a seventh: {}", chord);
+        }
+    }
+    // Everything after the note pattern is the same, but the level.
+    let rest = |line: &str| {
+        let after = line
+            .split_once(".sound(")
+            .map(|(_, r)| r)
+            .unwrap_or_default();
+        after
+            .split(".postgain(")
+            .next()
+            .unwrap_or_default()
+            .to_owned()
+    };
+    proptest::prop_assert_eq!(rest(single), rest(seventh));
+    Ok(())
 }
 
 /// Poems of a few stanzas, built from words the test phonemiser can say.
@@ -477,16 +607,34 @@ fn palette() -> impl proptest::strategy::Strategy<Value = String> {
         proptest::sample::select(prosody_emit::style::PRESETS.to_vec()),
         // reverb, delay, drive, compress, humanise — zero included, which leaves effects out.
         proptest::collection::vec(0_u8..=100, 5),
-        (1_u8..=100, 1000_u16..=20000, 10_u8..=200),
+        (
+            1_u8..=100,
+            1000_u16..=20000,
+            10_u8..=200,
+            proptest::sample::select(prosody_emit::style::KITS.to_vec()),
+            proptest::sample::select(prosody_emit::style::VOICINGS.to_vec()),
+        ),
     )
         .prop_map(
-            |(scale, root, low, swing, bank, synth, melody, preset, amounts, (room, cut, level))| {
+            |(
+                scale,
+                root,
+                low,
+                swing,
+                bank,
+                synth,
+                melody,
+                preset,
+                amounts,
+                (room, cut, level, kit, voicing),
+            )| {
                 let amount = |i: usize| f64::from(amounts[i]) / 100.0;
                 format!(
                     "+++\n[style]\npreset = \"{preset}\"\nscale = \"{scale}\"\nroot = \"{root}\"\n\
                      tempo_range = [{low}, {}]\nswing = {}\nbank = \"{bank}\"\nsynth = \"{synth}\"\n\
                      melody = \"{melody}\"\nreverb = {}\ndelay = {}\ndrive = {}\ncompress = {}\n\
-                     humanise = {}\nroom_size = {}\nhigh_cut = {cut}\nbass_gain = {}\n+++\n",
+                     humanise = {}\nroom_size = {}\nhigh_cut = {cut}\nbass_gain = {}\n\
+                     kit = \"{kit}\"\nvoicing = \"{voicing}\"\n+++\n",
                     low + 6,
                     f64::from(swing) / 100.0,
                     amount(0),

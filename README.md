@@ -74,11 +74,15 @@ provably not what happens — the page recompiles and the bar, voice and event c
 which is invariant I3 in front of you.
 
 The **Sound** menu picks a named palette for the instruments and the mix, leaving scale, root,
-tempo and bank alone: **default** (electric piano over acoustic bass, a modest room, a little echo
+tempo and bank alone (except **jazz**, below): **default** (electric piano over acoustic bass, a modest room, a little echo
 on the melody, light compression, a small human stray), **warm** (vibraphone over fretless bass, a
 long room, more echo, a lower high cut, a touch of drive, more stray) and **raw** (the palette as
-it was before any of this: triangle oscillators, dry, on the grid). Move any control and it reads
-*custom*. The mix controls: reverb, room size, echo on the melody, high cut, drive, compression,
+it was before any of this: triangle oscillators, dry, on the grid) and **jazz** (Rhodes playing
+each rhyme word as the seventh chord on its degree, an upright bass, the ride keeping time and the
+snare comping on the sampled acoustic R-8 kit, triplet swing, dorian, a warm room — the one
+palette that also sets the scale, swing and bank). Move any control and it reads *custom*. **Kit**
+picks kick-and-hat or ride-and-snare for the two drum layers, and **Voicing** plays each rhyme word
+as one note or as a seventh chord built in the current scale; neither moves an event. The mix controls: reverb, room size, echo on the melody, high cut, drive, compression,
 humanise, and a level each for the drums, the bass and the melody. **Humanise** makes each
 syllable a few milliseconds late and a little softer, drawn from that line's own seed — so the
 same poem always strays the same way, and editing one stanza never changes another's feel.
@@ -91,7 +95,7 @@ review (the held and refrain lanes, the bass, the stanza period, the outro), eac
 for two settings, A and B. A starts with everything on, B with everything off. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
 adds. The **Score A vs B** tab measures both settings side by side (see [Measuring it](#measuring-it))
-with the difference between them, under the machine or the interest profile. The page remembers
+with the difference between them, under the machine, jazz or interest profile. The page remembers
 your two settings.
 
 Under the mappings is **Reading — the poem spoken over the music**, on by default: each line is
@@ -217,7 +221,11 @@ It is the measuring half of a tuning loop. The baselines for every shipped poem 
 `--profile machine` judges against repetitive machine music instead (Kraftwerk, Daft Punk,
 psytrance): denser layers, more repetition, short riffs, plus a steady **pulse** and **steadiness**
 of bar length. `./scripts/cycle.sh` prints that profile for every example with the mean overall —
-the number the tuning cycle in [`PLAN.md`](PLAN.md) works to raise.
+the number the tuning cycle in [`PLAN.md`](PLAN.md) works to raise. `--profile jazz` (and
+`./scripts/cycle.sh jazz`, and the page's Score tab) judges against small-group jazz: less
+recurrence, more scale degrees in use, more accents off the beat, the time still kept. It measures
+the score, before the palette, so swing is neither rewarded nor penalised — a swung piece scores
+as its straight twin does. Its bands are reasoned guesses, like the machine profile's.
 
 `--without held,refrain,bass,period,outro` (any of them) leaves candidate mappings out, for the
 pattern and for `--score` alike; `./scripts/cycle.sh machine bass` scores every example without the
@@ -253,7 +261,7 @@ and 132, and the poem says where in that window, from how densely its syllables 
 
 Scales: `major`, `minor`, `harmonic_minor`, `dorian`, `phrygian`, `phrygian_dominant`, `lydian`,
 `mixolydian`, `locrian`, `pentatonic_minor`, `whole_tone`, `chromatic`.
-Banks: `tr909`, `tr808`, `tr707`, `linn`, `casio`.
+Banks: `tr909`, `tr808`, `tr707`, `linn`, `casio`, `r8` (Roland R-8, sampled acoustic drums).
 Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`, `triangle`.
 `synth` sets both pitched instruments; in Strudel the four model names play the recorded
 instrument nearest the model (Karplus–Strong: acoustic bass and nylon guitar; FM: DX-style synth
@@ -263,7 +271,9 @@ The rest of the header, every key optional:
 
 | key | what | range | default |
 |---|---|---|---|
-| `preset` | a named palette to start from — `default`, `warm`, `raw`; applied before every other key | | `default` |
+| `preset` | a named palette to start from — `default`, `warm`, `raw`, `jazz` (which also sets `scale = "dorian"`, `swing = 0.33`, `bank = "r8"`); applied before every other key | | `default` |
+| `kit` | which drum each layer plays: `machine` (kick on the foundation, hat on the flourish) or `ride` (ride and snare; on `tr808` and `tr707`, which have no ride, the open hat keeps time instead and the pattern's header says so) | | `machine` |
+| `voicing` | each rhyme word as one `note`, or as the `seventh` chord on its degree in the scale (the level is shared between the tones; in a scale without seven notes it stacks every other degree all the same — fourths in `pentatonic_minor`) | | `note` |
 | `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_fretless_bass`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
 | `reverb` | reverb send (the drums take half, plus §4.4's rise with distinctiveness; the bass three tenths) | 0–1 | 0.25 |
 | `room_size` | reverb length, seconds | 0.1–10 | 2.0 |

@@ -158,7 +158,12 @@ impl Named {
 ///
 /// The vocabulary is the poem's, not Strudel's: a backend translates these to whatever it can
 /// play. `SPEC.md` §5's example uses `tr909`.
-pub const BANKS: &[&str] = &["tr909", "tr808", "tr707", "linn", "casio"];
+///
+/// `r8` is the Roland R-8, a sampled *acoustic* kit, and the closest thing to a jazz kit the
+/// drum-machine sample map the page loads has: none of its 71 machines has brushes, and the R-8's
+/// ride and snare are recordings of real ones (checked against `tidal-drum-machines.json` on
+/// `strudel.b-cdn.net`, 2026-10-22: `RolandR8_rd` and `RolandR8_sd` exist).
+pub const BANKS: &[&str] = &["tr909", "tr808", "tr707", "linn", "casio", "r8"];
 
 /// Every synth a poem may name. `SPEC.md` §5 names four; the plain waveforms are here so a palette
 /// can ask for something ordinary.
@@ -207,7 +212,157 @@ pub const SOUNDFONTS: &[&str] = &[
 ///
 /// A preset sets only the sound and the mix; scale, root, tempo window, swing and bank are left
 /// as they were, so choosing one never moves a note. See [`Style::preset`].
-pub const PRESETS: &[&str] = &["default", "warm", "raw"];
+///
+/// One exception, `jazz`: a jazz palette over a minor scale played straight is not a jazz palette,
+/// so it also sets a scale, a swing and a bank (see [`preset_keys`]). Every one of those is still
+/// palette — I3 lets a style move every note and every onset by a fraction of a beat, and no
+/// event — but choosing `jazz` does move notes, where the other three never do.
+pub const PRESETS: &[&str] = &["default", "warm", "raw", "jazz"];
+
+/// The header keys a preset sets. Every preset sets the sound and the mix; `jazz` also sets its
+/// scale, swing and bank. The page's Sound menu applies exactly these, so choosing `warm` after
+/// `jazz` changes the sound back and leaves the scale where `jazz` put it.
+#[must_use]
+pub fn preset_keys(name: &str) -> Option<Vec<&'static str>> {
+    let preset = preset_palette(name)?;
+    let mut keys = SOUND_KEYS.to_vec();
+    if preset.feel.is_some() {
+        keys.extend(["scale", "swing", "bank"]);
+    }
+    Some(keys)
+}
+
+/// The keys every preset sets: the instruments, how they are played, and the mix.
+const SOUND_KEYS: &[&str] = &[
+    "bass",
+    "melody",
+    "kit",
+    "voicing",
+    "reverb",
+    "room_size",
+    "delay",
+    "high_cut",
+    "drive",
+    "compress",
+    "humanise",
+    "drums_gain",
+    "bass_gain",
+    "melody_gain",
+];
+
+/// Which sound each drum layer plays.
+///
+/// `SPEC.md` §4.1 makes a foundation the pulse and a flourish its ornament — that is structure, and
+/// it comes from the score. Which *sounds* carry them is palette, as `strudel::sample_for` has
+/// always said; this names the choice so a palette can make it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Kit {
+    /// A kick on the foundation and a closed hat on the flourish: the drum machine.
+    Machine,
+    /// A ride cymbal on the foundation and the snare on the flourish. In a jazz rhythm section the
+    /// ride keeps the time and the snare comps around it, which is exactly the foundation/flourish
+    /// division.
+    Ride,
+}
+
+/// Every kit a header may name, as it names them.
+pub const KITS: &[&str] = &["machine", "ride"];
+
+impl Kit {
+    /// Its name in a header.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Machine => "machine",
+            Self::Ride => "ride",
+        }
+    }
+
+    fn parse(name: &str) -> Result<Self, StyleError> {
+        match name {
+            "machine" => Ok(Self::Machine),
+            "ride" => Ok(Self::Ride),
+            _ => Err(StyleError::Unknown {
+                kind: "kit".to_owned(),
+                name: name.to_owned(),
+                known: KITS.join(", "),
+            }),
+        }
+    }
+}
+
+/// How a rhyme note is voiced: one tone, or a seventh chord built on it.
+///
+/// # Why this is palette (invariant I3)
+///
+/// I3 lets a style change how an event is *realised* and never which events exist or where they
+/// fall. A chord voicing is a realisation of one event, in the way an organ's mixture stop sounds
+/// several pipes for one key, or a soundfont sample carries many partials for one note:
+///
+/// - **Same events.** Each rhyme word is still one event at one onset, with one gain, one cutoff
+///   and one stray, and every tone of its chord takes those same values. No event is added, moved
+///   or removed, and the chord ends when the note would.
+/// - **Same degree, from the same word.** The chord is built on the event's own scale degree — the
+///   rhyme class's (`SPEC.md` §4.5) — by stacking every other degree of the *style's* scale above
+///   it: degrees *d*, *d*+2, *d*+4, *d*+6. Nothing else goes in. It does not look at the previous
+///   chord, the next one, the stanza or the bass, so it cannot express a progression: which rhyme
+///   classes share a note, and when they change, is still entirely the poem's. Every tone traces to
+///   the one rhyme word's span (I4).
+/// - **A function of palette only.** Given the degree, the tones depend on the scale alone, which
+///   §5 already makes palette. Switch the voicing off and the lowest tone of every chord is the note
+///   that played before — the I3 property test in `prosody-emit/tests/i3.rs` checks exactly that.
+///
+/// The name is the seven-note case. Stacking every other degree builds a seventh chord only in a
+/// seven-note scale: in `pentatonic_minor` it stacks fourths (C–F–B♭–E♭), in `whole_tone` an
+/// augmented stack, in `chromatic` a cluster of whole tones. That is still one event voiced from
+/// palette alone, so still palette; the pattern's header says which it is.
+///
+/// What it does *not* do is harmonise the poem. A chord progression derived from the poem — which
+/// chord follows which, decided by stanza or rhyme scheme — would be a new mapping and therefore
+/// structure; it is a proposal in `PLAN.md`, not this.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Voicing {
+    /// One tone per rhyme word: the melody as §4.5 first describes it.
+    Note,
+    /// A seventh chord on the rhyme word's degree, in close root position.
+    Seventh,
+}
+
+/// Every voicing a header may name.
+pub const VOICINGS: &[&str] = &["note", "seventh"];
+
+impl Voicing {
+    /// Its name in a header.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Note => "note",
+            Self::Seventh => "seventh",
+        }
+    }
+
+    /// The scale-degree offsets above a rhyme note that sound with it: the note alone, or every
+    /// other degree up to the seventh.
+    #[must_use]
+    pub const fn degrees(self) -> &'static [usize] {
+        match self {
+            Self::Note => &[0],
+            Self::Seventh => &[0, 2, 4, 6],
+        }
+    }
+
+    fn parse(name: &str) -> Result<Self, StyleError> {
+        match name {
+            "note" => Ok(Self::Note),
+            "seventh" => Ok(Self::Seventh),
+            _ => Err(StyleError::Unknown {
+                kind: "voicing".to_owned(),
+                name: name.to_owned(),
+                known: VOICINGS.join(", "),
+            }),
+        }
+    }
+}
 
 /// A scale: which semitones, relative to the root, its degrees take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -414,6 +569,8 @@ pub struct Style {
     bank: Named,
     bass: Named,
     melody: Named,
+    kit: Kit,
+    voicing: Voicing,
     mix: Mix,
 }
 
@@ -548,9 +705,34 @@ impl Mix {
     }
 }
 
-/// The sound and mix of a named preset: `(bass, melody, mix)`.
+/// What a named preset sets: always the sound and the mix, and for `jazz` a feel as well.
+#[derive(Debug, Clone, Copy)]
+struct Preset {
+    bass: &'static str,
+    melody: &'static str,
+    kit: Kit,
+    voicing: Voicing,
+    mix: Mix,
+    feel: Option<Feel>,
+}
+
+/// The palette values beyond the sound that a preset may also set.
+#[derive(Debug, Clone, Copy)]
+struct Feel {
+    scale: Scale,
+    swing: Swing,
+    bank: &'static str,
+}
+
+/// Dorian, from [`Scale::ALL`] by name rather than duplicated, for the reason
+/// [`Scale::MINOR`] gives.
+fn dorian() -> Scale {
+    Scale::parse("dorian").unwrap_or(Scale::MINOR)
+}
+
+/// The named presets.
 ///
-/// Three, so that the before and after of this palette can be heard side by side:
+/// Four, so that the before and after of this palette can be heard side by side:
 ///
 /// - **default** — what a poem with no header gets: an electric-piano melody over an acoustic
 ///   bass, a modest room, a little echo on the melody, light compression and a small human stray.
@@ -558,6 +740,9 @@ impl Mix {
 ///   high cut, a touch of saturation, and more stray.
 /// - **raw** — the palette as it was before soundfonts and a mix existed: triangle oscillators,
 ///   dry, on the grid. Kept so the difference stays audible, not as a recommendation.
+/// - **jazz** — a piano trio's colours: Rhodes voicing every rhyme word as a seventh chord, an
+///   upright bass, the ride keeping time with the snare comping, triplet swing, dorian, and a
+///   warm, darker room with more human stray. See [`jazz`].
 ///
 /// The levels were set by measurement, not by ear — nobody could listen where they were set.
 /// Measured in headless Chromium on Strudel's summed output before the page's master stage, as the
@@ -575,9 +760,17 @@ impl Mix {
 /// An earlier set (0.50, 0.55, 1.30) was tuned against a measurement taken too early in the piece
 /// and peaked at 1.6 to 2.9 before the master; the compressor alone let drum onsets through above
 /// full scale.
-const fn preset_sound(name: &str) -> Option<(&'static str, &'static str, Mix)> {
-    match name.as_bytes() {
-        b"default" => Some((
+fn preset_palette(name: &str) -> Option<Preset> {
+    let sound = |bass, melody, mix| Preset {
+        bass,
+        melody,
+        kit: Kit::Machine,
+        voicing: Voicing::Note,
+        mix,
+        feel: None,
+    };
+    match name {
+        "default" => Some(sound(
             "gm_acoustic_bass",
             "gm_epiano1",
             Mix {
@@ -593,7 +786,7 @@ const fn preset_sound(name: &str) -> Option<(&'static str, &'static str, Mix)> {
                 melody_gain: Amount(75),
             },
         )),
-        b"warm" => Some((
+        "warm" => Some(sound(
             "gm_fretless_bass",
             "gm_vibraphone",
             Mix {
@@ -609,7 +802,7 @@ const fn preset_sound(name: &str) -> Option<(&'static str, &'static str, Mix)> {
                 melody_gain: Amount(60),
             },
         )),
-        b"raw" => Some((
+        "raw" => Some(sound(
             "triangle",
             "triangle",
             Mix {
@@ -625,7 +818,57 @@ const fn preset_sound(name: &str) -> Option<(&'static str, &'static str, Mix)> {
                 melody_gain: Amount(100),
             },
         )),
+        "jazz" => Some(jazz()),
         _ => None,
+    }
+}
+
+/// The jazz palette. Every value is palette; each says what it is for.
+///
+/// - **Rhodes, as seventh chords** (`gm_epiano1`, [`Voicing::Seventh`]) — the comping instrument of
+///   a great deal of small-group jazz, voicing each rhyme word's degree as the diatonic seventh
+///   chord on it. The melody level is the chord's: the backend shares it between the four tones.
+/// - **Upright bass** (`gm_acoustic_bass`, General MIDI's program 33, *Acoustic Bass*: the
+///   upright), a little louder than the default because in a trio it carries the harmony's root.
+/// - **The ride keeps time, the snare comps** ([`Kit::Ride`] on `r8`, the sampled acoustic kit;
+///   no brushed kit exists in the sample map). The drums sit lower than the default's because a
+///   ride rings longer than a kick and every foundation syllable strikes it.
+/// - **Triplet swing**, `0.33`: Strudel's `swingBy(x, n)` delays the second half of each of a
+///   bar's `n` beats by `x / 2` of a beat, so a third puts an iamb's second syllable at two thirds
+///   of the beat — the 2:1 long–short of a swung eighth (`swing(n)` is the same `1/3`;
+///   `@strudel/core` `pattern.mjs`, as bundled in `@strudel/web` 1.3.0).
+/// - **Dorian** — the minor mode of modal jazz. Its raised sixth makes the seventh chord on its
+///   fourth degree a dominant seventh, so the chords on degrees 0 and 3 are the minor-seventh and
+///   dominant-seventh pair of the classic dorian vamp (Dm7 and G7 in D).
+/// - **Warm mix** — a longer, darker room than the default (lower high cut, more reverb), little
+///   echo (the chords already fill the space between rhyme words), a touch of drive and twice the
+///   default's human stray.
+///
+/// The levels are an estimate from the default's measurements, not measured themselves: a chord's
+/// four soundfont tones at half level each sum, uncorrelated, to about the single note's level.
+fn jazz() -> Preset {
+    Preset {
+        bass: "gm_acoustic_bass",
+        melody: "gm_epiano1",
+        kit: Kit::Ride,
+        voicing: Voicing::Seventh,
+        mix: Mix {
+            reverb: Amount(35),
+            room_size: 25,
+            delay: Amount(5),
+            high_cut: 3200,
+            drive: Amount(5),
+            compress: Amount(35),
+            humanise: Amount(40),
+            drums_gain: Amount(22),
+            bass_gain: Amount(40),
+            melody_gain: Amount(75),
+        },
+        feel: Some(Feel {
+            scale: dorian(),
+            swing: Swing(33),
+            bank: "r8",
+        }),
     }
 }
 
@@ -647,6 +890,8 @@ impl Default for Style {
             bank: Named { name: "tr909" },
             bass: Named { name: "triangle" },
             melody: Named { name: "triangle" },
+            kit: Kit::Machine,
+            voicing: Voicing::Note,
             mix: Mix {
                 reverb: Amount(0),
                 room_size: 20,
@@ -708,13 +953,26 @@ impl Style {
         self.melody
     }
 
+    /// Which sound each drum layer plays.
+    #[must_use]
+    pub const fn kit(&self) -> Kit {
+        self.kit
+    }
+
+    /// How a rhyme note is voiced.
+    #[must_use]
+    pub const fn voicing(&self) -> Voicing {
+        self.voicing
+    }
+
     /// The mix.
     #[must_use]
     pub const fn mix(&self) -> Mix {
         self.mix
     }
 
-    /// A named palette over the default scale, root, tempo and bank; `None` for an unknown name.
+    /// A named palette over the default scale, root, tempo and bank — except where the preset sets
+    /// them itself ([`preset_keys`]); `None` for an unknown name.
     #[must_use]
     pub fn preset(name: &str) -> Option<Self> {
         let mut style = Self::default();
@@ -722,12 +980,21 @@ impl Style {
     }
 
     fn apply_preset(&mut self, name: &str) -> bool {
-        let Some((bass, melody, mix)) = preset_sound(name) else {
+        let Some(preset) = preset_palette(name) else {
             return false;
         };
-        self.bass = Named { name: bass };
-        self.melody = Named { name: melody };
-        self.mix = mix;
+        self.bass = Named { name: preset.bass };
+        self.melody = Named {
+            name: preset.melody,
+        };
+        self.kit = preset.kit;
+        self.voicing = preset.voicing;
+        self.mix = preset.mix;
+        if let Some(feel) = preset.feel {
+            self.scale = feel.scale;
+            self.swing = feel.swing;
+            self.bank = Named { name: feel.bank };
+        }
         true
     }
 
@@ -804,6 +1071,8 @@ impl Style {
                     style.bank = Named::parse("bank", name, BANKS)?;
                 }
                 ("bass", toml::Value::String(name)) => style.bass = instrument(key, name)?,
+                ("kit", toml::Value::String(name)) => style.kit = Kit::parse(name)?,
+                ("voicing", toml::Value::String(name)) => style.voicing = Voicing::parse(name)?,
                 ("melody", toml::Value::String(name)) => style.melody = instrument(key, name)?,
                 ("swing", value) => {
                     style.swing = Swing(narrow(read_scaled(key, value, 100.0, 0, 100)?));
@@ -823,7 +1092,7 @@ impl Style {
                     mix.room_size = narrow(read_scaled(key, value, 10.0, 1, 100)?);
                 }
                 ("high_cut", value) => mix.high_cut = read_scaled(key, value, 1.0, 1000, 20000)?,
-                ("scale" | "root" | "bank" | "bass" | "melody", _) => {
+                ("scale" | "root" | "bank" | "bass" | "melody" | "kit" | "voicing", _) => {
                     return Err(wrong(key, "a string"));
                 }
                 ("tempo_range", _) => return Err(wrong(key, "a pair of numbers")),
@@ -862,6 +1131,8 @@ impl Style {
         fields.insert("bank", self.bank.get().to_owned());
         fields.insert("bass", self.bass.get().to_owned());
         fields.insert("melody", self.melody.get().to_owned());
+        fields.insert("kit", self.kit.name().to_owned());
+        fields.insert("voicing", self.voicing.name().to_owned());
         fields.insert("reverb", mix.reverb.describe());
         fields.insert(
             "room_size",
@@ -973,7 +1244,7 @@ fn read_tempo(bounds: &[toml::Value]) -> Result<TempoRange, StyleError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Note, Scale, Style, StyleError, Swing};
+    use super::{Kit, Note, Scale, Style, StyleError, Swing, Voicing};
 
     const HEADER: &str = "+++\n\
         [style]\n\
@@ -1059,6 +1330,7 @@ mod tests {
                 "drums_gain",
                 "high_cut",
                 "humanise",
+                "kit",
                 "melody",
                 "melody_gain",
                 "reverb",
@@ -1066,7 +1338,8 @@ mod tests {
                 "root",
                 "scale",
                 "swing",
-                "tempo_range"
+                "tempo_range",
+                "voicing"
             ]
         );
         assert_eq!(described["scale"], "phrygian_dominant");
@@ -1080,6 +1353,8 @@ mod tests {
         assert_eq!(described["room_size"], "2.0");
         assert_eq!(described["high_cut"], "4400");
         assert_eq!(described["drums_gain"], "0.28");
+        assert_eq!(described["kit"], "machine");
+        assert_eq!(described["voicing"], "note");
     }
 
     #[test]
@@ -1095,7 +1370,9 @@ mod tests {
             for (key, value) in style.describe() {
                 let value = match key {
                     "tempo_range" => format!("[{}]", value.replace("..", ", ")),
-                    "scale" | "bank" | "bass" | "melody" => format!("\"{value}\""),
+                    "scale" | "bank" | "bass" | "melody" | "kit" | "voicing" => {
+                        format!("\"{value}\"")
+                    }
                     "root" => format!("\"{}\"", value.replace('s', "#").to_uppercase()),
                     _ => value,
                 };
@@ -1140,6 +1417,77 @@ mod tests {
             Style::parse("+++\npreset = \"polka\"\n+++"),
             Err(StyleError::Unknown { .. })
         ));
+    }
+
+    #[test]
+    fn the_jazz_preset_sets_a_feel_as_well_as_a_sound() {
+        // Hand-written from the palette's own description: Rhodes sevenths over an upright, the
+        // ride and snare of the R-8, triplet swing, dorian.
+        let jazz = Style::preset("jazz").unwrap();
+        assert_eq!(jazz.melody().get(), "gm_epiano1");
+        assert_eq!(jazz.bass().get(), "gm_acoustic_bass");
+        assert_eq!(jazz.kit(), Kit::Ride);
+        assert_eq!(jazz.voicing(), Voicing::Seventh);
+        assert_eq!(jazz.bank().get(), "r8");
+        assert_eq!(jazz.swing(), Swing(33));
+        assert_eq!(jazz.scale().name(), "dorian");
+        assert_eq!(jazz.scale().steps(), &[0, 2, 3, 5, 7, 9, 10]);
+        // Root and tempo window are still the default's: the poem's key and pace are not jazz's.
+        assert_eq!(jazz.root(), Style::default().root());
+        assert_eq!(jazz.tempo_range(), Style::default().tempo_range());
+        // Every key a header names still overrides the preset, its feel included.
+        let modal = Style::parse(
+            "+++
+preset = \"jazz\"\nscale = \"mixolydian\"\nswing = 0\n+++",
+        )
+        .unwrap();
+        assert_eq!(modal.scale().name(), "mixolydian");
+        assert_eq!(modal.swing(), Swing(0));
+        assert_eq!(
+            modal.voicing(),
+            Voicing::Seventh,
+            "the rest is the preset's"
+        );
+        // The page applies a preset's own keys and no others.
+        let keys = super::preset_keys("jazz").unwrap();
+        for key in [
+            "scale",
+            "swing",
+            "bank",
+            "kit",
+            "voicing",
+            "melody",
+            "melody_gain",
+        ] {
+            assert!(keys.contains(&key), "{key}");
+        }
+        assert!(!keys.contains(&"root") && !keys.contains(&"tempo_range"));
+        let warm = super::preset_keys("warm").unwrap();
+        assert!(!warm.contains(&"scale") && !warm.contains(&"bank") && warm.contains(&"kit"));
+        assert!(super::preset_keys("polka").is_none());
+    }
+
+    #[test]
+    fn a_kit_and_a_voicing_are_named_values() {
+        let style = Style::parse("+++\nkit = \"ride\"\nvoicing = \"seventh\"\n+++").unwrap();
+        assert_eq!(
+            (style.kit(), style.voicing()),
+            (Kit::Ride, Voicing::Seventh)
+        );
+        assert_eq!(Voicing::Note.degrees(), &[0]);
+        assert_eq!(
+            Voicing::Seventh.degrees(),
+            &[0, 2, 4, 6],
+            "root, third, fifth, seventh"
+        );
+        for bad in [
+            "kit = \"brushes\"",
+            "voicing = \"ninth\"",
+            "kit = 1",
+            "voicing = true",
+        ] {
+            assert!(Style::parse(&format!("+++\n{bad}\n+++")).is_err(), "{bad}");
+        }
     }
 
     #[test]

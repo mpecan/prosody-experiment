@@ -334,7 +334,145 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 
 ---
 
+## Proposal — pending the user's decision: the structural half of jazz
+
+**Not implemented. Nothing below is in the code.** Sound and voice step 3 built the jazz *palette*
+(the log entry below). What makes jazz jazz beyond its colours — chords that move, and a bass
+that walks between them — adds events and decides where they fall, so it is structure (I3) and a
+change to what a poetic feature maps to (`CLAUDE.md` §10). Two options for each, for the user to
+pick from or reject. Whichever is chosen joins `prosody_core::mapping` as a candidate, so the A/B
+table on the page, `--without` and `./scripts/cycle.sh jazz <off>` can compare it with its absence
+and with the other option.
+
+### A harmony layer — a progression derived from the poem
+
+`SPEC.md` §4.6 already names "a real chord progression" as the natural second overrule, needing a
+harmony layer that does not exist. Either option adds one chord event per bar of a foundation
+stanza, in a fourth lane, its span the rhyme word of the line the bar hosts (I4); the emitter voices
+it through the palette's `Voicing` (so a chord is still palette in its *colour*, and structure in
+*when it changes and to what*). With a harmony layer the rhyme melody would go back to single notes
+on top of it.
+
+| | **H1 — the rhyme scheme is the harmonic rhythm** | **H2 — rhyme closure is tension and release** |
+|---|---|---|
+| Poetic feature | each line's rhyme class (§4.5), in the bar the line hosts | whether a line's rhyme is *open* (answered later in its stanza — the held lane's test) or *closes* one |
+| Musical result | the chord on that class's degree, for the bar: ABAB → i–ii–i–ii, AABB → i–i–ii–ii, a villanelle → two chords | an open line → the dominant of its degree (*d*+4, V7); its answer → the chord on the degree (I); an unrhymed line → the subdominant (*d*+3, IV) or ii; the last bar of a stanza → a V–I turnaround onto the next stanza's first chord |
+| What it reads as | the scheme you can see on the page, heard as changes | the suspension the held lane already sounds (§4.6), heard as harmony: ii–V–I falls out of ABAB |
+| Strengths | the most traceable mapping possible — every chord is a rhyme class; one rule; loops with its stanza | real functional motion, which is what jazz harmony is; makes the held lane's "an open rhyme is a suspension" literal |
+| Weaknesses | doubles what the melody already states (same degree); a class of one (free verse) gets no chord, so unrhymed poems have no harmony; inherits §4.5's poem-wide degree numbering (an early new rhyme transposes later chords — I2's open question) | more invented: "unrhymed → IV" and the turnaround are choices, not readings; fewer distinct chords per stanza; the turnaround looks ahead to the next stanza, so an edit to stanza *n*+1's first rhyme changes stanza *n*'s last bar (I2 crosses a stanza boundary — must be disclosed like the refrain lift) |
+| Scorer expectation | pitched ↑, entropy roughly unchanged, layering +1 in foundation bars | pitched ↑, entropy ↑ (V and IV add degrees), recurrence ↓ slightly at turnarounds |
+
+A/B: `Mapping::Harmony` (H1) and `Mapping::Cadence` (H2) — names to taste — both in
+`Mapping::ALL`. Off, a bar has no chord, which is today's piece. Both on, H2 decides where it
+applies (open and closing lines, turnarounds) and H1 fills the rest, so the page's A/B table can
+compare all four combinations (A = without `cadence`, B = without `harmony`, and so on).
+
+### A walking bass — from the vowel-height bass
+
+Today's bass (*machine cycle 1*, `Mapping::Bass`): every primary-stressed syllable of a foundation
+line is a note — open vowel root, mid third, close fifth. A walking bass is a note on every beat,
+moving by step between chord tones.
+
+| | **W1 — the syllables walk** | **W2 — the feet walk** |
+|---|---|---|
+| Poetic feature | every syllable of a foundation line; the stressed ones keep today's height note, and the unstressed ones between two stressed syllables become passing tones | each *foot* (§4.2's beat): its stressed vowel's height chooses which chord tone the beat lands on, and whether the next foot's vowel is higher or lower chooses the direction of the step to it |
+| Musical result | scale steps from one height note to the next, the last syllable before each stressed one a chromatic approach tone (a semitone below the target) | one bass note on every beat, outlining the bar's chord (needs H1 or H2; without one, the scale's root/third/fifth stand in) |
+| Strengths | no new rhythm — the bass plays the poem's own syllables, so it stays exactly as traceable as now (I4: one note per syllable); works without a harmony layer | the idiom itself: quarter notes on the beat, pulse ↑; the bass and the ride agree; vowel contour becomes melodic contour |
+| Weaknesses | walks in syllables, not beats — an anapaest walks three notes a beat, a spondee one — so it reads as a busy bass line more than a walking one; adds events on every unstressed foundation syllable (pitched share ↑ a lot) | moves bass events from syllables onto the beat grid, so `Mapping::Bass`'s mapping is *replaced*, not extended; a passing note's span is a whole foot, coarser than a syllable; depends on harmony to sound like walking |
+| Scorer expectation | pitched ↑ (likely over the jazz band's 0.85 on dense poems), entropy ↑ | pulse → 1.0, entropy ↑, syncopation unchanged (the bass is on the beat) |
+
+A/B: `Mapping::Walk` with W1 or W2 behind it (or both, as two names); off falls back to today's
+vowel-height bass, which stays its own switch, so "no bass", "height bass" and "walking bass" can
+all be heard against each other.
+
+### What the jazz profile says about this
+
+`./scripts/cycle.sh jazz` (the log entry below) is furthest out on **syncopation** for most poems —
+Blake 0.017 against a band of 0.45–0.9. That comes from stress → accent (§4.2), and neither the
+palette nor either proposal touches it: swing moves the off-beat syllables, not the accents, and
+the scorer reads the score before swing. If jazz is the target, syncopation is the question to
+answer first, and it is a §4.2 question.
+
+---
+
 ## Log
+
+### Sound and voice, step 3 — review fixes to jazz
+
+Four findings from review, all palette-side; no event moves and no mapping changes.
+
+- **A ride on a bank with no ride muted the pulse.** `kit = "ride"` asked every bank for `rd`, and
+  the TR-808 and TR-707 in `tidal-drum-machines.json` have none, so `preset = "jazz"` with
+  `bank = "tr808"` made Strudel log `sound RolandTR808_rd not found!` on every hit and the whole
+  foundation layer (§4.1, the pulse) play nothing. The text was unchanged, so I3 held on paper, but
+  a palette choice silenced a layer. The emitter now carries the sample table of each bank (checked
+  against the sample map, 2026-10-22), and a bank without a ride keeps time on its open hat (`oh`,
+  which every bank has) — the drum machine's usual stand-in. The header says so: "open hat in place
+  of the ride, which RolandTR808 does not have". Rejecting the pair at the style boundary was the
+  alternative; it would have made Sound = jazz then Bank = tr808 on the page an error rather than a
+  sound. A test walks every bank × kit × layer and checks the sample is in the bank (a mutation
+  restoring `rd` everywhere failed it).
+- **The Sound menu kept saying jazz after its scale, swing or bank changed.** The page re-checked
+  the menu only for the sound keys; it now re-checks for any key some palette sets, so it reads
+  *custom* and jazz can be chosen again to restore them.
+- **"Seventh chords" in a scale without seven notes.** Stacking every other degree builds a
+  seventh only in a seven-note scale; in `pentatonic_minor` it stacks fourths (C F B♭ E♭), in
+  `whole_tone` and `chromatic` something else again. The header now says "four-tone chords on
+  every other degree of pentatonic_minor (not sevenths: the scale has 5 notes, not 7)" there, and
+  `Voicing` documents it. Hand-worked test: C pentatonic minor, 60 65 70 75 and 63 67 72 77.
+
+### Sound and voice, step 3 — jazz: the palette, a profile, and a proposal
+
+The palette half of jazz, all palette (I3 untouched), plus a way to measure it and a written
+proposal for the structural half (the section above, pending the user's decision).
+
+- **Two new palette keys.** `kit = "machine" | "ride"` picks which drum carries each layer: kick
+  and hat, or ride (the foundation, the time) and snare (the flourish, comping). `sample_for` had
+  always called this palette; now a palette can choose it. `voicing = "note" | "seventh"` voices
+  each rhyme note as the seventh chord on its degree — degrees *d*, *d*+2, *d*+4, *d*+6 of the
+  style's scale — written as one mini-notation step `[60,63,67,70]`, every tone taking the event's
+  one gain, cutoff and stray, the melody level shared at 1/√4 per tone. The argument against I3 is
+  on `prosody_emit::Voicing`: same events, same onsets, built from the event's own degree and the
+  scale alone, never from another event, so it cannot carry a progression.
+- **A bank, `r8`** (Roland R-8 → `RolandR8`), the sampled acoustic kit. Checked against
+  `tidal-drum-machines.json` on `strudel.b-cdn.net`: none of its 71 machines has brushes; the R-8
+  has a real ride (`RolandR8_rd`) and snare. Closest available, not a brushed kit.
+- **The `jazz` preset**: Rhodes (`gm_epiano1`) sevenths over the upright (`gm_acoustic_bass`, GM
+  program 33), `kit = "ride"` on `r8`, triplet swing `0.33` (`swingBy(x, n)` delays the second half
+  of each beat by `x / 2` of a beat — `@strudel/core` `pattern.mjs` in `@strudel/web` 1.3.0 — so a
+  third gives 2:1), dorian, a warmer, darker room, more stray. The first preset that sets more than
+  the sound and mix; `style::preset_keys` says which keys each preset sets, and the page's Sound
+  menu applies exactly those (warm after jazz restores the sound and leaves dorian). Levels are an
+  estimate from the default's measurements, **not measured**.
+- **A `jazz` scoring profile** (`Profile::Jazz`, `--profile jazz`, the page's Score tab,
+  `./scripts/cycle.sh jazz`): layering 2–4, recurrence 0.65–0.85, pitched 0.4–0.85, entropy 2–3.3,
+  syncopation 0.45–0.9, pulse 0.75–1, steadiness 0.7–1 — reasoned guesses, reasons beside each
+  constant. Swing is palette and the scorer reads the score, so it is not measured at all.
+  `Profile::ALL` and `Profile::name` replace the hand-written match.
+- **Tests.** I3 property: one palette rendered under `note` and `seventh` voicing — every non-melody
+  line byte-identical, the melody's steps identical, each chord four tones whose lowest is the
+  note, thirds between them, and only the level changes beside it (a mutation that shifted the
+  chord's root failed it). The arrangement property now treats a chord as one value and its
+  palette generator varies `kit` and `voicing`. Hand-worked units: D dorian Dm7 = 62 65 69 72 and
+  Em7 = 64 67 71 74; the ride kit's skeleton equals the machine kit's; the jazz preset's values;
+  jazz bands against machine's (recurrence 0.95 fits machine 1.0 and jazz 0.444). Snapshots: the
+  jazz report for every poem (values identical to machine's, bands and fits differ — read), and
+  `pattern-villanelle-jazz` (Cm7 and Dm7, the two-note obsession as two chords, swing at 5 —
+  read). Every existing pattern snapshot changed in its header comment only: `kit = machine`,
+  `voicing = note`, and the `plays:` line naming what each drum layer plays.
+
+Verified in Chromium: the page loads, the Sound menu's jazz sets scale, swing, bank, kit and
+voicing; Play evaluates with no console errors or warnings; the R-8 ride and snare and both
+soundfonts (`0040`, `0320`) load; the melody lane's pattern queried in the page gives 104 haps
+for 26 written chords — four tones each, one parameter set per onset, nothing multiplied. The
+Score tab measures under jazz. No one has heard it.
+
+Cycle tables after this change (no mapping changed, so the machine table is as before):
+machine mean overall 0.743; jazz 0.740.
+
+Open: OSC does not voice chords (it sends the event's one pitch; the receiver could). The jazz
+levels want the peak measurement the default had. Whether a ride on every foundation syllable is
+too busy.
 
 ### Sound and voice, step 2 — review fixes to the reading
 

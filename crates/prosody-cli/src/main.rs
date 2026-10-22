@@ -77,7 +77,7 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      options:\n\
      \x20 --explain      print the poem with each token annotated, instead of the pattern\n\
      \x20 --score        print how the piece measures (interest, legibility), instead of the pattern\n\
-     \x20 --profile NAME what --score judges against: interest (the default) or machine\n\
+     \x20 --profile NAME what --score judges against: interest (the default), machine or jazz\n\
      \x20 --without LIST leave out candidate mappings, comma-separated: held, refrain, bass,\n\
      \x20                period, outro\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\

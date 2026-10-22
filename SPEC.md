@@ -243,6 +243,27 @@ its own child stream, restarted per bar, so a line strays identically wherever i
 edit elsewhere cannot move it. It changes when an event sounds by milliseconds and how loud; it
 cannot add, remove or reorder an event.
 
+*Extended 2026-10-22 (sound and voice, step 3 — jazz, the palette part).* Two more palette keys.
+`kit = "machine" | "ride"` names which drum carries each layer of §4.1: kick and hat, or a ride
+keeping the time on the foundation and the snare comping on the flourish. `voicing = "note" |
+"seventh"` voices each rhyme note (§4.5) as one tone or as the seventh chord on its degree — the
+degree with every other degree of the style's scale above it, *d*, *d*+2, *d*+4, *d*+6, sharing the
+melody's level between its tones. This is palette and not harmony: each chord is the one event of
+one rhyme word, at its onset, with its gain, cutoff and stray; it is built from that event's degree
+and the scale alone, never from a neighbouring chord, stanza or bass note, so it cannot express a
+progression (I3; the argument is on `prosody_emit::Voicing`, and a property test checks that the
+lowest tone of every chord is the note `note` voicing plays and that nothing else moves). A
+harmony layer — a progression derived from the poem — would be a §4 mapping, and is a proposal in
+`PLAN.md`, not part of this. A fourth preset, `jazz`, is the first that sets more than the sound
+and the mix: Rhodes sevenths over an upright bass, the ride kit on the sampled acoustic `r8` bank
+(no brushed kit exists in the sample map), triplet swing `0.33`, dorian, a warmer room. Its
+scale, swing and bank are palette like the rest; it simply moves notes where the other presets
+never do, and any header key still overrides it. A bank without a ride (the TR-808 and TR-707
+samples have none) keeps time on its open hat under `kit = "ride"`, and the pattern's header says
+so: a missing sample would otherwise silence the whole foundation, which no palette may do. In a
+scale without seven notes, `seventh` still stacks every other degree — fourths in
+`pentatonic_minor` — and the header names it as that rather than as a seventh.
+
 ---
 
 ## 6. Invariants (defend these)

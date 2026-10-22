@@ -137,13 +137,19 @@
         <select id="bank"></select>
       </label>
       <label>Sound
-        <select id="palette" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are."></select>
+        <select id="palette" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are — except jazz, which also sets its scale, swing and bank."></select>
       </label>
       <label>Bass
         <select id="bass"></select>
       </label>
       <label>Melody
         <select id="melody"></select>
+      </label>
+      <label>Kit
+        <select id="kit" title="Which drum carries each layer: kick and hat, or ride and snare"></select>
+      </label>
+      <label>Voicing
+        <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree"></select>
       </label>
       <label>Tempo range (bpm)
         <span class="row">
@@ -230,6 +236,7 @@
         <label>Judged against
           <select id="profile">
             <option value="machine">machine — Kraftwerk, Daft Punk, psytrance</option>
+            <option value="jazz">jazz — a piano trio, a modal quartet</option>
             <option value="interest">interest — generic</option>
           </select>
         </label>
@@ -265,7 +272,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 // Every palette control's id is its key in the style header, and every value is in header units.
-const SOUND = ['bass', 'melody', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress',
+const SOUND = ['bass', 'melody', 'kit', 'voicing', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress',
   'humanise', 'drums_gain', 'bass_gain', 'melody_gain'];
 const controls = ['scale', 'root', 'bank', 'low', 'high', 'swing', ...SOUND];
 const SLIDERS = ['swing', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress',
@@ -277,10 +284,15 @@ const OPTIONS = {
   bank: __BANKS__,
   bass: __INSTRUMENTS__,
   melody: __INSTRUMENTS__,
+  kit: __KITS__,
+  voicing: __VOICINGS__,
 };
 const MAPPINGS = __MAPPINGS__;   // [name, what it does], in the order the core lists them
 const PRESETS = __PRESETS__;     // the examples: name, label, poem, and the palette its header set
 const PALETTES = __PALETTES__;   // the named palettes, every control's value, from `Style::preset`
+// The controls each named palette sets (`style::preset_keys`): the sound and mix, and for jazz its
+// scale, swing and bank too. The menu applies these and leaves every other control alone.
+const PALETTE_KEYS = __PALETTE_KEYS__;
 for (const [id, values] of Object.entries(OPTIONS)) {
   $(id).innerHTML = values.map((v) => `<option>${v}</option>`).join('');
 }
@@ -295,7 +307,7 @@ function showValues() {
 function syncPaletteMenu() {
   const same = (a, b) => (isNaN(Number(a)) ? a === b : Number(a) === Number(b));
   const match = Object.entries(PALETTES)
-    .find(([, values]) => SOUND.every((id) => same($(id).value, values[id])));
+    .find(([name, values]) => PALETTE_KEYS[name].every((id) => same($(id).value, values[id])));
   $('palette').value = match ? match[0] : 'custom';
 }
 
@@ -311,7 +323,8 @@ $('poem').value = __SEED_POEM__;
 $('palette').addEventListener('input', () => {
   const values = PALETTES[$('palette').value];
   if (!values) return;
-  setControls(values, SOUND);    // sound and mix only: a palette never moves a note
+  // Its own keys only: the sound and mix, and jazz's scale, swing and bank. Root and tempo stay.
+  setControls(values, PALETTE_KEYS[$('palette').value]);
   schedule();
 });
 
@@ -764,7 +777,9 @@ $('poem').addEventListener('input', schedule);
 for (const id of controls) {
   $(id).addEventListener('input', () => {
     showValues();
-    if (SOUND.includes(id)) syncPaletteMenu();
+    // Any key some palette sets — jazz sets scale, swing and bank too — can stop the controls
+    // matching the palette the menu names, and a stale name could not be re-chosen to restore it.
+    if (Object.values(PALETTE_KEYS).some((keys) => keys.includes(id))) syncPaletteMenu();
     schedule();
   });
 }

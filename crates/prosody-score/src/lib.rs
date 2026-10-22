@@ -160,6 +160,36 @@ const MACHINE_PULSE: Band = Band::new(0.9, 1.0);
 /// The meter holds; a bar of another length is an event, not the norm.
 const MACHINE_STEADINESS: Band = Band::new(0.8, 1.0);
 
+// The jazz profile: a small-group swing or modal record — a piano trio, a quartet. Reasoned
+// guesses again, each against the machine profile it most differs from, and not measurements.
+//
+// Swing is not measured and cannot be: the scorer reads the score, before any palette, and swing is
+// palette (`SPEC.md` §5) — every onset is still where the score put it. A swung piece therefore
+// scores exactly as its straight twin does, which is what "tolerated" means here: nothing in this
+// profile penalises it, and nothing rewards it either.
+
+/// A trio is three players and a quartet four; comping, bass, ride and a line on top. Fewer than
+/// two at once is a soloist, more than four at this density muddies.
+const JAZZ_LAYERING: Band = Band::new(2.0, 4.0);
+/// Less looped than machine music: a head returns, the comping returns, the bass walks new ground
+/// each bar. Most bars bring something back, but a fifth to a third of what sounds is new.
+const JAZZ_RECURRENCE: Band = Band::new(0.65, 0.85);
+/// Bass and piano are pitched and only the drums are not, so more of the piece is pitched than in
+/// machine music; all of it would leave nothing to carry the time.
+const JAZZ_PITCHED: Band = Band::new(0.4, 0.85);
+/// Lines that move through a mode: four to ten degrees in use, against the machine's riffs of two
+/// to five. Below two bits is a vamp on one chord.
+const JAZZ_PITCH_ENTROPY: Band = Band::new(2.0, 3.3);
+/// Accents off the beat — anticipations, the offbeat comp, the "and" of a swung eighth — are the
+/// idiom, so the band sits above the generic one; the top is where accents stop implying a beat at
+/// all (Witek et al.'s inverted U again, shifted).
+const JAZZ_SYNCOPATION: Band = Band::new(0.45, 0.9);
+/// The ride and the walking bass mark nearly every beat; less strictly than four on the floor,
+/// since a comping figure or a break leaves one now and then.
+const JAZZ_PULSE: Band = Band::new(0.75, 1.0);
+/// A song form keeps its meter, but a turnaround or a tag can stretch a bar.
+const JAZZ_STEADINESS: Band = Band::new(0.7, 1.0);
+
 /// What a piece is judged against: which metrics, and which bands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Profile {
@@ -168,16 +198,28 @@ pub enum Profile {
     /// Repetitive machine music — Kraftwerk, Daft Punk, Laibach's electronic songs, psytrance:
     /// denser, more repetitive, a steady pulse and short riffs.
     Machine,
+    /// Small-group jazz — a piano trio, a modal quartet: fewer loops, more notes in use, more
+    /// accents off the beat, and the time still kept. Swing is palette and so is not measured.
+    Jazz,
 }
 
 impl Profile {
-    /// The profile called `name` on a command line: `interest` or `machine`.
+    /// Every profile, in the order a menu lists them.
+    pub const ALL: [Self; 3] = [Self::Interest, Self::Machine, Self::Jazz];
+
+    /// The profile called `name` on a command line: `interest`, `machine` or `jazz`.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        match name {
-            "interest" => Some(Self::Interest),
-            "machine" => Some(Self::Machine),
-            _ => None,
+        Self::ALL.into_iter().find(|profile| profile.name() == name)
+    }
+
+    /// Its name on a command line.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Interest => "interest",
+            Self::Machine => "machine",
+            Self::Jazz => "jazz",
         }
     }
 }
@@ -198,18 +240,38 @@ pub fn measure_as(score: &Score, profile: Profile) -> Vec<Metric> {
     let timeline = Timeline::of(score);
     match profile {
         Profile::Interest => interest_metrics(&timeline),
-        Profile::Machine => machine_metrics(&timeline),
+        Profile::Machine => genre_metrics(
+            &timeline,
+            [
+                MACHINE_LAYERING,
+                MACHINE_RECURRENCE,
+                MACHINE_PITCHED,
+                MACHINE_PITCH_ENTROPY,
+                MACHINE_SYNCOPATION,
+            ],
+            [MACHINE_PULSE, MACHINE_STEADINESS],
+        ),
+        Profile::Jazz => genre_metrics(
+            &timeline,
+            [
+                JAZZ_LAYERING,
+                JAZZ_RECURRENCE,
+                JAZZ_PITCHED,
+                JAZZ_PITCH_ENTROPY,
+                JAZZ_SYNCOPATION,
+            ],
+            [JAZZ_PULSE, JAZZ_STEADINESS],
+        ),
     }
 }
 
-fn machine_metrics(timeline: &Timeline) -> Vec<Metric> {
-    let bands = [
-        MACHINE_LAYERING,
-        MACHINE_RECURRENCE,
-        MACHINE_PITCHED,
-        MACHINE_PITCH_ENTROPY,
-        MACHINE_SYNCOPATION,
-    ];
+/// A genre profile: the five interest metrics under the genre's own bands, then pulse and
+/// steadiness under its bands for those.
+fn genre_metrics(
+    timeline: &Timeline,
+    bands: [Band; 5],
+    [pulse, steadiness]: [Band; 2],
+) -> Vec<Metric> {
     let mut metrics: Vec<Metric> = interest_metrics(timeline)
         .into_iter()
         .zip(bands)
@@ -218,12 +280,12 @@ fn machine_metrics(timeline: &Timeline) -> Vec<Metric> {
     metrics.push(Metric {
         name: "pulse",
         value: metrics::pulse(timeline),
-        band: MACHINE_PULSE,
+        band: pulse,
     });
     metrics.push(Metric {
         name: "steadiness",
         value: metrics::steadiness(timeline),
-        band: MACHINE_STEADINESS,
+        band: steadiness,
     });
     metrics
 }
@@ -381,7 +443,7 @@ fn fixed(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Band, Metric, Report, fixed};
+    use super::{Band, Metric, Profile, Report, fixed};
 
     #[test]
     fn inside_the_band_fits_perfectly() {
@@ -422,6 +484,28 @@ mod tests {
         };
         assert_eq!(fixed(report.interest()), "0.500");
         assert_eq!(fixed(report.overall()), "0.500", "no edit test, no penalty");
+    }
+
+    #[test]
+    fn every_profile_is_found_by_its_own_name() {
+        for profile in Profile::ALL {
+            assert_eq!(Profile::named(profile.name()), Some(profile));
+        }
+        assert_eq!(Profile::named("jazz"), Some(Profile::Jazz));
+        assert_eq!(Profile::named("polka"), None);
+    }
+
+    #[test]
+    fn jazz_wants_less_recurrence_and_more_syncopation_than_machine_music() {
+        // The point of the profile, as fits of the same values: a loop held almost unbroken
+        // (recurrence 0.95) is ideal machine music and half a band-width too repetitive for jazz —
+        // (0.95 − 0.85) / (0.85 − 0.65) = ½, so 1 / 1.5² = 0.444; and accents mostly off
+        // the beat (syncopation 0.6) are ideal jazz and, against machine's 0.1..0.4, two thirds of
+        // a width too many: 1 / (1 + ⅔)² = 0.36.
+        assert_eq!(fixed(super::MACHINE_RECURRENCE.fit(0.95)), "1.000");
+        assert_eq!(fixed(super::JAZZ_RECURRENCE.fit(0.95)), "0.444");
+        assert_eq!(fixed(super::JAZZ_SYNCOPATION.fit(0.6)), "1.000");
+        assert_eq!(fixed(super::MACHINE_SYNCOPATION.fit(0.6)), "0.360");
     }
 
     #[test]

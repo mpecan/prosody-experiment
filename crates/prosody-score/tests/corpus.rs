@@ -126,5 +126,10 @@ fn every_shipped_poem_measures_as_committed() {
             format!("machine-{name}"),
             Report::profiled(&score, edits, Profile::Machine).to_text()
         );
+        // And against small-group jazz, the target of the jazz palette's measurements.
+        insta::assert_snapshot!(
+            format!("jazz-{name}"),
+            Report::profiled(&score, edits, Profile::Jazz).to_text()
+        );
     }
 }

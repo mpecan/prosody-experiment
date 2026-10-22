@@ -492,6 +492,32 @@ fn the_machine_profile_adds_pulse_and_steadiness() {
 }
 
 #[test]
+fn the_jazz_profile_judges_the_same_piece_against_its_own_bands() {
+    let (jazz, err, code) = run(&["--score", "--profile", "jazz"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let (machine, _, _) = run(&["--score", "--profile", "machine"], COUPLET);
+    // The jazz bands, from `prosody-score`: recurrence 0.65..0.85, syncopation 0.45..0.9.
+    assert!(jazz.contains("0.650..0.850"), "{jazz}");
+    assert!(jazz.contains("0.450..0.900"), "{jazz}");
+    // Same piece, so the same values: only the bands and the fits differ.
+    let value = |out: &str, name: &str| {
+        out.lines()
+            .find(|line| line.starts_with(name))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .map(str::to_owned)
+    };
+    for name in [
+        "layering",
+        "recurrence",
+        "syncopation",
+        "pulse",
+        "steadiness",
+    ] {
+        assert_eq!(value(&jazz, name), value(&machine, name), "{name}");
+    }
+}
+
+#[test]
 fn a_mapping_can_be_left_out() {
     // `COUPLET`'s two stanzas are one regular foundation, so with every mapping its stressed
     // vowels carry a bass note, and the outro plays the last stanza again.

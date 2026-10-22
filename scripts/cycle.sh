@@ -5,6 +5,7 @@
 #
 #   ./scripts/cycle.sh            the machine-music profile
 #   ./scripts/cycle.sh interest   the generic one
+#   ./scripts/cycle.sh jazz       the small-group jazz profile (swing is palette, so not measured)
 #   ./scripts/cycle.sh machine bass,outro
 #                                 the machine profile with those candidate mappings left out
 #

@@ -20,7 +20,9 @@ use prosody_core::lower::{self, Analyses};
 use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
-use prosody_emit::style::{BANKS, PRESETS as PALETTES, SOUNDFONTS, SYNTHS};
+use prosody_emit::style::{
+    BANKS, KITS, PRESETS as PALETTES, SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
+};
 use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
@@ -59,10 +61,30 @@ fn page() -> Result<String> {
                 .map(|style| format!("{}:{}", json_string(name), palette_json(&style)))
         })
         .collect();
+    // The page's control for the tempo window is two boxes, `low` and `high`.
+    let palette_keys: Vec<String> = PALETTES
+        .iter()
+        .filter_map(|name| {
+            let keys: Vec<&str> = preset_keys(name)?
+                .into_iter()
+                .flat_map(|key| match key {
+                    "tempo_range" => vec!["low", "high"],
+                    other => vec![other],
+                })
+                .collect();
+            Some(format!("{}:{}", json_string(name), list(&keys)))
+        })
+        .collect();
 
     Ok(include_str!("index.html")
         .replace("__PRESETS__", &presets_json()?)
         .replace("__PALETTES__", &format!("{{{}}}", palettes.join(",")))
+        .replace(
+            "__PALETTE_KEYS__",
+            &format!("{{{}}}", palette_keys.join(",")),
+        )
+        .replace("__KITS__", &list(KITS))
+        .replace("__VOICINGS__", &list(VOICINGS))
         .replace("__SCALES__", &list(&scales))
         .replace("__BANKS__", &list(BANKS))
         .replace("__INSTRUMENTS__", &list(&instruments))
@@ -273,7 +295,7 @@ fn compile(request: &Request, output: &Output) -> Response {
 }
 
 /// The palette keys the page sends that are names, written as TOML strings.
-const NAMED_KEYS: &[&str] = &["scale", "root", "bank", "bass", "melody"];
+const NAMED_KEYS: &[&str] = &["scale", "root", "bank", "bass", "melody", "kit", "voicing"];
 
 /// The palette keys the page sends that are numbers, in header units.
 const NUMBER_KEYS: &[&str] = &[
@@ -519,7 +541,33 @@ mod tests {
                 "palette {name} missing"
             );
         }
-        for placeholder in ["__PALETTES__", "__INSTRUMENTS__", "__PRESETS__"] {
+        for name in prosody_emit::style::KITS
+            .iter()
+            .chain(prosody_emit::style::VOICINGS)
+        {
+            assert!(html.contains(&format!("\"{name}\"")), "{name} missing");
+        }
+        // The jazz palette tells the menu it sets the scale, swing and bank as well; warm does not.
+        assert!(
+            html.contains("\"jazz\":[\"bass\",\"melody\",\"kit\",\"voicing\""),
+            "jazz's keys"
+        );
+        let jazz_keys = html.split("\"jazz\":[").nth(1).unwrap();
+        let jazz_keys = &jazz_keys[..jazz_keys.find(']').unwrap()];
+        assert!(
+            jazz_keys.contains("\"scale\",\"swing\",\"bank\""),
+            "{jazz_keys}"
+        );
+        let warm_keys = html.split("\"warm\":[").nth(1).unwrap();
+        assert!(!warm_keys[..warm_keys.find(']').unwrap()].contains("scale"));
+        for placeholder in [
+            "__PALETTES__",
+            "__PALETTE_KEYS__",
+            "__INSTRUMENTS__",
+            "__PRESETS__",
+            "__KITS__",
+            "__VOICINGS__",
+        ] {
             assert!(!html.contains(placeholder), "{placeholder} left unfilled");
         }
         assert!(
@@ -629,6 +677,19 @@ mod tests {
         assert!(!body.contains("\"legibility\":null"), "{body}");
         let interest = super::compile(&request(&[("profile", "interest")], SEED), &Output::Score);
         assert!(!interest.body.contains("steadiness"), "{}", interest.body);
+        // The jazz profile: same metrics as machine, its own bands (recurrence 0.65..0.85).
+        let jazz = super::compile(&request(&[("profile", "jazz")], SEED), &Output::Score);
+        assert_eq!(jazz.status, 200, "{}", jazz.body);
+        assert!(
+            jazz.body.contains("\"name\":\"recurrence\",\"value\":"),
+            "{}",
+            jazz.body
+        );
+        assert!(
+            jazz.body.contains("\"low\":0.650,\"high\":0.850"),
+            "{}",
+            jazz.body
+        );
         // Leaving out the bass changes what is measured.
         let bare = super::compile(&request(&[("off", "bass")], SEED), &Output::Score);
         assert_ne!(full.body, bare.body);
@@ -725,6 +786,16 @@ mod tests {
     fn the_controls_write_a_header_the_style_reads_back() {
         // Every control's value, in header units, must arrive in the palette — a key the header
         // dropped would leave the page showing one palette and playing another.
+        for name in ["warm", "jazz"] {
+            let palette = prosody_emit::Style::preset(name).unwrap();
+            let pairs = controls(&palette);
+            let query: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            assert_eq!(
+                prosody_emit::Style::parse(&super::header(&request(&query, ""))).unwrap(),
+                palette,
+                "{name}"
+            );
+        }
         let warm = prosody_emit::Style::preset("warm").unwrap();
         let fields = warm.describe();
         let mut query: Vec<(String, String)> = fields
@@ -756,6 +827,36 @@ mod tests {
         // A name is quoted, so it cannot write a second key.
         let sneaky = super::header(&request(&[("bank", "tr909\"\nscale = \"lydian")], ""));
         assert!(prosody_emit::Style::parse(&sneaky).is_err(), "{sneaky}");
+    }
+
+    /// Every control's value for a palette, as the page sends it.
+    fn controls(style: &prosody_emit::Style) -> Vec<(&'static str, String)> {
+        let mut query: Vec<(&'static str, String)> = style
+            .describe()
+            .into_iter()
+            .filter(|(key, _)| !matches!(*key, "tempo_range" | "root"))
+            .collect();
+        query.push(("root", super::root_label(&style.describe()["root"])));
+        query
+    }
+
+    #[test]
+    fn the_jazz_palette_plays_rhodes_sevenths_over_the_ride() {
+        let jazz = prosody_emit::Style::preset("jazz").unwrap();
+        let pairs: Vec<(&str, String)> = controls(&jazz);
+        let query: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let response = super::compile(&request(&query, SEED), &Output::Pattern);
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = &response.body;
+        assert!(body.contains(".bank(\"RolandR8\")"), "{body}");
+        assert!(
+            body.contains("s(\"<[[rd rd]"),
+            "the ride keeps time: {body}"
+        );
+        assert!(body.contains(".swingBy(0.330,"), "triplet swing: {body}");
+        // C dorian, degree 0 as a seventh: C E♭ G B♭ from 60 — 60 63 67 70.
+        assert!(body.contains("[60,63,67,70]"), "{body}");
+        assert!(body.contains("//   voicing = seventh"), "{body}");
     }
 
     #[test]

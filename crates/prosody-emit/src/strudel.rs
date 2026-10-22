@@ -33,6 +33,7 @@
 //! | which cycle, which step, which subdivision | `Event` position | §4.2 |
 //! | `.gain` | `Event::velocity` | §4.2, stress → accent |
 //! | `.note` | `Event::pitch` through the style's scale | §4.5 |
+//! | a rhyme note's chord tones | the same degree, stacked in the style's scale ([`Voicing`]) | §5 |
 //! | `.lpf`, `.attack`, `.room` | `Event::sharpness` | §4.4 |
 //! | `.vowel` | `Event::bank` — the alliterating phoneme | §4.3, alliteration |
 //! | `.crush` depth | `Event::family` — distance from the family's root | §4.3, morphology |
@@ -61,7 +62,7 @@ use prosody_core::role::Layer;
 use prosody_core::voice::{Event, PitchSource, Score, Voice};
 use rand_core::Rng as _;
 
-use crate::style::{Named, Style};
+use crate::style::{Kit, Named, Style, Voicing};
 use crate::{Backend, fmt_param};
 
 /// Renders a score as Strudel pattern text.
@@ -163,6 +164,7 @@ const fn strudel_bank(bank: Named) -> &'static str {
         b"tr707" => "RolandTR707",
         b"linn" => "AkaiLinn",
         b"casio" => "CasioRZ1",
+        b"r8" => "RolandR8",
         // `tr909` and anything a later `BANKS` adds before this match does.
         _ => "RolandTR909",
     }
@@ -306,7 +308,10 @@ fn humanised(lane: Lane<'_>, style: &Style, strays: &BTreeMap<EventKey, Stray>) 
 ///
 /// Reverb and echo are per orbit in Strudel, not per event, so `roomsize` must be the same on
 /// every layer or each event would rebuild the room — it is written everywhere for that reason.
-fn bus(style: &Style, level: crate::style::Amount) -> String {
+///
+/// `share` divides the level between the tones of a chord ([`chord_share`]); it is 1 for a single
+/// sound.
+fn bus(style: &Style, level: crate::style::Amount, share: f64) -> String {
     let mix = style.mix();
     let mut calls = format!(
         ".roomsize({})",
@@ -324,8 +329,18 @@ fn bus(style: &Style, level: crate::style::Amount) -> String {
             fmt_param(2.0 + 5.0 * amount)
         );
     }
-    let _ = write!(calls, ".postgain({})", fmt_param(level.as_f64()));
+    let _ = write!(calls, ".postgain({})", fmt_param(level.as_f64() * share));
     calls
+}
+
+/// The level each tone of a chord takes, so a role's level is the level of the chord.
+///
+/// One over the square root of the tone count: soundfont tones at different pitches are
+/// uncorrelated, so their powers add, and four tones at half level carry the power of one at full.
+/// The melody level a palette sets therefore means the same thing under either voicing.
+fn chord_share(voicing: Voicing) -> f64 {
+    let tones = u32::try_from(voicing.degrees().len()).unwrap_or(1).max(1);
+    1.0 / f64::from(tones).sqrt()
 }
 
 /// How many cycles — slots of the arrangement — the piece plays a minute.
@@ -389,9 +404,34 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     }
     // The translation from the palette's words to Strudel's sounds, so `karplus` in a header is
     // not a mystery in the output.
+    let ride = ride_stand_in(style).map_or_else(
+        || "ride".to_owned(),
+        |bank| format!("open hat in place of the ride, which {bank} does not have,"),
+    );
+    let (pulse, ornament) = match style.kit() {
+        Kit::Machine => ("kick", "hat"),
+        Kit::Ride => (ride.as_str(), "snare"),
+    };
+    // Stacking every other degree makes a seventh chord only in a seven-note scale; elsewhere it
+    // makes something else, and the header names what is heard rather than what was asked for.
+    let scale = style.scale();
+    let chords = match style.voicing() {
+        Voicing::Note => String::new(),
+        Voicing::Seventh if scale.len() == 7 => {
+            " as seventh chords (each rhyme word's degree with \
+             the 3rd, 5th and 7th above it in the scale)"
+                .to_owned()
+        }
+        Voicing::Seventh => format!(
+            " as four-tone chords on every other degree of {} (not sevenths: the scale has {} \
+             notes, not 7)",
+            scale.name(),
+            scale.len()
+        ),
+    };
     let _ = writeln!(
         out,
-        "//   plays: drums from {}, melody on {}, bass on {}",
+        "//   plays: drums from {} ({pulse} on the foundation, {ornament} on the flourish), melody on {}{chords}, bass on {}",
         strudel_bank(style.bank()),
         strudel_instrument(style.melody(), Pitched::Melody),
         strudel_instrument(style.bass(), Pitched::Bass)
@@ -424,7 +464,7 @@ fn rhythm_layer(
     voice: Voice,
 ) -> Vec<(String, String)> {
     let events: Vec<&Event> = score.events_of(voice.id()).collect();
-    let sample = sample_for(style, voice);
+    let sample = sample_for(style, voice.layer());
     let name = format!(
         "voice {} — {}",
         voice.id().get(),
@@ -461,7 +501,7 @@ fn rhythm_layer(
                 fmt_param(style.mix().drive().as_f64() * 0.5)
             );
         }
-        layer.push_str(&bus(style, style.mix().drums_gain()));
+        layer.push_str(&bus(style, style.mix().drums_gain(), 1.0));
         layers.push((layer, lane.label(&name)));
     }
     layers
@@ -473,11 +513,92 @@ fn rhythm_layer(
 /// layer (drums, bass, ostinato)" and "high variance → aperiodic → flourish layer (fills, stabs,
 /// one-shots, ornament)". Which *sounds* those are is palette; that a foundation is the pulse and
 /// a flourish ornaments it is structure, and comes from the score.
-const fn sample_for(_style: &Style, voice: Voice) -> &'static str {
-    match voice.layer() {
-        Layer::Foundation => "bd",
-        Layer::Flourish => "hh",
+///
+/// The [`Kit`] is that palette choice: the drum machine's kick and hat, or a jazz section's ride
+/// keeping time and snare comping round it. Either way the foundation is the time and the flourish
+/// the ornament.
+///
+/// Not every bank has a ride: the TR-808 and TR-707 in the sample map have none. Asking for one
+/// there makes Strudel log "sound not found" on every hit and the whole pulse layer go silent, so a
+/// palette choice would in effect remove events — which is not palette's to do (I3) and leaves
+/// sound nobody can trace (I4). Such a bank plays its open hat instead, the drum machine's usual
+/// stand-in for a ride, and the pattern's header says so ([`ride_stand_in`]).
+fn sample_for(style: &Style, layer: Layer) -> &'static str {
+    match (style.kit(), layer) {
+        (Kit::Machine, Layer::Foundation) => "bd",
+        (Kit::Machine, Layer::Flourish) => "hh",
+        (Kit::Ride, Layer::Foundation) => {
+            if bank_has(strudel_bank(style.bank()), RIDE) {
+                RIDE
+            } else {
+                RIDE_STAND_IN
+            }
+        }
+        (Kit::Ride, Layer::Flourish) => "sd",
     }
+}
+
+/// The ride cymbal's sample name in the drum-machine sample map.
+const RIDE: &str = "rd";
+
+/// What a bank without a ride plays in its place: the open hat, which every bank has.
+const RIDE_STAND_IN: &str = "oh";
+
+/// `Some(bank)` when the style asks for a ride its bank does not have, so the header can say the
+/// open hat stands in — `CLAUDE.md` §6: a fallback must be visible.
+fn ride_stand_in(style: &Style) -> Option<&'static str> {
+    let bank = strudel_bank(style.bank());
+    (style.kit() == Kit::Ride && !bank_has(bank, RIDE)).then_some(bank)
+}
+
+/// The samples each bank has in the sample map the page loads (`tidal-drum-machines.json` on
+/// `strudel.b-cdn.net`, checked 2026-10-22). Only what a kit can ask for has to be right here; the
+/// rest is listed so the table reads as the map does.
+const BANK_SAMPLES: &[(&str, &[&str])] = &[
+    (
+        "RolandTR909",
+        &[
+            "bd", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rd", "rim", "sd",
+        ],
+    ),
+    (
+        "RolandTR808",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "perc", "rim", "sd", "sh",
+        ],
+    ),
+    (
+        "RolandTR707",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rim", "sd", "tb",
+        ],
+    ),
+    (
+        "AkaiLinn",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rd", "sd", "sh", "tb",
+        ],
+    ),
+    (
+        "CasioRZ1",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "rd", "rim", "sd",
+        ],
+    ),
+    (
+        "RolandR8",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "perc", "rd", "rim", "sd", "sh",
+            "tb",
+        ],
+    ),
+];
+
+/// Whether a Strudel bank has a sample of that name.
+fn bank_has(bank: &str, sample: &str) -> bool {
+    BANK_SAMPLES
+        .iter()
+        .any(|(name, samples)| *name == bank && samples.contains(&sample))
 }
 
 /// One of the lines a layer sounds at the same time, as one pattern of its own.
@@ -817,22 +938,46 @@ fn pitched_layer(
         Pitched::Bass => 36,
     };
 
+    // The melody may be voiced as chords (`Voicing`, palette — its doc argues it against I3); the
+    // bass is always one note, the root a chord would stand on.
+    let voicing = match role {
+        Pitched::Melody => style.voicing(),
+        Pitched::Bass => Voicing::Note,
+    };
     let note = |event: &Event| {
         event.pitch().map_or_else(
             || "~".to_owned(),
             |pitch| {
-                // Degree through the style's scale, from the style's root. Which note that
-                // is, is palette; that two lines take the *same* note is the poem's doing.
-                let semitone = base
-                    + i32::from(style.root().semitones())
-                    + style.scale().degree(pitch.degree().get());
-                // §4.5: "perfect rhyme → exact pitch; slant rhyme → detune or neighbour tone."
-                // The mapping interpolates between the two: a whole step off at a total
-                // mismatch, so a half-match lands exactly on the neighbour.
-                if pitch.detune().is_exact() {
-                    format!("{semitone}")
-                } else {
-                    fmt_param(f64::from(semitone) + pitch.detune().as_f64() * 2.0)
+                let tones: Vec<String> = voicing
+                    .degrees()
+                    .iter()
+                    .map(|above| {
+                        // Degree through the style's scale, from the style's root. Which note that
+                        // is, is palette; that two lines take the *same* note is the poem's doing.
+                        // A chord tone is the same degree plus every other step above it, in the
+                        // same scale — nothing from any other event.
+                        let semitone = base
+                            + i32::from(style.root().semitones())
+                            + style.scale().degree(pitch.degree().get() + above);
+                        // §4.5: "perfect rhyme → exact pitch; slant rhyme → detune or neighbour
+                        // tone." The mapping interpolates between the two: a whole step off at a
+                        // total mismatch, so a half-match lands exactly on the neighbour. A chord
+                        // is detuned as a whole, so a slant rhyme's chord is off as one.
+                        if pitch.detune().is_exact() {
+                            format!("{semitone}")
+                        } else {
+                            fmt_param(f64::from(semitone) + pitch.detune().as_f64() * 2.0)
+                        }
+                    })
+                    .collect();
+                // One tone is the note itself. Several are one mini-notation step stacked with
+                // `,` — the only `,` the emitter writes inside a pattern. It cannot multiply
+                // events the way stacked *lines* did (see [`Lane`]): every parameter pattern
+                // still has exactly one value at this step, so each tone takes that value, and
+                // the one event sounds as its chord, once.
+                match tones.as_slice() {
+                    [one] => one.clone(),
+                    _ => format!("[{}]", tones.join(",")),
                 }
             },
         )
@@ -894,6 +1039,7 @@ fn pitched_layer(
                 Pitched::Melody => mix.melody_gain(),
                 Pitched::Bass => mix.bass_gain(),
             },
+            chord_share(voicing),
         ));
         layers.push((layer, lane.label(name)));
     }
@@ -913,9 +1059,9 @@ mod tests {
 
     use prosody_core::role::Layer;
 
-    use super::{Strudel, StrudelError};
+    use super::{BANK_SAMPLES, Strudel, StrudelError, bank_has, sample_for, strudel_bank};
     use crate::Backend as _;
-    use crate::style::Style;
+    use crate::style::{BANKS, KITS, Style};
 
     /// Spelling is pronunciation: `A` and `o` are stressed vowels, `e` unstressed, `i` secondary.
     struct Spelled;
@@ -1537,6 +1683,160 @@ mod tests {
         };
         assert!(notes(melody).iter().all(|n| n == "60"), "{melody}");
         assert!(notes(bass).iter().all(|n| n == "39"), "{bass}");
+    }
+
+    #[test]
+    fn a_seventh_voicing_stacks_the_scale_on_each_rhyme_degree() {
+        // Two rhyme classes, "bAn" (degree 0) then "dos" (degree 1), under D dorian:
+        // D E F G A B C = 62 64 65 67 69 71 72 74 from MIDI 60 + 2. Hand-worked:
+        //   degree 0 + {0, 2, 4, 6} = D F A C = 62 65 69 72  (Dm7)
+        //   degree 1 + {0, 2, 4, 6} = E G B D = 64 67 71 74  (Em7)
+        let source = "rot bAn\nrot bAn\nrot dos\nrot dos\n";
+        let header = "+++\nroot = \"D\"\nscale = \"dorian\"\nvoicing = \"seventh\"\n+++";
+        let text = render(source, &Style::parse(header).unwrap());
+        let melody = text.lines().find(|l| l.contains("the melody")).unwrap();
+        let chords: Vec<&str> = melody
+            .split('"')
+            .nth(1)
+            .unwrap()
+            .split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+            .map(|t| t.trim_start_matches('[').trim_end_matches(']'))
+            .filter(|t| !t.is_empty() && *t != "~")
+            .collect();
+        assert!(chords.contains(&"62,65,69,72"), "{melody}");
+        assert!(chords.contains(&"64,67,71,74"), "{melody}");
+        assert!(chords.iter().all(|c| c.split(',').count() == 4), "{melody}");
+        // The level is the chord's: four tones at 1/√4 of the melody level, 0.75 × 0.5.
+        assert!(melody.contains(".postgain(0.375)"), "{melody}");
+        // The bass is never voiced: "rot" is OW, mid, so the third degree of dorian (3
+        // semitones) from 36 + 2 = 41, one note.
+        let bass = text.lines().find(|l| l.contains("the bass")).unwrap();
+        assert!(!bass.split('"').nth(1).unwrap().contains(','), "{bass}");
+        assert!(bass.contains("41"), "{bass}");
+        assert!(bass.contains(".postgain(0.320)"), "{bass}");
+        assert!(
+            text.contains("as seventh chords"),
+            "named in the header: {text}"
+        );
+
+        // Note voicing is the same piece with each chord's lowest tone alone.
+        let single = render(
+            source,
+            &Style::parse("+++\nroot = \"D\"\nscale = \"dorian\"\n+++").unwrap(),
+        );
+        let melody_single = single.lines().find(|l| l.contains("the melody")).unwrap();
+        assert!(melody_single.contains("62") && !melody_single.contains("65,"));
+    }
+
+    #[test]
+    fn every_kit_asks_every_bank_for_a_sample_the_bank_has() {
+        // A sample a bank lacks is not an error Strudel raises: it logs "sound not found" on every
+        // hit and the layer goes silent. So every pair a header can write must name a real one,
+        // and every bank a header can name must be in the table checked against the sample map.
+        for bank in BANKS {
+            for kit in KITS {
+                let style =
+                    Style::parse(&format!("+++\nkit = \"{kit}\"\nbank = \"{bank}\"\n+++")).unwrap();
+                let strudel = strudel_bank(style.bank());
+                assert!(
+                    BANK_SAMPLES.iter().any(|(name, _)| *name == strudel),
+                    "{bank} → {strudel} is not in the sample table"
+                );
+                for layer in [Layer::Foundation, Layer::Flourish] {
+                    let sample = sample_for(&style, layer);
+                    assert!(
+                        bank_has(strudel, sample),
+                        "{kit} on {bank} asks {strudel} for `{sample}` ({layer:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_bank_without_a_ride_keeps_time_on_its_open_hat_and_says_so() {
+        // tidal-drum-machines.json has no RolandTR808_rd and no RolandTR707_rd; both have `oh`.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        for (bank, strudel) in [("tr808", "RolandTR808"), ("tr707", "RolandTR707")] {
+            let header = format!("+++\npreset = \"jazz\"\nbank = \"{bank}\"\n+++");
+            let text = render(source, &Style::parse(&header).unwrap());
+            let drums: Vec<String> = text
+                .lines()
+                .filter(|l| l.starts_with("  s("))
+                .map(|l| argument(l, "s"))
+                .collect();
+            assert!(drums.iter().any(|d| d.contains("oh")), "{text}");
+            assert!(drums.iter().any(|d| d.contains("sd")), "{text}");
+            assert!(!drums.iter().any(|d| d.contains("rd")), "{text}");
+            assert!(
+                text.contains(&format!(
+                    "open hat in place of the ride, which {strudel} does not have,"
+                )),
+                "the stand-in is visible: {text}"
+            );
+        }
+        // A bank that has a ride plays it, and the header claims no stand-in.
+        let text = render(
+            source,
+            &Style::parse("+++\npreset = \"jazz\"\nbank = \"linn\"\n+++").unwrap(),
+        );
+        assert!(text.contains("(ride on the foundation"), "{text}");
+        assert!(!text.contains("in place of the ride"), "{text}");
+    }
+
+    #[test]
+    fn a_seventh_voicing_outside_a_seven_note_scale_is_named_for_what_it_stacks() {
+        // C pentatonic minor: C Eb F G Bb = 0 3 5 7 10. Hand-worked:
+        //   degree 0 + {0, 2, 4, 6} = degrees 0 2 4 6 = C F Bb Eb' = 60 65 70 75 (stacked fourths)
+        //   degree 1 + {0, 2, 4, 6} = degrees 1 3 5 7 = Eb G C' F' = 63 67 72 77
+        let source = "rot bAn\nrot bAn\nrot dos\nrot dos\n";
+        let header = "+++\nscale = \"pentatonic_minor\"\nvoicing = \"seventh\"\n+++";
+        let text = render(source, &Style::parse(header).unwrap());
+        let melody = text.lines().find(|l| l.contains("the melody")).unwrap();
+        assert!(melody.contains("[60,65,70,75]"), "{melody}");
+        assert!(melody.contains("[63,67,72,77]"), "{melody}");
+        assert!(!text.contains("as seventh chords"), "{text}");
+        assert!(
+            text.contains(
+                "as four-tone chords on every other degree of pentatonic_minor (not sevenths: \
+                 the scale has 5 notes, not 7)"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_ride_kit_keeps_time_on_the_ride_and_comps_on_the_snare() {
+        // The same poem as `the_layer_chooses_the_instrument`: a regular stanza and a ragged one.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let style = Style::parse("+++\nkit = \"ride\"\nbank = \"r8\"\n+++").unwrap();
+        let text = render(source, &style);
+        let drums: Vec<&str> = text.lines().filter(|l| l.starts_with("  s(")).collect();
+        assert!(
+            drums.iter().any(|l| l.contains("rd")),
+            "the foundation: {text}"
+        );
+        assert!(
+            drums.iter().any(|l| l.contains("sd")),
+            "the flourish: {text}"
+        );
+        assert!(
+            !drums.iter().any(|l| l.contains("bd") || l.contains("hh")),
+            "{text}"
+        );
+        assert!(
+            drums.iter().all(|l| l.contains(".bank(\"RolandR8\")")),
+            "{text}"
+        );
+        // Same layers, same steps: only the sound's name moved.
+        let machine = render(source, &Style::default());
+        let skeleton = |text: &str| -> Vec<String> {
+            text.lines()
+                .filter(|l| l.starts_with("  s("))
+                .map(|l| argument(l, "s").replace("rd", "bd").replace("sd", "hh"))
+                .collect()
+        };
+        assert_eq!(skeleton(&text), skeleton(&machine));
     }
 
     #[test]
