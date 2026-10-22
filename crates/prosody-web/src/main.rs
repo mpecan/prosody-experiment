@@ -20,7 +20,7 @@ use prosody_core::lower::{self, Analyses};
 use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
-use prosody_emit::style::{BANKS, SYNTHS};
+use prosody_emit::style::{BANKS, PRESETS as PALETTES, SOUNDFONTS, SYNTHS};
 use prosody_emit::{Backend as _, Scale, Strudel, Style};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
@@ -51,11 +51,21 @@ fn page() -> Result<String> {
         })
         .collect();
 
+    let instruments: Vec<&str> = SYNTHS.iter().chain(SOUNDFONTS).copied().collect();
+    let palettes: Vec<String> = PALETTES
+        .iter()
+        .filter_map(|name| {
+            Style::preset(name)
+                .map(|style| format!("{}:{}", json_string(name), palette_json(&style)))
+        })
+        .collect();
+
     Ok(include_str!("index.html")
         .replace("__PRESETS__", &presets_json()?)
+        .replace("__PALETTES__", &format!("{{{}}}", palettes.join(",")))
         .replace("__SCALES__", &list(&scales))
         .replace("__BANKS__", &list(BANKS))
-        .replace("__SYNTHS__", &list(SYNTHS))
+        .replace("__INSTRUMENTS__", &list(&instruments))
         .replace("__MAPPINGS__", &format!("[{}]", mappings.join(",")))
         .replace("__SEED_POEM__", &json_string(SEED)))
 }
@@ -123,25 +133,40 @@ fn presets_json() -> Result<String> {
         let poem = Poem::parse((*text).to_owned()).with_context(|| format!("preset {name}"))?;
         let style = Style::parse_optional(poem.frontmatter().and_then(|s| s.text(poem.source())))
             .with_context(|| format!("preset {name}'s palette"))?;
-        let fields = style.describe();
-        let field = |key: &str| fields.get(key).cloned().unwrap_or_default();
-        let tempo = field("tempo_range");
-        let (low, high) = tempo.split_once("..").unwrap_or(("110", "130"));
         presets.push(format!(
-            "{{\"name\":{},\"label\":{},\"poem\":{},\"palette\":{{\"scale\":{},\"root\":{},\"bank\":{},\"synth\":{},\"low\":{},\"high\":{},\"swing\":{}}}}}",
+            "{{\"name\":{},\"label\":{},\"poem\":{},\"palette\":{}}}",
             json_string(name),
             json_string(label),
             json_string(body_of(text)),
-            json_string(&field("scale")),
-            json_string(&root_label(&field("root"))),
-            json_string(&field("bank")),
-            json_string(&field("synth")),
-            json_string(low),
-            json_string(high),
-            json_string(&field("swing")),
+            palette_json(&style),
         ));
     }
     Ok(format!("[{}]", presets.join(",")))
+}
+
+/// A palette as the page's controls take it: one string per control, keyed by the control's id,
+/// which is the header key — except the tempo window, which is two boxes, and the root, which the
+/// menu spells `C#` where the debug view writes `cs`.
+///
+/// Built from [`Style::describe`], which writes every value in header units, so a field added to
+/// the style reaches the page without this function changing.
+fn palette_json(style: &Style) -> String {
+    let fields: Vec<String> = style
+        .describe()
+        .into_iter()
+        .flat_map(|(key, value)| match key {
+            "tempo_range" => {
+                let (low, high) = value.split_once("..").unwrap_or(("110", "130"));
+                vec![
+                    format!("\"low\":{}", json_string(low)),
+                    format!("\"high\":{}", json_string(high)),
+                ]
+            }
+            "root" => vec![format!("\"root\":{}", json_string(&root_label(&value)))],
+            _ => vec![format!("{}:{}", json_string(key), json_string(&value))],
+        })
+        .collect();
+    format!("{{{}}}", fields.join(","))
 }
 
 /// A root as the page's menu spells it: `cs` → `C#`.
@@ -198,6 +223,9 @@ fn main() -> Result<()> {
     server::serve(port, move |request| {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/") => Response::html(rendered.clone()),
+            ("GET", "/strudel-globals.mjs") => {
+                Response::javascript(include_str!("strudel-globals.mjs").to_owned())
+            }
             ("POST", "/pattern") => compile(request, &Output::Pattern),
             ("POST", "/explain") => compile(request, &Output::Explain),
             ("POST", "/score") => compile(request, &Output::Score),
@@ -240,9 +268,31 @@ fn compile(request: &Request, output: &Output) -> Response {
     }
 }
 
+/// The palette keys the page sends that are names, written as TOML strings.
+const NAMED_KEYS: &[&str] = &["scale", "root", "bank", "bass", "melody"];
+
+/// The palette keys the page sends that are numbers, in header units.
+const NUMBER_KEYS: &[&str] = &[
+    "swing",
+    "reverb",
+    "room_size",
+    "delay",
+    "high_cut",
+    "drive",
+    "compress",
+    "humanise",
+    "drums_gain",
+    "bass_gain",
+    "melody_gain",
+];
+
 /// The style header the controls describe.
+///
+/// Only what the request names is written, so whatever it leaves out takes [`Style::default`]'s
+/// value — the defaults live in one place, not here as well. Every value is validated by
+/// [`Style::parse`] like any header's; this only quotes names and refuses numbers that are not
+/// numbers, so a malformed one falls back rather than breaking the header around it.
 fn header(request: &Request) -> String {
-    let value = |name: &str, fallback: &str| request.param(name).unwrap_or(fallback).to_owned();
     let number = |name: &str, fallback: u16| {
         request
             .param(name)
@@ -255,15 +305,23 @@ fn header(request: &Request) -> String {
     // is above the high one. Ordering them here beats refusing to compile mid-edit.
     let (low, high) = (low.min(high), low.max(high));
 
-    format!(
-        "+++\n[style]\nscale = \"{}\"\nroot = \"{}\"\ntempo_range = [{low}, {high}]\n\
-         swing = {}\nbank = \"{}\"\nsynth = \"{}\"\n+++\n",
-        value("scale", "minor"),
-        value("root", "C"),
-        f64::from(number("swing", 0).min(100)) / 100.0,
-        value("bank", "tr909"),
-        value("synth", "triangle"),
-    )
+    let mut out = format!("+++\n[style]\ntempo_range = [{low}, {high}]\n");
+    for key in NAMED_KEYS {
+        if let Some(value) = request.param(key) {
+            let _ = writeln!(out, "{key} = {}", json_string(value));
+        }
+    }
+    for key in NUMBER_KEYS {
+        if let Some(value) = request
+            .param(key)
+            .and_then(|given| given.parse::<f64>().ok())
+            .filter(|given| given.is_finite())
+        {
+            let _ = writeln!(out, "{key} = {value}");
+        }
+    }
+    out.push_str("+++\n");
+    out
 }
 
 /// The mappings the request leaves on: all of them, less those named in `off` (comma-separated).
@@ -417,8 +475,19 @@ mod tests {
         for name in prosody_emit::style::BANKS
             .iter()
             .chain(prosody_emit::style::SYNTHS)
+            .chain(prosody_emit::style::SOUNDFONTS)
         {
-            assert!(html.contains(name), "{name} missing");
+            assert!(html.contains(&format!("\"{name}\"")), "{name} missing");
+        }
+        // Every named palette, with its values, for the sound menu.
+        for name in prosody_emit::style::PRESETS {
+            assert!(
+                html.contains(&format!("\"{name}\":{{")),
+                "palette {name} missing"
+            );
+        }
+        for placeholder in ["__PALETTES__", "__INSTRUMENTS__", "__PRESETS__"] {
+            assert!(!html.contains(placeholder), "{placeholder} left unfilled");
         }
         assert!(
             !html.contains("__SCALES__"),
@@ -552,25 +621,95 @@ mod tests {
     #[test]
     fn a_preset_brings_its_palette_to_the_controls() {
         let json = super::presets_json().unwrap();
-        // The Tyger's header, as the controls spell it — and its poem without the header.
-        assert!(
-            json.contains(
-                "\"palette\":{\"scale\":\"phrygian_dominant\",\"root\":\"D\",\"bank\":\"tr909\",\
-                 \"synth\":\"karplus\",\"low\":\"124\",\"high\":\"132\",\"swing\":\"8\"}"
-            ),
-            "{json}"
-        );
+        // The Tyger's header, as the controls spell it — and its poem without the header. Its
+        // `synth = "karplus"` sets both pitched instruments; the mix is the default preset's.
+        let tyger = json
+            .split("{\"name\":")
+            .find(|preset| preset.starts_with("\"blake-tyger\""))
+            .unwrap();
+        for field in [
+            "\"scale\":\"phrygian_dominant\"",
+            "\"root\":\"D\"",
+            "\"bank\":\"tr909\"",
+            "\"bass\":\"karplus\"",
+            "\"melody\":\"karplus\"",
+            "\"low\":\"124\"",
+            "\"high\":\"132\"",
+            "\"swing\":\"0.08\"",
+            "\"reverb\":\"0.25\"",
+            "\"humanise\":\"0.20\"",
+        ] {
+            assert!(tyger.contains(field), "{field} in {tyger}");
+        }
         assert!(
             json.contains("\"poem\":\"Tyger Tyger, burning bright,"),
             "{json}"
         );
         // A poem with no header takes the defaults.
         assert!(
-            json.contains("\"scale\":\"minor\",\"root\":\"C\""),
+            json.contains("\"root\":\"C\",\"scale\":\"minor\""),
             "{json}"
         );
         assert_eq!(super::root_label("cs"), "C#");
         assert_eq!(super::root_label("a"), "A");
+    }
+
+    #[test]
+    fn the_controls_write_a_header_the_style_reads_back() {
+        // Every control's value, in header units, must arrive in the palette — a key the header
+        // dropped would leave the page showing one palette and playing another.
+        let warm = prosody_emit::Style::preset("warm").unwrap();
+        let fields = warm.describe();
+        let mut query: Vec<(String, String)> = fields
+            .iter()
+            .filter(|(key, _)| !matches!(**key, "tempo_range" | "root"))
+            .map(|(key, value)| ((*key).to_owned(), value.clone()))
+            .collect();
+        query.push(("root".to_owned(), "C".to_owned()));
+        let pairs: Vec<(&str, &str)> = query
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        let header = super::header(&request(&pairs, ""));
+        assert_eq!(
+            prosody_emit::Style::parse(&header).unwrap(),
+            warm,
+            "{header}"
+        );
+
+        // A control the request leaves out takes the default; a number that is not one falls
+        // back rather than breaking the header around it.
+        let partial = super::header(&request(&[("reverb", "lots"), ("delay", "0.5")], ""));
+        let style = prosody_emit::Style::parse(&partial).unwrap();
+        assert_eq!(style.mix().delay().hundredths(), 50);
+        assert_eq!(
+            style.mix().reverb(),
+            prosody_emit::Style::default().mix().reverb()
+        );
+        // A name is quoted, so it cannot write a second key.
+        let sneaky = super::header(&request(&[("bank", "tr909\"\nscale = \"lydian")], ""));
+        assert!(prosody_emit::Style::parse(&sneaky).is_err(), "{sneaky}");
+    }
+
+    #[test]
+    fn the_soundfont_shim_is_served_as_a_module() {
+        // The import map points `@strudel/core` and `@strudel/webaudio` here; a 404 or a text
+        // MIME type would leave every soundfont unregistered and the melody silent.
+        let html = page().unwrap();
+        assert!(
+            html.contains("\"@strudel/webaudio\": \"/strudel-globals.mjs\""),
+            "import map"
+        );
+        let shim = include_str!("strudel-globals.mjs");
+        for name in [
+            "registerSound",
+            "getAudioContext",
+            "Pattern",
+            "noteToMidi",
+            "startPresetNote",
+        ] {
+            assert!(shim.contains(name), "{name}");
+        }
     }
 
     #[test]

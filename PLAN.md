@@ -336,6 +336,69 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 
 ## Log
 
+### Sound and voice, step 1 — it sounds like instruments now (palette only)
+
+The user listens through the web page. Making it sound good there turned up two defects first,
+both invisible from the text and both fixed here:
+
+- **The drums were silent on the page.** `initStrudel()` loads no samples, so every
+  `.bank("RolandTR909")` asked for a sound nobody had registered (`sound RolandTR909_bd not
+  found`, in the console of the unchanged page). The page now loads the drum-machine map
+  strudel.cc uses. Strudel's effect worklets also loaded only on the *next* mousedown after Play,
+  so the first play could not build `.crush`; the page now loads them itself.
+- **Stacked lines multiplied events.** Where a layer sounds two lines in one bar (a stanza looping
+  under the next, a held or call lane), the emitter stacked them with `,` inside every pattern.
+  Strudel matches each chained parameter pattern to the events by time, so each event met both
+  lines' gains, cutoffs, crushes… and became one event per combination: 2 events → 8 with two
+  parameters (checked in the browser), 32 hits per syllable on a drum layer, and a bass bar that
+  peaked at 12× full scale. Events not in the score are I4 broken. Each simultaneous line is now
+  its own stack element (`Lane`, labelled `(lane 2)` and so on), so every parameter meets exactly
+  one event. Verified on the corpus: the written drum hits and notes are the same count as before
+  in every snapshot, only split across lanes; a test pins hits = `sounded(score)`.
+
+Then the palette (`prosody_emit::style`, I3 untouched — the score is not readable from there):
+
+- **Instruments by role.** The pitched layer splits by `PitchSource` into the melody (rhyme
+  words) and the bass (stressed foundation vowels), each with its own instrument: any synth name
+  or a curated list of General MIDI soundfonts. The melody moved up two octaves (MIDI 60; it had
+  sat with the bass at 36). `karplus`, `fm` and `physical` now play the recorded instrument
+  nearest the model (they were all bare oscillators); the waveforms stay oscillators. The page
+  loads `@strudel/soundfonts@1.3.0` through an import map that answers its `@strudel/core` and
+  `@strudel/webaudio` imports from the Strudel already on the page (`strudel-globals.mjs`) — a
+  second copy from a CDN would register the fonts where the playing Strudel never looks.
+- **A mix.** `reverb`, `room_size`, `delay` (melody), `high_cut`, `drive`, `compress`, and a level
+  per role, all range-checked at the boundary. `high_cut` scales §4.4's brightness range instead
+  of clipping it, and `reverb` raises the floor of §4.4's dry/wet rise, so the mappings keep their
+  direction under every palette. A master stage on the page (not palette) catches the sum: a
+  gentle compressor, then a soft clipper (a `WaveShaperNode`, transparent below 0.6) whose output
+  cannot pass 0.95. Levels were set by measuring peaks in the browser, not by ear; see the review
+  note below. A role's level is never zero (`0.1..=2`), so the palette cannot mute a role — a
+  silent event is as untraceable as one behind a closed filter.
+- **Review fixes.** The first levels (0.50/0.55/1.30) were tuned on a measurement taken too early
+  in the piece. Measured over twelve seconds they peaked at 1.6 (opening poem) to 2.7 (the Wilde
+  villanelle, which sounds the most lines at once) before the master, and the page's
+  `DynamicsCompressor` limiter let drum onsets through above full scale (1.18 on Wilde) — its
+  2 ms attack is too slow and Chrome adds makeup gain after it. The soft clipper is now the
+  ceiling, and the default levels are 0.28/0.32/0.75 (warm 0.24/0.24/0.60), which bring each role
+  to about 0.5–0.6 alone on the opening poem. The register a role plays in (bass 36, melody 60) is
+  fixed in the Strudel backend; the docs had called it palette, which no header key could set.
+- **Humanise.** Each syllable up to 30 ms late and 30% softer at `humanise = 1` (`.nudge`,
+  `.velocity`), from its line's voice seed under a `humanise` child, restarted per bar. Strudel
+  honours `nudge` only for samples, so the page wraps every other sound to honour it too.
+  Property tests: reproducible; an edit in one stanza leaves every line of another straying bit
+  for bit as before; strays scale exactly with the amount and stay in range.
+- **Presets.** `preset = "default" | "warm" | "raw"` in a header, and a **Sound** menu on the
+  page. `raw` is the old palette (triangle, dry, on the grid) so the change can be heard against
+  it. A headerless poem gets `default`.
+
+The I3 arrangement test now compares, per layer, the *set* of pattern shapes, since `humanise = 0`
+leaves `.nudge` and `.velocity` out; every pattern is laid on its layer's grid, so a palette can
+add one without adding a shape. Its palette generator now varies every new key.
+
+Open for listening: whether default or warm is the better starting point; whether the bass, which
+sounds on every stressed foundation syllable, is too busy against the melody now that both are
+audible; and whether 30 ms is too much stray at the top of the range.
+
 ### Auditioning the candidates — A/B on the web page
 
 The user asked for a way to evaluate each candidate mapping in the frontend, and to keep it as a

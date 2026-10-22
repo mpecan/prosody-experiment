@@ -206,10 +206,16 @@ fn i3_but_the_style_does_reach_the_output() {
 /// rests are. That is what I3 protects, and it is the comparison the earlier tests were missing —
 /// five separate mutations letting the style delete events, reorder the melody, silence bars, or
 /// double the tempo all passed a suite that only checked substrings and inequality.
-fn arrangement(text: &str) -> Vec<String> {
+///
+/// Per layer, the *set* of distinct shapes among its patterns. A palette may add a parameter
+/// pattern — `humanise` adds `.nudge` and `.velocity`, and zero leaves them out — but every one
+/// is laid on the layer's own grid, so it adds no shape the layer did not already have. A palette
+/// that moved, added or dropped a single event would change some pattern's shape and so the set.
+fn arrangement(text: &str) -> Vec<std::collections::BTreeSet<String>> {
     text.lines()
         .filter(|line| line.starts_with("  s(") || line.starts_with("  note("))
         .map(|line| {
+            let mut shapes = std::collections::BTreeSet::new();
             let mut masked = String::new();
             let mut in_pattern = false;
             for part in line.split('"') {
@@ -235,11 +241,11 @@ fn arrangement(text: &str) -> Vec<String> {
                         masked.push_str(&collapsed);
                         masked.push(' ');
                     }
-                    masked.push('|');
+                    shapes.insert(std::mem::take(&mut masked));
                 }
                 in_pattern = !in_pattern;
             }
-            masked
+            shapes
         })
         .collect()
 }
@@ -305,9 +311,9 @@ fn i3_the_notes_move_but_the_degrees_do_not() {
     };
     assert_ne!(notes(&a), notes(&b), "different scales, different notes");
 
-    // Hand-worked from the two palettes. The third octave starts at semitone 36.
-    //   D phrygian dominant: root D = 2, degree 0 = 0 semitones  -> 38
-    //   A lydian:            root A = 9, degree 0 = 0 semitones  -> 45
+    // Hand-worked from the two palettes. The melody's octave starts at MIDI 60.
+    //   D phrygian dominant: root D = 2, degree 0 = 0 semitones  -> 60 + 2 = 62
+    //   A lydian:            root A = 9, degree 0 = 0 semitones  -> 60 + 9 = 69
     let first = |text: &str| {
         notes(text)
             .split('"')
@@ -319,8 +325,8 @@ fn i3_the_notes_move_but_the_degrees_do_not() {
             .unwrap_or_default()
             .to_owned()
     };
-    assert_eq!(first(&a), "38", "{}", notes(&a));
-    assert_eq!(first(&b), "45", "{}", notes(&b));
+    assert_eq!(first(&a), "62", "{}", notes(&a));
+    assert_eq!(first(&b), "69", "{}", notes(&b));
 }
 
 #[test]
@@ -467,13 +473,30 @@ fn palette() -> impl proptest::strategy::Strategy<Value = String> {
         0_u8..100,
         proptest::sample::select(prosody_emit::style::BANKS.to_vec()),
         proptest::sample::select(prosody_emit::style::SYNTHS.to_vec()),
+        proptest::sample::select(prosody_emit::style::SOUNDFONTS.to_vec()),
+        proptest::sample::select(prosody_emit::style::PRESETS.to_vec()),
+        // reverb, delay, drive, compress, humanise — zero included, which leaves effects out.
+        proptest::collection::vec(0_u8..=100, 5),
+        (1_u8..=100, 1000_u16..=20000, 10_u8..=200),
     )
-        .prop_map(|(scale, root, low, swing, bank, synth)| {
-            format!(
-                "+++\n[style]\nscale = \"{scale}\"\nroot = \"{root}\"\n\
-                 tempo_range = [{low}, {}]\nswing = {}\nbank = \"{bank}\"\nsynth = \"{synth}\"\n+++\n",
-                low + 6,
-                f64::from(swing) / 100.0,
-            )
-        })
+        .prop_map(
+            |(scale, root, low, swing, bank, synth, melody, preset, amounts, (room, cut, level))| {
+                let amount = |i: usize| f64::from(amounts[i]) / 100.0;
+                format!(
+                    "+++\n[style]\npreset = \"{preset}\"\nscale = \"{scale}\"\nroot = \"{root}\"\n\
+                     tempo_range = [{low}, {}]\nswing = {}\nbank = \"{bank}\"\nsynth = \"{synth}\"\n\
+                     melody = \"{melody}\"\nreverb = {}\ndelay = {}\ndrive = {}\ncompress = {}\n\
+                     humanise = {}\nroom_size = {}\nhigh_cut = {cut}\nbass_gain = {}\n+++\n",
+                    low + 6,
+                    f64::from(swing) / 100.0,
+                    amount(0),
+                    amount(1),
+                    amount(2),
+                    amount(3),
+                    amount(4),
+                    f64::from(room) / 10.0,
+                    f64::from(level) / 100.0,
+                )
+            },
+        )
 }

@@ -190,6 +190,24 @@ synth       = "karplus"       # or fm, subtractive, physical
 
 Never structure. See invariant I3.
 
+*Extended 2026-10-22 (sound and voice, step 1).* The palette also names an instrument for each
+pitched role — `bass` and `melody`, a synth name above or a General MIDI soundfont (`gm_epiano1`,
+`gm_acoustic_bass`, …); `synth` still sets both — and a mix, every amount range-checked at the
+boundary: `reverb`, `room_size`, `delay` (melody only), `high_cut` (the top of §4.4's brightness
+range, scaled rather than clipped), `drive`, `compress`, `humanise`, and a level per role
+(`drums_gain`, `bass_gain`, `melody_gain`). `preset = "default" | "warm" | "raw"` starts from a
+named palette. A role's level is never zero (`0.1..=2`): a muted role would leave its events in
+the score and inaudible, which I4 forbids as surely as a fully closed filter. The register a role
+plays in is *not* a palette value: the Strudel backend fixes the bass at MIDI 36 and the rhyme
+melody two octaves up at 60. It would be palette by nature (it moves no event), but no header key
+sets it yet.
+
+`humanise` is the one palette value that draws randomness, and it obeys I2: each syllable's stray
+(up to 30 ms late, up to 30% softer, scaled by the amount) comes from its *line's* voice seed under
+its own child stream, restarted per bar, so a line strays identically wherever it sounds and an
+edit elsewhere cannot move it. It changes when an event sounds by milliseconds and how loud; it
+cannot add, remove or reorder an event.
+
 ---
 
 ## 6. Invariants (defend these)

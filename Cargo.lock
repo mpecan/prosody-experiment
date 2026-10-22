@@ -322,6 +322,7 @@ dependencies = [
  "prosody-core",
  "prosody-lexicon",
  "prosody-lts",
+ "rand_core 0.10.1",
  "thiserror",
  "toml",
 ]

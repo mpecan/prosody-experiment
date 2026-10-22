@@ -173,6 +173,42 @@ pub const SYNTHS: &[&str] = &[
     "triangle",
 ];
 
+/// Every recorded instrument a pitched voice may name: General MIDI soundfonts.
+///
+/// Named as Strudel names them, because unlike [`SYNTHS`] there is nothing to translate — a GM
+/// program *is* a palette word with one meaning. The list is curated rather than complete: basses
+/// for the vowel-height bass, keys and mallets for the rhyme melody (`SPEC.md` §4.5 makes every
+/// rhyme word a struck note, so struck instruments suit it), a plucked string and a pad. Adding to
+/// it is palette work (`CLAUDE.md` §10); every name here must exist in `@strudel/soundfonts`' GM
+/// table, or it plays silence.
+pub const SOUNDFONTS: &[&str] = &[
+    "gm_acoustic_bass",
+    "gm_electric_bass_finger",
+    "gm_electric_bass_pick",
+    "gm_fretless_bass",
+    "gm_synth_bass_1",
+    "gm_synth_bass_2",
+    "gm_epiano1",
+    "gm_epiano2",
+    "gm_piano",
+    "gm_vibraphone",
+    "gm_marimba",
+    "gm_celesta",
+    "gm_music_box",
+    "gm_kalimba",
+    "gm_glockenspiel",
+    "gm_acoustic_guitar_nylon",
+    "gm_orchestral_harp",
+    "gm_pad_warm",
+    "gm_string_ensemble_1",
+];
+
+/// Every named palette — a starting point a header or the page can pick with `preset = "…"`.
+///
+/// A preset sets only the sound and the mix; scale, root, tempo window, swing and bank are left
+/// as they were, so choosing one never moves a note. See [`Style::preset`].
+pub const PRESETS: &[&str] = &["default", "warm", "raw"];
+
 /// A scale: which semitones, relative to the root, its degrees take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Scale {
@@ -376,7 +412,9 @@ pub struct Style {
     tempo_range: TempoRange,
     swing: Swing,
     bank: Named,
-    synth: Named,
+    bass: Named,
+    melody: Named,
+    mix: Mix,
 }
 
 /// How much to delay every second subdivision, in hundredths.
@@ -394,14 +432,211 @@ impl Swing {
     }
 }
 
+/// An amount between nothing and all of it, in hundredths: `0.35` in the header is `35`.
+///
+/// Integer for the same reason as [`Swing`]: amounts are compared (zero disables an effect), and
+/// `CLAUDE.md` §4 keeps floats out of control flow. A float exists only on the way out, through
+/// [`Amount::as_f64`] and `fmt_param`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Amount(u16);
+
+impl Amount {
+    /// Hundredths.
+    #[must_use]
+    pub const fn hundredths(self) -> u16 {
+        self.0
+    }
+
+    /// Whether the amount is zero — the effect is off.
+    #[must_use]
+    pub const fn is_off(self) -> bool {
+        self.0 == 0
+    }
+
+    /// As a fraction, for output only.
+    #[must_use]
+    pub fn as_f64(self) -> f64 {
+        f64::from(self.0) / 100.0
+    }
+
+    fn describe(self) -> String {
+        format!("{}.{:02}", self.0 / 100, self.0 % 100)
+    }
+}
+
+/// The mix: how the instruments sit together. Palette, every field — none of it decides an event.
+///
+/// Each field is validated to a range at the IO boundary ([`Style::parse`]), so a backend reads
+/// them without re-checking (`CLAUDE.md` §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Mix {
+    reverb: Amount,
+    room_size: u8,
+    delay: Amount,
+    high_cut: u16,
+    drive: Amount,
+    compress: Amount,
+    humanise: Amount,
+    drums_gain: Amount,
+    bass_gain: Amount,
+    melody_gain: Amount,
+}
+
+impl Mix {
+    /// How much of everything is sent to the reverb, `0..=1`. The drums' send also rises with a
+    /// word's distinctiveness (`SPEC.md` §4.4); this is the floor the mapping stands on.
+    #[must_use]
+    pub const fn reverb(self) -> Amount {
+        self.reverb
+    }
+
+    /// The reverb's length, in tenths of a second, `1..=100`.
+    #[must_use]
+    pub const fn room_size_tenths(self) -> u8 {
+        self.room_size
+    }
+
+    /// How much of the melody is sent to an echo, `0..=1`.
+    #[must_use]
+    pub const fn delay(self) -> Amount {
+        self.delay
+    }
+
+    /// The brightest a filter opens, in hertz, `1000..=20000` — the top of `SPEC.md` §4.4's
+    /// brightness range. Lowering it scales the range rather than clipping it, so a duller palette
+    /// still makes a striking word brighter than a plain one.
+    #[must_use]
+    pub const fn high_cut(self) -> u16 {
+        self.high_cut
+    }
+
+    /// Soft saturation on the drums and bass, `0..=1`.
+    #[must_use]
+    pub const fn drive(self) -> Amount {
+        self.drive
+    }
+
+    /// Compression on every layer, `0..=1`; zero is none.
+    #[must_use]
+    pub const fn compress(self) -> Amount {
+        self.compress
+    }
+
+    /// How far each event strays from the grid and from its stress's gain, `0..=1`; zero is a
+    /// machine. The strays come from each line's own seed (invariant I2).
+    #[must_use]
+    pub const fn humanise(self) -> Amount {
+        self.humanise
+    }
+
+    /// The drums' level, `0.1..=2` — never zero; see `read_level`.
+    #[must_use]
+    pub const fn drums_gain(self) -> Amount {
+        self.drums_gain
+    }
+
+    /// The bass's level, `0.1..=2` — never zero; see `read_level`.
+    #[must_use]
+    pub const fn bass_gain(self) -> Amount {
+        self.bass_gain
+    }
+
+    /// The melody's level, `0.1..=2` — never zero; see `read_level`.
+    #[must_use]
+    pub const fn melody_gain(self) -> Amount {
+        self.melody_gain
+    }
+}
+
+/// The sound and mix of a named preset: `(bass, melody, mix)`.
+///
+/// Three, so that the before and after of this palette can be heard side by side:
+///
+/// - **default** — what a poem with no header gets: an electric-piano melody over an acoustic
+///   bass, a modest room, a little echo on the melody, light compression and a small human stray.
+/// - **warm** — softer and wider: vibraphone over fretless bass, a long room, more echo, a lower
+///   high cut, a touch of saturation, and more stray.
+/// - **raw** — the palette as it was before soundfonts and a mix existed: triangle oscillators,
+///   dry, on the grid. Kept so the difference stays audible, not as a recommendation.
+///
+/// The levels were set by measurement, not by ear — nobody could listen where they were set.
+/// Measured in headless Chromium on Strudel's summed output before the page's master stage, as the
+/// peak over twelve seconds, with one role at unity and the others turned right down: on the
+/// opening poem the drums peaked at 2.10, the bass at 1.60 and the melody at 0.76; on the Wilde
+/// villanelle, which sounds the most lines at once, 3.49, 1.62 and 1.37. The drum-machine samples
+/// are normalised loud and several lines' hits coincide; the bass sounds on every stressed
+/// foundation syllable; a soundfont note peaks well below full scale. The levels bring each role's
+/// peak on the opening poem to roughly 0.5–0.6, so that the rhyme words (`SPEC.md` §4.5), the
+/// sparsest and most traceable events, are as present as the pulse under them. Summed, the
+/// default palette then peaks near 1.0 on the opening poem and higher on the densest poems, which
+/// the page's master stage (a gentle compressor, then a soft clipper whose output cannot pass
+/// 0.95) catches. Warm's longer room, echo and drive add up, so its levels sit lower again.
+///
+/// An earlier set (0.50, 0.55, 1.30) was tuned against a measurement taken too early in the piece
+/// and peaked at 1.6 to 2.9 before the master; the compressor alone let drum onsets through above
+/// full scale.
+const fn preset_sound(name: &str) -> Option<(&'static str, &'static str, Mix)> {
+    match name.as_bytes() {
+        b"default" => Some((
+            "gm_acoustic_bass",
+            "gm_epiano1",
+            Mix {
+                reverb: Amount(25),
+                room_size: 20,
+                delay: Amount(15),
+                high_cut: 4400,
+                drive: Amount(0),
+                compress: Amount(30),
+                humanise: Amount(20),
+                drums_gain: Amount(28),
+                bass_gain: Amount(32),
+                melody_gain: Amount(75),
+            },
+        )),
+        b"warm" => Some((
+            "gm_fretless_bass",
+            "gm_vibraphone",
+            Mix {
+                reverb: Amount(45),
+                room_size: 40,
+                delay: Amount(30),
+                high_cut: 3000,
+                drive: Amount(15),
+                compress: Amount(40),
+                humanise: Amount(40),
+                drums_gain: Amount(24),
+                bass_gain: Amount(24),
+                melody_gain: Amount(60),
+            },
+        )),
+        b"raw" => Some((
+            "triangle",
+            "triangle",
+            Mix {
+                reverb: Amount(0),
+                room_size: 20,
+                delay: Amount(0),
+                high_cut: 4400,
+                drive: Amount(0),
+                compress: Amount(0),
+                humanise: Amount(0),
+                drums_gain: Amount(100),
+                bass_gain: Amount(100),
+                melody_gain: Amount(100),
+            },
+        )),
+        _ => None,
+    }
+}
+
 impl Default for Style {
-    /// The palette a poem with no header gets.
+    /// The palette a poem with no header gets: the `default` preset.
     ///
     /// A poem is a complete score on its own; the header only recolours it. Defaulting rather than
     /// refusing is what makes that true — and `SPEC.md` §7.6 wants the cheapest possible audition
     /// path, which a mandatory header would not be.
     fn default() -> Self {
-        Self {
+        let mut style = Self {
             scale: Scale::MINOR,
             root: Note(0),
             tempo_range: TempoRange {
@@ -410,8 +645,23 @@ impl Default for Style {
             },
             swing: Swing(0),
             bank: Named { name: "tr909" },
-            synth: Named { name: "triangle" },
-        }
+            bass: Named { name: "triangle" },
+            melody: Named { name: "triangle" },
+            mix: Mix {
+                reverb: Amount(0),
+                room_size: 20,
+                delay: Amount(0),
+                high_cut: 4400,
+                drive: Amount(0),
+                compress: Amount(0),
+                humanise: Amount(0),
+                drums_gain: Amount(100),
+                bass_gain: Amount(100),
+                melody_gain: Amount(100),
+            },
+        };
+        style.apply_preset("default");
+        style
     }
 }
 
@@ -446,16 +696,50 @@ impl Style {
         self.bank
     }
 
-    /// The synth pitched voices play.
+    /// The instrument the bass plays — one of [`SYNTHS`] or [`SOUNDFONTS`].
     #[must_use]
-    pub const fn synth(&self) -> Named {
-        self.synth
+    pub const fn bass(&self) -> Named {
+        self.bass
+    }
+
+    /// The instrument the rhyme melody plays — one of [`SYNTHS`] or [`SOUNDFONTS`].
+    #[must_use]
+    pub const fn melody(&self) -> Named {
+        self.melody
+    }
+
+    /// The mix.
+    #[must_use]
+    pub const fn mix(&self) -> Mix {
+        self.mix
+    }
+
+    /// A named palette over the default scale, root, tempo and bank; `None` for an unknown name.
+    #[must_use]
+    pub fn preset(name: &str) -> Option<Self> {
+        let mut style = Self::default();
+        style.apply_preset(name).then_some(style)
+    }
+
+    fn apply_preset(&mut self, name: &str) -> bool {
+        let Some((bass, melody, mix)) = preset_sound(name) else {
+            return false;
+        };
+        self.bass = Named { name: bass };
+        self.melody = Named { name: melody };
+        self.mix = mix;
+        true
     }
 
     /// Reads a style header — the whole `+++` block, delimiters and all.
     ///
     /// Every value is validated here and nowhere else (`CLAUDE.md` §5). Unknown keys are ignored
     /// rather than refused, so a header written for a later version still plays.
+    ///
+    /// Three keys are applied before the rest, so that a header reads the same in any order:
+    /// `preset` first (a starting point), then `synth` (the older key, which sets both pitched
+    /// instruments at once), then everything else — so `bass` or `melody` overrides `synth`, and
+    /// any mix key overrides the preset.
     ///
     /// # Errors
     ///
@@ -488,23 +772,63 @@ impl Style {
             expected: expected.to_owned(),
         };
 
+        match table.get("preset") {
+            None => {}
+            Some(toml::Value::String(name)) => {
+                if !style.apply_preset(name) {
+                    return Err(StyleError::Unknown {
+                        kind: "preset".to_owned(),
+                        name: name.clone(),
+                        known: PRESETS.join(", "),
+                    });
+                }
+            }
+            Some(_) => return Err(wrong("preset", "a string")),
+        }
+        match table.get("synth") {
+            None => {}
+            Some(toml::Value::String(name)) => {
+                let synth = instrument("synth", name)?;
+                style.bass = synth;
+                style.melody = synth;
+            }
+            Some(_) => return Err(wrong("synth", "a string")),
+        }
+
         for (key, value) in table {
+            let mix = &mut style.mix;
             match (key.as_str(), value) {
                 ("scale", toml::Value::String(name)) => style.scale = Scale::parse(name)?,
                 ("root", toml::Value::String(name)) => style.root = Note::parse(name)?,
                 ("bank", toml::Value::String(name)) => {
                     style.bank = Named::parse("bank", name, BANKS)?;
                 }
-                ("synth", toml::Value::String(name)) => {
-                    style.synth = Named::parse("synth", name, SYNTHS)?;
+                ("bass", toml::Value::String(name)) => style.bass = instrument(key, name)?,
+                ("melody", toml::Value::String(name)) => style.melody = instrument(key, name)?,
+                ("swing", value) => {
+                    style.swing = Swing(narrow(read_scaled(key, value, 100.0, 0, 100)?));
                 }
-                ("swing", value) => style.swing = Swing(read_swing(value)?),
                 ("tempo_range", toml::Value::Array(bounds)) => {
                     style.tempo_range = read_tempo(bounds)?;
                 }
-                ("scale" | "root" | "bank" | "synth", _) => return Err(wrong(key, "a string")),
+                ("reverb", value) => mix.reverb = read_amount(key, value, 1)?,
+                ("delay", value) => mix.delay = read_amount(key, value, 1)?,
+                ("drive", value) => mix.drive = read_amount(key, value, 1)?,
+                ("compress", value) => mix.compress = read_amount(key, value, 1)?,
+                ("humanise", value) => mix.humanise = read_amount(key, value, 1)?,
+                ("drums_gain", value) => mix.drums_gain = read_level(key, value)?,
+                ("bass_gain", value) => mix.bass_gain = read_level(key, value)?,
+                ("melody_gain", value) => mix.melody_gain = read_level(key, value)?,
+                ("room_size", value) => {
+                    mix.room_size = narrow(read_scaled(key, value, 10.0, 1, 100)?);
+                }
+                ("high_cut", value) => mix.high_cut = read_scaled(key, value, 1.0, 1000, 20000)?,
+                ("scale" | "root" | "bank" | "bass" | "melody", _) => {
+                    return Err(wrong(key, "a string"));
+                }
                 ("tempo_range", _) => return Err(wrong(key, "a pair of numbers")),
-                // Unknown keys are palette this build has no opinion about yet.
+                // `preset` and `synth` were applied above. Unknown keys are palette this build has
+                // no opinion about yet.
                 _ => {}
             }
         }
@@ -521,8 +845,12 @@ impl Style {
     }
 
     /// Every field as a name-value pair, in a fixed order, for the debug view.
+    ///
+    /// Each value is written as the header would write it, so a described palette can be pasted
+    /// back into a header — which is how the page's preset menu fills its controls.
     #[must_use]
     pub fn describe(&self) -> BTreeMap<&'static str, String> {
+        let mix = self.mix;
         let mut fields = BTreeMap::new();
         fields.insert("scale", self.scale.name.to_owned());
         fields.insert("root", self.root.name().to_owned());
@@ -530,36 +858,90 @@ impl Style {
             "tempo_range",
             format!("{}..{}", self.tempo_range.low.0, self.tempo_range.high.0),
         );
-        fields.insert("swing", format!("{}", self.swing.0));
+        fields.insert("swing", Amount(u16::from(self.swing.0)).describe());
         fields.insert("bank", self.bank.get().to_owned());
-        fields.insert("synth", self.synth.get().to_owned());
+        fields.insert("bass", self.bass.get().to_owned());
+        fields.insert("melody", self.melody.get().to_owned());
+        fields.insert("reverb", mix.reverb.describe());
+        fields.insert(
+            "room_size",
+            format!("{}.{}", mix.room_size / 10, mix.room_size % 10),
+        );
+        fields.insert("delay", mix.delay.describe());
+        fields.insert("high_cut", format!("{}", mix.high_cut));
+        fields.insert("drive", mix.drive.describe());
+        fields.insert("compress", mix.compress.describe());
+        fields.insert("humanise", mix.humanise.describe());
+        fields.insert("drums_gain", mix.drums_gain.describe());
+        fields.insert("bass_gain", mix.bass_gain.describe());
+        fields.insert("melody_gain", mix.melody_gain.describe());
         fields
     }
 }
 
-/// Reads `swing = 0.12` or `swing = 0`, as hundredths.
-fn read_swing(value: &toml::Value) -> Result<u8, StyleError> {
+/// A pitched instrument: a synth name or a soundfont.
+fn instrument(key: &str, name: &str) -> Result<Named, StyleError> {
+    Named::parse(key, name, SYNTHS)
+        .or_else(|_| Named::parse(key, name, SOUNDFONTS))
+        .map_err(|_| StyleError::Unknown {
+            kind: key.to_owned(),
+            name: name.to_owned(),
+            known: format!("{}, {}", SYNTHS.join(", "), SOUNDFONTS.join(", ")),
+        })
+}
+
+/// A value already bounded to fit a `u8`.
+fn narrow(value: u16) -> u8 {
+    u8::try_from(value).unwrap_or(u8::MAX)
+}
+
+/// Reads an amount between zero and `max`, as hundredths.
+fn read_amount(key: &str, value: &toml::Value, max: u16) -> Result<Amount, StyleError> {
+    read_scaled(key, value, 100.0, 0, max * 100).map(Amount)
+}
+
+/// Reads a role's level, `0.1..=2`.
+///
+/// Never zero, for the reason the emitter never lets a palette close a filter completely: a role
+/// at zero would leave its events in the score and silent on the speaker, and an event nobody can
+/// hear is one that cannot be traced to its word (invariant I4). Turning a role down is palette;
+/// turning it off would be deciding which events exist, which is structure (I3).
+fn read_level(key: &str, value: &toml::Value) -> Result<Amount, StyleError> {
+    read_scaled(key, value, 100.0, 10, 200).map(Amount)
+}
+
+/// Reads a number, multiplies it by `scale`, rounds it once, and refuses it outside
+/// `low..=high` — so the value downstream is an integer and no float ever decides anything
+/// (`CLAUDE.md` §4). Integers and floats are both accepted: `swing = 0` and `swing = 0.12`.
+fn read_scaled(
+    key: &str,
+    value: &toml::Value,
+    scale: f64,
+    low: u16,
+    high: u16,
+) -> Result<u16, StyleError> {
     let wrong = || StyleError::Invalid {
-        key: "swing".to_owned(),
-        expected: "a number between 0 and 1".to_owned(),
+        key: key.to_owned(),
+        expected: format!(
+            "a number between {} and {}",
+            f64::from(low) / scale,
+            f64::from(high) / scale
+        ),
     };
-    let hundredths = match value {
-        toml::Value::Integer(0) => 0,
-        toml::Value::Integer(1) => 100,
-        toml::Value::Float(fraction) => {
-            if !(0.0..=1.0).contains(fraction) {
-                return Err(wrong());
-            }
-            // Rounded once, here, so the value downstream is an integer and no float ever decides
-            // anything (`CLAUDE.md` §4).
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // bounded 0..=100
-            {
-                (fraction * 100.0).round() as u8
-            }
-        }
+    let number = match value {
+        // Exact below 2^53, and anything that large is out of range regardless.
+        #[allow(clippy::cast_precision_loss)] // see above
+        toml::Value::Integer(whole) => *whole as f64,
+        toml::Value::Float(fraction) => *fraction,
         _ => return Err(wrong()),
     };
-    Ok(hundredths)
+    let scaled = (number * scale).round();
+    if !(f64::from(low)..=f64::from(high)).contains(&scaled) {
+        return Err(wrong());
+    }
+    // Bounded by `high`, a `u16`, on the line above; NaN fails `contains`.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // bounded above
+    Ok(scaled as u16)
 }
 
 /// Reads `tempo_range = [128, 134]`.
@@ -613,7 +995,9 @@ mod tests {
         assert_eq!(style.tempo_range().high().get(), 134);
         assert_eq!(style.swing(), Swing(12));
         assert_eq!(style.bank().get(), "tr909");
-        assert_eq!(style.synth().get(), "karplus");
+        // `synth` is the older key: it sets both pitched instruments.
+        assert_eq!(style.bass().get(), "karplus");
+        assert_eq!(style.melody().get(), "karplus");
     }
 
     #[test]
@@ -630,7 +1014,20 @@ mod tests {
         assert_eq!(style.tempo_range().high().get(), 130);
         assert_eq!(style.swing(), Swing(0), "no swing unless asked for");
         assert_eq!(style.bank().get(), "tr909");
-        assert_eq!(style.synth().get(), "triangle");
+        // The default preset: recorded instruments, a modest room, a small human stray.
+        assert_eq!(style.bass().get(), "gm_acoustic_bass");
+        assert_eq!(style.melody().get(), "gm_epiano1");
+        assert_eq!(style.mix().reverb().hundredths(), 25);
+        assert_eq!(style.mix().room_size_tenths(), 20);
+        assert_eq!(style.mix().delay().hundredths(), 15);
+        assert_eq!(style.mix().high_cut(), 4400);
+        assert!(style.mix().drive().is_off());
+        assert_eq!(style.mix().compress().hundredths(), 30);
+        assert_eq!(style.mix().humanise().hundredths(), 20);
+        assert_eq!(style.mix().drums_gain().hundredths(), 28);
+        assert_eq!(style.mix().bass_gain().hundredths(), 32);
+        assert_eq!(style.mix().melody_gain().hundredths(), 75);
+        assert_eq!(Some(style), Style::preset("default"));
     }
 
     #[test]
@@ -652,14 +1049,131 @@ mod tests {
         let described = Style::parse(HEADER).unwrap().describe();
         assert_eq!(
             described.keys().copied().collect::<Vec<_>>(),
-            vec!["bank", "root", "scale", "swing", "synth", "tempo_range"]
+            vec![
+                "bank",
+                "bass",
+                "bass_gain",
+                "compress",
+                "delay",
+                "drive",
+                "drums_gain",
+                "high_cut",
+                "humanise",
+                "melody",
+                "melody_gain",
+                "reverb",
+                "room_size",
+                "root",
+                "scale",
+                "swing",
+                "tempo_range"
+            ]
         );
         assert_eq!(described["scale"], "phrygian_dominant");
         assert_eq!(described["root"], "d");
         assert_eq!(described["tempo_range"], "128..134");
-        assert_eq!(described["swing"], "12");
+        assert_eq!(described["swing"], "0.12");
         assert_eq!(described["bank"], "tr909");
-        assert_eq!(described["synth"], "karplus");
+        assert_eq!(described["bass"], "karplus");
+        assert_eq!(described["melody"], "karplus");
+        assert_eq!(described["reverb"], "0.25");
+        assert_eq!(described["room_size"], "2.0");
+        assert_eq!(described["high_cut"], "4400");
+        assert_eq!(described["drums_gain"], "0.28");
+    }
+
+    #[test]
+    fn a_described_palette_reads_back_as_itself() {
+        use std::fmt::Write as _;
+
+        // The page fills its controls from `describe` and writes them back as a header, so the
+        // two must agree on every value — a field that read back differently would play one
+        // palette and show another.
+        for name in super::PRESETS {
+            let style = Style::preset(name).unwrap();
+            let mut header = String::from("+++\n");
+            for (key, value) in style.describe() {
+                let value = match key {
+                    "tempo_range" => format!("[{}]", value.replace("..", ", ")),
+                    "scale" | "bank" | "bass" | "melody" => format!("\"{value}\""),
+                    "root" => format!("\"{}\"", value.replace('s', "#").to_uppercase()),
+                    _ => value,
+                };
+                let _ = writeln!(header, "{key} = {value}");
+            }
+            header.push_str("+++");
+            assert_eq!(Style::parse(&header).unwrap(), style, "{name}:\n{header}");
+        }
+    }
+
+    #[test]
+    fn a_preset_sets_the_sound_and_a_key_overrides_it() {
+        let warm = Style::parse("+++\npreset = \"warm\"\n+++").unwrap();
+        assert_eq!(Some(warm.clone()), Style::preset("warm"));
+        assert_eq!(warm.melody().get(), "gm_vibraphone");
+        assert_eq!(warm.mix().high_cut(), 3000);
+        // A preset never moves a note: scale, root, tempo and bank stay the default's.
+        assert_eq!(warm.scale(), Style::default().scale());
+        assert_eq!(warm.tempo_range(), Style::default().tempo_range());
+        // Order in the header does not matter: the preset is applied first, `synth` next, and
+        // the per-role keys last.
+        let mixed = Style::parse(
+            "+++\nmelody = \"gm_marimba\"\nreverb = 0.1\nsynth = \"sine\"\npreset = \"warm\"\n+++",
+        )
+        .unwrap();
+        assert_eq!(mixed.melody().get(), "gm_marimba");
+        assert_eq!(mixed.bass().get(), "sine");
+        assert_eq!(mixed.mix().reverb().hundredths(), 10);
+        assert_eq!(
+            mixed.mix().room_size_tenths(),
+            40,
+            "the rest is the preset's"
+        );
+        let raw = Style::preset("raw").unwrap();
+        assert_eq!(
+            (raw.bass().get(), raw.melody().get()),
+            ("triangle", "triangle")
+        );
+        assert!(raw.mix().humanise().is_off() && raw.mix().reverb().is_off());
+        assert!(Style::preset("polka").is_none());
+        assert!(matches!(
+            Style::parse("+++\npreset = \"polka\"\n+++"),
+            Err(StyleError::Unknown { .. })
+        ));
+    }
+
+    #[test]
+    fn mix_values_are_read_to_their_ranges() {
+        // Hand-worked: each in header units, stored as integers.
+        let style = Style::parse(
+            "+++\nreverb = 0.5\nroom_size = 3.5\ndelay = 0\nhigh_cut = 2500\n\
+             humanise = 1\nmelody_gain = 1.25\n+++",
+        )
+        .unwrap();
+        assert_eq!(style.mix().reverb().hundredths(), 50);
+        assert_eq!(style.mix().room_size_tenths(), 35);
+        assert!(style.mix().delay().is_off());
+        assert_eq!(style.mix().high_cut(), 2500);
+        assert_eq!(style.mix().humanise().hundredths(), 100);
+        assert_eq!(style.mix().melody_gain().hundredths(), 125);
+        for bad in [
+            "reverb = 1.5",
+            "reverb = -0.1",
+            "humanise = \"lots\"",
+            "room_size = 0",
+            "room_size = 11",
+            "high_cut = 999",
+            "high_cut = 20001",
+            "drums_gain = 2.5",
+            "melody_gain = 0",
+            "bass_gain = 0.05",
+            "bass = \"gm_nonesuch\"",
+            "melody = 3",
+        ] {
+            assert!(Style::parse(&format!("+++\n{bad}\n+++")).is_err(), "{bad}");
+        }
+        // A soundfont or a synth name, for either role.
+        assert!(Style::parse("+++\nbass = \"sine\"\nmelody = \"gm_kalimba\"\n+++").is_ok());
     }
 
     #[test]

@@ -68,9 +68,20 @@ and the annotation on the right, and Play/Stop at the top. It recompiles as you 
 third of a second after you stop — and if it is already playing it switches to the new version
 without stopping, so you can rewrite a line and hear the difference immediately.
 
-The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, swing, sample bank
-and synth. Changing one of them changes what you hear and provably not what happens — the page
-recompiles and the bar, voice and event counts stay put, which is invariant I3 in front of you.
+The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, swing, sample bank,
+the bass and melody instruments, and the mix. Changing one of them changes what you hear and
+provably not what happens — the page recompiles and the bar, voice and event counts stay put,
+which is invariant I3 in front of you.
+
+The **Sound** menu picks a named palette for the instruments and the mix, leaving scale, root,
+tempo and bank alone: **default** (electric piano over acoustic bass, a modest room, a little echo
+on the melody, light compression, a small human stray), **warm** (vibraphone over fretless bass, a
+long room, more echo, a lower high cut, a touch of drive, more stray) and **raw** (the palette as
+it was before any of this: triangle oscillators, dry, on the grid). Move any control and it reads
+*custom*. The mix controls: reverb, room size, echo on the melody, high cut, drive, compression,
+humanise, and a level each for the drums, the bass and the melody. **Humanise** makes each
+syllable a few milliseconds late and a little softer, drawn from that line's own seed — so the
+same poem always strays the same way, and editing one stanza never changes another's feel.
 
 The **example poems…** menu at the top loads any poem in `examples/`, together with the palette its
 header asks for (the defaults when it has none).
@@ -84,8 +95,11 @@ with the difference between them, under the machine or the interest profile. The
 your two settings.
 
 It binds to `127.0.0.1` only, and deliberately: it compiles arbitrary text from a request body,
-which is exactly right on your own machine and exactly wrong on a network. Playback loads Strudel
-and its drum samples from a CDN, so the first Play needs an internet connection.
+which is exactly right on your own machine and exactly wrong on a network. Playback loads Strudel,
+the drum-machine samples (the map strudel.cc uses) and the General MIDI soundfonts from CDNs, so
+the first Play needs an internet connection; each instrument a pattern uses is loaded before it
+starts. The page's output goes through a gentle compressor and then a soft clipper that cannot
+exceed 0.95, so a dense bar bends rather than clips.
 
 ### Path B — Strudel, by hand
 
@@ -98,6 +112,10 @@ and its drum samples from a CDN, so the first Play needs an internet connection.
 3. Select everything in the editor and paste over it.
 4. Press **Ctrl+Enter** (or the ▶ button). The first run downloads the drum samples, so give it a
    second.
+   strudel.cc registers the same drum machines and GM soundfonts this page loads, so the
+   instruments sound the same. One difference: strudel.cc honours `.nudge` only for samples, so
+   there the humanise stray moves the drums and not the bass or melody (their softening still
+   applies); the local page applies it to every sound.
 
 That is the whole loop. Edit the poem, recompile, paste again — or keep a terminal open with
 `--watch` and paste whenever you like something.
@@ -222,6 +240,24 @@ Scales: `major`, `minor`, `harmonic_minor`, `dorian`, `phrygian`, `phrygian_domi
 `mixolydian`, `locrian`, `pentatonic_minor`, `whole_tone`, `chromatic`.
 Banks: `tr909`, `tr808`, `tr707`, `linn`, `casio`.
 Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`, `triangle`.
+`synth` sets both pitched instruments; in Strudel the four model names play the recorded
+instrument nearest the model (Karplus–Strong: acoustic bass and nylon guitar; FM: DX-style synth
+bass and electric piano; physical: acoustic bass and marimba), and the waveforms stay oscillators.
+
+The rest of the header, every key optional:
+
+| key | what | range | default |
+|---|---|---|---|
+| `preset` | a named palette to start from — `default`, `warm`, `raw`; applied before every other key | | `default` |
+| `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_fretless_bass`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
+| `reverb` | reverb send (the drums take half, plus §4.4's rise with distinctiveness; the bass three tenths) | 0–1 | 0.25 |
+| `room_size` | reverb length, seconds | 0.1–10 | 2.0 |
+| `delay` | echo on the melody, a dotted eighth behind | 0–1 | 0.15 |
+| `high_cut` | the top of §4.4's brightness range, Hz — scales it, never clips it | 1000–20000 | 4400 |
+| `drive` | soft saturation on drums and bass | 0–1 | 0 |
+| `compress` | compression on every layer | 0–1 | 0.30 |
+| `humanise` | how late (up to 30 ms) and how much softer (up to 30%) each syllable strays, from its line's seed | 0–1 | 0.20 |
+| `drums_gain`, `bass_gain`, `melody_gain` | each role's level — never zero, so a role cannot be muted | 0.1–2 | 0.28, 0.32, 0.75 |
 
 ---
 

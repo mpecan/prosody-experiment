@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>prosody</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
     color-scheme: dark;
@@ -133,8 +134,14 @@
       <label>Bank
         <select id="bank"></select>
       </label>
-      <label>Synth
-        <select id="synth"></select>
+      <label>Sound
+        <select id="palette" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are."></select>
+      </label>
+      <label>Bass
+        <select id="bass"></select>
+      </label>
+      <label>Melody
+        <select id="melody"></select>
       </label>
       <label>Tempo range (bpm)
         <span class="row">
@@ -142,12 +149,44 @@
           <input id="high" type="number" min="1" max="400" value="130">
         </span>
       </label>
-      <label>Swing <span id="swingOut">0.00</span>
-        <input id="swing" type="range" min="0" max="100" value="0">
+      <label>Swing <span id="swingOut"></span>
+        <input id="swing" type="range" min="0" max="1" step="0.01">
+      </label>
+      <h2>Mix</h2>
+      <label>Reverb <span id="reverbOut"></span>
+        <input id="reverb" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Room size (s) <span id="room_sizeOut"></span>
+        <input id="room_size" type="range" min="0.1" max="10" step="0.1">
+      </label>
+      <label>Echo on melody <span id="delayOut"></span>
+        <input id="delay" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>High cut (Hz) <span id="high_cutOut"></span>
+        <input id="high_cut" type="range" min="1000" max="20000" step="100">
+      </label>
+      <label>Drive <span id="driveOut"></span>
+        <input id="drive" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Compress <span id="compressOut"></span>
+        <input id="compress" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Humanise <span id="humaniseOut"></span>
+        <input id="humanise" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Drums level <span id="drums_gainOut"></span>
+        <input id="drums_gain" type="range" min="0.1" max="2" step="0.01">
+      </label>
+      <label>Bass level <span id="bass_gainOut"></span>
+        <input id="bass_gain" type="range" min="0.1" max="2" step="0.01">
+      </label>
+      <label>Melody level <span id="melody_gainOut"></span>
+        <input id="melody_gain" type="range" min="0.1" max="2" step="0.01">
       </label>
       <p>
         The poem decides where in the tempo range it sits, from how densely its syllables pack
-        into bars. Everything else here is colour.
+        into bars. Everything else here is colour. Humanise strays each syllable a little late and
+        soft, drawn from its own line, so the same poem always strays the same way.
       </p>
     </div>
     <div class="palette mappings">
@@ -195,34 +234,78 @@
   </section>
 </main>
 
+<!--
+  `@strudel/soundfonts` imports `@strudel/core` and `@strudel/webaudio` by name. Answering those
+  from a CDN would give it a second Strudel that the playing one never hears, so the import map
+  sends both to the Strudel `@strudel/web` already put on the page (see strudel-globals.mjs).
+-->
+<script type="importmap">
+{ "imports": {
+  "@strudel/core": "/strudel-globals.mjs",
+  "@strudel/webaudio": "/strudel-globals.mjs",
+  "sfumato": "/strudel-globals.mjs"
+} }
+</script>
 <script src="https://unpkg.com/@strudel/web@1.3.0"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const controls = ['scale', 'root', 'bank', 'synth', 'low', 'high', 'swing'];
+// Every palette control's id is its key in the style header, and every value is in header units.
+const SOUND = ['bass', 'melody', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress',
+  'humanise', 'drums_gain', 'bass_gain', 'melody_gain'];
+const controls = ['scale', 'root', 'bank', 'low', 'high', 'swing', ...SOUND];
+const SLIDERS = ['swing', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress',
+  'humanise', 'drums_gain', 'bass_gain', 'melody_gain'];
 
 const OPTIONS = {
   scale: __SCALES__,
   root: ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'],
   bank: __BANKS__,
-  synth: __SYNTHS__,
+  bass: __INSTRUMENTS__,
+  melody: __INSTRUMENTS__,
 };
-const MAPPINGS = __MAPPINGS__;
-const PRESETS = __PRESETS__;     // the examples: name, label, poem, and the palette its header set   // [name, what it does], in the order the core lists them
+const MAPPINGS = __MAPPINGS__;   // [name, what it does], in the order the core lists them
+const PRESETS = __PRESETS__;     // the examples: name, label, poem, and the palette its header set
+const PALETTES = __PALETTES__;   // the named palettes, every control's value, from `Style::preset`
 for (const [id, values] of Object.entries(OPTIONS)) {
   $(id).innerHTML = values.map((v) => `<option>${v}</option>`).join('');
 }
-$('scale').value = 'minor';
-$('root').value = 'C';
-$('bank').value = 'tr909';
-$('synth').value = 'triangle';
+$('palette').innerHTML = Object.keys(PALETTES).map((name) => `<option>${name}</option>`).join('')
+  + '<option value="custom" disabled>custom</option>';
+
+function showValues() {
+  for (const id of SLIDERS) $(id + 'Out').textContent = $(id).value;
+}
+
+// The palette menu names the palette the sound controls currently match, or "custom".
+function syncPaletteMenu() {
+  const same = (a, b) => (isNaN(Number(a)) ? a === b : Number(a) === Number(b));
+  const match = Object.entries(PALETTES)
+    .find(([, values]) => SOUND.every((id) => same($(id).value, values[id])));
+  $('palette').value = match ? match[0] : 'custom';
+}
+
+function setControls(values, ids) {
+  for (const id of ids) if (id in values && $(id)) $(id).value = values[id];
+  showValues();
+  syncPaletteMenu();
+}
+
+setControls(PALETTES.default, controls);
 $('poem').value = __SEED_POEM__;
+
+$('palette').addEventListener('input', () => {
+  const values = PALETTES[$('palette').value];
+  if (!values) return;
+  setControls(values, SOUND);    // sound and mix only: a palette never moves a note
+  schedule();
+});
 
 $('preset').innerHTML += PRESETS.map((p) => `<option value="${p.name}">${p.label}</option>`).join('');
 $('preset').addEventListener('input', () => {
   const preset = PRESETS.find((p) => p.name === $('preset').value);
   if (!preset) return;
   $('poem').value = preset.poem;
-  for (const [id, value] of Object.entries(preset.palette)) $(id).value = value;
+  setControls(preset.palette, controls);
   $('poem').scrollTop = 0;
   compile();
 });
@@ -334,7 +417,7 @@ function renderScores() {
 }
 
 async function compile() {
-  $('swingOut').textContent = ($('swing').value / 100).toFixed(2);
+  showValues();
   const poem = $('poem').value;
   if (!poem.trim()) {
     latestPattern = '';
@@ -380,12 +463,117 @@ function schedule() {
   timer = setTimeout(compile, 350);
 }
 
+// Where the sounds come from. The drum machines are the same sample map strudel.cc loads; without
+// it every `.bank(...)` asks for a sample nobody registered and the drums are silent.
+const SAMPLES = 'https://strudel.b-cdn.net';
+const SOUNDFONTS = 'https://unpkg.com/@strudel/soundfonts@1.3.0/dist/index.mjs';
+
+async function startStrudel() {
+  await initStrudel({
+    prebake: () => Promise.all([
+      samples(`${SAMPLES}/tidal-drum-machines.json`, `${SAMPLES}/tidal-drum-machines/machines/`, {
+        prebake: true,
+        tag: 'drum-machines',
+      }),
+      // Imported only now: the import map answers its Strudel imports from the globals that
+      // `initStrudel` has just created.
+      import(SOUNDFONTS).then((soundfonts) => soundfonts.registerSoundfonts()),
+    ]),
+  });
+  // `initStrudel` loads Strudel's effect worklets (crush, shape, …) on the *next* mousedown, but
+  // it is called from inside the Play click, after that click's mousedown — so the first play ran
+  // without them and every drum layer, which carries `.crush`, failed to build. Load them now.
+  await initAudio();
+  honourNudge();
+}
+
+// Strudel's sampler starts a sample `nudge` seconds late; its oscillators and soundfonts ignore
+// the field. The palette's humanise writes `.nudge` on every layer, so every other sound is
+// wrapped to start that much later too — one meaning of `nudge` for the whole piece.
+function honourNudge() {
+  for (const [name, sound] of Object.entries(soundMap.get())) {
+    if (sound.data?.type === 'sample' || sound.data?.nudged) continue;
+    const trigger = sound.onTrigger;
+    registerSound(name, (time, value, ...rest) =>
+      trigger(time + (Number(value?.nudge) || 0), value, ...rest), { ...sound.data, nudged: true });
+  }
+}
+
+// The master: everything Strudel plays, summed, through two fixed stages that are page-side and
+// not palette. Strudel compresses each event's own chain; nothing in it watches the total, and a
+// villanelle sounds many lines at once.
+//
+// 1. A gentle compressor, the glue. It cannot be the ceiling: its 2 ms attack lets a drum onset
+//    through above its threshold, and Chrome adds makeup gain after it (a steady 0.5 sine comes out
+//    at 0.61), so a DynamicsCompressor alone measured peaks of 1.18 on the Wilde villanelle.
+// 2. A soft clipper, which is. A WaveShaper clamps any input beyond its curve's ends to those ends,
+//    so its output can never exceed the curve's largest value: transparent below CLIP_KNEE,
+//    bending smoothly towards CLIP_CEILING above it, and flat at the ceiling for anything that
+//    arrives up to CLIP_RANGE (and beyond — clamped). No oversampling, because its interpolation
+//    filter can overshoot the curve and the point of this stage is that nothing does.
+const CLIP_KNEE = 0.6, CLIP_CEILING = 0.95, CLIP_RANGE = 4;
+function softClipCurve(points = 4097) {
+  const curve = new Float32Array(points);
+  const bend = CLIP_CEILING - CLIP_KNEE;
+  for (let i = 0; i < points; i++) {
+    const v = (i / (points - 1) * 2 - 1) * CLIP_RANGE;
+    const a = Math.abs(v);
+    curve[i] = Math.sign(v) * (a <= CLIP_KNEE ? a : CLIP_KNEE + bend * Math.tanh((a - CLIP_KNEE) / bend));
+  }
+  return curve;
+}
+let limited = null;
+function limitTheMaster() {
+  const output = getSuperdoughAudioController().output;
+  const gain = output?.destinationGain;
+  if (!gain || limited === gain) return;
+  const ctx = getAudioContext();
+  const glue = new DynamicsCompressorNode(ctx, {
+    threshold: -6, knee: 6, ratio: 8, attack: 0.003, release: 0.15,
+  });
+  // The shaper's curve spans −1…1; scaling by 1/CLIP_RANGE first lets it cover ±CLIP_RANGE.
+  const into = new GainNode(ctx, { gain: 1 / CLIP_RANGE });
+  const clip = new WaveShaperNode(ctx, { curve: softClipCurve(), oversample: 'none' });
+  gain.disconnect();
+  gain.connect(glue).connect(into).connect(clip).connect(ctx.destination);
+  limited = gain;
+}
+
+// Every sound a pattern asks for, loaded before it starts: a soundfont or sample still loading
+// when its first note is due is skipped, so the first bars would play with holes in them. Each is
+// triggered once at zero gain, through Strudel's own path, which loads and caches it.
+const warmed = new Set();
+async function warmUp(code) {
+  const wanted = [];
+  for (const line of code.split('\n')) {
+    const pattern = (name) => (line.match(new RegExp(`(?:^|[.\\s])${name}\\("([^"]*)"\\)`)) || [])[1];
+    const tokens = (text) => text.replace(/[<>\[\],]/g, ' ').split(/\s+/).filter((t) => t && t !== '~');
+    const notes = pattern('note');
+    if (notes !== undefined) {
+      const sound = pattern('sound');
+      for (const note of new Set(tokens(notes))) wanted.push({ s: sound, note: Number(note) });
+    }
+    const drums = line.trimStart().startsWith('s(') ? pattern('s') : undefined;
+    if (drums !== undefined) {
+      const bank = pattern('bank');
+      for (const s of new Set(tokens(drums))) wanted.push({ s, bank });
+    }
+  }
+  const ctx = getAudioContext();
+  await Promise.all(wanted.map((value) => {
+    const key = JSON.stringify(value);
+    if (warmed.has(key)) return null;
+    warmed.add(key);
+    return superdough({ ...value, gain: 0 }, ctx.currentTime + 0.05, 0.05).catch(() => warmed.delete(key));
+  }));
+}
+
 async function play() {
   if (!latestPattern) return;
   if (!strudelReady) {
-    status('loading Strudel and samples…');
+    status('loading Strudel, drum machines and soundfonts…');
     try {
-      await initStrudel();
+      await startStrudel();
       strudelReady = true;
     } catch (error) {
       status('could not start Strudel: ' + error.message, true);
@@ -396,7 +584,12 @@ async function play() {
     // The generated code is a `stack(...)` expression built from Strudel's own functions, which
     // `initStrudel` puts in global scope. Mini-notation inside `s("…")` and `note("…")` is parsed
     // by those functions, so no transpiler step is needed.
-    const pattern = (0, eval)(latestPattern);
+    const code = latestPattern;
+    const pattern = (0, eval)(code);
+    limitTheMaster();
+    status('loading the instruments this pattern uses…');
+    await warmUp(code);
+    if (code !== latestPattern) return;   // a newer version arrived while loading; it plays itself
     pattern.play();
     playing = true;
     $('stop').disabled = false;
@@ -420,7 +613,8 @@ $('stop').addEventListener('click', stop);
 $('poem').addEventListener('input', schedule);
 for (const id of controls) {
   $(id).addEventListener('input', () => {
-    if (id === 'swing') $('swingOut').textContent = ($('swing').value / 100).toFixed(2);
+    showValues();
+    if (SOUND.includes(id)) syncPaletteMenu();
     schedule();
   });
 }
