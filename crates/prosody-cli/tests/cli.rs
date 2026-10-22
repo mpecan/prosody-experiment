@@ -291,29 +291,89 @@ fn watch_without_a_file_is_refused() {
     assert!(err.contains("needs a file"), "{err}");
 }
 
+/// A running watcher whose output is collected as it arrives.
+///
+/// The watcher tests used to sleep a fixed 400 ms and assume the first compile had finished. It
+/// had alone, but not while the whole workspace's suites ran beside it, so they failed in most
+/// full runs. Waiting for the output itself, under a generous deadline, tests the same thing
+/// without guessing how fast the machine is.
+struct Watcher {
+    child: std::process::Child,
+    out: std::sync::Arc<std::sync::Mutex<String>>,
+    complaint: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl Watcher {
+    fn start(arguments: &[&str], poem: &std::path::Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
+            .args(arguments)
+            .arg(poem)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the binary should start");
+        let out = Self::collect(child.stdout.take().unwrap());
+        let complaint = Self::collect(child.stderr.take().unwrap());
+        Self {
+            child,
+            out,
+            complaint,
+        }
+    }
+
+    fn collect(
+        mut stream: impl std::io::Read + Send + 'static,
+    ) -> std::sync::Arc<std::sync::Mutex<String>> {
+        let text = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let filling = std::sync::Arc::clone(&text);
+        std::thread::spawn(move || {
+            let mut chunk = [0_u8; 4096];
+            while let Ok(read) = stream.read(&mut chunk) {
+                if read == 0 {
+                    break;
+                }
+                filling
+                    .lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&chunk[..read]));
+            }
+        });
+        text
+    }
+
+    /// Waits until `done(stdout, stderr)` holds, or gives up after a deadline and lets the
+    /// assertions that follow say what was missing.
+    fn wait_for(&self, done: impl Fn(&str, &str) -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            if done(&self.out.lock().unwrap(), &self.complaint.lock().unwrap()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// Stops the watcher and hands back what it wrote to stdout and stderr.
+    fn stop(mut self) -> (String, String) {
+        self.child.kill().expect("stopping the watcher");
+        self.child.wait().expect("collecting the watcher");
+        let out = self.out.lock().unwrap().clone();
+        let complaint = self.complaint.lock().unwrap().clone();
+        (out, complaint)
+    }
+}
+
 #[test]
 fn the_watcher_recompiles_when_the_poem_changes() {
     // `SPEC.md` §7.8's live reload, and what invariant I2 was written for.
     let poem = std::env::temp_dir().join("prosody-watch.poem");
     std::fs::write(&poem, COUPLET).expect("writing the poem");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
-        .args(["--watch", "--osc"])
-        .arg(&poem)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary should start");
-
-    // Give it time for the first compile, then edit the poem and wait for the second.
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    let watcher = Watcher::start(&["--watch", "--osc"], &poem);
+    watcher.wait_for(|out, complaint| complaint.contains("watching") && out.contains("# "));
     std::fs::write(&poem, format!("{COUPLET}and the wind will rise\n")).expect("editing");
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    child.kill().expect("stopping the watcher");
-
-    let finished = child.wait_with_output().expect("collecting output");
-    let out = String::from_utf8_lossy(&finished.stdout);
-    let complaint = String::from_utf8_lossy(&finished.stderr);
+    watcher.wait_for(|out, _| out.matches("# ").count() >= 2);
+    let (out, complaint) = watcher.stop();
     let _ = std::fs::remove_file(&poem);
 
     assert!(complaint.contains("watching"), "{complaint}");
@@ -331,24 +391,13 @@ fn the_watcher_survives_a_poem_that_will_not_compile() {
     let poem = std::env::temp_dir().join("prosody-watch-broken.poem");
     std::fs::write(&poem, COUPLET).expect("writing the poem");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
-        .args(["--watch"])
-        .arg(&poem)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary should start");
-
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    let watcher = Watcher::start(&["--watch"], &poem);
+    watcher.wait_for(|out, _| out.contains("stack("));
     std::fs::write(&poem, "+++\nscale = \"klingon\"\n+++\nthe fire burns\n").expect("breaking it");
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    watcher.wait_for(|_, complaint| complaint.contains("unknown scale"));
     std::fs::write(&poem, COUPLET).expect("fixing it");
-    std::thread::sleep(std::time::Duration::from_millis(400));
-    child.kill().expect("stopping the watcher");
-
-    let finished = child.wait_with_output().expect("collecting output");
-    let out = String::from_utf8_lossy(&finished.stdout);
-    let complaint = String::from_utf8_lossy(&finished.stderr);
+    watcher.wait_for(|out, _| out.matches("stack(").count() >= 2);
+    let (out, complaint) = watcher.stop();
     let _ = std::fs::remove_file(&poem);
 
     assert!(
