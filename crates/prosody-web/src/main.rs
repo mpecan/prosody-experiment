@@ -34,7 +34,7 @@ use server::{Request, Response};
 ///
 /// Substituted rather than hard-coded in the HTML so that the controls cannot drift from what
 /// [`Style`] actually accepts — adding a scale in one place adds it to the page.
-fn page() -> String {
+fn page() -> Result<String> {
     let list = |values: &[&str]| {
         let quoted: Vec<String> = values.iter().map(|value| format!("\"{value}\"")).collect();
         format!("[{}]", quoted.join(","))
@@ -51,12 +51,104 @@ fn page() -> String {
         })
         .collect();
 
-    include_str!("index.html")
+    Ok(include_str!("index.html")
+        .replace("__PRESETS__", &presets_json()?)
         .replace("__SCALES__", &list(&scales))
         .replace("__BANKS__", &list(BANKS))
         .replace("__SYNTHS__", &list(SYNTHS))
         .replace("__MAPPINGS__", &format!("[{}]", mappings.join(",")))
-        .replace("__SEED_POEM__", &json_string(SEED))
+        .replace("__SEED_POEM__", &json_string(SEED)))
+}
+
+/// The example poems, for the preset menu: a file name and a label, then the file itself.
+///
+/// Embedded rather than read at run time so the binary works from any directory; a test checks
+/// that every file in `examples/` is here, so a new example cannot be missing from the menu.
+const PRESETS: &[(&str, &str, &str)] = &[
+    (
+        "blake-tyger",
+        "Blake — The Tyger",
+        include_str!("../../../examples/blake-tyger.poem"),
+    ),
+    (
+        "carroll-jabberwocky",
+        "Carroll — Jabberwocky",
+        include_str!("../../../examples/carroll-jabberwocky.poem"),
+    ),
+    (
+        "dickinson-because",
+        "Dickinson — Because I could not stop for Death",
+        include_str!("../../../examples/dickinson-because.poem"),
+    ),
+    (
+        "hopkins-pied-beauty",
+        "Hopkins — Pied Beauty",
+        include_str!("../../../examples/hopkins-pied-beauty.poem"),
+    ),
+    (
+        "poe-annabel-lee",
+        "Poe — Annabel Lee",
+        include_str!("../../../examples/poe-annabel-lee.poem"),
+    ),
+    (
+        "preseren-zdravljica",
+        "Prešeren — Zdravljica",
+        include_str!("../../../examples/preseren-zdravljica.poem"),
+    ),
+    (
+        "shakespeare-sonnet-18",
+        "Shakespeare — Sonnet 18",
+        include_str!("../../../examples/shakespeare-sonnet-18.poem"),
+    ),
+    (
+        "whitman-song-of-myself",
+        "Whitman — Song of Myself",
+        include_str!("../../../examples/whitman-song-of-myself.poem"),
+    ),
+    (
+        "wilde-theocritus",
+        "Wilde — Theocritus",
+        include_str!("../../../examples/wilde-theocritus.poem"),
+    ),
+];
+
+/// The presets as a JSON array for the page: each poem without its header, and the palette that
+/// header asked for — the defaults when it has none — in the form the controls take.
+///
+/// The palette goes to the controls rather than staying in the poem because the controls are the
+/// one source of truth for it (see [`body_of`]).
+fn presets_json() -> Result<String> {
+    let mut presets = Vec::new();
+    for (name, label, text) in PRESETS {
+        let poem = Poem::parse((*text).to_owned()).with_context(|| format!("preset {name}"))?;
+        let style = Style::parse_optional(poem.frontmatter().and_then(|s| s.text(poem.source())))
+            .with_context(|| format!("preset {name}'s palette"))?;
+        let fields = style.describe();
+        let field = |key: &str| fields.get(key).cloned().unwrap_or_default();
+        let tempo = field("tempo_range");
+        let (low, high) = tempo.split_once("..").unwrap_or(("110", "130"));
+        presets.push(format!(
+            "{{\"name\":{},\"label\":{},\"poem\":{},\"palette\":{{\"scale\":{},\"root\":{},\"bank\":{},\"synth\":{},\"low\":{},\"high\":{},\"swing\":{}}}}}",
+            json_string(name),
+            json_string(label),
+            json_string(body_of(text)),
+            json_string(&field("scale")),
+            json_string(&root_label(&field("root"))),
+            json_string(&field("bank")),
+            json_string(&field("synth")),
+            json_string(low),
+            json_string(high),
+            json_string(&field("swing")),
+        ));
+    }
+    Ok(format!("[{}]", presets.join(",")))
+}
+
+/// A root as the page's menu spells it: `cs` → `C#`.
+fn root_label(name: &str) -> String {
+    let sharp = name.ends_with('s');
+    let letter = name.trim_end_matches('s').to_uppercase();
+    if sharp { format!("{letter}#") } else { letter }
 }
 
 /// The poem the page opens with.
@@ -102,7 +194,7 @@ fn main() -> Result<()> {
         .map_or(Ok(4747), |given| given.parse())
         .context("the port must be a number")?;
 
-    let rendered = page();
+    let rendered = page()?;
     server::serve(port, move |request| {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/") => Response::html(rendered.clone()),
@@ -318,7 +410,7 @@ mod tests {
     fn the_page_lists_every_palette_value_the_style_accepts() {
         // Substituted from `Style`'s own tables rather than typed into the HTML, so a scale added
         // in one place cannot be missing from the other.
-        let html = page();
+        let html = page().unwrap();
         for scale in prosody_emit::Scale::ALL {
             assert!(html.contains(scale.name()), "{} missing", scale.name());
         }
@@ -375,7 +467,7 @@ mod tests {
 
     #[test]
     fn the_page_lists_every_mapping_the_core_can_leave_out() {
-        let html = page();
+        let html = page().unwrap();
         for mapping in Mapping::ALL {
             assert!(html.contains(mapping.describe()), "{mapping:?} missing");
         }
@@ -440,6 +532,53 @@ mod tests {
         assert_ne!(full.body, bare.body);
         let unknown = super::compile(&request(&[("profile", "polka")], SEED), &Output::Score);
         assert_eq!(unknown.status, 400);
+    }
+
+    #[test]
+    fn every_example_is_a_preset() {
+        let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+        let mut files: Vec<String> = std::fs::read_dir(examples)
+            .unwrap()
+            .filter_map(|entry| {
+                let name = entry.unwrap().file_name().into_string().unwrap();
+                name.strip_suffix(".poem").map(str::to_owned)
+            })
+            .collect();
+        files.sort();
+        let presets: Vec<&str> = super::PRESETS.iter().map(|(name, _, _)| *name).collect();
+        assert_eq!(files, presets);
+    }
+
+    #[test]
+    fn a_preset_brings_its_palette_to_the_controls() {
+        let json = super::presets_json().unwrap();
+        // The Tyger's header, as the controls spell it — and its poem without the header.
+        assert!(
+            json.contains(
+                "\"palette\":{\"scale\":\"phrygian_dominant\",\"root\":\"D\",\"bank\":\"tr909\",\
+                 \"synth\":\"karplus\",\"low\":\"124\",\"high\":\"132\",\"swing\":\"8\"}"
+            ),
+            "{json}"
+        );
+        assert!(
+            json.contains("\"poem\":\"Tyger Tyger, burning bright,"),
+            "{json}"
+        );
+        // A poem with no header takes the defaults.
+        assert!(
+            json.contains("\"scale\":\"minor\",\"root\":\"C\""),
+            "{json}"
+        );
+        assert_eq!(super::root_label("cs"), "C#");
+        assert_eq!(super::root_label("a"), "A");
+    }
+
+    #[test]
+    fn every_preset_compiles() {
+        for (name, _, text) in super::PRESETS {
+            let response = super::compile(&request(&[], body_of(text)), &Output::Pattern);
+            assert_eq!(response.status, 200, "{name}: {}", response.body);
+        }
     }
 
     #[test]

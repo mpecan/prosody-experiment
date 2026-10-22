@@ -55,6 +55,7 @@
   }
   .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .78rem; }
   label { display: flex; flex-direction: column; gap: .2rem; font-size: .74rem; color: var(--dim); }
+  header select { width: auto; }
   select, input {
     font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 5px;
     border: 1px solid var(--line); background: #17161f; color: var(--ink);
@@ -105,6 +106,9 @@
 
 <header>
   <h1>prosody <span>— a poem is the score</span></h1>
+  <select id="preset" title="Load one of the example poems, with its palette">
+    <option value="">example poems…</option>
+  </select>
   <button id="play" class="primary">▶ Play</button>
   <button id="stop" disabled>■ Stop</button>
   <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
@@ -202,7 +206,8 @@ const OPTIONS = {
   bank: __BANKS__,
   synth: __SYNTHS__,
 };
-const MAPPINGS = __MAPPINGS__;   // [name, what it does], in the order the core lists them
+const MAPPINGS = __MAPPINGS__;
+const PRESETS = __PRESETS__;     // the examples: name, label, poem, and the palette its header set   // [name, what it does], in the order the core lists them
 for (const [id, values] of Object.entries(OPTIONS)) {
   $(id).innerHTML = values.map((v) => `<option>${v}</option>`).join('');
 }
@@ -211,6 +216,16 @@ $('root').value = 'C';
 $('bank').value = 'tr909';
 $('synth').value = 'triangle';
 $('poem').value = __SEED_POEM__;
+
+$('preset').innerHTML += PRESETS.map((p) => `<option value="${p.name}">${p.label}</option>`).join('');
+$('preset').addEventListener('input', () => {
+  const preset = PRESETS.find((p) => p.name === $('preset').value);
+  if (!preset) return;
+  $('poem').value = preset.poem;
+  for (const [id, value] of Object.entries(preset.palette)) $(id).value = value;
+  $('poem').scrollTop = 0;
+  compile();
+});
 
 let strudelReady = false;
 let playing = false;

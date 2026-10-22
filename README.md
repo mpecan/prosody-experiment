@@ -72,6 +72,9 @@ The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, s
 and synth. Changing one of them changes what you hear and provably not what happens — the page
 recompiles and the bar, voice and event counts stay put, which is invariant I3 in front of you.
 
+The **example poems…** menu at the top loads any poem in `examples/`, together with the palette its
+header asks for (the defaults when it has none).
+
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
 review (the held and refrain lanes, the bass, the stanza period, the outro), each with a checkbox
 for two settings, A and B. A starts with everything on, B with everything off. The **hearing A | B**
@@ -287,7 +290,7 @@ are enforced rather than merely intended.
 ## State of it
 
 Everything `SPEC.md` asks for is built: all the mappings, both backends, the live-reload watcher,
-the debug view, a golden corpus, and property tests for all four invariants. 603 tests.
+the debug view, a golden corpus, and property tests for all four invariants. 606 tests.
 
 Things that are known to be wrong, in rough order of how much they would bother a listener:
 

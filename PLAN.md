@@ -367,6 +367,12 @@ Each mapping left out, machine profile, mean overall over the nine examples (all
 The refrain lane — from options 1 and 2, before this cycle — scores *better* left out under the
 machine profile. It was judged under the interest profile; whether it stays is for listening.
 
+**First listening (2026-10-09).** The user, on the Tyger: A — every candidate on — sounds much
+better than B, every candidate off. The first verdict from ears rather than bands, and it agrees
+with the bands' direction (the page's two-stanza Tyger: overall 0.886 for A, 0.684 for B). It judges the set, not each mapping;
+the per-mapping comparisons are still to hear. The page also gained a menu of the example poems,
+each loading the palette its header sets, so the corpus can be auditioned without pasting.
+
 ### Machine cycle 3b — the outro
 
 After 3a the bottom two were the one-stanza poems: Prešeren 0.412, Sonnet 18 0.611, both with
