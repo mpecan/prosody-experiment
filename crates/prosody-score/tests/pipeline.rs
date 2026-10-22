@@ -15,7 +15,7 @@ use prosody_core::phoneme::{
 use prosody_core::surprisal::{Lexicon, Rarity};
 use prosody_core::voice::Score;
 use prosody_core::{Poem, meter, repetition, rhyme, role, sound, surprisal};
-use prosody_score::{measure, sensitivity};
+use prosody_score::{Profile, measure, measure_as, sensitivity};
 
 struct Toy;
 
@@ -312,4 +312,35 @@ fn a_line_held_under_another_keeps_its_melody_but_not_its_walk() {
     );
     assert!((metric(&height, "pitched") - 0.5).abs() < 1e-12);
     assert!((metric(&feet, "pitched") - 26.0 / 40.0).abs() < 1e-12);
+}
+
+#[test]
+fn an_anapaest_held_under_an_iamb_crosses_its_beat() {
+    // ABAB, the first A line opening on an anapaest: `da da dA | da dO` against the others'
+    // `xa xA | xa xE`, two beats each. By hand, as in the test above: slots 0-3 state the stanza,
+    // the A line held under slot 1 and the B line under slot 2, and the outro plays slots 4-7
+    // with nothing held — 8 slots of 2 beats, 16 beats.
+    //
+    // Only slot 1 has two lines with different feet in one beat: its host's first foot divides
+    // beat 0 in two, the held A line's anapaest in three. One crossed beat of 16. Slot 2's two
+    // lines are both iambs. Nothing else in the piece crosses.
+    let source = "da da dA da dO\nma mA ma mE\nta tA ta tO\nsa sA sa sE\n";
+    let score = compile(source).unwrap();
+    let cross = measure_as(&score, Profile::Jazz)
+        .into_iter()
+        .find(|metric| metric.name() == "cross_rhythm")
+        .unwrap();
+    assert!(
+        (cross.value() - 1.0 / 16.0).abs() < 1e-12,
+        "{}",
+        cross.value()
+    );
+    // Measured by the jazz profile only; the machine profile and the generic one are unchanged.
+    for profile in [Profile::Interest, Profile::Machine] {
+        assert!(
+            measure_as(&score, profile)
+                .iter()
+                .all(|metric| metric.name() != "cross_rhythm")
+        );
+    }
 }

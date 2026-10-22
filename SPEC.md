@@ -78,6 +78,18 @@ This is the load-bearing decision. It means writing a tight regular stanza *is* 
 
 Consequence worth embracing rather than correcting: iambic pentameter yields five beats. Poetry naturally produces odd meters. Don't quantise to 4/4.
 
+*Observed 2026-10-22 (the off-rhythm trace; no mapping changed).* Two consequences of this mapping,
+heard as "off-rhythm beats" and now named. **Cross-rhythm:** a foot of three syllables divides its
+beat in three, one of two in two, so when lines with different feet sound in one bar (§4.6's held,
+refrain and call lanes stack them) the beat carries 3 against 2 — Theocritus's dactylic line-ends
+("Sicily", "Persephone") against its iambic tetrameter in 30% of its beats, The Tyger's "In the
+forests" against "Tyger Tyger," in 3%. `prosody-score`'s jazz profile measures it (`cross_rhythm`).
+**The elastic beat is still in the Strudel backend:** a cycle is a slot at one `.cpm` for the
+piece (tempo ÷ the integer mean bar length), so a bar of four beats among bars of three plays its
+beats a third faster — Theocritus's four-beat bars run at 161 bpm against its stated 121. The OSC
+backend and the scorer keep the beat constant; the page plays the Strudel text. Fixing it is a
+backend question raised in `PLAN.md`'s log, not decided here.
+
 ### 4.3 Repetition → structure (highest-value pass)
 
 Repetition is not one thing. Distinguish:

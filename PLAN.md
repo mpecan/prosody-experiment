@@ -396,9 +396,77 @@ palette nor either proposal touches it: swing moves the off-beat syllables, not 
 the scorer reads the score before swing. If jazz is the target, syncopation is the question to
 answer first, and it is a §4.2 question.
 
+*Since then (the off-rhythm trace, in the log):* the 0.017 is a measuring artefact as much as a
+mapping one — `syncopation` merges every line's accents, and with three or four lines stacked some
+line accents 346 of The Tyger's 350 sounding beats, so the 254 accented instants off the beat never
+count. What the user heard as off-rhythm is mostly cross-rhythm and the Strudel elastic beat; the
+jazz profile now measures the first (`cross_rhythm`).
+
 ---
 
 ## Log
+
+### The off-rhythm feel — a trace, and cross-rhythm in the jazz profile
+
+The user heard off-rhythm beats; the scorer's syncopation gave The Tyger 0.017. Traced on the
+score (every slot's placements, each line's per-beat subdivision) and on the emitted pattern text,
+before any metric. No mapping changed.
+
+**What puts onsets off the shared beat.**
+
+- *Lines with different feet in one bar (cross-rhythm, 3 against 2).* §4.2 divides a beat by its
+  foot's syllables, and the held, refrain and call lanes stack lines, so a three-syllable foot can
+  sound against a two-syllable one. **Theocritus**, 38 of 126 beats: its dactylic line-ends —
+  "Dost thou remember Sicily" (bytes 52..77, `[bd bd] [bd bd bd] [bd bd bd]`) looping in the
+  refrain lane, "O Singer of Persephone" (147..169) likewise — against the iambic tetrameter of the
+  host: slots 3, 6 and 9 ("Still through the ivy flits the bee", 80..115, `[bd bd]` ×4) cross in
+  beats 1 and 2; slots 12–19 ("Simaetha calls on Hecate", 172..196, and "And hears the wild dogs")
+  cross in beat 2 against "Persephone"'s triplet; slot 1's "In the dim" (24..34) anapaest against
+  the refrain "O singer" in beat 0. **The Tyger**, 11 of 352 beats: only the anapaest "In the
+  for-" of "In the forests of the night" (187..201 and 847..861; `[bd bd bd]`, its accent on the
+  third triplet) in beat 0, against the call lane's "Tyger Tyger," (158..170, `[bd bd]`) in slots 1,
+  2 and 5, and in slots 73–85 against the call "And what shoulder" (407..424) and the refrain "What
+  immortal hand or eye" (216..241).
+- *The elastic beat, in the Strudel backend only.* A slot is one cycle, and the whole piece has one
+  `.cpm` — tempo ÷ the integer mean bar length — so bars of different length play beats of
+  different length. Theocritus (126 beats over 33 slots, so mean 3, `.cpm(40.333)`) plays its
+  3-beat bars at 121 bpm and its 4-beat bars at 161, switching at slots 3, 4, 6, 8 and 9 — the
+  five changes behind its steadiness of 27/32 = 0.844 — and most of the piece is 4-beat bars. The
+  Tyger's bars are all four beats, so it has none. The OSC backend and the scorer's timeline keep the beat constant, so
+  no metric can see this; `steadiness` (0.844) counts the changes but scores them as meter, not
+  tempo. Swing (`.swingBy(x, mean)`) slices by the same mean, so on a mixed-length poem it would
+  slice across beats; no example has both today (Tyger's swing 0.08 at `n = 4` is aligned: second
+  halves of beats 4% late, which also makes "In the for-"'s triplet uneven).
+- *Not off the grid, but felt.* Squeezed loops (`Slot::room_for`, a longer stanza's line under a
+  shorter bar) would put every onset off the host's beats; neither poem has one (every placement's room
+  is its own length: no line is longer than the bar it sounds in). Lines shorter than the period rest: The Tyger's slot 77 — the 3-foot "In the forests"
+  hosting and the 2-beat call — leaves beat 3 empty (pulse 0.994). Humanise (≤ 6 ms, each line its
+  own seed) flams lines that coincide by a few milliseconds.
+- *Why syncopation reads 0.017.* LHL over the merged accents: some line accents 346 of the 350
+  on-beat instants in The Tyger, so an accent on the "and" (254 of its 600 accented instants — "or"
+  in "hand or eye", "frame" and "thy" in "Could frame thy", CMUdict's primary stress on monosyllables,
+  §9's lexical-stress problem) is always followed by an accented beat, and LHL counts nothing.
+
+**The metric.** `cross_rhythm` (`prosody-score`, jazz profile only): per beat and per line, the line's
+subdivision is the lcm of its onsets' denominators within the beat; a beat counts when two lines'
+subdivisions do not divide one another. Share of the piece's beats. Band 0.1–0.4, a reasoned guess
+(three against two is a device in small-group jazz, heard against a shared ride; no study counts its
+share). Hand-worked tests: 3 against 2 crosses and 2 against 4 does not; one line never crosses
+itself; a 5-in-4 squeezed loop crosses every beat; a chord is no grid; through the real lowering, an
+anapaest held under an iamb is 1 of 16 beats, and only jazz reports it. The Score tab lists metrics
+from the report, so it shows the new row unchanged; `scripts/cycle.sh` gained a `cross` column (`-`
+outside jazz).
+
+**Measured.** Machine: unchanged, mean 0.743 — the metric is not in that profile (a straight
+machine grid has no use for it). Jazz: mean 0.740 → 0.737. Cross-rhythm: Theocritus 0.302, Hopkins
+0.279, Jabberwocky 0.144, Whitman 0.119, Poe 0.093, The Tyger 0.031, Sonnet 18 0.021, Dickinson
+0.013, Prešeren 0.000. The jazz snapshots each gained the one row; interest moved only through the
+geometric mean over eight fits instead of seven.
+
+**Raised, not done** (each would be a switch or variant, `CLAUDE.md` §10): a Strudel bar that lasts
+its beats (constant pulse, as OSC already does), with swing sliced per bar; cross-rhythm as a
+mapping to choose rather than a by-product (e.g. a held/refrain line fitted to the host's
+subdivision); accents of unstressed monosyllables; a per-line syncopation beside the merged one.
 
 ### Sound and voice, step 6, second review fix — the drum keeps its syllable's accent
 

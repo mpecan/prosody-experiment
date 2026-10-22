@@ -189,6 +189,13 @@ const JAZZ_SYNCOPATION: Band = Band::new(0.45, 0.9);
 const JAZZ_PULSE: Band = Band::new(0.75, 1.0);
 /// A song form keeps its meter, but a turnaround or a tag can stretch a bar.
 const JAZZ_STEADINESS: Band = Band::new(0.7, 1.0);
+/// Three against two — a comping figure or a line in triplets over the ride's straight or swung
+/// pairs, a hemiola across the bar — is a device a small group uses, not the ground it stands on:
+/// the ride and the bass keep one shared subdivision and the cross-rhythm is heard against it. So
+/// from one beat in ten crossed (below it the piece has one grid throughout) to two in five
+/// (above it no subdivision is shared for long enough to be the grid). A reasoned guess, like the
+/// rest: no study we know of counts the share of crossed beats in recorded jazz.
+const JAZZ_CROSS_RHYTHM: Band = Band::new(0.1, 0.4);
 
 /// What a piece is judged against: which metrics, and which bands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,7 +206,8 @@ pub enum Profile {
     /// denser, more repetitive, a steady pulse and short riffs.
     Machine,
     /// Small-group jazz — a piano trio, a modal quartet: fewer loops, more notes in use, more
-    /// accents off the beat, and the time still kept. Swing is palette and so is not measured.
+    /// accents off the beat, some lines crossing the shared grid (three against two), and the time
+    /// still kept. Swing is palette and so is not measured.
     Jazz,
 }
 
@@ -234,7 +242,7 @@ pub fn measure(score: &Score) -> Vec<Metric> {
 }
 
 /// Measures a compiled poem against `profile`, in a fixed order: the five interest metrics, then
-/// whatever the profile adds.
+/// whatever the profile adds — pulse and steadiness for both genres, then cross-rhythm for jazz.
 #[must_use]
 pub fn measure_as(score: &Score, profile: Profile) -> Vec<Metric> {
     let timeline = Timeline::of(score);
@@ -251,17 +259,27 @@ pub fn measure_as(score: &Score, profile: Profile) -> Vec<Metric> {
             ],
             [MACHINE_PULSE, MACHINE_STEADINESS],
         ),
-        Profile::Jazz => genre_metrics(
-            &timeline,
-            [
-                JAZZ_LAYERING,
-                JAZZ_RECURRENCE,
-                JAZZ_PITCHED,
-                JAZZ_PITCH_ENTROPY,
-                JAZZ_SYNCOPATION,
-            ],
-            [JAZZ_PULSE, JAZZ_STEADINESS],
-        ),
+        Profile::Jazz => {
+            let mut metrics = genre_metrics(
+                &timeline,
+                [
+                    JAZZ_LAYERING,
+                    JAZZ_RECURRENCE,
+                    JAZZ_PITCHED,
+                    JAZZ_PITCH_ENTROPY,
+                    JAZZ_SYNCOPATION,
+                ],
+                [JAZZ_PULSE, JAZZ_STEADINESS],
+            );
+            // Jazz only: the machine profile's straight grid has no use for it, and adding it
+            // there would move that cycle's numbers for a reason that is not its genre's.
+            metrics.push(Metric {
+                name: "cross_rhythm",
+                value: metrics::cross_rhythm(&timeline),
+                band: JAZZ_CROSS_RHYTHM,
+            });
+            metrics
+        }
     }
 }
 
@@ -506,6 +524,14 @@ mod tests {
         assert_eq!(fixed(super::JAZZ_RECURRENCE.fit(0.95)), "0.444");
         assert_eq!(fixed(super::JAZZ_SYNCOPATION.fit(0.6)), "1.000");
         assert_eq!(fixed(super::MACHINE_SYNCOPATION.fit(0.6)), "0.360");
+    }
+
+    #[test]
+    fn a_piece_on_one_grid_falls_short_of_jazz_cross_rhythm() {
+        // A piece almost all on one grid (The Tyger measures 0.031) is about a quarter of a
+        // band-width short of jazz's 0.1..0.4: (0.1 − 0.031) / 0.3 = 0.23, so 1 / 1.23² = 0.661.
+        assert_eq!(fixed(super::JAZZ_CROSS_RHYTHM.fit(0.031)), "0.661");
+        assert_eq!(fixed(super::JAZZ_CROSS_RHYTHM.fit(0.3)), "1.000");
     }
 
     #[test]

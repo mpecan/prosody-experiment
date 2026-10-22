@@ -251,9 +251,13 @@ psytrance): denser layers, more repetition, short riffs, plus a steady **pulse**
 of bar length. `./scripts/cycle.sh` prints that profile for every example with the mean overall —
 the number the tuning cycle in [`PLAN.md`](PLAN.md) works to raise. `--profile jazz` (and
 `./scripts/cycle.sh jazz`, and the page's Score tab) judges against small-group jazz: less
-recurrence, more scale degrees in use, more accents off the beat, the time still kept. It measures
-the score, before the palette, so swing is neither rewarded nor penalised — a swung piece scores
-as its straight twin does. Its bands are reasoned guesses, like the machine profile's.
+recurrence, more scale degrees in use, more accents off the beat, the time still kept — and one
+metric of its own, **cross_rhythm**: the share of beats in which two lines sounding together divide
+the beat incompatibly (an anapaest's three syllables against an iamb's two, or a loop squeezed into
+a shorter bar), so one line's onsets fall off the other's grid. Band 0.1–0.4; the machine profile
+does not measure it. It measures the score, before the palette, so swing is neither rewarded nor
+penalised — a swung piece scores as its straight twin does. Its bands are reasoned guesses, like the
+machine profile's.
 
 `--set name=variant,…` chooses a candidate mapping's variant — `held`, `refrain`, `period` and
 `outro` take `off` or `on` (default `on`), `bass` takes `off`, `height`, `syllables` or `feet`

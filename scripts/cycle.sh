@@ -5,7 +5,8 @@
 #
 #   ./scripts/cycle.sh            the machine-music profile
 #   ./scripts/cycle.sh interest   the generic one
-#   ./scripts/cycle.sh jazz       the small-group jazz profile (swing is palette, so not measured)
+#   ./scripts/cycle.sh jazz       the small-group jazz profile (swing is palette, so not measured;
+#                                 the `cross` column — lines crossing each other's grid — is jazz's)
 #   ./scripts/cycle.sh machine bass,outro
 #                                 the machine profile with those candidate mappings left out
 #   ./scripts/cycle.sh machine bass=off,period=off
@@ -26,17 +27,18 @@ esac
 cargo build --quiet --locked --manifest-path "$here/../Cargo.toml" -p prosody-cli
 bin="$here/../target/debug/prosody"
 
-printf '%-22s %6s %6s %6s %6s %6s %6s %6s | %6s %6s %6s\n' \
-    poem layer recur pitch entr sync pulse steady inter legib overall
+printf '%-22s %6s %6s %6s %6s %6s %6s %6s %6s | %6s %6s %6s\n' \
+    poem layer recur pitch entr sync pulse steady cross inter legib overall
 for poem in "$here"/../examples/*.poem; do
     name=$(basename "$poem" .poem | cut -c1-22)
     "$bin" --score --profile "$profile" ${choices:+$flag "$choices"} "$poem" | awk -v name="$name" '
         { v[$1] = $2 }
         END {
-            printf "%-22s %6s %6s %6s %6s %6s %6s %6s | %6s %6s %6s\n", name,
+            printf "%-22s %6s %6s %6s %6s %6s %6s %6s %6s | %6s %6s %6s\n", name,
                 v["layering"], v["recurrence"], v["pitched"], v["pitch_entropy"],
                 v["syncopation"], (v["pulse"] == "" ? "-" : v["pulse"]),
                 (v["steadiness"] == "" ? "-" : v["steadiness"]),
+                (v["cross_rhythm"] == "" ? "-" : v["cross_rhythm"]),
                 v["interest"], v["legibility"], v["overall"]
         }'
 done | tee /dev/stderr | awk '{ sum += $NF; n++ } END { printf "mean overall %.3f over %d poems\n", sum / n, n }'

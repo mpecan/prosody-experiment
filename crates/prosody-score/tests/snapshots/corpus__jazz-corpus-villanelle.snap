@@ -10,9 +10,10 @@ pitch_entropy      1.654  2.000..3.300   0.624
 syncopation        0.342  0.450..0.900   0.650
 pulse              1.000  0.750..1.000   1.000
 steadiness         1.000  0.700..1.000   1.000
-interest           0.830
+cross_rhythm       0.025  0.100..0.400   0.640
+interest           0.803
 audible            1.000  80 of 80 edits
 local              0.325  26 of 80 edits
 explained          0.975  78 of 80 edits
 legibility         0.975
-overall            0.809
+overall            0.783

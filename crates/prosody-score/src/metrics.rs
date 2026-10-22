@@ -183,6 +183,64 @@ pub(crate) fn steadiness(timeline: &Timeline) -> f64 {
     ratio(kept, lengths.len().saturating_sub(1))
 }
 
+/// Share of the piece's beats in which two lines sounding together divide the beat incompatibly —
+/// one in two and the other in three, say — so that one line's onsets fall off the other's grid.
+///
+/// The trace behind it (`PLAN.md`'s log, *the off-rhythm feel*): what puts onsets
+/// off the shared beat in the shipped poems is lines with different feet sounding in one bar —
+/// an anapaest's three syllables in a beat against an iamb's two (§4.2: "syllable → subdivision
+/// within the foot"), and a loop squeezed into a shorter bar, whose beats then fall between the
+/// host's. [`syncopation`] cannot see either: it merges every line's accents into one grid, and
+/// with three or four lines stacked some line accents nearly every beat.
+///
+/// Per beat and per line, the line's subdivision is the least common multiple of the denominators
+/// of its onsets' positions within the beat: `[x x]` is 2, `[x x x]` is 3, a lone onset on the beat
+/// is 1. Two lines conflict where neither subdivision divides the other — 2 against 4 is one grid
+/// subdivided, 2 against 3 is two grids. A beat counts once however many pairs conflict in it.
+///
+/// Lines only. A chord sounds on the bar's first beat, which every grid contains; the synth plays
+/// the lines' own onsets, so it would only duplicate their grids.
+pub(crate) fn cross_rhythm(timeline: &Timeline) -> f64 {
+    let mut grids: BTreeMap<(u64, usize), u64> = BTreeMap::new();
+    for hit in timeline.hits.iter().filter(|hit| !hit.chord) {
+        let grid = grids.entry((hit.slot, hit.voice)).or_insert(1);
+        *grid = lcm(*grid, hit.within.1.max(1));
+    }
+    let mut by_beat: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    for ((slot, _), grid) in grids {
+        by_beat.entry(slot).or_default().push(grid);
+    }
+    let crossed = by_beat
+        .values()
+        .filter(|grids| {
+            grids.iter().enumerate().any(|(index, a)| {
+                grids
+                    .iter()
+                    .skip(index + 1)
+                    .any(|b| a % b != 0 && b % a != 0)
+            })
+        })
+        .count();
+    ratio(
+        crossed,
+        usize::try_from(timeline.beats).unwrap_or(usize::MAX),
+    )
+}
+
+fn gcd(a: u64, b: u64) -> u64 {
+    let (mut a, mut b) = (a, b);
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a
+}
+
+/// Least common multiple of two positive subdivisions; saturates rather than overflowing, which a
+/// beat's handful of syllables never comes near.
+fn lcm(a: u64, b: u64) -> u64 {
+    (a / gcd(a, b).max(1)).saturating_mul(b)
+}
+
 /// `numerator / denominator`, or zero for an empty denominator.
 fn ratio(numerator: usize, denominator: usize) -> f64 {
     if denominator == 0 {
@@ -198,7 +256,9 @@ fn as_f64(count: usize) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{layering, pitch_entropy, pitched, pulse, recurrence, steadiness, syncopation};
+    use super::{
+        cross_rhythm, layering, pitch_entropy, pitched, pulse, recurrence, steadiness, syncopation,
+    };
     use crate::timeline::tests::hit;
     use crate::timeline::{Hit, Timeline, Tone};
 
@@ -400,6 +460,7 @@ mod tests {
             syncopation(&empty),
             pulse(&empty),
             steadiness(&empty),
+            cross_rhythm(&empty),
         ] {
             close(value, 0.0);
         }
@@ -420,6 +481,98 @@ mod tests {
             beats: 4,
         };
         close(pulse(&timeline), 0.5);
+    }
+
+    #[test]
+    fn three_against_two_in_a_beat_is_a_cross_rhythm() {
+        // One bar of two beats. Beat 0: voice 0 an iamb (0, ½), voice 1 an anapaest (0, ⅓, ⅔) —
+        // subdivisions 2 and 3, neither divides the other. Beat 1: voice 0 (0, ½) and voice 1
+        // (0, ¼, ½, ¾) — 2 divides 4, one grid. One crossed beat of two: ½.
+        let timeline = Timeline {
+            hits: vec![
+                hit(0, 0, (0, 1), 0),
+                hit(0, 0, (1, 2), 0),
+                hit(0, 0, (0, 1), 1),
+                hit(0, 0, (1, 3), 1),
+                hit(0, 0, (2, 3), 1),
+                hit(1, 0, (0, 1), 0),
+                hit(1, 0, (1, 2), 0),
+                hit(1, 0, (0, 1), 1),
+                hit(1, 0, (1, 4), 1),
+                hit(1, 0, (1, 2), 1),
+                hit(1, 0, (3, 4), 1),
+            ],
+            bar_starts: vec![0],
+            beats: 2,
+        };
+        close(cross_rhythm(&timeline), 0.5);
+    }
+
+    #[test]
+    fn one_line_alone_never_crosses_itself() {
+        // A dactyl's triplet beside an iamb's pair, but both in voice 0: one line's own feet are
+        // its meter, not a second grid. Three beats, none crossed.
+        let timeline = Timeline {
+            hits: vec![
+                hit(0, 0, (0, 1), 0),
+                hit(0, 0, (1, 3), 0),
+                hit(0, 0, (2, 3), 0),
+                hit(1, 0, (0, 1), 0),
+                hit(1, 0, (1, 2), 0),
+                hit(2, 0, (0, 1), 0),
+            ],
+            bar_starts: vec![0],
+            beats: 3,
+        };
+        close(cross_rhythm(&timeline), 0.0);
+        close(cross_rhythm(&iambs(4)), 0.0);
+    }
+
+    #[test]
+    fn a_loop_squeezed_into_a_shorter_bar_falls_off_the_hosts_grid() {
+        // A bar of four beats, the host straight iambs (0, ½ in every beat), and under it a loop of
+        // five one-syllable feet squeezed into the bar: onsets at 0, ⅘, 1⅗, 2⅖, 3⅕. Beat 0 holds
+        // 0 and ⅘ — subdivision 5 against 2. Beats 1, 2 and 3 hold one onset each, at ⅗, ⅖ and
+        // ⅕ of the beat: 5 against 2 again. All four beats cross: 1.0.
+        let mut hits = Vec::new();
+        for beat in 0..4 {
+            hits.push(hit(beat, 0, (0, 1), 0));
+            hits.push(hit(beat, 0, (1, 2), 0));
+        }
+        hits.extend([
+            hit(0, 0, (0, 1), 1),
+            hit(0, 0, (4, 5), 1),
+            hit(1, 0, (3, 5), 1),
+            hit(2, 0, (2, 5), 1),
+            hit(3, 0, (1, 5), 1),
+        ]);
+        let timeline = Timeline {
+            hits,
+            bar_starts: vec![0],
+            beats: 4,
+        };
+        close(cross_rhythm(&timeline), 1.0);
+    }
+
+    #[test]
+    fn a_chord_on_the_beat_is_no_second_grid() {
+        // Voice 1 an anapaest in beat 0, the bar's chord on its first beat, and voice 2 on the
+        // beat alone. A chord is not a line, and a lone onset on the beat is subdivision 1, which
+        // divides every grid: nothing crosses.
+        let mut chord = hit(0, 0, (0, 1), 0);
+        chord.chord = true;
+        let timeline = Timeline {
+            hits: vec![
+                hit(0, 0, (0, 1), 1),
+                hit(0, 0, (1, 3), 1),
+                hit(0, 0, (2, 3), 1),
+                chord,
+                hit(0, 0, (0, 1), 2),
+            ],
+            bar_starts: vec![0],
+            beats: 1,
+        };
+        close(cross_rhythm(&timeline), 0.0);
     }
 
     #[test]
