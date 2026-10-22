@@ -144,6 +144,32 @@ fn explain_renders_the_poem_with_each_token_annotated() {
 }
 
 #[test]
+fn the_explain_views_palette_values_share_one_column() {
+    // The longest palette keys are 13 characters (density_level, melody_octave, ride_fallback);
+    // after the two-space indent every value starts at byte 16.
+    let poem = format!("+++\ndensity_level = 1\nride_fallback = \"crash\"\n+++\n{COUPLET}");
+    let (out, err, code) = run(&["--explain"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    let style: Vec<&str> = out
+        .lines()
+        .skip_while(|l| *l != "style")
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .collect();
+    assert!(style.len() > 10, "{out}");
+    for line in style {
+        let (key, value) = line.split_at(16);
+        assert!(
+            key.ends_with(' ') && !value.starts_with(' ') && !value.is_empty(),
+            "{line:?} is off the column"
+        );
+    }
+    assert!(out.contains("  density_level 1.00\n"), "{out}");
+    assert!(out.contains("  ride_fallback crash\n"), "{out}");
+    assert!(out.contains("  bass_octave   2\n"), "{out}");
+}
+
+#[test]
 fn a_broken_pipe_is_not_a_crash() {
     // `prosody poem.txt | head -1` is the most ordinary thing anyone does with this program, and
     // Rust panics on EPIPE unless you handle it.
@@ -223,6 +249,22 @@ fn the_same_poem_always_compiles_to_the_same_bytes() {
     let (first, _, _) = run(&[], COUPLET);
     let (second, _, _) = run(&[], COUPLET);
     assert_eq!(first, second);
+}
+
+#[test]
+fn the_osc_schedule_names_the_header_keys_it_does_not_apply() {
+    let poem = format!("+++\nmelody_octave = 5\n+++\n{COUPLET}");
+    let (out, err, code) = run(&["--osc"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(
+        out.lines().nth(1),
+        Some(
+            "# not applied here: melody_octave = 5 (pitch is sent from MIDI 36, velocity unscaled)"
+        ),
+        "{out}"
+    );
+    let (plain, _, _) = run(&["--osc"], COUPLET);
+    assert!(!plain.contains("not applied"), "{plain}");
 }
 
 #[test]
@@ -604,7 +646,7 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
     assert_eq!(code, Some(0), "{err}");
     // `bass=on` is the default, so the block is the one line; then the summary's blank line.
     assert!(
-        explained.contains("mappings\n  reading      stanza\n\n"),
+        explained.contains("mappings\n  reading       stanza\n\n"),
         "{explained}"
     );
     let (plain, _, _) = run(&["--explain"], COUPLET);

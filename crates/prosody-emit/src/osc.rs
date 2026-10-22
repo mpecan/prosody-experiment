@@ -217,6 +217,25 @@ pub const TEMPO: &str = "/prosody/tempo";
 pub struct Schedule {
     messages: Vec<Message>,
     beats_per_minute: u16,
+    unapplied: Vec<(&'static str, String)>,
+}
+
+/// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
+/// that it does not apply: every pitch is sent from MIDI 36 with no melody/bass split, and every
+/// velocity unscaled by density. A header that sets one of them is told so in
+/// [`Schedule::to_text`] and on `--send`, rather than having it vanish (`CLAUDE.md` §6: a fallback
+/// must be visible). Sample choices (`bank`, `kit`, `ride_fallback`, ...) are not listed: the
+/// schedule names no sound at all, so a receiver is choosing those anyway.
+const UNAPPLIED: &[&str] = &["bass_octave", "melody_octave", "density_level"];
+
+/// The [`UNAPPLIED`] keys this style sets away from their default, with the values it sets.
+fn unapplied(style: &Style) -> Vec<(&'static str, String)> {
+    let defaults = Style::default().describe();
+    style
+        .describe()
+        .into_iter()
+        .filter(|(key, value)| UNAPPLIED.contains(key) && defaults.get(key) != Some(value))
+        .collect()
 }
 
 impl Schedule {
@@ -233,6 +252,13 @@ impl Schedule {
     #[must_use]
     pub const fn beats_per_minute(&self) -> u16 {
         self.beats_per_minute
+    }
+
+    /// The palette keys the header set that this schedule does not apply, with their values, in
+    /// key order. Empty unless a header moves `bass_octave`, `melody_octave` or `density_level`.
+    #[must_use]
+    pub fn unapplied(&self) -> &[(&'static str, String)] {
+        &self.unapplied
     }
 
     /// How long the piece lasts, in beats.
@@ -269,6 +295,18 @@ impl Schedule {
             self.beats_per_minute,
             self.messages.len()
         );
+        if !self.unapplied.is_empty() {
+            let keys: Vec<String> = self
+                .unapplied
+                .iter()
+                .map(|(key, value)| format!("{key} = {value}"))
+                .collect();
+            let _ = writeln!(
+                out,
+                "# not applied here: {} (pitch is sent from MIDI 36, velocity unscaled)",
+                keys.join(", ")
+            );
+        }
         for message in &self.messages {
             let args: Vec<String> = message
                 .args
@@ -338,6 +376,7 @@ impl Backend for Osc {
                 .tempo_range()
                 .at_density(score.events().len(), score.bars())
                 .get(),
+            unapplied: unapplied(style),
         })
     }
 }
@@ -800,6 +839,39 @@ mod tests {
         assert_eq!(notes(&c), vec![36; 8]);
         assert_eq!(notes(&d), vec![38; 8], "the root moves every note");
         assert_eq!(c.messages().len(), d.messages().len(), "and nothing else");
+    }
+
+    #[test]
+    fn the_keys_it_does_not_apply_are_named_not_dropped() {
+        let score = score_of("teA bAn\nteA bAn\n");
+        let backend = Osc::new();
+        let plain = backend.render(&score, &Style::default()).unwrap();
+        assert!(plain.unapplied().is_empty());
+        assert!(!plain.to_text().contains("not applied"));
+
+        let set =
+            Style::parse("+++\nbass_octave = 1\ndensity_level = 1\nride_fallback = \"crash\"\n+++")
+                .unwrap();
+        let moved = backend.render(&score, &set).unwrap();
+        // Key order, and only the two that shape a number this schedule sends.
+        assert_eq!(
+            moved.unapplied(),
+            &[
+                ("bass_octave", "1".to_owned()),
+                ("density_level", "1.00".to_owned())
+            ]
+        );
+        let text = moved.to_text();
+        assert_eq!(
+            text.lines().nth(1),
+            Some(
+                "# not applied here: bass_octave = 1, density_level = 1.00 \
+                 (pitch is sent from MIDI 36, velocity unscaled)"
+            ),
+            "{text}"
+        );
+        // ...and nothing it sends changes: the disclosure is the whole of the difference.
+        assert_eq!(moved.messages(), plain.messages());
     }
 
     #[test]

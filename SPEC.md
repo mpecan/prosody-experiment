@@ -259,9 +259,8 @@ range, scaled rather than clipped), `drive`, `compress`, `humanise`, and a level
 (`drums_gain`, `bass_gain`, `melody_gain`). `preset = "default" | "warm" | "raw"` starts from a
 named palette. A role's level is never zero (`0.1..=2`): a muted role would leave its events in
 the score and inaudible, which I4 forbids as surely as a fully closed filter. The register a role
-plays in is *not* a palette value: the Strudel backend fixes the bass at MIDI 36 and the rhyme
-melody two octaves up at 60. It would be palette by nature (it moves no event), but no header key
-sets it yet.
+plays in was at first fixed in the Strudel backend (bass MIDI 36, melody 60); it is now palette —
+see the step 4.2 extension below.
 
 `humanise` is the one palette value that draws randomness, and it obeys I2: each syllable's stray
 (up to 30 ms late, up to 30% softer, scaled by the amount) comes from its *line's* voice seed under
@@ -289,6 +288,39 @@ samples have none) keeps time on its open hat under `kit = "ride"`, and the patt
 so: a missing sample would otherwise silence the whole foundation, which no palette may do. In a
 scale without seven notes, `seventh` still stacks every other degree — fourths in
 `pentatonic_minor` — and the header names it as that rather than as a seventh.
+
+*Extended 2026-10-22 (sound and voice, step 4.2 — palette the user asked to be able to change).*
+Three more keys, every one palette:
+
+- **`bass_octave`** (`1..=3`, default `2`, MIDI 36) and **`melody_octave`** (`3..=5`, default `4`,
+  MIDI 60) — the octave each pitched role plays in, in scientific pitch notation (MIDI of its C =
+  12 × (octave + 1)). Whole numbers only. They move every note of a role by octaves and no event;
+  the ranges meet at octave 3 and never cross, so the melody is never under the bass. The Strudel
+  backend reads them; OSC still sends every pitch from 36 (it does not split the roles), and
+  says so: a schedule whose header moves either key, or `density_level`, carries a
+  `# not applied here: …` line, and `--send` prints the same on stderr.
+- **`ride_fallback = "open_hat" | "crash"`** (default `open_hat`) — what keeps time under
+  `kit = "ride"` on a bank with no ride sample (TR-808, TR-707). The stand-in strikes exactly where
+  the ride would; the `plays:` line of the pattern's header names it ("crash in place of the ride,
+  which RolandTR808 does not have"). A bank with a ride ignores it.
+- **`density_level`** (`0..=1`, default `0`, today's fixed levels) — levels that follow density.
+  Every gain in a bar is multiplied by *n*^−`density_level`, where *n* is the number of lines
+  sounding in that bar (every placement of the arrangement that plays at least one event): at
+  `0.5` a bar of *n* lines is divided by √*n* (the power of *n* uncorrelated lines held at one
+  line's), at `1` by *n* (their summed peak, when their hits coincide). A bar of one line is never
+  changed. This is the one palette value that *reads* the score's structure; it changes only gain
+  values — no event, onset or pattern step — and the I3 property test varies it and checks that
+  the output differs from `0` in `.gain` values alone, each no louder. **Disclosed against I2:** a
+  line's level in a bar it shares depends on how many other lines share it, so with
+  `density_level > 0` an edit to stanza *n* that changes how many lines sound in a bar (a stanza
+  that loops longer) changes the *level* of stanza *m*'s line in that bar. Its events and its voice
+  are untouched — I2's property tests are about the score and still hold — but the emitted gains
+  of a shared bar are not stanza-local. At the default `0` nothing crosses. The `warm` and `jazz`
+  presets set `0.5`; `default` and `raw` keep `0`.
+
+The pattern header lists these four keys only when they differ from their default, so a pattern
+that does not use them reads byte for byte as before; when `density_level` is set, the header also
+names the factor for each line count the piece has. The explain view always lists them.
 
 ---
 

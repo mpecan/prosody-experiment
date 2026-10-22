@@ -21,7 +21,7 @@ use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
 use prosody_emit::style::{
-    BANKS, KITS, PRESETS as PALETTES, SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
+    BANKS, KITS, PRESETS as PALETTES, RIDE_FALLBACKS, SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
 };
 use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading};
 use prosody_lexicon::EnglishLexicon;
@@ -89,6 +89,7 @@ fn page() -> Result<String> {
         )
         .replace("__KITS__", &list(KITS))
         .replace("__VOICINGS__", &list(VOICINGS))
+        .replace("__RIDE_FALLBACKS__", &list(RIDE_FALLBACKS))
         .replace("__SCALES__", &list(&scales))
         .replace("__BANKS__", &list(BANKS))
         .replace("__INSTRUMENTS__", &list(&instruments))
@@ -300,7 +301,16 @@ fn compile(request: &Request, output: &Output) -> Response {
 }
 
 /// The palette keys the page sends that are names, written as TOML strings.
-const NAMED_KEYS: &[&str] = &["scale", "root", "bank", "bass", "melody", "kit", "voicing"];
+const NAMED_KEYS: &[&str] = &[
+    "scale",
+    "root",
+    "bank",
+    "bass",
+    "melody",
+    "kit",
+    "voicing",
+    "ride_fallback",
+];
 
 /// The palette keys the page sends that are numbers, in header units.
 const NUMBER_KEYS: &[&str] = &[
@@ -315,6 +325,9 @@ const NUMBER_KEYS: &[&str] = &[
     "drums_gain",
     "bass_gain",
     "melody_gain",
+    "density_level",
+    "bass_octave",
+    "melody_octave",
 ];
 
 /// The style header the controls describe.
@@ -429,8 +442,12 @@ fn render(source: &str, output: &Output, mappings: &Mappings, profile: Profile) 
         // unpronounceable words is exactly when a writer most wants to see why.
         Output::Explain => {
             let mut out = String::new();
-            for (key, value) in style.describe() {
-                let _ = writeln!(out, "{key:<12} {value}");
+            let fields = style.describe();
+            // Pad to the longest key, so a key added to the palette cannot push its value off
+            // the column.
+            let width = fields.keys().map(|key| key.len()).max().unwrap_or(0);
+            for (key, value) in fields {
+                let _ = writeln!(out, "{key:<width$} {value}");
             }
             // Every choice that is not the default, so the view says which piece it describes.
             let changed: Vec<String> = mappings
@@ -438,7 +455,7 @@ fn render(source: &str, output: &Output, mappings: &Mappings, profile: Profile) 
                 .map(|choice| format!("{}={}", choice.mapping().name(), choice.variant().name()))
                 .collect();
             if !changed.is_empty() {
-                let _ = writeln!(out, "{:<12} {}", "mappings", changed.join(", "));
+                let _ = writeln!(out, "{:<width$} {}", "mappings", changed.join(", "));
             }
             let _ = writeln!(out);
             out.push_str(&annotate::render(
@@ -581,12 +598,13 @@ mod tests {
         for name in prosody_emit::style::KITS
             .iter()
             .chain(prosody_emit::style::VOICINGS)
+            .chain(prosody_emit::style::RIDE_FALLBACKS)
         {
             assert!(html.contains(&format!("\"{name}\"")), "{name} missing");
         }
         // The jazz palette tells the menu it sets the scale, swing and bank as well; warm does not.
         assert!(
-            html.contains("\"jazz\":[\"bass\",\"melody\",\"kit\",\"voicing\""),
+            html.contains("\"jazz\":[\"bass\",\"melody\",\"kit\",\"ride_fallback\",\"voicing\""),
             "jazz's keys"
         );
         let jazz_keys = html.split("\"jazz\":[").nth(1).unwrap();
@@ -604,6 +622,7 @@ mod tests {
             "__PRESETS__",
             "__KITS__",
             "__VOICINGS__",
+            "__RIDE_FALLBACKS__",
         ] {
             assert!(!html.contains(placeholder), "{placeholder} left unfilled");
         }
@@ -771,7 +790,7 @@ mod tests {
             &Output::Explain,
         );
         assert!(
-            explain.body.contains("mappings     reading=stanza"),
+            explain.body.contains("mappings      reading=stanza"),
             "{}",
             explain.body
         );
@@ -781,6 +800,32 @@ mod tests {
         let music =
             |query: &[(&str, &str)]| super::compile(&request(query, SEED), &Output::Pattern).body;
         assert_eq!(music(&[]), music(&[("set", "reading:off")]));
+    }
+
+    #[test]
+    fn the_explain_views_palette_values_share_one_column() {
+        // The longest palette keys are 13 characters (density_level, melody_octave,
+        // ride_fallback), so every value starts at byte 14: thirteen for the key, one space.
+        let explain = super::compile(
+            &request(&[("set", "reading:stanza"), ("density_level", "0.7")], SEED),
+            &Output::Explain,
+        );
+        assert_eq!(explain.status, 200, "{}", explain.body);
+        let header: Vec<&str> = explain.body.lines().take_while(|l| !l.is_empty()).collect();
+        assert!(header.len() > 10, "{}", explain.body);
+        for line in header {
+            let (key, value) = line.split_at(14);
+            assert!(
+                key.ends_with(' ') && !value.starts_with(' ') && !value.is_empty(),
+                "{line:?} is off the column"
+            );
+        }
+        assert!(
+            explain.body.contains("density_level 0.70"),
+            "{}",
+            explain.body
+        );
+        assert!(explain.body.contains("bass_octave   2"), "{}", explain.body);
     }
 
     #[test]
@@ -999,6 +1044,35 @@ mod tests {
         // C dorian, degree 0 as a seventh: C E♭ G B♭ from 60 — 60 63 67 70.
         assert!(body.contains("[60,63,67,70]"), "{body}");
         assert!(body.contains("//   voicing = seventh"), "{body}");
+    }
+
+    #[test]
+    fn the_register_the_ride_stand_in_and_density_reach_the_pattern() {
+        let query = [
+            ("bass_octave", "1"),
+            ("melody_octave", "5"),
+            ("ride_fallback", "crash"),
+            ("density_level", "0.5"),
+            ("kit", "ride"),
+            ("bank", "tr808"),
+        ];
+        let response = super::compile(&request(&query, SEED), &Output::Pattern);
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = &response.body;
+        for line in [
+            "//   bass_octave = 1\n",
+            "//   melody_octave = 5\n",
+            "//   ride_fallback = crash\n",
+            "//   density_level = 0.50\n",
+            "crash in place of the ride, which RolandTR808 does not have,",
+            "//   density: every gain in a bar divided by n^0.500",
+        ] {
+            assert!(body.contains(line), "{line} missing: {body}");
+        }
+        // An octave outside its role's range is refused at the boundary, naming the key.
+        let response = super::compile(&request(&[("bass_octave", "4")], SEED), &Output::Pattern);
+        assert_eq!(response.status, 400);
+        assert!(response.body.contains("bass_octave"), "{}", response.body);
     }
 
     #[test]

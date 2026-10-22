@@ -397,6 +397,77 @@ answer first, and it is a §4.2 question.
 
 ## Log
 
+### Sound and voice, step 4.2, review fixes
+
+- **OSC names what it does not apply.** The schedule sends pitch from MIDI 36 and velocity
+  unscaled, so `bass_octave`, `melody_octave` and `density_level` never reached it, silently.
+  Now a header that moves one of them gets `# not applied here: bass_octave = 1, density_level =
+  1.00 (pitch is sent from MIDI 36, velocity unscaled)` in `--osc` text and one stderr line per
+  key on `--send` (`CLAUDE.md` §6). The messages themselves are unchanged (tested). Sample keys
+  (`ride_fallback`, `bank`, `kit`) are not listed: the schedule names no sound at all. Under the
+  `jazz` and `warm` presets the line appears for `density_level = 0.50`.
+- **Explain views align.** The CLI's and the page's explain views padded keys to 12 and the new
+  keys are 13; both now pad to the longest key, so every value shares one column (tested in
+  both crates by column, hand-worked: byte 14 on the page, 16 in the CLI). The page's
+  `mappings` row moved one column with it.
+- **Kept:** the pattern header still lists the four new keys only when they are set — listing
+  them always would change every snapshot, which the step ruled out. The explain view lists all.
+
+### Sound and voice, step 4.2 — the register, the ride's stand-in, and levels that follow density
+
+Three palette keys the user asked to be able to change. All palette (I3): no event, onset or
+pattern step moves; `prosody-core` is untouched, and no mapping changed.
+
+- **`bass_octave` (1–3) and `melody_octave` (3–5)**, defaults 2 and 4 — today's MIDI 36 and 60,
+  which the Strudel backend had hard-coded. `style::Octave`, whole numbers only (an octave of
+  `2.5` is refused, not rounded). Hand-worked: bass octave 1 and melody 5 put "rot bAn" at 27
+  and 72; both at 3, 51 and 48. OSC still sends every pitch from 36 (it never split the roles).
+- **`ride_fallback = "open_hat" | "crash"`**, default `open_hat` — what keeps time under the
+  ride kit on a bank without a ride. The `plays:` line names it ("crash in place of the ride,
+  which RolandTR808 does not have"); a bank with a ride ignores it. The every-bank test now walks
+  bank × kit × fallback × layer, and a test checks that crash and open hat differ in the sample
+  name and nothing else.
+- **`density_level` (0–1)**, default 0 — every gain in a bar × *n*^−level, *n* the lines sounding
+  in that bar; 0.5 is ÷√*n*, 1 is ÷*n*, a bar of one line never moves. Folded into each event's
+  `.gain` value on the layer's own grid (`grid_by_slot`), not a new parameter pattern, so the
+  arrangement check sees no new shape. It reads the score's structure (lines per bar) and writes
+  only gain values; a new I3 property checks exactly that (the output differs from level 0 in
+  `.gain` values alone, each no louder; a mutation halving the exponent failed the unit test).
+  **I2 disclosure** (`SPEC.md` §5): above 0, a shared bar's levels depend on how many lines share
+  it, so an edit to one stanza can change the *level* of another stanza's line in a bar they
+  share. The score is untouched, so I2's properties still hold; the emitted gains of a shared bar
+  are not stanza-local.
+- **Presets.** `warm` and `jazz` now set `density_level = 0.5`; `default` and `raw` keep 0. Every
+  preset also restores octave 2/4 and the open hat (all four keys joined `preset_keys`).
+- **Visible.** The explain view always lists the four keys; the pattern header lists them only
+  when they differ from the default, so a pattern not using them is byte-identical to before, and
+  with a density level it adds one line naming the factor for each line count the piece has. Page
+  controls: Ride stand-in (menu), Bass octave and Melody octave (sliders), Levels follow density
+  (mix slider).
+- **Snapshots.** Only `pattern-villanelle-jazz` changed, because the jazz preset now sets the
+  density level: two header lines added, and gain values only — checked by script against the
+  old snapshot with every `.gain(…)` removed (identical) and every gain ratio in {1, 0.707,
+  0.577}, the villanelle's bars of one, two and three lines. Read.
+
+**Measured** in Chromium on port 4882: the peak of Strudel's summed output tapped by an
+`AnalyserNode` at the superdough destination gain, before the page's duck, compressor and soft
+clipper (knee 0.6, ceiling 0.95), each example with the palette its own header sets, setting A:
+
+| poem | window | level 0 | 0.5 | 1 |
+|---|---|---|---|---|
+| blake-tyger | first 12 s | 0.788 | 0.461 | 0.272 |
+| blake-tyger | first 30 s | 0.838 | 0.462 | 0.304 |
+| wilde-theocritus | first 12 s | 0.731 | 0.558 | 0.469 |
+| wilde-theocritus | first 30 s | 0.950 | 0.655 | 0.476 |
+
+Wilde, 30 s, under the Sound menu's presets: warm 0.802 at 0, 0.614 at 0.5; jazz 0.718 at 0,
+0.512 at 0.5 — hence 0.5 for both. At 1 the sparse bars keep their level and the dense ones drop
+far (Blake ÷4 in its four-line bars), which may sound like the texture thinning rather than a
+mix; that is for listening. Also checked: jazz + `tr808` + crash + octaves 1/5 plays with no
+console errors or warnings, `RolandTR808_cr` and both soundfonts load (200), and the Sound menu
+reads *jazz* after choosing it (density 0.5) and *custom* after a control moves. No one has heard
+it. Cycle tables unchanged: machine mean overall 0.743, jazz 0.740.
+
 ### Sound and voice, step 4.1 — every candidate mapping is a selector
 
 The user chose selectors with named variants over flat on/off switches, and asked for the reading

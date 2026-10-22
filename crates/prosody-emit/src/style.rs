@@ -237,7 +237,10 @@ const SOUND_KEYS: &[&str] = &[
     "bass",
     "melody",
     "kit",
+    "ride_fallback",
     "voicing",
+    "bass_octave",
+    "melody_octave",
     "reverb",
     "room_size",
     "delay",
@@ -248,6 +251,7 @@ const SOUND_KEYS: &[&str] = &[
     "drums_gain",
     "bass_gain",
     "melody_gain",
+    "density_level",
 ];
 
 /// Which sound each drum layer plays.
@@ -290,6 +294,86 @@ impl Kit {
         }
     }
 }
+
+/// What keeps time under [`Kit::Ride`] on a bank that has no ride sample.
+///
+/// The TR-808 and TR-707 in the sample map have no ride, and asking for one silences the whole
+/// foundation layer (`SPEC.md` §4.1's pulse), which no palette may do. Which drum stands in is a
+/// choice of colour, not of events — the stand-in strikes exactly where the ride would — so it is
+/// palette, and a header can make it. Both stand-ins are in every bank the page loads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum RideFallback {
+    /// The open hat: the drum machine's usual stand-in for a ride, short and bright.
+    OpenHat,
+    /// The crash: a real cymbal with a long wash, nearer a ride's ring, and louder.
+    Crash,
+}
+
+/// Every ride fallback a header may name.
+pub const RIDE_FALLBACKS: &[&str] = &["open_hat", "crash"];
+
+impl RideFallback {
+    /// Its name in a header.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::OpenHat => "open_hat",
+            Self::Crash => "crash",
+        }
+    }
+
+    /// What the pattern's header calls it.
+    #[must_use]
+    pub const fn spoken(self) -> &'static str {
+        match self {
+            Self::OpenHat => "open hat",
+            Self::Crash => "crash",
+        }
+    }
+
+    fn parse(name: &str) -> Result<Self, StyleError> {
+        match name {
+            "open_hat" => Ok(Self::OpenHat),
+            "crash" => Ok(Self::Crash),
+            _ => Err(StyleError::Unknown {
+                kind: "ride_fallback".to_owned(),
+                name: name.to_owned(),
+                known: RIDE_FALLBACKS.join(", "),
+            }),
+        }
+    }
+}
+
+/// The octave a pitched role plays in, in scientific pitch notation: octave 4 starts at middle C,
+/// MIDI 60.
+///
+/// The register moves every note of a role by whole octaves and moves no event, so it is palette
+/// (`SPEC.md` §5). Each role has its own range, validated at the boundary: the bass from octave 1
+/// to 3 (MIDI 24–48), where a bass instrument has its body, and the melody from 3 to 5 (MIDI
+/// 48–72), where keys and mallets sing. The ranges meet at octave 3 and never cross, so the
+/// melody is never below the bass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Octave(u8);
+
+impl Octave {
+    /// The octave number.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// The MIDI note its C has: octave 2 is 36, octave 4 is 60.
+    #[must_use]
+    pub fn midi_c(self) -> i32 {
+        12 * (i32::from(self.0) + 1)
+    }
+}
+
+/// The octaves the bass may play in.
+pub const BASS_OCTAVES: std::ops::RangeInclusive<u8> = 1..=3;
+
+/// The octaves the melody may play in.
+pub const MELODY_OCTAVES: std::ops::RangeInclusive<u8> = 3..=5;
 
 /// How a rhyme note is voiced: one tone, or a seventh chord built on it.
 ///
@@ -570,7 +654,10 @@ pub struct Style {
     bass: Named,
     melody: Named,
     kit: Kit,
+    ride_fallback: RideFallback,
     voicing: Voicing,
+    bass_octave: Octave,
+    melody_octave: Octave,
     mix: Mix,
 }
 
@@ -637,6 +724,7 @@ pub struct Mix {
     drums_gain: Amount,
     bass_gain: Amount,
     melody_gain: Amount,
+    density_level: Amount,
 }
 
 impl Mix {
@@ -703,6 +791,19 @@ impl Mix {
     pub const fn melody_gain(self) -> Amount {
         self.melody_gain
     }
+
+    /// How far levels follow density, `0..=1`; zero is the fixed levels above.
+    ///
+    /// Every gain in a bar is divided by *n* to this power, where *n* is how many lines sound in
+    /// that bar: at `0.5` by √*n*, which holds the power of *n* uncorrelated lines at one line's,
+    /// and at `1` by *n*, which holds their summed peak when their hits coincide — as a stanza
+    /// looping under the next mostly does, since both sit on the bar's beats. A bar of one line is
+    /// never changed. It reads how many lines a bar sounds, which is the score's structure, and
+    /// changes nothing but gain values; see `strudel::density` for the argument against I3.
+    #[must_use]
+    pub const fn density_level(self) -> Amount {
+        self.density_level
+    }
 }
 
 /// What a named preset sets: always the sound and the mix, and for `jazz` a feel as well.
@@ -737,12 +838,12 @@ fn dorian() -> Scale {
 /// - **default** — what a poem with no header gets: an electric-piano melody over an acoustic
 ///   bass, a modest room, a little echo on the melody, light compression and a small human stray.
 /// - **warm** — softer and wider: vibraphone over fretless bass, a long room, more echo, a lower
-///   high cut, a touch of saturation, and more stray.
+///   high cut, a touch of saturation, and more stray; levels follow density at `0.5`.
 /// - **raw** — the palette as it was before soundfonts and a mix existed: triangle oscillators,
 ///   dry, on the grid. Kept so the difference stays audible, not as a recommendation.
 /// - **jazz** — a piano trio's colours: Rhodes voicing every rhyme word as a seventh chord, an
 ///   upright bass, the ride keeping time with the snare comping, triplet swing, dorian, and a
-///   warm, darker room with more human stray. See [`jazz`].
+///   warm, darker room with more human stray; levels follow density at `0.5`. See [`jazz`].
 ///
 /// The levels were set by measurement, not by ear — nobody could listen where they were set.
 /// Measured in headless Chromium on Strudel's summed output before the page's master stage, as the
@@ -784,6 +885,7 @@ fn preset_palette(name: &str) -> Option<Preset> {
                 drums_gain: Amount(28),
                 bass_gain: Amount(32),
                 melody_gain: Amount(75),
+                density_level: Amount(0),
             },
         )),
         "warm" => Some(sound(
@@ -800,6 +902,9 @@ fn preset_palette(name: &str) -> Option<Preset> {
                 drums_gain: Amount(24),
                 bass_gain: Amount(24),
                 melody_gain: Amount(60),
+                // Measured (PLAN.md, *sound and voice, step 4.2*): the Wilde villanelle peaked at
+                // 0.80 before the master at 0, 0.61 at 0.5 — out of the soft clipper's knee.
+                density_level: Amount(50),
             },
         )),
         "raw" => Some(sound(
@@ -816,6 +921,7 @@ fn preset_palette(name: &str) -> Option<Preset> {
                 drums_gain: Amount(100),
                 bass_gain: Amount(100),
                 melody_gain: Amount(100),
+                density_level: Amount(0),
             },
         )),
         "jazz" => Some(jazz()),
@@ -863,6 +969,9 @@ fn jazz() -> Preset {
             drums_gain: Amount(22),
             bass_gain: Amount(40),
             melody_gain: Amount(75),
+            // Measured: the Wilde villanelle peaked at 0.72 before the master at 0, 0.51 at 0.5.
+            // A ride rings on, so a bar of three lines' rides stacks up longer than three kicks.
+            density_level: Amount(50),
         },
         feel: Some(Feel {
             scale: dorian(),
@@ -891,7 +1000,10 @@ impl Default for Style {
             bass: Named { name: "triangle" },
             melody: Named { name: "triangle" },
             kit: Kit::Machine,
+            ride_fallback: RideFallback::OpenHat,
             voicing: Voicing::Note,
+            bass_octave: Octave(2),
+            melody_octave: Octave(4),
             mix: Mix {
                 reverb: Amount(0),
                 room_size: 20,
@@ -903,6 +1015,7 @@ impl Default for Style {
                 drums_gain: Amount(100),
                 bass_gain: Amount(100),
                 melody_gain: Amount(100),
+                density_level: Amount(0),
             },
         };
         style.apply_preset("default");
@@ -965,6 +1078,24 @@ impl Style {
         self.voicing
     }
 
+    /// What keeps time under the ride kit on a bank with no ride.
+    #[must_use]
+    pub const fn ride_fallback(&self) -> RideFallback {
+        self.ride_fallback
+    }
+
+    /// The octave the bass plays in, within [`BASS_OCTAVES`].
+    #[must_use]
+    pub const fn bass_octave(&self) -> Octave {
+        self.bass_octave
+    }
+
+    /// The octave the rhyme melody plays in, within [`MELODY_OCTAVES`].
+    #[must_use]
+    pub const fn melody_octave(&self) -> Octave {
+        self.melody_octave
+    }
+
     /// The mix.
     #[must_use]
     pub const fn mix(&self) -> Mix {
@@ -990,6 +1121,11 @@ impl Style {
         self.kit = preset.kit;
         self.voicing = preset.voicing;
         self.mix = preset.mix;
+        // Every preset plays in today's register and keeps time on the open hat where a bank has
+        // no ride: the keys are in `SOUND_KEYS`, so the page's Sound menu restores them too.
+        self.ride_fallback = RideFallback::OpenHat;
+        self.bass_octave = Octave(2);
+        self.melody_octave = Octave(4);
         if let Some(feel) = preset.feel {
             self.scale = feel.scale;
             self.swing = feel.swing;
@@ -1072,6 +1208,15 @@ impl Style {
                 }
                 ("bass", toml::Value::String(name)) => style.bass = instrument(key, name)?,
                 ("kit", toml::Value::String(name)) => style.kit = Kit::parse(name)?,
+                ("ride_fallback", toml::Value::String(name)) => {
+                    style.ride_fallback = RideFallback::parse(name)?;
+                }
+                ("bass_octave", value) => {
+                    style.bass_octave = read_octave(key, value, BASS_OCTAVES)?;
+                }
+                ("melody_octave", value) => {
+                    style.melody_octave = read_octave(key, value, MELODY_OCTAVES)?;
+                }
                 ("voicing", toml::Value::String(name)) => style.voicing = Voicing::parse(name)?,
                 ("melody", toml::Value::String(name)) => style.melody = instrument(key, name)?,
                 ("swing", value) => {
@@ -1088,11 +1233,16 @@ impl Style {
                 ("drums_gain", value) => mix.drums_gain = read_level(key, value)?,
                 ("bass_gain", value) => mix.bass_gain = read_level(key, value)?,
                 ("melody_gain", value) => mix.melody_gain = read_level(key, value)?,
+                ("density_level", value) => mix.density_level = read_amount(key, value, 1)?,
                 ("room_size", value) => {
                     mix.room_size = narrow(read_scaled(key, value, 10.0, 1, 100)?);
                 }
                 ("high_cut", value) => mix.high_cut = read_scaled(key, value, 1.0, 1000, 20000)?,
-                ("scale" | "root" | "bank" | "bass" | "melody" | "kit" | "voicing", _) => {
+                (
+                    "scale" | "root" | "bank" | "bass" | "melody" | "kit" | "voicing"
+                    | "ride_fallback",
+                    _,
+                ) => {
                     return Err(wrong(key, "a string"));
                 }
                 ("tempo_range", _) => return Err(wrong(key, "a pair of numbers")),
@@ -1133,6 +1283,10 @@ impl Style {
         fields.insert("melody", self.melody.get().to_owned());
         fields.insert("kit", self.kit.name().to_owned());
         fields.insert("voicing", self.voicing.name().to_owned());
+        fields.insert("ride_fallback", self.ride_fallback.name().to_owned());
+        fields.insert("bass_octave", format!("{}", self.bass_octave.0));
+        fields.insert("melody_octave", format!("{}", self.melody_octave.0));
+        fields.insert("density_level", mix.density_level.describe());
         fields.insert("reverb", mix.reverb.describe());
         fields.insert(
             "room_size",
@@ -1179,6 +1333,24 @@ fn read_amount(key: &str, value: &toml::Value, max: u16) -> Result<Amount, Style
 /// turning it off would be deciding which events exist, which is structure (I3).
 fn read_level(key: &str, value: &toml::Value) -> Result<Amount, StyleError> {
     read_scaled(key, value, 100.0, 10, 200).map(Amount)
+}
+
+/// Reads an octave: a whole number within the role's range. Not [`read_scaled`], which rounds — an
+/// octave of `2.5` is a mistake to report, not a value to round.
+fn read_octave(
+    key: &str,
+    value: &toml::Value,
+    range: std::ops::RangeInclusive<u8>,
+) -> Result<Octave, StyleError> {
+    value
+        .as_integer()
+        .and_then(|whole| u8::try_from(whole).ok())
+        .filter(|octave| range.contains(octave))
+        .map(Octave)
+        .ok_or_else(|| StyleError::Invalid {
+            key: key.to_owned(),
+            expected: format!("a whole number from {} to {}", range.start(), range.end()),
+        })
 }
 
 /// Reads a number, multiplies it by `scale`, rounds it once, and refuses it outside
@@ -1244,7 +1416,7 @@ fn read_tempo(bounds: &[toml::Value]) -> Result<TempoRange, StyleError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Kit, Note, Scale, Style, StyleError, Swing, Voicing};
+    use super::{Kit, Note, RideFallback, Scale, Style, StyleError, Swing, Voicing};
 
     const HEADER: &str = "+++\n\
         [style]\n\
@@ -1324,8 +1496,10 @@ mod tests {
                 "bank",
                 "bass",
                 "bass_gain",
+                "bass_octave",
                 "compress",
                 "delay",
+                "density_level",
                 "drive",
                 "drums_gain",
                 "high_cut",
@@ -1333,7 +1507,9 @@ mod tests {
                 "kit",
                 "melody",
                 "melody_gain",
+                "melody_octave",
                 "reverb",
+                "ride_fallback",
                 "room_size",
                 "root",
                 "scale",
@@ -1355,6 +1531,10 @@ mod tests {
         assert_eq!(described["drums_gain"], "0.28");
         assert_eq!(described["kit"], "machine");
         assert_eq!(described["voicing"], "note");
+        assert_eq!(described["bass_octave"], "2");
+        assert_eq!(described["melody_octave"], "4");
+        assert_eq!(described["density_level"], "0.00");
+        assert_eq!(described["ride_fallback"], "open_hat");
     }
 
     #[test]
@@ -1370,7 +1550,7 @@ mod tests {
             for (key, value) in style.describe() {
                 let value = match key {
                     "tempo_range" => format!("[{}]", value.replace("..", ", ")),
-                    "scale" | "bank" | "bass" | "melody" | "kit" | "voicing" => {
+                    "scale" | "bank" | "bass" | "melody" | "kit" | "voicing" | "ride_fallback" => {
                         format!("\"{value}\"")
                     }
                     "root" => format!("\"{}\"", value.replace('s', "#").to_uppercase()),
@@ -1389,6 +1569,16 @@ mod tests {
         assert_eq!(Some(warm.clone()), Style::preset("warm"));
         assert_eq!(warm.melody().get(), "gm_vibraphone");
         assert_eq!(warm.mix().high_cut(), 3000);
+        assert_eq!(warm.mix().density_level().hundredths(), 50);
+        assert!(
+            Style::preset("default")
+                .unwrap()
+                .mix()
+                .density_level()
+                .is_off()
+                && Style::preset("raw").unwrap().mix().density_level().is_off(),
+            "default and raw keep fixed levels"
+        );
         // A preset never moves a note: scale, root, tempo and bank stay the default's.
         assert_eq!(warm.scale(), Style::default().scale());
         assert_eq!(warm.tempo_range(), Style::default().tempo_range());
@@ -1431,6 +1621,7 @@ mod tests {
         assert_eq!(jazz.bank().get(), "r8");
         assert_eq!(jazz.swing(), Swing(33));
         assert_eq!(jazz.scale().name(), "dorian");
+        assert_eq!(jazz.mix().density_level().hundredths(), 50);
         assert_eq!(jazz.scale().steps(), &[0, 2, 3, 5, 7, 9, 10]);
         // Root and tempo window are still the default's: the poem's key and pace are not jazz's.
         assert_eq!(jazz.root(), Style::default().root());
@@ -1488,6 +1679,60 @@ preset = \"jazz\"\nscale = \"mixolydian\"\nswing = 0\n+++",
         ] {
             assert!(Style::parse(&format!("+++\n{bad}\n+++")).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn the_register_the_fallback_and_the_density_level_are_read_to_their_ranges() {
+        // Today's register, by default: octave 2 is MIDI 36 and octave 4 is MIDI 60.
+        let plain = Style::default();
+        assert_eq!(plain.bass_octave().get(), 2);
+        assert_eq!(plain.bass_octave().midi_c(), 36);
+        assert_eq!(plain.melody_octave().get(), 4);
+        assert_eq!(plain.melody_octave().midi_c(), 60);
+        assert_eq!(plain.ride_fallback(), RideFallback::OpenHat);
+        assert!(plain.mix().density_level().is_off());
+        let set = Style::parse(
+            "+++\nbass_octave = 1\nmelody_octave = 5\nride_fallback = \"crash\"\n\
+             density_level = 0.5\n+++",
+        )
+        .unwrap();
+        // Hand-worked: 12 · (1 + 1) = 24, 12 · (5 + 1) = 72.
+        assert_eq!(set.bass_octave().midi_c(), 24);
+        assert_eq!(set.melody_octave().midi_c(), 72);
+        assert_eq!(set.ride_fallback(), RideFallback::Crash);
+        assert_eq!(set.mix().density_level().hundredths(), 50);
+        for bad in [
+            "bass_octave = 0",
+            "bass_octave = 4",
+            "bass_octave = 2.5",
+            "bass_octave = \"2\"",
+            "melody_octave = 2",
+            "melody_octave = 6",
+            "ride_fallback = \"cowbell\"",
+            "ride_fallback = 1",
+            "density_level = 1.5",
+            "density_level = -0.1",
+        ] {
+            assert!(Style::parse(&format!("+++\n{bad}\n+++")).is_err(), "{bad}");
+        }
+        // A preset restores today's register and stand-in, like every other sound key.
+        let keys = super::preset_keys("warm").unwrap();
+        for key in [
+            "bass_octave",
+            "melody_octave",
+            "ride_fallback",
+            "density_level",
+        ] {
+            assert!(keys.contains(&key), "{key}");
+        }
+        let after = Style::parse("+++\nbass_octave = 3\n+++").unwrap();
+        assert_eq!(after.bass_octave().get(), 3);
+        let overridden = Style::parse("+++\nbass_octave = 3\npreset = \"raw\"\n+++").unwrap();
+        assert_eq!(
+            overridden.bass_octave().get(),
+            3,
+            "a key overrides the preset in any order"
+        );
     }
 
     #[test]

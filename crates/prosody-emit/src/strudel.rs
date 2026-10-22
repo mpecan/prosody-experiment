@@ -62,7 +62,7 @@ use prosody_core::role::Layer;
 use prosody_core::voice::{Event, PitchSource, Score, Voice};
 use rand_core::Rng as _;
 
-use crate::style::{Kit, Named, Style, Voicing};
+use crate::style::{Kit, Named, RideFallback, Style, Voicing};
 use crate::{Backend, fmt_param};
 
 /// Renders a score as Strudel pattern text.
@@ -114,12 +114,20 @@ impl Backend for Strudel {
         header(&mut out, score, style);
 
         let strays = strays(score);
+        let density = density(score, style);
         let mut layers: Vec<(String, String)> = Vec::new();
         for voice in score.voices() {
-            layers.extend(rhythm_layer(score, style, &strays, *voice));
+            layers.extend(rhythm_layer(score, style, &strays, &density, *voice));
         }
         for role in [Pitched::Melody, Pitched::Bass] {
-            layers.extend(pitched_layer(score, style, &strays, role, tempo.get()));
+            layers.extend(pitched_layer(
+                score,
+                style,
+                &strays,
+                &density,
+                role,
+                tempo.get(),
+            ));
         }
 
         out.push_str("stack(\n");
@@ -384,6 +392,66 @@ fn sounded(score: &Score) -> usize {
         .sum()
 }
 
+/// The palette keys the header lists only when they are not at their default (see [`header`]).
+const LISTED_WHEN_SET: &[&str] = &[
+    "bass_octave",
+    "melody_octave",
+    "density_level",
+    "ride_fallback",
+];
+
+/// How many lines sound in each slot of the arrangement, in slot order: every placement that plays
+/// at least one event — a stated line, a stanza looping under the next, a held line, a call.
+fn lines_sounding(score: &Score) -> Vec<usize> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| {
+            slot.placements()
+                .iter()
+                .filter(|placement| !score.placed(**placement).events().is_empty())
+                .count()
+        })
+        .collect()
+}
+
+/// The level a bar of `lines` lines takes at this density exponent: `lines^-exponent`, and exactly
+/// 1 for a bar of one line or none. A value only (`CLAUDE.md` §4).
+fn level_for(lines: usize, exponent: f64) -> f64 {
+    if lines <= 1 {
+        return 1.0;
+    }
+    let lines = f64::from(u32::try_from(lines).unwrap_or(u32::MAX));
+    lines.powf(-exponent)
+}
+
+/// Each slot's level under the palette's `density_level`, in slot order — every 1 at zero.
+///
+/// # Why this is palette (invariant I3)
+///
+/// It is the one palette value that reads the score's structure: how many lines a bar sounds.
+/// It reads it and changes only gain *values* — every event, onset and pattern step stays where it
+/// was, and a bar of one line is untouched — the way a mixing engineer rides the faders in a dense
+/// chorus without touching the arrangement. The I3 arrangement property varies it. It was asked
+/// for because a villanelle's bars of three lines drove the page's master soft clipper (PLAN.md,
+/// *sound and voice, step 1*).
+///
+/// What it costs, disclosed in `SPEC.md` §5: a line's level in a bar it shares now depends on how
+/// many *other* lines share it, so an edit that changes how many lines sound in a bar — a stanza
+/// that loops longer — changes the level of another stanza's line in that bar. Levels only; its
+/// events, and its voice in the score, are untouched, which is what I2's property tests check.
+fn density(score: &Score, style: &Style) -> Vec<f64> {
+    let exponent = style.mix().density_level().as_f64();
+    if style.mix().density_level().is_off() {
+        return vec![1.0; score.arrangement().slots().len()];
+    }
+    lines_sounding(score)
+        .into_iter()
+        .map(|lines| level_for(lines, exponent))
+        .collect()
+}
+
 /// The comment block: what the poem is, and what the palette did to it.
 ///
 /// Not decoration. `SPEC.md` §8 wants every audible thing traceable to a token span, and pattern
@@ -399,14 +467,25 @@ fn header(out: &mut String, score: &Score, style: &Style) {
         score.voices().len(),
         sounded(score)
     );
+    // Keys added after the corpus was recorded are listed only when they are set away from their
+    // default, so a pattern that does not use them reads exactly as it did before they existed.
+    let defaults = Style::default().describe();
     for (key, value) in style.describe() {
+        if LISTED_WHEN_SET.contains(&key) && defaults.get(key) == Some(&value) {
+            continue;
+        }
         let _ = writeln!(out, "//   {key} = {value}");
     }
     // The translation from the palette's words to Strudel's sounds, so `karplus` in a header is
     // not a mystery in the output.
     let ride = ride_stand_in(style).map_or_else(
         || "ride".to_owned(),
-        |bank| format!("open hat in place of the ride, which {bank} does not have,"),
+        |bank| {
+            format!(
+                "{} in place of the ride, which {bank} does not have,",
+                style.ride_fallback().spoken()
+            )
+        },
     );
     let (pulse, ornament) = match style.kit() {
         Kit::Machine => ("kick", "hat"),
@@ -445,6 +524,24 @@ fn header(out: &mut String, score: &Score, style: &Style) {
             fmt_param(humanise.as_f64() * MAX_SOFTEN)
         );
     }
+    if !style.mix().density_level().is_off() {
+        // Which bars were turned down, and by how much: the mapping from "lines sounding" to a
+        // level is the one place this palette value reads the score, so it is spelled out.
+        let exponent = style.mix().density_level().as_f64();
+        let mut counts: Vec<usize> = lines_sounding(score);
+        counts.sort_unstable();
+        counts.dedup();
+        let factors: Vec<String> = counts
+            .iter()
+            .map(|n| format!("{n}: ×{}", fmt_param(level_for(*n, exponent))))
+            .collect();
+        let _ = writeln!(
+            out,
+            "//   density: every gain in a bar divided by n^{}, n = the lines sounding in it ({})",
+            fmt_param(exponent),
+            factors.join(", ")
+        );
+    }
     if !score.silent().is_empty() {
         // CLAUDE.md §6: a fallback must be visible. A word nobody could pronounce makes no sound,
         // and a listener would otherwise hear only a short line.
@@ -461,6 +558,7 @@ fn rhythm_layer(
     score: &Score,
     style: &Style,
     strays: &BTreeMap<EventKey, Stray>,
+    density: &[f64],
     voice: Voice,
 ) -> Vec<(String, String)> {
     let events: Vec<&Event> = score.events_of(voice.id()).collect();
@@ -478,7 +576,7 @@ fn rhythm_layer(
     for lane in Lane::all(score, &events) {
         let mut layer = format!("  s(\"{}\")", grid(lane, &|_| sample.to_owned(), "~"));
         // §4.2: stress becomes accent.
-        let _ = write!(layer, ".gain(\"{}\")", gains(lane));
+        let _ = write!(layer, ".gain(\"{}\")", gains(lane, density));
         // §4.4: distinctiveness drives brightness, attack and how wet the event sits.
         let _ = write!(layer, ".lpf(\"{}\")", cutoffs(lane, style));
         let _ = write!(layer, ".attack(\"{}\")", attacks(lane));
@@ -521,8 +619,9 @@ fn rhythm_layer(
 /// Not every bank has a ride: the TR-808 and TR-707 in the sample map have none. Asking for one
 /// there makes Strudel log "sound not found" on every hit and the whole pulse layer go silent, so a
 /// palette choice would in effect remove events — which is not palette's to do (I3) and leaves
-/// sound nobody can trace (I4). Such a bank plays its open hat instead, the drum machine's usual
-/// stand-in for a ride, and the pattern's header says so ([`ride_stand_in`]).
+/// sound nobody can trace (I4). Such a bank plays the palette's [`RideFallback`] instead — its
+/// open hat by default, the drum machine's usual stand-in for a ride, or its crash — and the
+/// pattern's header says so ([`ride_stand_in`]).
 fn sample_for(style: &Style, layer: Layer) -> &'static str {
     match (style.kit(), layer) {
         (Kit::Machine, Layer::Foundation) => "bd",
@@ -531,7 +630,7 @@ fn sample_for(style: &Style, layer: Layer) -> &'static str {
             if bank_has(strudel_bank(style.bank()), RIDE) {
                 RIDE
             } else {
-                RIDE_STAND_IN
+                stand_in(style.ride_fallback())
             }
         }
         (Kit::Ride, Layer::Flourish) => "sd",
@@ -541,11 +640,17 @@ fn sample_for(style: &Style, layer: Layer) -> &'static str {
 /// The ride cymbal's sample name in the drum-machine sample map.
 const RIDE: &str = "rd";
 
-/// What a bank without a ride plays in its place: the open hat, which every bank has.
-const RIDE_STAND_IN: &str = "oh";
+/// What a bank without a ride plays in its place — the palette's [`RideFallback`]: the open hat or
+/// the crash, which every bank in [`BANK_SAMPLES`] has.
+const fn stand_in(fallback: RideFallback) -> &'static str {
+    match fallback {
+        RideFallback::OpenHat => "oh",
+        RideFallback::Crash => "cr",
+    }
+}
 
-/// `Some(bank)` when the style asks for a ride its bank does not have, so the header can say the
-/// open hat stands in — `CLAUDE.md` §6: a fallback must be visible.
+/// `Some(bank)` when the style asks for a ride its bank does not have, so the header can say which
+/// drum stands in — `CLAUDE.md` §6: a fallback must be visible.
 fn ride_stand_in(style: &Style) -> Option<&'static str> {
     let bank = strudel_bank(style.bank());
     (style.kit() == Kit::Ride && !bank_has(bank, RIDE)).then_some(bank)
@@ -676,6 +781,12 @@ impl<'a> Lane<'a> {
 /// `value` renders one event; `absent` fills a beat with no event in this pattern, so the melody
 /// can rest where the rhythm sounds while keeping the same grid.
 fn grid(lane: Lane<'_>, value: &dyn Fn(&Event) -> String, absent: &str) -> String {
+    grid_by_slot(lane, &|event, _| value(event), absent)
+}
+
+/// [`grid`], with each value also told which slot of the arrangement it sounds in — for the one
+/// parameter that differs between the passes of a line: its level under `density_level`.
+fn grid_by_slot(lane: Lane<'_>, value: &dyn Fn(&Event, usize) -> String, absent: &str) -> String {
     let (score, events) = (lane.score, lane.events);
     let mut by_bar: BTreeMap<usize, BTreeMap<usize, Vec<&Event>>> = BTreeMap::new();
     for event in events {
@@ -693,7 +804,8 @@ fn grid(lane: Lane<'_>, value: &dyn Fn(&Event) -> String, absent: &str) -> Strin
     // together are *not* stacked with `,` inside the pattern: see [`Lane`]. This pattern carries
     // the `lane.index`-th of them, and rests where a bar has fewer.
     let mut bars = Vec::new();
-    for slot in score.arrangement().slots() {
+    for (index, slot) in score.arrangement().slots().iter().enumerate() {
+        let value = |event: &Event| value(event, index);
         let lines: Vec<String> = slot
             .placements()
             .iter()
@@ -724,7 +836,7 @@ fn grid(lane: Lane<'_>, value: &dyn Fn(&Event) -> String, absent: &str) -> Strin
                 } else {
                     placed.beats()
                 };
-                (!present.is_empty()).then(|| line(&present, steps, value, absent))
+                (!present.is_empty()).then(|| line(&present, steps, &value, absent))
             })
             .collect();
         bars.push(
@@ -804,9 +916,17 @@ fn line(
     }
 }
 
-/// `SPEC.md` §4.2: stress becomes accent.
-fn gains(lane: Lane<'_>) -> String {
-    grid(lane, &|event| fmt_param(event.velocity().as_f64()), "~")
+/// `SPEC.md` §4.2: stress becomes accent — times the bar's level under `density_level`, which is 1
+/// unless the palette asks levels to follow density ([`density`]).
+fn gains(lane: Lane<'_>, density: &[f64]) -> String {
+    grid_by_slot(
+        lane,
+        &|event, slot| {
+            let level = density.get(slot).copied().unwrap_or(1.0);
+            fmt_param(event.velocity().as_f64() * level)
+        },
+        "~",
+    )
 }
 
 /// `SPEC.md` §4.4: distinctiveness becomes brightness.
@@ -913,6 +1033,7 @@ fn pitched_layer(
     score: &Score,
     style: &Style,
     strays: &BTreeMap<EventKey, Stray>,
+    density: &[f64],
     role: Pitched,
     tempo: u16,
 ) -> Vec<(String, String)> {
@@ -928,14 +1049,14 @@ fn pitched_layer(
     if pitched.is_empty() {
         return Vec::new();
     }
-    // Which octave a role sits in is fixed here, in the backend, not read from the palette: the
-    // bass at the second (MIDI 36), where a bass instrument has its body, and the melody two
-    // octaves above (MIDI 60), where keys and mallets sing. It moves no event, so it could become a
-    // `Style` field; no header key sets it yet (SPEC.md §5). Before the roles were split both sat
-    // at 36, so the rhyme melody was in the bass.
+    // Which octave a role sits in is palette (`SPEC.md` §5, `bass_octave` and `melody_octave`):
+    // it moves every note of the role by whole octaves and no event. By default the bass is in the
+    // second (MIDI 36), where a bass instrument has its body, and the melody two octaves above
+    // (MIDI 60), where keys and mallets sing. Before the roles were split both sat at 36, so the
+    // rhyme melody was in the bass.
     let base = match role {
-        Pitched::Melody => 60,
-        Pitched::Bass => 36,
+        Pitched::Melody => style.melody_octave().midi_c(),
+        Pitched::Bass => style.bass_octave().midi_c(),
     };
 
     // The melody may be voiced as chords (`Voicing`, palette — its doc argues it against I3); the
@@ -999,7 +1120,7 @@ fn pitched_layer(
     for lane in Lane::all(score, &pitched) {
         let mut layer = format!("  note(\"{}\")", grid(lane, &note, "~"));
         let _ = write!(layer, ".sound(\"{instrument}\")");
-        let _ = write!(layer, ".gain(\"{}\")", gains(lane));
+        let _ = write!(layer, ".gain(\"{}\")", gains(lane, density));
         // §4.4 reaches the pitched layers too — the rhyme word is the most prominent event in the
         // piece, and an earlier version was the only layer distinctiveness never touched.
         let _ = write!(layer, ".lpf(\"{}\")", cutoffs(lane, style));
@@ -1061,7 +1182,7 @@ mod tests {
 
     use super::{BANK_SAMPLES, Strudel, StrudelError, bank_has, sample_for, strudel_bank};
     use crate::Backend as _;
-    use crate::style::{BANKS, KITS, Style};
+    use crate::style::{BANKS, KITS, RIDE_FALLBACKS, Style};
 
     /// Spelling is pronunciation: `A` and `o` are stressed vowels, `e` unstressed, `i` secondary.
     struct Spelled;
@@ -1733,10 +1854,15 @@ mod tests {
         // A sample a bank lacks is not an error Strudel raises: it logs "sound not found" on every
         // hit and the layer goes silent. So every pair a header can write must name a real one,
         // and every bank a header can name must be in the table checked against the sample map.
-        for bank in BANKS {
-            for kit in KITS {
-                let style =
-                    Style::parse(&format!("+++\nkit = \"{kit}\"\nbank = \"{bank}\"\n+++")).unwrap();
+        for (bank, kit, fallback) in BANKS.iter().flat_map(|bank| {
+            KITS.iter()
+                .flat_map(move |kit| RIDE_FALLBACKS.iter().map(move |f| (bank, kit, f)))
+        }) {
+            {
+                let style = Style::parse(&format!(
+                    "+++\nkit = \"{kit}\"\nbank = \"{bank}\"\nride_fallback = \"{fallback}\"\n+++"
+                ))
+                .unwrap();
                 let strudel = strudel_bank(style.bank());
                 assert!(
                     BANK_SAMPLES.iter().any(|(name, _)| *name == strudel),
@@ -1746,7 +1872,7 @@ mod tests {
                     let sample = sample_for(&style, layer);
                     assert!(
                         bank_has(strudel, sample),
-                        "{kit} on {bank} asks {strudel} for `{sample}` ({layer:?})"
+                        "{kit} on {bank} ({fallback}) asks {strudel} for `{sample}` ({layer:?})"
                     );
                 }
             }
@@ -1782,6 +1908,170 @@ mod tests {
         );
         assert!(text.contains("(ride on the foundation"), "{text}");
         assert!(!text.contains("in place of the ride"), "{text}");
+    }
+
+    #[test]
+    fn a_bank_without_a_ride_can_keep_time_on_its_crash_instead() {
+        // tidal-drum-machines.json has RolandTR808_cr and RolandTR707_cr.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let crash = "+++\npreset = \"jazz\"\nbank = \"tr808\"\nride_fallback = \"crash\"\n+++";
+        let text = render(source, &Style::parse(crash).unwrap());
+        let drums: Vec<String> = text
+            .lines()
+            .filter(|l| l.starts_with("  s("))
+            .map(|l| argument(l, "s"))
+            .collect();
+        assert!(drums.iter().any(|d| d.contains("cr")), "{text}");
+        assert!(drums.iter().any(|d| d.contains("sd")), "{text}");
+        assert!(
+            !drums.iter().any(|d| d.contains("oh") || d.contains("rd")),
+            "{text}"
+        );
+        assert!(
+            text.contains("(crash in place of the ride, which RolandTR808 does not have, on"),
+            "the stand-in is named on the plays line: {text}"
+        );
+        assert!(text.contains("//   ride_fallback = crash\n"), "{text}");
+        // The same piece but for that one sample name: the stand-in strikes where the hat did.
+        let hat = render(
+            source,
+            &Style::parse("+++\npreset = \"jazz\"\nbank = \"tr808\"\n+++").unwrap(),
+        );
+        let music = |t: &str| -> Vec<String> {
+            t.lines()
+                .filter(|l| !l.starts_with("//"))
+                .map(|l| {
+                    l.replace("\"cr", "\"oh")
+                        .replace(" cr", " oh")
+                        .replace("[cr", "[oh")
+                })
+                .collect()
+        };
+        assert_eq!(music(&text), music(&hat));
+        // A bank that has a ride plays it whatever the fallback, and the header names no stand-in.
+        let linn = render(
+            source,
+            &Style::parse(
+                "+++\npreset = \"jazz\"\nbank = \"linn\"\nride_fallback = \"crash\"\n+++",
+            )
+            .unwrap(),
+        );
+        assert!(linn.contains("(ride on the foundation"), "{linn}");
+        assert!(!linn.contains("in place of the ride"), "{linn}");
+    }
+
+    #[test]
+    fn each_role_plays_in_its_palettes_octave() {
+        // Hand-worked, C minor, as in `the_bass_and_the_melody_are_separate_instruments`: the
+        // rhyme class is degree 0 and "rot" is the third degree (3 semitones). Melody octave 5
+        // starts at MIDI 72, so 72; bass octave 1 at 24, so 24 + 3 = 27. And octave 3 for both,
+        // where the ranges meet: 48 and 51.
+        let source = "rot bAn\nrot bAn\n";
+        let notes = |text: &str, role: &str| -> Vec<String> {
+            let line = text.lines().find(|l| l.contains(role)).unwrap();
+            argument(line, "note")
+                .replace(['<', '>', '[', ']'], " ")
+                .split_whitespace()
+                .filter(|t| *t != "~")
+                .map(ToOwned::to_owned)
+                .collect()
+        };
+        for (header, melody, bass) in [
+            ("bass_octave = 1\nmelody_octave = 5", "72", "27"),
+            ("bass_octave = 3\nmelody_octave = 3", "48", "51"),
+            ("", "60", "39"),
+        ] {
+            let text = render(
+                source,
+                &Style::parse(&format!("+++\n{header}\n+++")).unwrap(),
+            );
+            let (m, b) = (notes(&text, "the melody"), notes(&text, "the bass"));
+            assert!(
+                !m.is_empty() && m.iter().all(|n| n == melody),
+                "{header}: {m:?}"
+            );
+            assert!(
+                !b.is_empty() && b.iter().all(|n| n == bass),
+                "{header}: {b:?}"
+            );
+        }
+        // Listed in the header when set, and only then — so a pattern that does not use them
+        // reads exactly as it did before the keys existed.
+        let moved = render(
+            source,
+            &Style::parse("+++\nbass_octave = 1\nmelody_octave = 5\n+++").unwrap(),
+        );
+        assert!(moved.contains("//   bass_octave = 1\n"), "{moved}");
+        assert!(moved.contains("//   melody_octave = 5\n"), "{moved}");
+        let plain = render(source, &Style::default());
+        for key in [
+            "bass_octave",
+            "melody_octave",
+            "density_level",
+            "ride_fallback",
+        ] {
+            assert!(!plain.contains(key), "{key} listed at its default: {plain}");
+        }
+    }
+
+    #[test]
+    fn levels_follow_density_only_in_bars_of_several_lines() {
+        // The arrangement of `a_stanza_keeps_playing_under_the_next`: stanza 1 stated alone (two
+        // slots of one line), then stanza 2 with stanza 1 looping under it, then the outro, which
+        // repeats stanza 2 over the same loop — so one line, one line, then two lines in each of
+        // the last four slots.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let score = score_of(source);
+        assert_eq!(super::lines_sounding(&score), vec![1, 1, 2, 2, 2, 2]);
+
+        let at = |level: &str| {
+            render(
+                source,
+                &Style::parse(&format!("+++\ndensity_level = {level}\n+++")).unwrap(),
+            )
+        };
+        // Zero is today's piece, byte for byte, header included.
+        assert_eq!(at("0"), render(source, &Style::default()));
+
+        // Voice 0 is stanza 1's first line, `bA`: one stressed syllable at full velocity, sounding
+        // in slots 0, 2 and 4 (`<[hh ~ ~] ~ hh ~ hh ~>`). Hand-worked levels: slot 0 has one line
+        // and keeps 1; slots 2 and 4 have two, so 2^-1 = 0.5 at density 1 and 2^-0.5 = 0.707 at
+        // density 0.5.
+        let voice_0 = |text: &str| values_on(text, "  s(\"<[hh", "gain");
+        assert_eq!(voice_0(&at("0")), vec![1.0, 1.0, 1.0]);
+        assert_eq!(voice_0(&at("1")), vec![1.0, 0.5, 0.5]);
+        assert_eq!(voice_0(&at("0.5")), vec![1.0, 0.707, 0.707]);
+
+        // Only gain values change: every other line, and every other parameter of every layer, is
+        // byte for byte the same — the arrangement, the samples, the notes, the filters.
+        let without_gain = |text: &str| -> Vec<String> {
+            text.lines()
+                .filter(|l| !l.starts_with("//"))
+                .map(|l| {
+                    let mut kept = String::new();
+                    let mut rest = l;
+                    while let Some(at) = rest.find(".gain(\"") {
+                        kept.push_str(&rest[..at]);
+                        let after = &rest[at + 7..];
+                        rest = &after[after.find('"').unwrap() + 2..];
+                    }
+                    kept.push_str(rest);
+                    kept
+                })
+                .collect()
+        };
+        assert_eq!(without_gain(&at("1")), without_gain(&at("0")));
+        assert_ne!(at("1"), at("0"));
+        // ...and the header says what it did.
+        assert!(at("1").contains("//   density_level = 1.00\n"));
+        assert!(
+            at("0.5").contains(
+                "//   density: every gain in a bar divided by n^0.500, n = the lines sounding in \
+                 it (1: ×1.000, 2: ×0.707)"
+            ),
+            "{}",
+            at("0.5")
+        );
     }
 
     #[test]

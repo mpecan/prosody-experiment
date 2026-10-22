@@ -152,6 +152,15 @@
       <label>Voicing
         <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree"></select>
       </label>
+      <label>Ride stand-in
+        <select id="ride_fallback" title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash"></select>
+      </label>
+      <label>Bass octave <span id="bass_octaveOut"></span>
+        <input id="bass_octave" type="range" min="1" max="3" step="1" title="The octave the bass plays in: 2 is MIDI 36">
+      </label>
+      <label>Melody octave <span id="melody_octaveOut"></span>
+        <input id="melody_octave" type="range" min="3" max="5" step="1" title="The octave the rhyme melody plays in: 4 is MIDI 60, middle C">
+      </label>
       <label>Tempo range (bpm)
         <span class="row">
           <input id="low" type="number" min="1" max="400" value="110">
@@ -191,6 +200,9 @@
       </label>
       <label>Melody level <span id="melody_gainOut"></span>
         <input id="melody_gain" type="range" min="0.1" max="2" step="0.01">
+      </label>
+      <label>Levels follow density <span id="density_levelOut"></span>
+        <input id="density_level" type="range" min="0" max="1" step="0.01" title="Each bar's gains divided by n to this power, n = the lines sounding in it: 0 fixed levels, 0.5 by √n, 1 by n">
       </label>
       <p>
         The poem decides where in the tempo range it sits, from how densely its syllables pack
@@ -277,11 +289,12 @@
 <script>
 const $ = (id) => document.getElementById(id);
 // Every palette control's id is its key in the style header, and every value is in header units.
-const SOUND = ['bass', 'melody', 'kit', 'voicing', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress',
-  'humanise', 'drums_gain', 'bass_gain', 'melody_gain'];
+const SOUND = ['bass', 'melody', 'kit', 'ride_fallback', 'voicing', 'bass_octave', 'melody_octave', 'reverb',
+  'room_size', 'delay', 'high_cut', 'drive', 'compress', 'humanise', 'drums_gain', 'bass_gain', 'melody_gain',
+  'density_level'];
 const controls = ['scale', 'root', 'bank', 'low', 'high', 'swing', ...SOUND];
-const SLIDERS = ['swing', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress',
-  'humanise', 'drums_gain', 'bass_gain', 'melody_gain'];
+const SLIDERS = ['swing', 'bass_octave', 'melody_octave', 'reverb', 'room_size', 'delay', 'high_cut', 'drive',
+  'compress', 'humanise', 'drums_gain', 'bass_gain', 'melody_gain', 'density_level'];
 
 const OPTIONS = {
   scale: __SCALES__,
@@ -291,6 +304,7 @@ const OPTIONS = {
   melody: __INSTRUMENTS__,
   kit: __KITS__,
   voicing: __VOICINGS__,
+  ride_fallback: __RIDE_FALLBACKS__,
 };
 // [name, what it does, [its variants], its default], in the order the core lists them
 const MAPPINGS = __MAPPINGS__;

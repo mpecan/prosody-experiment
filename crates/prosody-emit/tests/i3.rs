@@ -475,6 +475,67 @@ proptest::proptest! {
         }
     }
 
+    /// Levels that follow density, isolated. `density_level` is the one palette value that reads
+    /// the score's structure — how many lines each bar sounds — so the claim it makes against I3 is
+    /// checked directly: between `0` and any other amount, every line of the output is byte for
+    /// byte the same once its `.gain` pattern is taken out, and each gain is at most what it was.
+    #[test]
+    fn i3_density_changes_only_gain_values(body in poem(), one in palette(), level in 1_u8..=100) {
+        let set = |amount: f64| {
+            one.lines()
+                .map(|line| {
+                    if line.starts_with("density_level") {
+                        format!("density_level = {amount}")
+                    } else {
+                        line.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let (score, flat) = score_of(&format!("{}\n{body}", set(0.0)));
+        let (_, dense) = score_of(&format!("{}\n{body}", set(f64::from(level) / 100.0)));
+        let backend = Strudel::new();
+        let (Ok(a), Ok(b)) = (backend.render(&score, &flat), backend.render(&score, &dense)) else {
+            return Ok(());
+        };
+        proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+        let music = |text: &str| -> Vec<(String, Vec<f64>)> {
+            text.lines()
+                .filter(|l| !l.starts_with("//"))
+                .map(|line| {
+                    let mut kept = String::new();
+                    let mut gains = Vec::new();
+                    let mut rest = line;
+                    while let Some(at) = rest.find(".gain(\"") {
+                        kept.push_str(&rest[..at]);
+                        let after = &rest[at + 7..];
+                        let end = after.find('"').unwrap();
+                        gains.extend(
+                            after[..end]
+                                .replace(['<', '>', '[', ']'], " ")
+                                .split_whitespace()
+                                .filter(|t| *t != "~")
+                                .map(|t| t.parse::<f64>().unwrap()),
+                        );
+                        rest = &after[end + 2..];
+                    }
+                    kept.push_str(rest);
+                    (kept, gains)
+                })
+                .collect()
+        };
+        let (x, y) = (music(&a), music(&b));
+        proptest::prop_assert_eq!(x.len(), y.len());
+        for ((line_a, gains_a), (line_b, gains_b)) in x.iter().zip(&y) {
+            proptest::prop_assert_eq!(line_a, line_b);
+            proptest::prop_assert_eq!(gains_a.len(), gains_b.len());
+            for (g, h) in gains_a.iter().zip(gains_b) {
+                proptest::prop_assert!(h <= g, "{} became {}", g, h);
+            }
+        }
+    }
+
     /// ...and the score the arrangement comes from is untouched too.
     #[test]
     fn i3_no_palette_can_change_the_score(body in poem(), one in palette(), two in palette()) {
@@ -614,6 +675,12 @@ fn palette() -> impl proptest::strategy::Strategy<Value = String> {
             proptest::sample::select(prosody_emit::style::KITS.to_vec()),
             proptest::sample::select(prosody_emit::style::VOICINGS.to_vec()),
         ),
+        (
+            prosody_emit::style::BASS_OCTAVES,
+            prosody_emit::style::MELODY_OCTAVES,
+            0_u8..=100,
+            proptest::sample::select(prosody_emit::style::RIDE_FALLBACKS.to_vec()),
+        ),
     )
         .prop_map(
             |(
@@ -627,6 +694,7 @@ fn palette() -> impl proptest::strategy::Strategy<Value = String> {
                 preset,
                 amounts,
                 (room, cut, level, kit, voicing),
+                (bass_octave, melody_octave, density, ride_fallback),
             )| {
                 let amount = |i: usize| f64::from(amounts[i]) / 100.0;
                 format!(
@@ -634,7 +702,9 @@ fn palette() -> impl proptest::strategy::Strategy<Value = String> {
                      tempo_range = [{low}, {}]\nswing = {}\nbank = \"{bank}\"\nsynth = \"{synth}\"\n\
                      melody = \"{melody}\"\nreverb = {}\ndelay = {}\ndrive = {}\ncompress = {}\n\
                      humanise = {}\nroom_size = {}\nhigh_cut = {cut}\nbass_gain = {}\n\
-                     kit = \"{kit}\"\nvoicing = \"{voicing}\"\n+++\n",
+                     kit = \"{kit}\"\nvoicing = \"{voicing}\"\nbass_octave = {bass_octave}\n\
+                     melody_octave = {melody_octave}\ndensity_level = {}\n\
+                     ride_fallback = \"{ride_fallback}\"\n+++\n",
                     low + 6,
                     f64::from(swing) / 100.0,
                     amount(0),
@@ -644,6 +714,7 @@ fn palette() -> impl proptest::strategy::Strategy<Value = String> {
                     amount(4),
                     f64::from(room) / 10.0,
                     f64::from(level) / 100.0,
+                    f64::from(density) / 100.0,
                 )
             },
         )

@@ -374,6 +374,10 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
         schedule.messages().len(),
         schedule.beats_per_minute()
     );
+    // A header key the schedule does not apply is said out loud, not dropped (`CLAUDE.md` §6).
+    for (key, value) in schedule.unapplied() {
+        eprintln!("prosody: {key} = {value} is not applied to an OSC schedule");
+    }
     Ok(())
 }
 
@@ -418,8 +422,11 @@ fn explain(
 ) -> Result<()> {
     let mut out = String::new();
     let _ = writeln!(out, "style");
-    for (key, value) in style.describe() {
-        let _ = writeln!(out, "  {key:<12} {value}");
+    let fields = style.describe();
+    // Pad to the longest key, so a key added to the palette cannot push its value off the column.
+    let width = fields.keys().map(|key| key.len()).max().unwrap_or(0);
+    for (key, value) in fields {
+        let _ = writeln!(out, "  {key:<width$} {value}");
     }
     // Every candidate mapping not at its default, so the view says which piece it describes.
     let changed: Vec<Choice> = mappings.changed().collect();
@@ -428,7 +435,7 @@ fn explain(
         for choice in changed {
             let _ = writeln!(
                 out,
-                "  {:<12} {}",
+                "  {:<width$} {}",
                 choice.mapping().name(),
                 choice.variant().name()
             );
