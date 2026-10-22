@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::timeline::{Hit, Timeline};
+use crate::timeline::{Hit, Timeline, Tone};
 
 /// An instrument a listener hears: a line's voice, the pitched synth, or the chord lane.
 ///
@@ -93,7 +93,7 @@ pub(crate) fn pitched(timeline: &Timeline) -> f64 {
 /// unfolded roots credited the harmony with variety nobody hears. A chord still counts as pitched
 /// and as its own instrument, which the score does decide.
 pub(crate) fn pitch_entropy(timeline: &Timeline) -> f64 {
-    let mut counts: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut counts: BTreeMap<Tone, usize> = BTreeMap::new();
     for degree in timeline
         .hits
         .iter()
@@ -200,7 +200,7 @@ fn as_f64(count: usize) -> f64 {
 mod tests {
     use super::{layering, pitch_entropy, pitched, pulse, recurrence, steadiness, syncopation};
     use crate::timeline::tests::hit;
-    use crate::timeline::{Hit, Timeline};
+    use crate::timeline::{Hit, Timeline, Tone};
 
     fn close(actual: f64, expected: f64) {
         assert!(
@@ -214,8 +214,8 @@ mod tests {
         hit
     }
 
-    const fn on(mut hit: Hit, degree: usize) -> Hit {
-        hit.degree = Some(degree);
+    fn on(mut hit: Hit, degree: usize) -> Hit {
+        hit.degree = Some(Tone::degree(degree));
         hit
     }
 

@@ -98,8 +98,10 @@ header asks for (the defaults when it has none).
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
 review (the held and refrain lanes, the bass, the stanza period, the outro, the harmony, the
 reading), each a selector of named variants — always including `off` — with one menu per setting,
-A and B. The first five are `off`/`on`; the harmony is `off` (its default), `rhyme`, `cadence` or
-`both` (see [the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives` or `stanza`.
+A and B. The held and refrain lanes, the stanza period and the outro are `off`/`on`; the bass is
+`off`, `height` (its default), `syllables` or `feet` (see [the walking bass](#the-walking-bass));
+the harmony is `off` (its default), `rhyme`, `cadence` or `both` (see
+[the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives` or `stanza`.
 A starts with every mapping at its default (marked "(default)" in the menu), B with every one off; a menu not at its default
 has a bold border. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
@@ -172,10 +174,15 @@ This is the one that re-plays as you type. It needs
 
 ```sh
 cargo run -p prosody-cli -- --osc examples/dickinson-because.poem
-# 121 bpm, 85 messages
-#     0.000  /prosody/note  0.000 "foundation" 0 0.333 -1 0.000 0.688 0.000 1.000
-#     0.500  /prosody/note  0.500 "foundation" 0 1.000 -1 0.000 0.688 0.000 1.000
+# 121 bpm, 408 messages
+#     0.000  /prosody/note  0.000 "foundation" 0 0.333 -1 0.000 0.688 0.000 1.000 0.333
+#     0.500  /prosody/note  0.500 "foundation" 0 1.000 36 0.000 0.688 0.000 1.000 1.000
 ```
+
+A note's arguments are `beats layer voice gain note detune sharpness family sustain noteGain`.
+`gain` is the drum's accent, always the syllable's own stress; `noteGain` is the pitched note's,
+which differs under `bass = feet`: the foot's note rides on its first syllable but is struck at
+its stressed one. `examples/prosody.scd` reads both.
 
 Onsets are in **beats**, counted from the start of the piece. The tempo is sent once, separately,
 because a tempo is palette and the rhythm is not.
@@ -184,7 +191,9 @@ The schedule sends every pitch from MIDI 36 and every velocity unscaled, so `bas
 `melody_octave` and `density_level` do not reach it. A header that sets one gets a
 `# not applied here: …` line under the first, and `--send` says the same on stderr. It has no chord
 message either: under the harmony mapping the schedule's text says `# not scheduled here: N chords
-of the harmony layer`, and `--send` says so on stderr.
+of the harmony layer`, and `--send` says so on stderr. A message has one pitch, so under a walking
+bass a rhyme word's message carries the melody's note, and the text says `# not scheduled here: N
+bass notes under rhyme words`.
 
 ---
 
@@ -246,14 +255,40 @@ recurrence, more scale degrees in use, more accents off the beat, the time still
 the score, before the palette, so swing is neither rewarded nor penalised — a swung piece scores
 as its straight twin does. Its bands are reasoned guesses, like the machine profile's.
 
-`--set name=variant,…` chooses a candidate mapping's variant — `held`, `refrain`, `bass`,
-`period` and `outro` take `off` or `on` (default `on`), `harmony` takes `off`, `rhyme`, `cadence` or
-`both` (default `off`), `reading` takes `off`, `arrives` or `stanza` (default `arrives`) — for the pattern and for `--score` alike; an unknown name or variant
+`--set name=variant,…` chooses a candidate mapping's variant — `held`, `refrain`, `period` and
+`outro` take `off` or `on` (default `on`), `bass` takes `off`, `height`, `syllables` or `feet`
+(default `height`), `harmony` takes `off`, `rhyme`, `cadence` or `both` (default `off`), `reading`
+takes `off`, `arrives` or `stanza` (default `arrives`) — for the pattern and for `--score` alike;
+an unknown name or variant
 is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`.
 `--explain` lists every choice that is not a default. The reading is not in the CLI's pattern, so
 `reading=…` changes only that list. `./scripts/cycle.sh machine bass` scores every example without
 the bass, and `./scripts/cycle.sh machine bass=off,period=off` passes its list to `--set` (any list
 containing `=` does); `./scripts/cycle.sh jazz harmony=cadence` scores the harmony.
+
+### The walking bass
+
+*Two candidates beside the default* (`SPEC.md` §4.6, `--set bass=…`, or the `bass` menu on the
+page). `height`, the default, is the bass as it was: a note on every stressed vowel of a foundation
+line, by the vowel's height. The two walks:
+
+- **`syllables`** — every syllable of a foundation line plays a note. A stressed one keeps its
+  height note; the syllable just before a stressed one is a semitone below that note (a chromatic
+  approach); the unstressed ones between step through the scale from one stressed note towards the
+  next. In verse with one unstressed syllable between stresses, that is mostly approach tones.
+- **`feet`** — one note on every beat (foot), held for the beat. The foot's stressed vowel chooses
+  root, third or fifth — of the bar's chord when the harmony is on, of the scale otherwise — and
+  where that would repeat the last note it steps instead, up if the next foot's vowel is higher.
+
+Under a walk a rhyme word plays its melody note *and* its bass note, and only one walk sounds a
+bar: a line held, refrained or called under another keeps its drums and melody but not its walk,
+so two walks never clash a semitone apart. The pattern's header names the
+walk (`walking bass (mapping bass = feet): …`), and `--explain` adds a `bass` block under each
+foundation line saying why each note is what it is (`step down: AH is mid, so the third of IV deg
+3 would repeat the last note; the next foot's ER is not higher`), lists the bars it walks in and
+the ones it is silent in, and shows each syllable's own bass note in the pitch column. The OSC
+schedule sends a bass note where there is no melody note, at the bass note's accent, and counts
+the ones it cannot send.
 
 ### The harmony layer
 
@@ -351,6 +386,7 @@ The rest of the header, every key optional:
 | A rhyme answered later in its stanza | the line keeps sounding until its answer arrives, then resolves | §4.6 |
 | A refrain line | loops in its own lane until the next refrain line takes over | §4.6 |
 | A stressed vowel in a foundation line | a bass note by vowel height: open → root, mid → third, close → fifth | §4.6 |
+| A foundation line's syllables or feet (candidate, `bass=syllables` / `bass=feet`) | a walking bass: passing and approach tones between the stressed notes, or a chord tone on every beat | §4.6 |
 | A foundation line's rhyme (candidate, `harmony`, off by default) | its bar's chord: the class's degree, or V/I/IV by whether the rhyme is open, answered or alone in its stanza, with a turnaround in the last bar | §4.6 |
 | Foot → beat, syllable → subdivision, line → bar | rhythm | §4.2 |
 | Stress | accent / velocity | §4.2 |

@@ -286,6 +286,118 @@ fn harmony_variant() -> impl Strategy<Value = Variant> {
     proptest::sample::select(vec![Variant::Rhyme, Variant::Cadence, Variant::Both])
 }
 
+/// Any bass variant that sounds: the height bass, or either walk.
+fn bass_variant() -> impl Strategy<Value = Variant> {
+    proptest::sample::select(vec![Variant::Height, Variant::Syllables, Variant::Feet])
+}
+
+/// Any harmony variant, off included.
+fn any_harmony() -> impl Strategy<Value = Variant> {
+    proptest::sample::select(vec![
+        Variant::Off,
+        Variant::Rhyme,
+        Variant::Cadence,
+        Variant::Both,
+    ])
+}
+
+/// The bass and harmony chosen, every other mapping at its default.
+fn bass_with(bass: Variant, harmony: Variant) -> Mappings {
+    Mappings::all()
+        .with(Mapping::Bass.choose(bass).unwrap())
+        .with(Mapping::Harmony.choose(harmony).unwrap())
+}
+
+/// Everything an event carries except its bass note, for comparing two scores that may differ
+/// only in their bass.
+fn without_bass(score: &Score) -> Vec<String> {
+    score
+        .events()
+        .iter()
+        .map(|e| {
+            format!(
+                "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                e.span(),
+                e.voice(),
+                e.bar(),
+                e.beat(),
+                e.subdivision(),
+                e.foot(),
+                e.velocity(),
+                e.provenance(),
+                e.pitch(),
+                e.sharpness(),
+                e.family(),
+                e.anchor(),
+                e.bank(),
+            )
+        })
+        .collect()
+}
+
+/// Which rule chose a bass note, without any degree: the chord's function is stanza-local, its
+/// root is §4.5's poem-wide numbering.
+fn bass_rule(note: prosody_core::BassNote) -> String {
+    use prosody_core::BassReason;
+    let function = |chord: Option<prosody_core::Chord>| {
+        chord.map_or("scale", |chord| chord.function().numeral())
+    };
+    match note.why() {
+        BassReason::Height(vowel) => format!("height {}", vowel.symbol()),
+        BassReason::Passing { from, toward } => format!("passing {} {}", from.get(), toward.get()),
+        BassReason::Approach { onto } => format!("approach {}", onto.get()),
+        BassReason::LeadIn { toward } => format!("lead-in {}", toward.get()),
+        BassReason::Tail { from } => format!("tail {}", from.get()),
+        BassReason::ChordTone { vowel, chord } => {
+            format!("chord tone {} of {}", vowel.symbol(), function(chord))
+        }
+        BassReason::Step {
+            vowel,
+            chord,
+            direction,
+            next,
+        } => format!(
+            "step {direction:?} {} of {} next {:?}",
+            vowel.symbol(),
+            function(chord),
+            next.map(Phoneme::symbol)
+        ),
+    }
+}
+
+/// Every bass note of a stanza, relative to the stanza: where it sounds, its note above its root,
+/// the rule that chose it, and its span's offset and length. The root is left out, as the
+/// harmony's degrees are (see `harmony_shape`).
+#[allow(clippy::type_complexity)] // one row of a comparison, read only here
+fn bass_shape(
+    score: &Score,
+    within: Span,
+) -> Vec<(usize, usize, usize, i32, String, String, usize, usize)> {
+    let first = score
+        .events()
+        .iter()
+        .find(|e| within.contains(e.span()))
+        .map_or(0, |e| e.bar().get());
+    score
+        .events()
+        .iter()
+        .filter(|e| within.contains(e.span()))
+        .filter_map(|e| {
+            let note = e.bass()?;
+            Some((
+                e.bar().get() - first,
+                e.beat().get(),
+                e.subdivision().index(),
+                note.step().get(),
+                format!("{:?} {:?}", note.chromatic(), note.velocity()),
+                bass_rule(note),
+                note.span().start() - within.start(),
+                note.span().end() - note.span().start(),
+            ))
+        })
+        .collect()
+}
+
 /// Every line of a stanza's harmony, relative to the stanza: its bar and its span's offset from
 /// the stanza's start, and what it is — the function and which rule, or the rest and why. The
 /// degrees are left out: they are §4.5's poem-wide numbering, as the melody's pitch is (see
@@ -1718,7 +1830,9 @@ proptest! {
     }
 
     /// The harmony adds chords and changes nothing else: every event and every slot of the
-    /// arrangement is what the same choices make with the harmony off.
+    /// arrangement is what the same choices make with the harmony off — except, under the walking
+    /// bass's W2, which chord tone each bass note lands on, which is what W2 reads the chord for.
+    /// There the notes stay on the same syllables.
     #[test]
     fn the_harmony_changes_nothing_but_the_chords(
         source in poem_source(),
@@ -1726,7 +1840,15 @@ proptest! {
     ) {
         let off = score_with(&source, &mappings.clone().without(Mapping::Harmony));
         let some = score_with(&source, &mappings);
-        prop_assert_eq!(off.events(), some.events());
+        if mappings.get(Mapping::Bass) == Variant::Feet {
+            prop_assert_eq!(without_bass(&off), without_bass(&some));
+            let carriers = |score: &Score| -> Vec<bool> {
+                score.events().iter().map(|e| e.bass().is_some()).collect()
+            };
+            prop_assert_eq!(carriers(&off), carriers(&some));
+        } else {
+            prop_assert_eq!(off.events(), some.events());
+        }
         prop_assert_eq!(off.voices(), some.voices());
         prop_assert_eq!(off.arrangement(), some.arrangement());
         prop_assert!(off.harmony().is_empty());
@@ -1771,6 +1893,175 @@ proptest! {
         prop_assert_eq!(
             harmony_shape(&score_with(&source, &mappings), last),
             harmony_shape(&score_with(poem.source(), &mappings), moved)
+        );
+    }
+
+    /// I4 — every bass note traces to the poem: under the height bass and W1 to its syllable's
+    /// word, under W2 to its whole foot, which holds the syllable it sounds on. It sounds only in a
+    /// foundation line (§4.1's "drums, bass"), and under W2 it counts from its bar's chord's root,
+    /// or from degree 0 when the bar has none.
+    #[test]
+    fn i4_every_bass_note_traces_to_its_syllable_or_foot(
+        source in poem_source(),
+        bass in bass_variant(),
+        harmony in any_harmony(),
+    ) {
+        let poem = Poem::parse(source.clone()).unwrap();
+        let score = score_with(&source, &bass_with(bass, harmony));
+        let meter = meter::scan(&poem, &EverySyllableStressed);
+        let feet: Vec<Vec<Span>> = meter
+            .stanzas()
+            .iter()
+            .flat_map(prosody_core::StanzaMeter::lines)
+            .map(|line| line.feet().iter().map(prosody_core::Foot::span).collect())
+            .collect();
+        for event in score.events() {
+            let Some(note) = event.bass() else { continue };
+            prop_assert!(note.span().text(poem.source()).is_some());
+            prop_assert!(note.span().contains(event.span()));
+            let layer = score.voice(event.voice()).map(|voice| voice.layer());
+            prop_assert_eq!(layer, Some(Layer::Foundation));
+            if bass == Variant::Feet {
+                prop_assert_eq!(
+                    Some(note.span()),
+                    feet[event.bar().get()].get(event.beat().get()).copied()
+                );
+                prop_assert_eq!(event.subdivision().index(), 0, "on the beat");
+                let root = score
+                    .harmony_of(event.bar().get())
+                    .and_then(prosody_core::Harmony::chord)
+                    .map_or(0, |chord| chord.root().get());
+                prop_assert_eq!(note.root().get(), root);
+            } else {
+                prop_assert_eq!(note.span(), event.span());
+                prop_assert_eq!(note.root().get(), 0);
+            }
+        }
+    }
+
+    /// Each variant plays the notes its rule says, and where: the height bass only on primary
+    /// stresses outside rhyme words; W1 on every syllable of a foundation line that has a primary
+    /// stress (this phonemiser gives every vowel a height); W2 once on every foot of a foundation
+    /// line, on its first syllable.
+    #[test]
+    fn each_bass_variant_sounds_where_its_rule_says(
+        source in poem_source(),
+        bass in bass_variant(),
+        harmony in any_harmony(),
+    ) {
+        let score = score_with(&source, &bass_with(bass, harmony));
+        let foundation = |event: &prosody_core::Event| {
+            score.voice(event.voice()).map(|voice| voice.layer()) == Some(Layer::Foundation)
+        };
+        let stressed_bars: std::collections::BTreeSet<usize> = score
+            .events()
+            .iter()
+            .filter(|e| e.velocity() == prosody_core::Velocity::PRIMARY)
+            .map(|e| e.bar().get())
+            .collect();
+        for event in score.events() {
+            let expected = foundation(event)
+                && match bass {
+                    Variant::Height => {
+                        event.velocity() == prosody_core::Velocity::PRIMARY
+                            && event.pitch().is_none()
+                    }
+                    Variant::Syllables => stressed_bars.contains(&event.bar().get()),
+                    _ => event.subdivision().index() == 0,
+                };
+            prop_assert_eq!(event.bass().is_some(), expected, "{:?}", event);
+        }
+    }
+
+    /// One walk a bar: under a walking bass, at most one line of each slot sounds its bass —
+    /// the slot's foundation-layer line, the one its chord comes from — so no two walks can sound
+    /// a semitone apart. The height bass sounds under every line that sounds, as it always has.
+    #[test]
+    fn a_walking_bass_sounds_one_line_a_bar(
+        source in poem_source(),
+        mappings in any_mappings(),
+        bass in bass_variant(),
+    ) {
+        let score = score_with(&source, &mappings.with(Mapping::Bass.choose(bass).unwrap()));
+        for slot in score.arrangement().slots() {
+            let sounding: Vec<_> = slot
+                .placements()
+                .iter()
+                .filter(|placement| score.sounds_bass(slot, placement))
+                .collect();
+            match bass {
+                Variant::Syllables | Variant::Feet => {
+                    prop_assert!(sounding.len() <= 1, "{:?}", slot);
+                    for placement in sounding {
+                        prop_assert_eq!(
+                            placement.lane(),
+                            prosody_core::arrange::Lane::Layer(Layer::Foundation)
+                        );
+                        prop_assert_eq!(placement.part(), prosody_core::arrange::Part::Line);
+                    }
+                }
+                _ => prop_assert_eq!(sounding.len(), slot.placements().len()),
+            }
+        }
+    }
+
+    /// The bass changes nothing but the bass: under any choice of the other mappings, every
+    /// variant of it plays the same events, voices, arrangement and harmony as no bass at all.
+    #[test]
+    fn the_bass_changes_nothing_but_the_bass(
+        source in poem_source(),
+        mappings in any_mappings(),
+        bass in bass_variant(),
+    ) {
+        let off = score_with(&source, &mappings.clone().without(Mapping::Bass));
+        let some = score_with(&source, &mappings.with(Mapping::Bass.choose(bass).unwrap()));
+        prop_assert!(off.events().iter().all(|e| e.bass().is_none()));
+        prop_assert_eq!(without_bass(&off), without_bass(&some));
+        prop_assert_eq!(off.voices(), some.voices());
+        prop_assert_eq!(off.arrangement(), some.arrangement());
+        prop_assert_eq!(off.harmony(), some.harmony());
+    }
+
+    /// I2 — editing one stanza leaves another stanza's bass alone: which syllables carry a note,
+    /// on which step, by which rule, traced to what.
+    ///
+    /// Scoped as the harmony's is (`SPEC.md` §4.6): a walk never leaves its line, but a line's
+    /// bass still depends on whether its stanza is foundation (§4.1, which can be poem-relative),
+    /// on which of its words are rhyme words (the height bass leaves them to the melody), and under
+    /// W2 with the harmony on, on its bar's chord — whose function follows the stanza's rhyme
+    /// pattern and whose root is §4.5's poem-wide numbering. So the layer and the rhyme pattern
+    /// are assumed unchanged, and the root is not compared.
+    #[test]
+    fn i2_an_edit_leaves_other_stanzas_bass_alone(
+        source in poem_source(),
+        pick in 0_usize..4096,
+        text in replacement(),
+        bass in bass_variant(),
+        harmony in any_harmony(),
+    ) {
+        let mut poem = Poem::parse(source.clone()).unwrap();
+        prop_assume!(poem.stanzas().len() > 1);
+        let stanzas = poem.stanzas().len();
+        let last = poem.stanzas()[stanzas - 1].span();
+        let edited = poem.stanzas()[0].span();
+        let pattern = rhyme_pattern(&poem, stanzas - 1);
+        let layer = roles_of(&source).stanzas()[stanzas - 1].layer();
+
+        let inside: Vec<Span> = token_spans(&poem)
+            .into_iter()
+            .filter(|s| edited.contains(*s))
+            .collect();
+        prop_assume!(!inside.is_empty());
+        poem.apply(inside[pick % inside.len()], text).unwrap();
+        prop_assume!(poem.stanzas().len() == stanzas);
+        prop_assume!(rhyme_pattern(&poem, stanzas - 1) == pattern);
+        prop_assume!(roles_of(poem.source()).stanzas()[stanzas - 1].layer() == layer);
+        let moved = poem.stanzas()[stanzas - 1].span();
+
+        let mappings = bass_with(bass, harmony);
+        prop_assert_eq!(
+            bass_shape(&score_with(&source, &mappings), last),
+            bass_shape(&score_with(poem.source(), &mappings), moved)
         );
     }
 

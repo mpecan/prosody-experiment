@@ -155,6 +155,53 @@ held.
 line is pitched by its vowel's height: open → root, mid → third degree, close → fifth. Close vowels
 carry a higher intrinsic pitch, so the riff follows the vowels; a rhyme word keeps §4.5's note.
 
+**The walking bass** (*the jazz plan's step 4, two candidates approved for comparison; neither is
+the default*). `Mapping::Bass` is a selector: `off`, **`height`** (the default — the bass
+above), and the proposal's two walks. A bass note is its own field of an event, beside the
+melody's note, so under a walk a rhyme word sounds both; `height` keeps its old rule and leaves a
+rhyme word to the melody, so the default piece is unchanged.
+
+- **`syllables` (W1) — the syllables walk.** Every syllable of a foundation line sounds a note,
+  traced to its word (I4). A primary-stressed syllable keeps its height note. The last syllable
+  before a stressed one is a **chromatic approach**: a semitone below that stressed note. Any other
+  unstressed syllable between two stressed ones is a **passing tone**, a scale step at a time from
+  the first stressed note towards the second, holding one step short of it (between two equal notes,
+  the upper neighbour). *Choices the proposal left open, made here:* an unstressed syllable before
+  the line's first stressed one climbs into it by step (the **lead-in**), one after the last steps
+  down from it (the **tail**), so every syllable has a note; secondary stress counts as unstressed
+  (the height bass follows the primary accents only); and a line with no primary-stressed syllable
+  has nothing to walk between, so no bass.
+- **`feet` (W2) — the feet walk.** One note per foot, on its first syllable — on the beat — held
+  for the beat and traced to the whole foot (I4, coarser than a syllable). The foot's stressed vowel
+  (its most stressed syllable's, the first on a tie) chooses the **chord tone** by height: root,
+  third or fifth of the bar's chord when the harmony layer gave the bar one, of the scale (degree 0)
+  otherwise. Its accent is that syllable's. *The proposal's direction rule, as built:* chord tones
+  sit in one octave in height order, so a higher next vowel already makes the move to it go up;
+  where the foot's tone would repeat the walk's last note, it **steps** instead — up if the next
+  foot's vowel is higher, down if it is lower, the same, or there is no next foot. A walk never
+  looks past its line.
+- **One walk a bar.** A line sounding under another — held, refrain, call — keeps its drums and
+  its melody, but under a walk only the bar's foundation-layer line (the one its chord comes from,
+  `Score::sounds_bass`) sounds its bass. Two or three walks stacked in one bar landed their passing
+  and approach tones a semitone apart (The Tyger under `syllables`: 59 of 257 bass onsets), where
+  two `height` notes are chord tones and only ever agree — so `height` still sounds under every
+  line, as before. A line's explain view says where it walks and where it is silent.
+
+Spans: a W1 note's is its syllable's word, a W2 note's its foot. Register is palette: the root of a
+W2 chord is folded into one octave of the scale, as the chord lane folds it, and a step below the
+root sounds below it. **Disclosed against I2:** a walk stays inside its line, so an edit elsewhere
+reaches a line's bass only through what it already read — its stanza's layer (§4.1), which of its
+words are rhyme words (`height` only), and under W2 with the harmony on, its bar's chord, whose
+function follows the stanza's rhyme pattern and whose root is §4.5's poem-wide numbering. The I2
+property is scoped to that: when the stanza's layer and rhyme pattern are unchanged, which
+syllables carry a note, on which step, by which rule, are unchanged; the root is not compared. The
+OSC schedule sends a bass note as the message's pitch where there is no melody note, struck at the
+bass note's own accent (under W2, its foot's stressed syllable's, as the Strudel backend strikes
+it), and says how many bass notes under rhyme words it cannot send (a message has one pitch). One
+message is both the syllable's drum hit and its pitched note, so it carries two accents: `gain`,
+the drum's, is always the syllable's own stress (§4.2) — a walk never moves it — and a last
+argument, the note's.
+
 **The refrain lane** — §4.3's "literal loop of that voice" at line scale. A refrain line, once
 heard, loops in its own lane until the next refrain line is first heard and takes over. No lane
 doubles a voice already sounding in the bar. A refrain stanza stops both lanes with every loop.
@@ -197,16 +244,18 @@ is unchanged. The OSC schedule has no chord message, and says how many chords it
 **Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
 lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list
 of named variants, always including `off`, and a default. A `Mappings` value chooses one variant
-per mapping, and only a variant the mapping lists can be chosen. Today the five above are
-`off`/`on`, default `on`; the harmony is `off`/`rhyme`/`cadence`/`both`, default `off`; the reading
-is `off`/`arrives`/`stanza`, default `arrives`. They are
+per mapping, and only a variant the mapping lists can be chosen. Today the held and refrain
+lanes, the stanza period and the outro are `off`/`on`, default `on`; the bass is
+`off`/`height`/`syllables`/`feet`, default `height`; the harmony is `off`/`rhyme`/`cadence`/`both`,
+default `off`; the reading is `off`/`arrives`/`stanza`, default `arrives`. They are
 chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
 `set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
 page's A/B table, so the piece can be heard and measured under each choice. This is a separate
 argument to the lowering, not part of the style: it changes structure, and I3 keeps the style out
 of structure. Every invariant holds within one choice. Every default is the piece as specified,
 and the default everywhere — except the harmony, a candidate whose default is `off`, so a piece
-that does not choose it is the piece it was. Left out, each falls back to what preceded it: no held or refrain lane,
+that does not choose it is the piece it was; likewise the bass's walks are variants beside its
+default, `height`. Left out, each falls back to what preceded it: no held or refrain lane,
 no bass, a bar as long as its own line with everything under it stretched or squeezed to fit, and
 a piece that ends as the last stanza arrives. A mapping joins the list when a design iteration
 proposes it, so the comparison stays available as long as the question is open.

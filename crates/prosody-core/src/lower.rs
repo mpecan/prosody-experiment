@@ -7,8 +7,10 @@
 //! 1. `rhythm` — every syllable placed in time, from the meter. This builds the whole event list;
 //!    the three after it only decorate what it produced.
 //! 2. `melody` — pitch, on the rhyming words.
-//! 3. `colour` — sharpness and family modulation, per word.
-//! 4. `figures` — the structural figures of §4.3 that a voice cannot express.
+//! 3. the bass ([`crate::bass`]) — a bass note on foundation syllables or feet, after the harmony
+//!    layer ([`crate::harmony`]) has decided each line's chord, which W2 walks on.
+//! 4. `colour` — sharpness and family modulation, per word.
+//! 5. `figures` — the structural figures of §4.3 that a voice cannot express.
 //!
 //! Splitting them this way is what makes a wrong note attributable to one mapping rather than to
 //! "the lowering": a misplaced beat is `rhythm`'s, a wrong note `melody`'s.
@@ -36,7 +38,7 @@ use crate::parse::Poem;
 use crate::phoneme::Phoneme;
 use crate::repetition::{FigureKind, PoemRepetition, VoiceId};
 use crate::rhyme::PoemRhyme;
-use crate::role::{Layer, PoemRoles};
+use crate::role::PoemRoles;
 use crate::seed::{Domain, Seed};
 use crate::sound::SoundRepetition;
 use crate::span::Span;
@@ -112,11 +114,15 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
 
     let by_line = lines_by_voice(analyses);
     let (mut events, bars, nuclei) = rhythm(analyses, &by_line);
-    if mappings.has(Mapping::Bass) {
-        bass(&mut events, &nuclei, analyses);
-    }
     let degrees = degrees(analyses.rhyme);
     melody(&mut events, analyses, &degrees);
+    // The harmony layer reads the rhyme and the roles and nothing the arrangement decides: a chord
+    // is a fact about its line, and `Score::chord_in` finds it wherever the line sounds. It comes
+    // before the bass because W2's walk lands on the bar's chord tones.
+    let harmony = crate::harmony::run(analyses.rhyme, analyses.roles, &degrees, mappings);
+    // After the melody: the height bass leaves a rhyme word to §4.5's note, as it always has.
+    let walk = mappings.get(Mapping::Bass);
+    crate::bass::run(&mut events, &nuclei, analyses, &harmony, walk);
     colour(&mut events, analyses);
     figures(&mut events, analyses);
     let voices = voices(analyses, &by_line, &events);
@@ -125,10 +131,9 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
     // pass already emits in this order; sorting anyway means a later pass may reorder freely
     // without the backend's output depending on the order it happened to choose.
     events.sort_by_key(Event::order);
-    // The harmony layer reads the rhyme and the roles and nothing the arrangement decides: a chord
-    // is a fact about its line, and `Score::chord_in` finds it wherever the line sounds.
-    let harmony = crate::harmony::run(analyses.rhyme, analyses.roles, &degrees, mappings);
-    let score = Score::new(voices, events, bars, silent(analyses)).with_harmony(harmony);
+    let score = Score::new(voices, events, bars, silent(analyses))
+        .with_harmony(harmony)
+        .with_bass(walk);
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,
@@ -221,7 +226,7 @@ fn lines_by_voice(analyses: Analyses<'_>) -> BTreeMap<Span, VoiceId> {
 /// [`LineMeter::unpronounced`](crate::meter::LineMeter::unpronounced) records them, so the silence
 /// is visible rather than a line that merely reads short.
 ///
-/// Also returns each event's vowel, index for index, for [`bass`].
+/// Also returns each event's vowel, index for index, for the bass ([`crate::bass`]).
 fn rhythm(
     analyses: Analyses<'_>,
     by_line: &BTreeMap<Span, VoiceId>,
@@ -262,47 +267,6 @@ fn rhythm(
     }
 
     (events, bar, nuclei)
-}
-
-/// Gives every primary-stressed syllable of a foundation line a bass note, by its vowel.
-///
-/// §4.1 calls the foundation "drums, bass, ostinato", and until this the foundation had no bass:
-/// only rhyme words were pitched, so most of a piece was unpitched percussion. The note comes
-/// from the stressed vowel's *height*, the property with an acoustic claim to pitch: close vowels
-/// carry a higher intrinsic F0 than open ones (Lehiste 1970), so `see` sits above `saw`. Three
-/// heights, three degrees — root, third and fifth of the style's scale — because a machine bass
-/// is a riff of a few notes, not a melody. A repeated line repeats its riff exactly; an edit that
-/// changes a stressed vowel changes that note and nothing else.
-///
-/// Runs before [`melody`], which overrides it on a rhyme word: §4.5's note wins where both apply.
-/// A vowel this does not recognise — an inventory other than `ARPAbet` — gets no note, which the
-/// debug view shows as `—` rather than a guess.
-fn bass(events: &mut [Event], nuclei: &[Phoneme], analyses: Analyses<'_>) {
-    let foundation: Vec<bool> = analyses
-        .roles
-        .lines()
-        .map(|(_, line)| line.layer() == Layer::Foundation)
-        .collect();
-    for (event, &vowel) in events.iter_mut().zip(nuclei) {
-        let in_foundation = foundation.get(event.bar().get()).copied().unwrap_or(false);
-        if !in_foundation || event.velocity() != Velocity::PRIMARY {
-            continue;
-        }
-        if let Some(degree) = height_degree(vowel) {
-            *event = event.with_pitch(Pitch::of_vowel(vowel, degree));
-        }
-    }
-}
-
-/// An `ARPAbet` vowel's height as a scale degree: open 0, mid 2, close 4. Diphthongs by their
-/// starting point.
-fn height_degree(vowel: Phoneme) -> Option<usize> {
-    match vowel.symbol() {
-        "AA" | "AE" | "AO" | "AW" | "AY" => Some(0),
-        "AH" | "EH" | "ER" | "EY" | "OW" | "OY" => Some(2),
-        "IH" | "IY" | "UH" | "UW" => Some(4),
-        _ => None,
-    }
 }
 
 /// Gives the rhyming words their notes (`SPEC.md` §4.5).
@@ -504,8 +468,7 @@ mod tests {
         }
     }
 
-    /// The note a rhyme gave an event (§4.5), leaving out the bass, which pitches stressed
-    /// foundation syllables by their vowel and has its own tests.
+    /// The note a rhyme gave an event (§4.5). The bass is a field of its own ([`crate::bass`]).
     fn rhyme_pitch(event: &crate::voice::Event) -> Option<crate::voice::Pitch> {
         event.pitch().filter(|pitch| pitch.class().is_some())
     }
@@ -992,7 +955,7 @@ mod tests {
 
     #[test]
     fn a_foundation_lines_stressed_syllables_carry_its_bass() {
-        use crate::voice::PitchSource;
+        use crate::bass::BassReason;
         // Hand-worked. `bA teo` twice is a regular stanza, so foundation. Its primary stresses are
         // `A` (AA, open: degree 0) and `o` (OW, mid: degree 2); `e` is unstressed and gets nothing.
         // `teo` ends both lines, so it is a perfect rhyme and §4.5's note replaces its bass.
@@ -1002,30 +965,24 @@ mod tests {
             .events()
             .iter()
             .filter(|e| e.bar().get() == 0)
-            .map(|e| {
-                (
-                    e.span().text(source).unwrap(),
-                    e.pitch().map(crate::voice::Pitch::source),
-                )
-            })
+            .map(|e| (e.span().text(source).unwrap(), e.bass(), e.pitch()))
             .collect();
         let aa = ARPABET.phoneme("AA").unwrap();
-        assert_eq!(notes[0], ("bA", Some(PitchSource::Vowel(aa))));
-        let bass = score.events()[0].pitch().unwrap();
-        assert_eq!(bass.degree().get(), 0);
-        assert!(bass.detune().is_exact());
+        let bass = notes[0].1.unwrap();
+        assert_eq!(notes[0].0, "bA");
+        assert_eq!(bass.why(), BassReason::Height(aa));
+        assert_eq!((bass.root().get(), bass.step().get()), (0, 0));
         assert!(
             notes
                 .iter()
-                .filter(|(word, _)| *word == "teo")
-                .all(|(_, source)| matches!(source, Some(PitchSource::Rhyme(_)))),
-            "the rhyme's note wins on a rhyme word: {notes:?}"
+                .filter(|(word, ..)| *word == "teo")
+                .all(|(_, bass, pitch)| bass.is_none() && pitch.is_some()),
+            "the rhyme's note, and no bass, on a rhyme word: {notes:?}"
         );
     }
 
     #[test]
     fn vowel_height_chooses_the_bass_degree() {
-        use crate::voice::PitchSource;
         // `bo` is OW, a mid vowel: degree 2 (`bA` above showed the open AA at 0). `ti` carries
         // only secondary stress, so no bass — the bass follows the primary accents. `tA` and `sA`
         // rhyme, so they take §4.5's note.
@@ -1035,27 +992,22 @@ mod tests {
             .events()
             .iter()
             .filter(|e| e.bar().get() == 0)
-            .filter_map(|e| Some((e.span().text(source)?, e.pitch()?)))
-            .filter(|(_, p)| matches!(p.source(), PitchSource::Vowel(_)))
-            .map(|(word, p)| (word, p.degree().get()))
+            .filter_map(|e| Some((e.span().text(source)?, e.bass()?)))
+            .map(|(word, note)| (word, note.step().get()))
             .collect();
         assert_eq!(bass, vec![("bo", 2)]);
     }
 
     #[test]
     fn a_flourish_line_has_no_bass() {
-        use crate::voice::PitchSource;
         // Stanza 1 is regular, so foundation; stanza 2 — one syllable against four — is
         // irregular, so flourish. §4.1's bass belongs to the foundation only.
         let score = lower("tA tA\nsA sA\n\ndA\nnA nA nA nA\n");
         let has_bass = |bar: usize| {
-            score.events().iter().any(|e| {
-                e.bar().get() == bar
-                    && matches!(
-                        e.pitch().map(crate::voice::Pitch::source),
-                        Some(PitchSource::Vowel(_))
-                    )
-            })
+            score
+                .events()
+                .iter()
+                .any(|e| e.bar().get() == bar && e.bass().is_some())
         };
         assert!(has_bass(0) && has_bass(1));
         assert!(!has_bass(2) && !has_bass(3));

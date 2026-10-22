@@ -337,8 +337,9 @@ to each constant — not measurements of them. Distrust a gain your ears do not 
 ## Proposal — pending the user's decision: the structural half of jazz
 
 **The harmony half is now a candidate** (`Mapping::Harmony`: `rhyme` = H1, `cadence` = H2, `both`;
-off by default — see the log, *sound and voice, step 5*). The walking bass is still not
-implemented. Sound and voice step 3 built the jazz *palette*
+off by default — see the log, *sound and voice, step 5*). **So is the walking bass**
+(`Mapping::Bass`: `height`, the default and the bass as it was, `syllables` = W1, `feet` = W2 — see
+the log, *sound and voice, step 6*). Sound and voice step 3 built the jazz *palette*
 (the log entry below). What makes jazz jazz beyond its colours — chords that move, and a bass
 that walks between them — adds events and decides where they fall, so it is structure (I3) and a
 change to what a poetic feature maps to (`CLAUDE.md` §10). Two options for each, for the user to
@@ -398,6 +399,247 @@ answer first, and it is a §4.2 question.
 ---
 
 ## Log
+
+### Sound and voice, step 6, second review fix — the drum keeps its syllable's accent
+
+The first fix struck an OSC message carrying a W2 bass note at the foot's accent — but one
+`/prosody/note` is both the drum hit and the pitched note, and `examples/prosody.scd` read the same
+`gain` for both. Under `bass = feet` a foot's unstressed onset was struck as a full-force drum hit
+(the Sonnet: 48 messages changed gain against `bass = off`; The Tyger: 68), an OSC-only source of
+off-rhythm accents that the Strudel drums did not share.
+
+- `gain` (argument 3) is the syllable's own velocity again, always (§4.2's stress → accent).
+- A new last argument, `noteGain`, carries the pitched note's accent: the bass note's under a walk,
+  the event's otherwise. Appended so every earlier argument keeps its position;
+  `examples/prosody.scd` strikes `\prosodyPitch` with it.
+- Checked against `bass = off` on the Sonnet, The Tyger and Theocritus: 0 messages change their
+  (onset, layer, voice, gain) under `height`, `syllables` or `feet`. Test
+  `the_drums_keep_their_syllables_accents_whatever_the_bass_walks` holds it on a fixture.
+
+### Sound and voice, step 6, review fixes — one walk a bar
+
+The step-6 review heard the walks stacking: a line held, refrained or called under another kept
+walking in its own lane, so the bass instrument played two or three walks at once, and their passing
+and approach tones met a semitone apart. Counted on the page's evaluated pattern (cycles 0–64, bass
+onsets grouped by start, onsets holding notes a semitone apart): The Tyger, `height` 0 of 192,
+`syllables` 59 of 257, `feet` 33 of 136, `feet`+cadence 53 of 136; Theocritus 0, 22, 17, 15. It may
+be part of the "off-rhythm" impression too.
+
+- **One walk a bar** (`Score::sounds_bass`, the one place it is decided): under `syllables` and
+  `feet`, only the slot's foundation-layer line — the one `Score::chord_in` takes the chord from —
+  sounds its bass; a line under it keeps its drums and melody. `height` sounds under every line as
+  before (its notes are chord tones, so stacked ones never clash), so the default piece and every
+  snapshot are unchanged. The Strudel bass layer, the OSC schedule and the scorer's timeline all
+  ask it. Re-counted on the page after the fix: 0 semitone clashes, one bass lane (see the step
+  report).
+- **OSC strikes a bass note as the bass note**: where a message carries the bass's pitch, its
+  velocity is the bass note's (under W2 the foot's stressed syllable's), as the Strudel backend's
+  gain is. Its sustain stays the syllable's: `sustain` is the receiver's envelope multiplier
+  (`examples/prosody.scd`), not a length in beats.
+- **The explain view agrees with itself**: walking, the token table's pitch column shows each
+  syllable's own bass note on its own row (`bass 0-` on Tyger's `ger`), and a rhyme word both notes
+  (`deg 0~ bass 0@4`); each line's bass block says where it walks and where it is silent
+  (`walks in stated 1 · yielding 5(1)` / `silent in refraining 2 — one walk a bar`). `height`
+  renders as it did.
+- **Tests**: a property that under a walk each slot sounds at most one bass line, and that one its
+  foundation-layer whole line (and every line under `height`); hand-worked ABAB fixtures for the
+  Strudel lane (one bass lane, `[36 34]` then `[39 38]`, drums still in lane 2), OSC (`de`'s
+  messages at 0, 2, 8: `(1.0, 36)`, `(1/3, -1)` held, `(1.0, 36)`), the scorer (pitched 26 of 40
+  under `feet`, 20 of 40 under `height`) and the view (walks/silent lines, per-syllable cells). The
+  old pitched-share test moved to AABB, where nothing is held. Disabling the rule fails all four
+  new rule tests.
+- **Measured** (`./scripts/cycle.sh`, means): machine `height` 0.743 (unchanged), `syllables`
+  0.667 (was 0.617), `feet` 0.723 (0.740), `feet`+cadence 0.765 (0.777); jazz `height` 0.740
+  (unchanged), `syllables` 0.773 (0.739), `feet` 0.754 (0.775), `feet`+cadence 0.753 (0.766).
+  The pitched share falls most (Blake under `feet` 0.575 → 0.293), because the held and refrain
+  lanes no longer double it; legibility is unchanged everywhere.
+
+### Sound and voice, step 6 — the walking bass, as candidates
+
+The user approved the proposal's W1 and W2 as variants to compare by ear. `Mapping::Bass` is now a
+selector — `off`, `height` (default: today's vowel-height bass), `syllables` (W1), `feet` (W2) —
+following the proposal table; `SPEC.md` §4.6 has the rules and the choices the table left open.
+With `height` nothing changes: no snapshot moved, the machine cycle reads 0.743 and the jazz cycle
+0.740, as before.
+
+- **A bass note is its own field** (`prosody_core::bass`, `Event::bass`), no longer a `Pitch` beside
+  the melody's. The walks need a note under a rhyme word (W1 plays every syllable; W2's note often
+  rides on a rhyme word's foot), and with one pitch per event the melody won. `PitchSource::Vowel`
+  is gone. `height` keeps the old rule — no bass on a rhyme word — so its output is byte-identical.
+  The pass runs after the melody and the harmony (W2 reads the bar's chord).
+- **W1** (`syllables`): every syllable of a foundation line. Stressed (primary) syllables keep their
+  height note; the last syllable before a stressed one is a semitone below that note; other
+  unstressed syllables between two stressed ones step through the scale from the first towards the
+  second, holding one short (the upper neighbour between equal notes). Choices made here: a lead-in
+  climbs into the first stressed note and a tail steps down from the last, so every syllable
+  sounds; a line with no primary stress has no bass. In iambic or trochaic verse there is one
+  unstressed syllable between stresses, so W1 is mostly approach tones (The Tyger's first line:
+  `0 0- 0 2- 2 0- 0`).
+- **W2** (`feet`): one note a foot, on its first syllable, held for the beat (the Strudel lane writes
+  each beat whole), traced to the foot's span, struck with the foot's stressed syllable's accent.
+  The stressed vowel's height picks root, third or fifth of the bar's chord (harmony on) or of the
+  scale (off, or a bar with no chord). As built, the proposal's direction rule decides only where the
+  foot's tone would repeat the walk's last note: it steps up if the next foot's vowel is higher,
+  down otherwise. Between different tones the move already goes the way the vowels do, since chord
+  tones sit in height order in one octave.
+- **Emitter.** A bass note renders as its root (folded into one octave, as the chord lane folds it)
+  plus its step, through the scale, a semitone lower for an approach (`Scale::step`, signed). The
+  bass lane's comment names the variant, and a walking bass adds one header line (`walking bass
+  (mapping bass = feet): …`); `height` adds nothing. OSC sends a bass note as the pitch where there
+  is no melody note, and its text says how many bass notes under rhyme words it cannot send
+  (`unsent_bass`; zero under `height`).
+- **Visible.** `--explain` and the page's explain tab add a `bass` block under each foundation line
+  when the bass walks — one row a note: where it sounds, what it traces to, `step 2`, `step 0-` (a
+  semitone below) or `2@3` (from chord root 3), and why (`approach: a semitone below the next
+  stressed note, 0`; `step down: AH is mid, so the third of IV deg 3 would repeat the last note; the
+  next foot's ER is not higher`). The legend lists a `bass §4.6` pass only then.
+- **Scorer.** The timeline counts a bass note as pitched. A W2 note is keyed by its step above its
+  chord's root, not root + step: the root is the harmony's, which the step-5 review left out of
+  pitch entropy (keyed by root + step, feet+cadence read Blake's entropy as 3.876 and the machine
+  mean as 0.670 — the same miscount, through the bass). An event with a melody and a bass note is
+  one hit carrying the melody's degree. The edit test still treats a melody note and a height-bass
+  note on the same degree as one heard pitch, as it did when both were `Pitch` values
+  (`a_rhyme_across_stanzas_carries_an_edit_with_it` pins it); every other bass note is compared on
+  its own.
+- **Tests.** Hand-worked in `crates/prosody-core/tests/bass.rs` (W1 up, down, lead-in and tail,
+  equal notes, no stress; W2 steps up and down and below the root, harmony off, rhyme, cadence roots
+  4 5 0 8, a chordless bar, flourish, off), `bass::tests` (passing tones), the explain view's rows,
+  Strudel MIDI (W1 `39 38 35 36` in C minor; W2 `[36 39 38 36]`, and `[41 38 39 41]` over H1's
+  degree-1 chord), OSC pitches and the unsent count, `Scale::step` below the root, and the scorer's
+  pitched share (height 0.5, feet 0.75) and unchanged entropy under H1. Properties: I4 (a note traces
+  to its syllable or foot, only in a foundation line, W2 from its bar's chord root), each variant
+  sounds where its rule says, the bass changes nothing but the bass, I2 for the bass (scoped as
+  `SPEC.md` §4.6 discloses; a mutation reading the poem's first bar's chord failed it), I3 for the
+  walking bass, and the harmony property now lets W2's chord tones move with the harmony. The I1 and
+  invents-nothing properties draw from all 768 combinations. Two more mutations — a W2 note traced to
+  its syllable, a W1 walk crossing lines — failed the I4 and rule properties.
+- **Checked in Chromium on port 4884**, The Tyger and Theocritus, A = `syllables`, B = `feet` (then
+  `feet` with `harmony=cadence`), switching A/B while playing: patterns evaluate and play, no console
+  errors or warnings in 28 messages, `gm_acoustic_bass` (`0320_JCLive_sf2_file.js`) loads 200. The
+  evaluated W2 lane on The Tyger has one onset a beat, each lasting the beat; W1 one a syllable. No
+  one has heard it.
+
+**Measured** (`./scripts/cycle.sh <profile> <choices>`). The default rows are the step-5 tables,
+unchanged. Pulse does not move under W2: the drums already strike every beat a foot starts on, so the
+proposal's "pulse → 1.0" was already as high as these poems' feet allow. Legibility does not move
+under any variant: no walk crosses its line, and the bars a chord-driven change reaches are bars the
+rhyme already links. W1 pitches nearly everything (pitched 1.000 on six poems, past both bands);
+W2 under cadence is the machine profile's best mean so far (0.777), and W2 alone the jazz profile's
+(0.775).
+
+`machine`, bass=height (the default):
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  0.681  2.063  0.017  0.994  1.000 |  0.933  0.811  0.757
+carroll-jabberwocky     2.563  0.890  0.513  1.651  0.600  0.887  1.000 |  0.790  0.957  0.755
+dickinson-because       2.408  0.883  0.664  1.573  0.362  0.887  1.000 |  0.898  0.831  0.746
+hopkins-pied-beauty     3.085  0.800  0.442  1.745  0.163  0.953  0.933 |  0.905  0.946  0.857
+poe-annabel-lee         3.700  0.896  0.492  1.847  0.154  0.841  0.811 |  0.876  0.914  0.801
+preseren-zdravljica     1.972  0.724  0.683  1.542  0.214  0.643  1.000 |  0.503  1.000  0.503
+shakespeare-sonnet-18   2.129  0.750  0.745  1.854  0.364  0.993  1.000 |  0.733  1.000  0.733
+whitman-song-of-myself  2.615  0.859  0.307  1.546  0.150  0.894  1.000 |  0.904  0.837  0.757
+wilde-theocritus        2.689  0.892  0.713  2.099  0.341  0.944  0.844 |  0.950  0.820  0.779
+mean overall 0.743 over 9 poems
+```
+`machine`, bass=syllables (W1):
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  1.000  2.728  0.017  0.994  1.000 |  0.720  0.811  0.584
+carroll-jabberwocky     2.599  0.890  1.000  2.983  0.600  0.887  1.000 |  0.589  0.957  0.563
+dickinson-because       2.465  0.883  1.000  2.725  0.362  0.887  1.000 |  0.698  0.831  0.580
+hopkins-pied-beauty     3.110  0.800  0.712  2.680  0.163  0.953  0.933 |  0.834  0.946  0.789
+poe-annabel-lee         3.700  0.896  0.765  2.673  0.154  0.841  0.811 |  0.776  0.914  0.709
+preseren-zdravljica     2.083  0.724  1.000  2.603  0.214  0.643  1.000 |  0.401  1.000  0.401
+shakespeare-sonnet-18   2.137  0.750  1.000  2.624  0.364  0.993  1.000 |  0.597  1.000  0.597
+whitman-song-of-myself  2.706  0.859  0.487  2.768  0.150  0.894  1.000 |  0.866  0.837  0.725
+wilde-theocritus        2.689  0.892  1.000  2.788  0.341  0.944  0.844 |  0.734  0.820  0.602
+mean overall 0.617 over 9 poems
+```
+`machine`, bass=feet (W2):
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  0.575  2.584  0.017  0.994  1.000 |  0.881  0.811  0.715
+carroll-jabberwocky     2.599  0.890  0.526  2.132  0.600  0.887  1.000 |  0.793  0.957  0.759
+dickinson-because       2.465  0.883  0.529  2.217  0.362  0.887  1.000 |  0.904  0.831  0.751
+hopkins-pied-beauty     3.110  0.800  0.399  2.337  0.163  0.953  0.933 |  0.898  0.946  0.850
+poe-annabel-lee         3.700  0.896  0.446  2.143  0.154  0.841  0.811 |  0.876  0.914  0.801
+preseren-zdravljica     2.083  0.724  0.561  2.205  0.214  0.643  1.000 |  0.508  1.000  0.508
+shakespeare-sonnet-18   2.137  0.750  0.560  2.361  0.364  0.993  1.000 |  0.749  1.000  0.749
+whitman-song-of-myself  2.706  0.859  0.261  2.043  0.150  0.894  1.000 |  0.886  0.837  0.742
+wilde-theocritus        2.689  0.892  0.639  2.168  0.341  0.944  0.844 |  0.960  0.820  0.787
+mean overall 0.740 over 9 poems
+```
+`machine`, bass=feet, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.596  2.584  0.017  0.994  1.000 |  0.881  0.811  0.715
+carroll-jabberwocky     2.880  0.911  0.562  2.132  0.600  0.887  1.000 |  0.822  0.957  0.786
+dickinson-because       2.746  0.907  0.571  2.217  0.362  0.887  1.000 |  0.934  0.831  0.776
+hopkins-pied-beauty     3.305  0.829  0.424  2.337  0.163  0.953  0.933 |  0.947  0.946  0.897
+poe-annabel-lee         3.911  0.911  0.467  2.143  0.154  0.841  0.811 |  0.876  0.914  0.801
+preseren-zdravljica     2.472  0.791  0.625  2.205  0.214  0.643  1.000 |  0.580  1.000  0.580
+shakespeare-sonnet-18   2.338  0.818  0.595  2.361  0.364  0.993  1.000 |  0.850  1.000  0.850
+whitman-song-of-myself  2.846  0.879  0.287  2.043  0.150  0.894  1.000 |  0.918  0.837  0.769
+wilde-theocritus        2.966  0.913  0.663  2.168  0.341  0.944  0.844 |  0.995  0.820  0.816
+mean overall 0.777 over 9 poems
+```
+`jazz`, bass=height (the default):
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  0.681  2.063  0.017  0.994  1.000 |  0.742  0.811  0.602
+carroll-jabberwocky     2.563  0.890  0.513  1.651  0.600  0.887  1.000 |  0.887  0.957  0.848
+dickinson-because       2.408  0.883  0.664  1.573  0.362  0.887  1.000 |  0.839  0.831  0.697
+hopkins-pied-beauty     3.085  0.800  0.442  1.745  0.163  0.953  0.933 |  0.825  0.946  0.781
+poe-annabel-lee         3.700  0.896  0.492  1.847  0.154  0.841  0.811 |  0.790  0.914  0.722
+preseren-zdravljica     1.972  0.724  0.683  1.542  0.214  0.643  1.000 |  0.732  1.000  0.732
+shakespeare-sonnet-18   2.129  0.750  0.745  1.854  0.364  0.993  1.000 |  0.923  1.000  0.923
+whitman-song-of-myself  2.615  0.859  0.307  1.546  0.150  0.894  1.000 |  0.742  0.837  0.622
+wilde-theocritus        2.689  0.892  0.713  2.099  0.341  0.944  0.844 |  0.890  0.820  0.729
+mean overall 0.740 over 9 poems
+```
+`jazz`, bass=syllables (W1):
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  1.000  2.728  0.017  0.994  1.000 |  0.684  0.811  0.555
+carroll-jabberwocky     2.599  0.890  1.000  2.983  0.600  0.887  1.000 |  0.875  0.957  0.836
+dickinson-because       2.465  0.883  1.000  2.725  0.362  0.887  1.000 |  0.838  0.831  0.696
+hopkins-pied-beauty     3.110  0.800  0.712  2.680  0.163  0.953  0.933 |  0.868  0.946  0.822
+poe-annabel-lee         3.700  0.896  0.765  2.673  0.154  0.841  0.811 |  0.816  0.914  0.745
+preseren-zdravljica     2.083  0.724  1.000  2.603  0.214  0.643  1.000 |  0.738  1.000  0.738
+shakespeare-sonnet-18   2.137  0.750  1.000  2.624  0.364  0.993  1.000 |  0.876  1.000  0.876
+whitman-song-of-myself  2.706  0.859  0.487  2.768  0.150  0.894  1.000 |  0.853  0.837  0.714
+wilde-theocritus        2.689  0.892  1.000  2.788  0.341  0.944  0.844 |  0.820  0.820  0.672
+mean overall 0.739 over 9 poems
+```
+`jazz`, bass=feet (W2):
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.586  0.939  0.575  2.584  0.017  0.994  1.000 |  0.742  0.811  0.602
+carroll-jabberwocky     2.599  0.890  0.526  2.132  0.600  0.887  1.000 |  0.949  0.957  0.908
+dickinson-because       2.465  0.883  0.529  2.217  0.362  0.887  1.000 |  0.910  0.831  0.756
+hopkins-pied-beauty     3.110  0.800  0.399  2.337  0.163  0.953  0.933 |  0.868  0.946  0.821
+poe-annabel-lee         3.700  0.896  0.446  2.143  0.154  0.841  0.811 |  0.816  0.914  0.745
+preseren-zdravljica     2.083  0.724  0.561  2.205  0.214  0.643  1.000 |  0.801  1.000  0.801
+shakespeare-sonnet-18   2.137  0.750  0.560  2.361  0.364  0.993  1.000 |  0.951  1.000  0.951
+whitman-song-of-myself  2.706  0.859  0.261  2.043  0.150  0.894  1.000 |  0.790  0.837  0.661
+wilde-theocritus        2.689  0.892  0.639  2.168  0.341  0.944  0.844 |  0.890  0.820  0.729
+mean overall 0.775 over 9 poems
+```
+`jazz`, bass=feet, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady |  inter  legib overall
+blake-tyger             3.837  0.949  0.596  2.584  0.017  0.994  1.000 |  0.735  0.811  0.597
+carroll-jabberwocky     2.880  0.911  0.562  2.132  0.600  0.887  1.000 |  0.926  0.957  0.886
+dickinson-because       2.746  0.907  0.571  2.217  0.362  0.887  1.000 |  0.885  0.831  0.735
+hopkins-pied-beauty     3.305  0.829  0.424  2.337  0.163  0.953  0.933 |  0.868  0.946  0.822
+poe-annabel-lee         3.911  0.911  0.467  2.143  0.154  0.841  0.811 |  0.802  0.914  0.733
+preseren-zdravljica     2.472  0.791  0.625  2.205  0.214  0.643  1.000 |  0.801  1.000  0.801
+shakespeare-sonnet-18   2.338  0.818  0.595  2.361  0.364  0.993  1.000 |  0.951  1.000  0.951
+whitman-song-of-myself  2.846  0.879  0.287  2.043  0.150  0.894  1.000 |  0.780  0.837  0.653
+wilde-theocritus        2.966  0.913  0.663  2.168  0.341  0.944  0.844 |  0.870  0.820  0.713
+mean overall 0.766 over 9 poems
+```
+
 
 ### Sound and voice, step 5, review fixes
 

@@ -89,7 +89,7 @@ fn shape(score: &Score, bar: usize) -> Vec<String> {
             // word, both passed this test unchanged. §8's wording is "confined to the expected
             // *voices*", so the voice has to be in here.
             format!(
-                "{:?} {} {}/{} {:?} {:.3} {:.3} {:?} {:?} {:?}",
+                "{:?} {} {}/{} {:?} {:.3} {:.3} {:?} {:?} {:?} {:?}",
                 event.voice(),
                 event.beat().get(),
                 event.subdivision().index(),
@@ -100,6 +100,10 @@ fn shape(score: &Score, bar: usize) -> Vec<String> {
                 event
                     .pitch()
                     .map(|p| (p.degree().get(), p.detune().as_f64().to_bits())),
+                // The bass was part of `pitch` until the walking bass gave it a field of its own.
+                event
+                    .bass()
+                    .map(|b| (b.root().get(), b.step().get(), b.chromatic())),
                 event.family().map(|f| (f.voice(), f.depth())),
                 event.anchor(),
             )

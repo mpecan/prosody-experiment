@@ -642,9 +642,12 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
     assert_eq!(code, Some(0), "{err}");
     assert_eq!(full, same);
     // The explain view lists each choice that is not a default, and only those.
-    let (explained, err, code) = run(&["--explain", "--set", "reading=stanza,bass=on"], COUPLET);
+    let (explained, err, code) = run(
+        &["--explain", "--set", "reading=stanza,bass=height"],
+        COUPLET,
+    );
     assert_eq!(code, Some(0), "{err}");
-    // `bass=on` is the default, so the block is the one line; then the summary's blank line.
+    // `bass=height` is the default, so the block is the one line; then the summary's blank line.
     assert!(
         explained.contains("mappings\n  reading       stanza\n\n"),
         "{explained}"
@@ -656,7 +659,7 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
         ("polka=on", "unknown mapping `polka`"),
         (
             "bass=stanza",
-            "unknown variant `stanza` of mapping `bass` (it has off, on)",
+            "unknown variant `stanza` of mapping `bass` (it has off, height, syllables, feet)",
         ),
         (
             "reading=on",

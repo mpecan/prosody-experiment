@@ -681,7 +681,7 @@ mod tests {
         }
         // Each with its variants and its default, for the A/B selectors.
         assert!(
-            html.contains("[\"bass\",\"stressed foundation vowels play a bass note by height\",[\"off\",\"on\"],\"on\"]"),
+            html.contains("[\"off\",\"height\",\"syllables\",\"feet\"],\"height\"]"),
             "the bass selector"
         );
         assert!(
@@ -736,7 +736,10 @@ mod tests {
         );
         assert_eq!(
             super::mappings(&request(&[("set", "bass:stanza")], "")),
-            Err("unknown variant `stanza` of mapping `bass` (it has off, on)".to_owned())
+            Err(
+                "unknown variant `stanza` of mapping `bass` (it has off, height, syllables, feet)"
+                    .to_owned()
+            )
         );
         assert!(super::mappings(&request(&[("set", "reading")], "")).is_err());
         let refused = super::compile(&request(&[("set", "reading:loud")], SEED), &Output::Reading);

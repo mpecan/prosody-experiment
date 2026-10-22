@@ -26,7 +26,10 @@ pub enum Mapping {
     HeldLane,
     /// §4.6's refrain lane: a refrain line loops until the next refrain line takes over.
     RefrainLane,
-    /// §4.1's bass: a stressed foundation syllable is pitched by its vowel's height.
+    /// §4.6's bass: a stressed foundation syllable pitched by its vowel's height
+    /// ([`Variant::Height`], the default), or a walking bass — on every syllable
+    /// ([`Variant::Syllables`], W1) or a note a foot on the beat ([`Variant::Feet`], W2). See
+    /// `crate::bass`.
     Bass,
     /// §4.6's bar lock to the stanza: a bar lasts its stanza's longest line. Off, a bar lasts its
     /// own line, and whatever sounds under it is stretched or squeezed to fit.
@@ -62,6 +65,15 @@ pub enum Variant {
     /// The harmony's H1 and H2 together: H2 where it applies (open and closing lines, the
     /// turnaround), H1 in every other bar.
     Both,
+    /// The bass by vowel height: every primary-stressed foundation syllable not in a rhyme word,
+    /// open root, mid third, close fifth — the bass as it shipped (*machine cycle 1*).
+    Height,
+    /// The bass's W1: every syllable of a foundation line walks — the stressed ones on their
+    /// height note, the ones between by scale step, the last before each a chromatic approach.
+    Syllables,
+    /// The bass's W2: a note a foot, on the beat — the foot's vowel height chooses the chord tone,
+    /// and the next foot's the direction of a step where the tone would repeat.
+    Feet,
 }
 
 impl Variant {
@@ -76,6 +88,9 @@ impl Variant {
             Self::Rhyme => "rhyme",
             Self::Cadence => "cadence",
             Self::Both => "both",
+            Self::Height => "height",
+            Self::Syllables => "syllables",
+            Self::Feet => "feet",
         }
     }
 }
@@ -93,6 +108,15 @@ const HARMONY: &[Variant] = &[
     Variant::Rhyme,
     Variant::Cadence,
     Variant::Both,
+];
+
+/// The bass's variants: none, by vowel height (today's), walking every syllable (W1), or walking
+/// a note a foot (W2).
+const BASS: &[Variant] = &[
+    Variant::Off,
+    Variant::Height,
+    Variant::Syllables,
+    Variant::Feet,
 ];
 
 impl Mapping {
@@ -133,7 +157,11 @@ impl Mapping {
         match self {
             Self::HeldLane => "an open rhyme sounds until its answer",
             Self::RefrainLane => "a refrain line loops until the next one",
-            Self::Bass => "stressed foundation vowels play a bass note by height",
+            Self::Bass => {
+                "a foundation bass: stressed vowels by height (height), walking every syllable \
+                 with passing and approach tones (syllables), or a note a foot on the beat from \
+                 the chord (feet)"
+            }
             Self::StanzaPeriod => "every bar of a stanza lasts its longest line",
             Self::Outro => "the loops play one more pass at the end",
             Self::Harmony => {
@@ -150,9 +178,8 @@ impl Mapping {
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
-            Self::HeldLane | Self::RefrainLane | Self::Bass | Self::StanzaPeriod | Self::Outro => {
-                SWITCH
-            }
+            Self::HeldLane | Self::RefrainLane | Self::StanzaPeriod | Self::Outro => SWITCH,
+            Self::Bass => BASS,
             Self::Reading => READING,
             Self::Harmony => HARMONY,
         }
@@ -162,9 +189,10 @@ impl Mapping {
     #[must_use]
     pub const fn default_variant(self) -> Variant {
         match self {
-            Self::HeldLane | Self::RefrainLane | Self::Bass | Self::StanzaPeriod | Self::Outro => {
-                Variant::On
-            }
+            Self::HeldLane | Self::RefrainLane | Self::StanzaPeriod | Self::Outro => Variant::On,
+            // The bass as it shipped. The walking variants are candidates the user approved for
+            // comparison (`PLAN.md`, the walking-bass proposal), so the default piece keeps it.
+            Self::Bass => Variant::Height,
             // SPEC.md §4.7: each line is read where it is first heard — the reading as it shipped.
             Self::Reading => Variant::Arrives,
             // A candidate the user approved for comparison, not yet the piece as specified: off
@@ -326,13 +354,13 @@ mod tests {
 
     #[test]
     fn the_defaults_are_todays_piece() {
-        // The five machine-cycle switches are on, the reading reads each line where it arrives,
-        // and the harmony — a candidate not yet in the piece — is off.
+        // The four machine-cycle switches are on, the bass is by vowel height, the reading reads
+        // each line where it arrives, and the harmony — a candidate not yet in the piece — is off.
         let all = Mappings::all();
         for mapping in Mapping::ALL {
             assert_eq!(all.has(mapping), mapping != Mapping::Harmony, "{mapping:?}");
         }
-        assert_eq!(all.get(Mapping::Bass), Variant::On);
+        assert_eq!(all.get(Mapping::Bass), Variant::Height);
         assert_eq!(all.get(Mapping::Reading), Variant::Arrives);
         assert_eq!(all.get(Mapping::Harmony), Variant::Off);
         assert_eq!(all.changed().count(), 0);
@@ -341,6 +369,19 @@ mod tests {
     #[test]
     fn a_variant_a_mapping_lacks_cannot_be_chosen() {
         assert!(Mapping::Bass.choose(Variant::Stanza).is_none());
+        assert!(Mapping::Bass.choose(Variant::On).is_none());
+        assert!(Mapping::Harmony.choose(Variant::Feet).is_none());
+        let feet = Mapping::Bass.choose_named("feet").unwrap();
+        assert_eq!(feet.variant(), Variant::Feet);
+        assert_eq!(
+            Mapping::Bass.variants(),
+            &[
+                Variant::Off,
+                Variant::Height,
+                Variant::Syllables,
+                Variant::Feet
+            ]
+        );
         assert!(Mapping::Reading.choose(Variant::On).is_none());
         assert!(Mapping::Reading.choose_named("on").is_none());
         assert!(Mapping::Outro.choose_named("polka").is_none());
@@ -380,7 +421,7 @@ mod tests {
         );
         // Choosing a default again is the same value as never having changed it.
         let back = some
-            .with(Mapping::Bass.choose(Variant::On).unwrap())
+            .with(Mapping::Bass.choose(Variant::Height).unwrap())
             .with(Mapping::Outro.choose(Variant::On).unwrap())
             .with(Mapping::Reading.choose(Variant::Arrives).unwrap());
         assert_eq!(back, Mappings::all());
@@ -388,9 +429,10 @@ mod tests {
 
     #[test]
     fn every_combination_is_listed_once() {
-        // Five on/off switches, a four-way harmony and a three-way reading: 2^5 × 4 × 3 = 384.
+        // Four on/off switches, a four-way bass, a four-way harmony and a three-way reading:
+        // 2^4 × 4 × 4 × 3 = 768.
         let every = Mappings::every();
-        assert_eq!(every.len(), 384);
+        assert_eq!(every.len(), 768);
         for (index, one) in every.iter().enumerate() {
             assert!(!every[index + 1..].contains(one), "{one:?} twice");
         }

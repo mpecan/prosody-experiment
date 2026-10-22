@@ -40,6 +40,7 @@
 //! | repetition | §4.3 | [`Voice::id`] — which lines are the same instrument |
 //! | meter | §4.2 | [`Event::bar`], [`Event::beat`], [`Event::subdivision`], [`Event::velocity`] |
 //! | rhyme | §4.5 | [`Event::pitch`], on the rhyming word only |
+//! | bass | §4.6 | [`Event::bass`], on a foundation line's syllables or feet ([`crate::bass`]) |
 //! | surprisal | §4.4 | [`Event::sharpness`] |
 //! | word families | §4.3 | [`Event::family`] — modulation depth within an instrument |
 //!
@@ -71,7 +72,9 @@
 //! none — which invariant I4 forbids more strongly than it forbids silence.
 
 use crate::arrange::{Arrangement, Lane, Part, Placement, Slot};
+use crate::bass::BassNote;
 use crate::harmony::{Chord, Harmony};
+use crate::mapping::Variant;
 use crate::meter::FootKind;
 use crate::phoneme::{Phoneme, Provenance};
 use crate::repetition::VoiceId;
@@ -287,12 +290,14 @@ pub struct Pitch {
 }
 
 /// Where a note came from, for tracing it back (invariant I4).
+///
+/// Only a rhyme gives an event a [`Pitch`] — the melody. The bass was a second source here until
+/// its walking variants needed a note under a rhyme word too; it is now [`Event::bass`], so one
+/// event can carry both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PitchSource {
     /// The word a rhyme rests on: its class's degree (`SPEC.md` §4.5).
     Rhyme(RhymeClassId),
-    /// A stressed syllable of a foundation line: its vowel's height (the bass).
-    Vowel(Phoneme),
 }
 
 impl Pitch {
@@ -313,7 +318,6 @@ impl Pitch {
     pub const fn class(self) -> Option<RhymeClassId> {
         match self.source {
             PitchSource::Rhyme(class) => Some(class),
-            PitchSource::Vowel(_) => None,
         }
     }
 
@@ -419,6 +423,7 @@ pub struct Event {
     velocity: Velocity,
     provenance: Provenance,
     pitch: Option<Pitch>,
+    bass: Option<BassNote>,
     sharpness: Surprisal,
     family: Option<Family>,
     anchor: Option<Anchor>,
@@ -480,6 +485,15 @@ impl Event {
         self.pitch
     }
 
+    /// Its bass note, if the bass mapping gave it one (`SPEC.md` §4.6, [`crate::bass`]): a
+    /// stressed foundation syllable under the height bass, any foundation syllable under W1, a
+    /// foot's first syllable under W2. Independent of [`Event::pitch`]: under the walking variants
+    /// a rhyme word carries both.
+    #[must_use]
+    pub const fn bass(self) -> Option<BassNote> {
+        self.bass
+    }
+
     /// How distinctive its word is (`SPEC.md` §4.4), driving sharpness and brightness.
     #[must_use]
     pub const fn sharpness(self) -> Surprisal {
@@ -535,6 +549,7 @@ pub struct Score {
     silent: Vec<Span>,
     arrangement: Arrangement,
     harmony: Vec<Harmony>,
+    bass: Variant,
 }
 
 impl Score {
@@ -552,7 +567,21 @@ impl Score {
             silent,
             arrangement: Arrangement::default(),
             harmony: Vec::new(),
+            bass: Variant::Off,
         }
+    }
+
+    /// The same score, recording which variant of the bass made its bass notes.
+    pub(crate) const fn with_bass(mut self, variant: Variant) -> Self {
+        self.bass = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Bass`](crate::mapping::Mapping::Bass) made the bass notes
+    /// ([`Event::bass`]), so a backend and the debug view can say what they are.
+    #[must_use]
+    pub const fn bass(&self) -> Variant {
+        self.bass
     }
 
     /// The same score, with each line's harmony ([`crate::harmony`]).
@@ -594,6 +623,35 @@ impl Score {
                 && placement.part() == Part::Line
         })?;
         self.harmony_of(foundation.bar().get())?.chord()
+    }
+
+    /// Whether `placement`'s bass notes sound in `slot`.
+    ///
+    /// Under the height bass, yes, wherever the line sounds — as it always did: its notes are the
+    /// root, third and fifth of one scale, so two lines' notes at one instant are a chord, never a
+    /// clash, and the default piece stays the piece it was.
+    ///
+    /// Under a walking bass (W1, W2), only the slot's foundation-layer line — the one
+    /// [`Score::chord_in`] takes the bar's chord from. A walk is *one* line moving by step and by
+    /// semitone; a held, refrain or call line walking in its own lane under it put two or three
+    /// walks in one bar, and their passing and approach tones landed a semitone apart (on Blake's
+    /// Tyger under W1, 59 of 257 bass onsets). One walk a bar, as one chord a bar (`SPEC.md` §4.6).
+    /// The line under it still sounds everything else it sounds — its drums, its melody.
+    ///
+    /// The one place this is decided, so every backend and the scorer agree on it.
+    #[must_use]
+    pub fn sounds_bass(&self, slot: &Slot, placement: &Placement) -> bool {
+        match self.bass {
+            Variant::Syllables | Variant::Feet => slot
+                .placements()
+                .iter()
+                .find(|candidate| {
+                    candidate.lane() == Lane::Layer(crate::role::Layer::Foundation)
+                        && candidate.part() == Part::Line
+                })
+                .is_some_and(|walking| walking == placement),
+            _ => true,
+        }
     }
 
     /// The same score, laid out in time by [`crate::arrange`].
@@ -801,14 +859,6 @@ impl Pitch {
             source: PitchSource::Rhyme(class),
         }
     }
-
-    pub(crate) const fn of_vowel(vowel: Phoneme, degree: usize) -> Self {
-        Self {
-            degree: ScaleDegree::new(degree),
-            detune: Detune::EXACT,
-            source: PitchSource::Vowel(vowel),
-        }
-    }
 }
 
 impl Family {
@@ -851,6 +901,7 @@ impl Event {
             velocity,
             provenance,
             pitch: None,
+            bass: None,
             sharpness: Surprisal::NONE,
             family: None,
             anchor: None,
@@ -870,6 +921,11 @@ impl Event {
 
     pub(crate) const fn with_pitch(mut self, pitch: Pitch) -> Self {
         self.pitch = Some(pitch);
+        self
+    }
+
+    pub(crate) const fn with_bass(mut self, bass: BassNote) -> Self {
+        self.bass = Some(bass);
         self
     }
 

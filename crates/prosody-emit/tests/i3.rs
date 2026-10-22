@@ -129,7 +129,7 @@ fn i3_changing_the_style_leaves_the_score_identical() {
             .iter()
             .map(|e| {
                 format!(
-                    "{} {} {}/{} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                    "{} {} {}/{} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
                     e.bar().get(),
                     e.beat().get(),
                     e.subdivision().index(),
@@ -138,6 +138,9 @@ fn i3_changing_the_style_leaves_the_score_identical() {
                     e.velocity(),
                     e.sharpness(),
                     e.pitch().map(|p| (p.degree().get(), p.detune())),
+                    // Its span moves with the header, as every span does; the note must not.
+                    e.bass()
+                        .map(|b| (b.root().get(), b.step().get(), b.chromatic(), b.velocity())),
                     e.family().map(|f| (f.voice(), f.depth())),
                     e.anchor(),
                     e.voice(),
@@ -476,6 +479,45 @@ proptest::proptest! {
         proptest::prop_assert_eq!(lane(&a), usize::from(score.chords().next().is_some()));
     }
 
+    /// I3 with a walking bass (`SPEC.md` §4.6, W1 and W2), with or without the harmony: no palette
+    /// adds, moves or rests a bass note. Which scale, root note and octave it sounds in are
+    /// palette; which syllables and beats carry one, and on which step, are the score's.
+    #[test]
+    fn i3_no_palette_can_change_the_walking_bass(
+        body in poem(),
+        one in palette(),
+        two in palette(),
+        bass in proptest::sample::select(vec![
+            prosody_core::Variant::Syllables,
+            prosody_core::Variant::Feet,
+        ]),
+        harmony in proptest::sample::select(vec![
+            prosody_core::Variant::Off,
+            prosody_core::Variant::Rhyme,
+            prosody_core::Variant::Cadence,
+        ]),
+    ) {
+        let mappings = prosody_core::Mappings::all()
+            .with(prosody_core::Mapping::Bass.choose(bass).unwrap())
+            .with(prosody_core::Mapping::Harmony.choose(harmony).unwrap());
+        let (score, style_one) = score_with(&format!("{one}{body}"), &mappings);
+        let (_, style_two) = score_with(&format!("{two}{body}"), &mappings);
+        let backend = Strudel::new();
+        let (Ok(a), Ok(b)) = (
+            backend.render(&score, &style_one),
+            backend.render(&score, &style_two),
+        ) else {
+            return Ok(());
+        };
+        proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+        let lane = |text: &str| text.lines().filter(|l| l.contains("// the bass")).count();
+        proptest::prop_assert_eq!(lane(&a), lane(&b));
+        proptest::prop_assert_eq!(
+            lane(&a) > 0,
+            score.events().iter().any(|e| e.bass().is_some())
+        );
+    }
+
     /// The chord voicing, isolated: one palette rendered with each rhyme note alone and again with
     /// it voiced as a seventh chord. The claim `Voicing` makes against I3 is that this changes the
     /// realisation of each pitched event and nothing else — same events, same positions — so:
@@ -587,7 +629,7 @@ proptest::proptest! {
                 .iter()
                 .map(|e| {
                     format!(
-                        "{} {} {}/{} {:?} {:?} {:?} {:?} {:?}",
+                        "{} {} {}/{} {:?} {:?} {:?} {:?} {:?} {:?}",
                         e.bar().get(),
                         e.beat().get(),
                         e.subdivision().index(),
@@ -595,6 +637,9 @@ proptest::proptest! {
                         e.velocity(),
                         e.sharpness(),
                         e.pitch().map(|p| (p.degree().get(), p.detune())),
+                        // Its span moves with the header, as every span does; the note must not.
+                        e.bass()
+                            .map(|b| (b.root().get(), b.step().get(), b.chromatic(), b.velocity())),
                         e.family().map(|f| (f.voice(), f.depth())),
                         e.voice(),
                     )

@@ -439,7 +439,7 @@ fn without_the_bass_only_rhyme_words_are_pitched() {
         score
             .events()
             .iter()
-            .filter(|e| e.pitch().is_some())
+            .filter(|e| e.pitch().is_some() || e.bass().is_some())
             .count()
     };
     assert_eq!(pitched(&compile("da dA\n")), 1);

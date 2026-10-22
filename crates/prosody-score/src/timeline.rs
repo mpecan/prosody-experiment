@@ -26,11 +26,45 @@ pub(crate) struct Hit {
     pub(crate) voice: usize,
     /// Struck at full force: a primary stress (`SPEC.md` §4.2's "stress → accent").
     pub(crate) accent: bool,
-    /// Its scale degree, if it is a rhyme word's syllable (§4.5), or a chord's root.
-    pub(crate) degree: Option<usize>,
+    /// Its note, if it is a rhyme word's syllable (§4.5), a bass note (§4.6), or a chord's root.
+    pub(crate) degree: Option<Tone>,
     /// A chord of the harmony layer (§4.6) rather than a syllable: it sounds on its own
     /// instrument, not its line's voice.
     pub(crate) chord: bool,
+}
+
+/// A note as the score names it, before any scale: a number of scale steps, and whether it sits a
+/// semitone below that step (the walking bass's approach tone, `prosody_core::bass`).
+///
+/// A rhyme degree *d* and a bass note *d* steps above degree 0 are the same tone here, as they
+/// were when the bass was a [`Pitch`](prosody_core::Pitch). A walking bass note under a chord
+/// (W2) is keyed by its step above the chord's root, not by root + step: the root is the
+/// harmony's, numbered poem-wide and folded into one octave by the backend — a fold that needs
+/// the scale, which this crate cannot see — and the step-5 review left chord roots out of pitch
+/// entropy for exactly that reason. Counting it here would bring the miscount back through the
+/// bass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Tone {
+    pub(crate) step: i64,
+    pub(crate) semitone_below: bool,
+}
+
+impl Tone {
+    /// A scale degree: a rhyme note or a chord's root.
+    pub(crate) fn degree(degree: usize) -> Self {
+        Self {
+            step: i64::try_from(degree).unwrap_or(i64::MAX),
+            semitone_below: false,
+        }
+    }
+
+    /// A bass note, by its step above its root.
+    fn bass(note: prosody_core::BassNote) -> Self {
+        Self {
+            step: i64::from(note.step().get()),
+            semitone_below: note.chromatic() == prosody_core::Chromatic::SemitoneBelow,
+        }
+    }
 }
 
 /// How deep in the metrical hierarchy a position sits. Shallower is stronger.
@@ -79,6 +113,8 @@ impl Timeline {
             let slot_beats = to_u64(slot.beats()).max(1);
             for placement in slot.placements() {
                 let placed = score.placed(*placement);
+                // Under a walking bass, one walk a bar (`Score::sounds_bass`), as it is played.
+                let bass_sounds = score.sounds_bass(slot, placement);
                 let first = placed.first_beat();
                 let line_beats = to_u64(placed.beats()).max(1);
                 let room = to_u64(slot.room_for(placed.beats()));
@@ -96,7 +132,12 @@ impl Timeline {
                         within: reduce(scaled % denominator, denominator),
                         voice: event.voice().get(),
                         accent: event.velocity() == Velocity::PRIMARY,
-                        degree: event.pitch().map(|pitch| pitch.degree().get()),
+                        // The melody's note where there is one. Under a walking bass a rhyme
+                        // word carries a bass note too; this one hit counts the melody's.
+                        degree: event.pitch().map_or_else(
+                            || event.bass().filter(|_| bass_sounds).map(Tone::bass),
+                            |pitch| Some(Tone::degree(pitch.degree().get())),
+                        ),
                         chord: false,
                     });
                 }
@@ -111,7 +152,7 @@ impl Timeline {
                     within: (0, 1),
                     voice: 0,
                     accent: false,
-                    degree: Some(chord.root().get()),
+                    degree: Some(Tone::degree(chord.root().get())),
                     chord: true,
                 });
             }

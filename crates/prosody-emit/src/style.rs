@@ -499,6 +499,23 @@ impl Scale {
         i32::from(step) + 12 * i32::try_from(octave).unwrap_or(0)
     }
 
+    /// The semitone offset of a signed number of steps from degree 0: [`Scale::degree`] for a step
+    /// at or above it, and below it the scale's own notes an octave down — step −1 in C major is
+    /// the B below. For the bass, whose walk passes below its root (`prosody_core::bass`).
+    #[must_use]
+    pub fn step(self, step: i64) -> i32 {
+        let Ok(len) = i64::try_from(self.steps.len()) else {
+            return 0;
+        };
+        if len == 0 {
+            return 0;
+        }
+        let octave = step.div_euclid(len);
+        let within = usize::try_from(step.rem_euclid(len)).unwrap_or(0);
+        let semitone = self.steps.get(within).copied().unwrap_or(0);
+        i32::from(semitone) + 12 * i32::try_from(octave).unwrap_or(0)
+    }
+
     /// Parses a scale name.
     ///
     /// # Errors
@@ -1889,6 +1906,18 @@ preset = \"jazz\"\nscale = \"mixolydian\"\nswing = 0\n+++",
         assert_eq!(scale.degree(6), 10);
         assert_eq!(scale.degree(7), 12, "an octave up, not back to the root");
         assert_eq!(scale.degree(9), 16);
+    }
+
+    #[test]
+    fn steps_below_the_root_are_the_scales_notes_an_octave_down() {
+        // Phrygian dominant again: 0 1 4 5 7 8 10. Step −1 is the 7th degree an octave down,
+        // 10 − 12 = −2; step −3 is the 5th, 7 − 12 = −5; step −8 is −1 an octave lower still.
+        let scale = Scale::parse("phrygian_dominant").unwrap();
+        assert_eq!(scale.step(0), 0);
+        assert_eq!(scale.step(9), scale.degree(9));
+        assert_eq!(scale.step(-1), -2);
+        assert_eq!(scale.step(-3), -5);
+        assert_eq!(scale.step(-8), -14);
     }
 
     #[test]

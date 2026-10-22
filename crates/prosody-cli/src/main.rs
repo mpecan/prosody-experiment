@@ -80,7 +80,8 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20 --score        print how the piece measures (interest, legibility), instead of the pattern\n\
      \x20 --profile NAME what --score judges against: interest (the default), machine or jazz\n\
      \x20 --set LIST     choose candidate mappings' variants, comma-separated name=variant:\n\
-     \x20                held, refrain, bass, period, outro = off|on (default on);\n\
+     \x20                held, refrain, period, outro = off|on (default on);\n\
+     \x20                bass = off|height|syllables|feet (default height);\n\
      \x20                harmony = off|rhyme|cadence|both (default off);\n\
      \x20                reading = off|arrives|stanza (default arrives)\n\
      \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
@@ -383,6 +384,12 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
         eprintln!(
             "prosody: {} chords of the harmony layer are not sent: OSC has no chord message",
             schedule.unsent_chords()
+        );
+    }
+    if schedule.unsent_bass() > 0 {
+        eprintln!(
+            "prosody: {} bass notes under rhyme words are not sent: a message has one pitch",
+            schedule.unsent_bass()
         );
     }
     Ok(())

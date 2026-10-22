@@ -396,7 +396,12 @@ struct Heard {
     beat: BeatIndex,
     subdivision: Subdivision,
     velocity: Velocity,
-    pitch: Option<(ScaleDegree, Detune)>,
+    pitch: Option<(usize, Detune)>,
+    bass: Option<(
+        ScaleDegree,
+        prosody_core::ScaleStep,
+        prosody_core::Chromatic,
+    )>,
     sharpness: Surprisal,
     depth: Option<Distance>,
     anchor: Option<Anchor>,
@@ -414,13 +419,42 @@ impl Heard {
             beat: event.beat(),
             subdivision: event.subdivision(),
             velocity: event.velocity(),
-            pitch: event.pitch().map(|pitch| (pitch.degree(), pitch.detune())),
+            pitch: heard_pitch(event),
+            bass: event
+                .bass()
+                // Unless it is already the event's one pitch, above.
+                .filter(|_| event.pitch().is_some() || height_bass(event).is_none())
+                .map(|note| (note.root(), note.step(), note.chromatic())),
             sharpness: event.sharpness(),
             depth: event.family().map(prosody_core::Family::depth),
             anchor: event.anchor(),
             bank: event.bank(),
         }
     }
+}
+
+/// The event's note as one pitch: the melody's degree and detune, or else a height bass note's
+/// degree.
+///
+/// Before the walking bass the height bass was a `Pitch` like the melody, so this comparison saw
+/// "a rhyme note on degree 0" and "the bass's open vowel, degree 0" as the same — which
+/// `a_rhyme_across_stanzas_carries_an_edit_with_it` pins, and the machine cycle's legibility
+/// numbers rest on. Kept exactly, so the default piece measures as it did. Any other bass note — a
+/// walking bass's, or one under a rhyme word — is compared on its own ([`Heard::bass`]).
+fn heard_pitch(event: &Event) -> Option<(usize, Detune)> {
+    event
+        .pitch()
+        .map(|pitch| (pitch.degree().get(), pitch.detune()))
+        .or_else(|| height_bass(event))
+}
+
+/// A height bass note (`prosody_core::BassReason::Height`) as a degree, if the event has one.
+fn height_bass(event: &Event) -> Option<(usize, Detune)> {
+    let note = event.bass()?;
+    let prosody_core::BassReason::Height(_) = note.why() else {
+        return None;
+    };
+    Some((usize::try_from(note.step().get()).ok()?, Detune::EXACT))
 }
 
 fn share(part: usize, whole: usize) -> f64 {

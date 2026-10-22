@@ -227,3 +227,89 @@ fn the_edit_test_is_deterministic() {
 fn no_probes_means_no_measurement() {
     assert_eq!(sensitivity::measure("da dA\n", &[], compile), None);
 }
+
+/// The same poem under the bass and harmony variants given.
+fn compile_with(source: &str, bass: &str, harmony: &str) -> Score {
+    let mappings = prosody_core::Mappings::all()
+        .with(prosody_core::Mapping::Bass.choose_named(bass).unwrap())
+        .with(
+            prosody_core::Mapping::Harmony
+                .choose_named(harmony)
+                .unwrap(),
+        );
+    let poem = Poem::parse(source.to_owned()).unwrap();
+    let meter = meter::scan(&poem, &Toy);
+    let repetition = repetition::analyse(&poem);
+    let roles = role::assign(&meter, &repetition).unwrap();
+    lower::run_with(
+        Analyses {
+            poem: &poem,
+            meter: &meter,
+            rhyme: &rhyme::analyse(&poem, &Toy),
+            repetition: &repetition,
+            sound: &sound::analyse(&poem, &Toy),
+            surprisal: &surprisal::analyse(&poem, &Toy, &Flat),
+            roles: &roles,
+        },
+        &mappings,
+    )
+    .unwrap()
+}
+
+fn metric(score: &Score, name: &str) -> f64 {
+    measure(score)
+        .into_iter()
+        .find(|metric| metric.name() == name)
+        .unwrap()
+        .value()
+}
+
+#[test]
+fn a_walking_bass_is_pitched_but_its_chords_root_adds_no_entropy() {
+    // AABB of two-iamb lines, ending O, O, E, E: O is degree 0, E degree 1. Every line is
+    // `xa xA xa xR`, four syllables. AABB, not ABAB: each open rhyme is answered in the very next
+    // bar, so nothing is held under another line, and every placement is its bar's foundation line
+    // — the one whose walk sounds (`Score::sounds_bass`, one walk a bar).
+    let source = "da dA da dO\nma mA ma mO\nta tA ta tE\nsa sA sa sE\n";
+    // Hand-worked shares of pitched events, the same in every line and so in the whole piece:
+    // the height bass pitches the stressed `xA` and the melody the rhyme word — 2 of 4. W2 pitches
+    // each foot's first syllable, both `xa`, and the melody the rhyme word — 3 of 4.
+    let height = compile(source).unwrap();
+    let feet = compile_with(source, "feet", "off");
+    assert!((metric(&height, "pitched") - 0.5).abs() < 1e-12);
+    assert!((metric(&feet, "pitched") - 0.75).abs() < 1e-12);
+    // Under H1 the E lines' bars walk the same steps from degree 1 instead of 0. The root is the
+    // harmony's, which pitch entropy leaves out (the step-5 review fix), so the entropy is the same
+    // with the chords as without them.
+    let rhymed = compile_with(source, "feet", "rhyme");
+    assert!(rhymed.chords().next().is_some());
+    assert!((metric(&feet, "pitch_entropy") - metric(&rhymed, "pitch_entropy")).abs() < 1e-12);
+}
+
+#[test]
+fn a_line_held_under_another_keeps_its_melody_but_not_its_walk() {
+    // ABAB of two-iamb lines, ending O, E, O, E. The arrangement, by hand: the stanza is stated in
+    // slots 0-3, the A line held under slot 1 (its answer comes in slot 2) and the B line under
+    // slot 2 (answered in slot 3), and the loop plays one more pass, slots 4-7, with every rhyme
+    // already answered — 8 whole lines and 2 held ones, 40 syllables.
+    //
+    // The height bass sounds under a held line too, as it always has: each line pitches its
+    // stressed `xA` and its rhyme word, 2 of 4, so 20 of 40. W2 pitches each foot's first `xa` and
+    // the rhyme word, 3 of 4 — but one walk a bar (`Score::sounds_bass`): a held line keeps its
+    // melody note and drops its walk, so 8 × 3 + 2 × 1 = 26 of 40, not the 30 it was when every
+    // line walked at once.
+    let source = "da dA da dO\nma mA ma mE\nta tA ta tO\nsa sA sa sE\n";
+    let height = compile(source).unwrap();
+    let feet = compile_with(source, "feet", "off");
+    let slots = feet.arrangement().slots();
+    assert_eq!(slots.len(), 8);
+    assert_eq!(
+        slots
+            .iter()
+            .map(|slot| slot.placements().len())
+            .sum::<usize>(),
+        10
+    );
+    assert!((metric(&height, "pitched") - 0.5).abs() < 1e-12);
+    assert!((metric(&feet, "pitched") - 26.0 / 40.0).abs() < 1e-12);
+}

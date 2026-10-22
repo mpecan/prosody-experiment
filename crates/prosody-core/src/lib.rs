@@ -23,6 +23,7 @@
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
 //! - [`mapping`] — which variant of each candidate mapping applies, so each can be heard against
 //!   the others and against its absence.
+//! - [`bass`] — §4.6's bass: by vowel height, or walking on every syllable or every foot.
 //! - [`harmony`] — §4.6's harmony layer, a candidate: a chord per foundation bar, from the rhyme
 //!   scheme or from rhyme closure.
 //! - [`arrange`] — laying that IR out in time: stanzas loop until a competing stanza transforms
@@ -40,6 +41,7 @@
 
 pub mod annotate;
 pub mod arrange;
+pub mod bass;
 pub mod harmony;
 pub mod lower;
 pub mod mapping;
@@ -57,6 +59,7 @@ pub mod voice;
 
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
 pub use arrange::{Arrangement, Cause, Fit, Lane, Part, Placement, Slot};
+pub use bass::{BassNote, BassReason, Chromatic, Direction, Height, ScaleStep};
 pub use harmony::{Chord, Function, Harmony, Reason, Rest, Silence};
 pub use mapping::{Choice, Mapping, Mappings, Variant};
 pub use meter::{
