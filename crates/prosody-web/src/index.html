@@ -519,7 +519,7 @@ const SAMPLES = 'https://strudel.b-cdn.net';
 const SOUNDFONTS = 'https://unpkg.com/@strudel/soundfonts@1.3.0/dist/index.mjs';
 
 async function startStrudel() {
-  await initStrudel({
+  const repl = await initStrudel({
     prebake: () => Promise.all([
       samples(`${SAMPLES}/tidal-drum-machines.json`, `${SAMPLES}/tidal-drum-machines/machines/`, {
         prebake: true,
@@ -530,6 +530,11 @@ async function startStrudel() {
       import(SOUNDFONTS).then((soundfonts) => soundfonts.registerSoundfonts()),
     ]),
   });
+  // The pattern says its tempo with `.cpm`, which in `@strudel/core` assumes one cycle a second;
+  // the scheduler starts at half that. strudel.cc's REPL rewrites `.cpm` against its scheduler,
+  // but this page evaluates with a plain `eval`, so it sets the scheduler instead — without this
+  // every piece played at half its tempo. `reading::SCHEDULER_CPS` must say the same number.
+  repl.setCps(1);
   // `initStrudel` loads Strudel's effect worklets (crush, shape, …) on the *next* mousedown, but
   // it is called from inside the Play click, after that click's mousedown — so the first play ran
   // without them and every drum layer, which carries `.crush`, failed to build. Load them now.

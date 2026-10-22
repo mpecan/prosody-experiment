@@ -63,14 +63,14 @@ pub const FASTEST: f64 = 1.6;
 
 /// The cycles a second of the scheduler the pattern plays on.
 ///
-/// Strudel's `.cpm(x)` is `fast(x / 60)` — it assumes a scheduler at one cycle a second
-/// (`@strudel/core` 1.2.6, `pattern.mjs`) — but the scheduler starts at 0.5 (`cyclist.mjs`,
-/// `this.cps = 0.5`), and neither the page nor the pattern changes it. So a bar of a pattern at
-/// `.cpm(x)` lasts `120 / x` seconds, not `60 / x`: the piece plays at half its stated tempo.
-/// That is a defect of the pattern's tempo, recorded in `PLAN.md` and not fixed here, because
-/// fixing it doubles the speed of everything the page plays. The reading is fitted to the bar as
-/// it actually sounds, so when the tempo is fixed this constant goes with it.
-pub const SCHEDULER_CPS: f64 = 0.5;
+/// `@strudel/core`'s `.cpm(x)` is `fast(x / 60)` — it assumes a scheduler at one cycle a second
+/// (1.2.6, `pattern.mjs`) — while the scheduler starts at 0.5 (`cyclist.mjs`). strudel.cc never
+/// sees the mismatch: its REPL redefines `.cpm` against the scheduler's own rate before
+/// evaluating (`repl.mjs`). The page evaluates with a plain `eval`, which gets core's `.cpm`, so
+/// it sets its scheduler to this rate once Strudel has started, and every piece played there at
+/// half its stated tempo until it did. The page and this constant must agree: the reading is
+/// fitted to the bar as it actually sounds.
+pub const SCHEDULER_CPS: f64 = 1.0;
 
 /// One line, spoken in one slot.
 #[derive(Debug, Clone, PartialEq)]
@@ -376,10 +376,10 @@ mod tests {
         (poem, score)
     }
 
-    /// 240 bpm exactly, so the clock can be worked by hand: over two-beat bars, 120 cycles a
-    /// minute, and on a scheduler at half a cycle a second, a bar of one second.
-    fn at_240() -> Style {
-        Style::parse("+++\ntempo_range = [240, 240]\n+++").unwrap()
+    /// 120 bpm exactly, so the clock can be worked by hand: over two-beat bars, 60 cycles a
+    /// minute, and on a scheduler at one cycle a second, a bar of one second.
+    fn at_120() -> Style {
+        Style::parse("+++\ntempo_range = [120, 120]\n+++").unwrap()
     }
 
     /// Two stanzas of two two-foot lines, of one layer: the second transforms the first's loop.
@@ -415,7 +415,7 @@ mod tests {
             ]
         );
 
-        let reading = plan(&poem, &score, &at_240()).unwrap();
+        let reading = plan(&poem, &score, &at_120()).unwrap();
         // Each line once, in the slot it is first heard: line 2 in slot 2 (its first arrival, not
         // its second in slot 4), line 3 in slot 5. Slot 3 yields, slot 4 re-arrives, 6 and 7 are
         // the outro: silent.
@@ -436,7 +436,7 @@ mod tests {
         assert!(
             reading
                 .pattern()
-                .ends_with("n(\"<0 1 2 ~ ~ 3 ~ ~>\").cpm(120.000)\n"),
+                .ends_with("n(\"<0 1 2 ~ ~ 3 ~ ~>\").cpm(60.000)\n"),
             "{}",
             reading.pattern()
         );
@@ -446,7 +446,7 @@ mod tests {
     fn every_cue_is_its_lines_span() {
         // I4: the spoken text is exactly the source under the cue's span.
         let (poem, score) = lowered(TRANSFORMING);
-        for cue in plan(&poem, &score, &at_240()).unwrap().cues() {
+        for cue in plan(&poem, &score, &at_120()).unwrap().cues() {
             assert_eq!(cue.span().text(poem.source()), Some(cue.text()));
         }
     }
@@ -482,7 +482,7 @@ mod tests {
         );
         assert!(causes.len() > 6, "an outro follows: {causes:?}");
 
-        let reading = plan(&poem, &score, &at_240()).unwrap();
+        let reading = plan(&poem, &score, &at_120()).unwrap();
         let spoken: Vec<(usize, usize)> = reading
             .cues()
             .iter()
@@ -498,16 +498,16 @@ mod tests {
 
     #[test]
     fn the_rate_fits_the_line_to_its_bar() {
-        // Hand-worked. 240 bpm over two-beat bars is `.cpm(120)`, which Strudel plays as a bar of
-        // 60 / 120 / 0.5 = one second (SCHEDULER_CPS); 85% of it is 0.85 s. "eA eA" sounds four syllables, 1 s at four a second, so the rate is
+        // Hand-worked. 120 bpm over two-beat bars is `.cpm(60)`, which Strudel plays as a bar of
+        // 60 / 60 / 1 = one second (SCHEDULER_CPS); 85% of it is 0.85 s. "eA eA" sounds four syllables, 1 s at four a second, so the rate is
         // 1 / 0.85 = 1.176. "teA teA" is the same four syllables.
         let (poem, score) = lowered(TRANSFORMING);
-        let reading = plan(&poem, &score, &at_240()).unwrap();
+        let reading = plan(&poem, &score, &at_120()).unwrap();
         assert_eq!(fmt_param(reading.cues()[0].rate()), "1.176");
         assert_eq!(reading.cues()[0].syllables(), 4);
 
         // Twice the tempo halves the bar, so the same line would need 2.353 — bounded to FASTEST.
-        let fast = Style::parse("+++\ntempo_range = [480, 480]\n+++").unwrap();
+        let fast = Style::parse("+++\ntempo_range = [240, 240]\n+++").unwrap();
         let reading = plan(&poem, &score, &fast).unwrap();
         assert_eq!(fmt_param(reading.cues()[0].rate()), fmt_param(FASTEST));
     }
@@ -526,9 +526,9 @@ mod tests {
         // I3: which line is read in which bar is structure. A different palette may read faster,
         // not elsewhere.
         let (poem, score) = lowered(TRANSFORMING);
-        let brisk = plan(&poem, &score, &at_240()).unwrap();
-        // 180 bpm: a bar of 4/3 s, 85% of it 1.133 s, so four syllables at 0.882.
-        let other = Style::parse("+++\ntempo_range = [180, 180]\nscale = \"lydian\"\n+++").unwrap();
+        let brisk = plan(&poem, &score, &at_120()).unwrap();
+        // 90 bpm: a bar of 4/3 s, 85% of it 1.133 s, so four syllables at 0.882.
+        let other = Style::parse("+++\ntempo_range = [90, 90]\nscale = \"lydian\"\n+++").unwrap();
         let steady = plan(&poem, &score, &other).unwrap();
         let shape = |reading: &super::Reading| -> Vec<(usize, usize)> {
             reading
@@ -546,9 +546,9 @@ mod tests {
     fn the_same_poem_reads_the_same_bytes() {
         // I1.
         let (poem, score) = lowered(TRANSFORMING);
-        let once = plan(&poem, &score, &at_240()).unwrap().pattern();
+        let once = plan(&poem, &score, &at_120()).unwrap().pattern();
         let (poem, score) = lowered(TRANSFORMING);
-        assert_eq!(once, plan(&poem, &score, &at_240()).unwrap().pattern());
+        assert_eq!(once, plan(&poem, &score, &at_120()).unwrap().pattern());
     }
 
     #[test]
@@ -570,7 +570,7 @@ mod tests {
     fn a_pasted_line_separator_stays_in_the_comment_and_in_the_spoken_text() {
         let source = "bAt\u{2028}dAt\nnAd\n";
         let (poem, score) = lowered(source);
-        let reading = plan(&poem, &score, &at_240()).unwrap();
+        let reading = plan(&poem, &score, &at_120()).unwrap();
         let pattern = reading.pattern();
         // Every evaluated line is a comment or the one `n(...)` line: nothing after a line
         // terminator escapes its comment.
@@ -593,6 +593,6 @@ mod tests {
     fn a_score_from_another_poem_is_refused() {
         let (poem, _) = lowered(TRANSFORMING);
         let (_, other) = lowered("eA eA\n");
-        assert!(plan(&poem, &other, &at_240()).is_err());
+        assert!(plan(&poem, &other, &at_120()).is_err());
     }
 }

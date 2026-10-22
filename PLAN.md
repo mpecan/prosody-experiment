@@ -397,6 +397,26 @@ answer first, and it is a §4.2 question.
 
 ## Log
 
+### The page plays at the stated tempo
+
+Fixes the half-tempo defect recorded in *Sound and voice, step 2* below, which also corrects that
+entry: the defect was **the page's only**, not strudel.cc's. `@strudel/core` 1.2.6's `.cpm(x)` is
+`fast(x / 60)` and assumes one cycle a second, while the scheduler starts at 0.5 (`cyclist.mjs`).
+strudel.cc evaluates through its REPL, which redefines `.cpm` as `fast(x / 60 / scheduler.cps)`
+before running the code (`repl.mjs`, `injectPatternMethods`), so a pasted pattern was always at
+tempo. The page evaluates with a plain `eval`, gets core's `.cpm`, and played at half.
+
+- **The fix is on the page**, not in the text: after `initStrudel` the page sets its scheduler to
+  one cycle a second (`repl.setCps(1)`). The emitted pattern is unchanged, so no snapshot moves,
+  and the same text is right on both paths.
+- `reading::SCHEDULER_CPS` is now `1.0`, and must agree with the page. The reading's hand-worked
+  rate tests were re-worked at half their tempos (120 bpm over two-beat bars is a one-second bar),
+  so their expected rates are the same numbers.
+- Measured in Chromium on the Blake preset (`.cpm(30.250)`): cues now fire 1.98–2.0 s apart (were
+  3.97 s), and the lines read at 1.04–1.19× instead of the 0.6 floor.
+- Everything played on the page is now twice as fast as before, as the header always said. Tempo
+  ranges in the presets were tuned by ear at the old speed, so they may want halving or a look.
+
 ### Sound and voice, step 3 — review fixes to jazz
 
 Four findings from review, all palette-side; no event moves and no mapping changes.
