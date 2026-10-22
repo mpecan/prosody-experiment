@@ -586,6 +586,52 @@ fn a_mapping_can_be_left_out() {
 }
 
 #[test]
+fn set_chooses_variants_and_without_is_its_shorthand() {
+    // `--set bass=off,outro=off` is the same piece as `--without bass,outro`: six bars.
+    let (bare, err, code) = run(&["--without", "bass,outro"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let (set, err, code) = run(&["--set", "bass=off,outro=off"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(bare, set);
+    // Setting a default changes nothing; the reading is not in the pattern, so it changes
+    // nothing here either.
+    let (full, _, _) = run(&[], COUPLET);
+    let (same, err, code) = run(&["--set", "outro=on,reading=stanza"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(full, same);
+    // The explain view lists each choice that is not a default, and only those.
+    let (explained, err, code) = run(&["--explain", "--set", "reading=stanza,bass=on"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    // `bass=on` is the default, so the block is the one line; then the summary's blank line.
+    assert!(
+        explained.contains("mappings\n  reading      stanza\n\n"),
+        "{explained}"
+    );
+    let (plain, _, _) = run(&["--explain"], COUPLET);
+    assert!(!plain.contains("mappings\n"), "{plain}");
+
+    for (given, expected) in [
+        ("polka=on", "unknown mapping `polka`"),
+        (
+            "bass=stanza",
+            "unknown variant `stanza` of mapping `bass` (it has off, on)",
+        ),
+        (
+            "reading=on",
+            "unknown variant `on` of mapping `reading` (it has off, arrives, stanza)",
+        ),
+        ("reading", "--set wants name=variant, not `reading`"),
+    ] {
+        let (_, err, code) = run(&["--set", given], COUPLET);
+        assert_ne!(code, Some(0), "{given}");
+        assert!(err.contains(expected), "{given}: {err}");
+    }
+    let (_, err, code) = run(&["--set"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(err.contains("--set needs a list"), "{err}");
+}
+
+#[test]
 fn score_reports_every_metric_and_an_edit_per_word() {
     // The scorer's output is read by scripts, so its keys are the contract: every metric, the
     // edit test, and the totals, each as `name value`.

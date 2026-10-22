@@ -7,9 +7,9 @@
 //! Like `prosody-cli`, this crate is all IO. Every musical decision belongs to `prosody-core` and
 //! every palette decision to `prosody-emit`; nothing here does more than move text.
 //!
-//! The page also compares. Each candidate mapping ([`Mapping`]) can be left out of either of two
-//! settings, A and B; the page plays one, shows both patterns, and measures both with
-//! `prosody-score`, so what a mapping adds can be heard and read side by side.
+//! The page also compares. Each candidate mapping ([`Mapping`]) is a selector, and either of two
+//! settings, A and B, can choose any of its variants; the page plays one, shows both patterns, and
+//! measures both with `prosody-score`, so what a choice changes can be heard and read side by side.
 
 use std::fmt::Write as _;
 
@@ -42,13 +42,17 @@ fn page() -> Result<String> {
         format!("[{}]", quoted.join(","))
     };
     let scales: Vec<&str> = Scale::ALL.iter().map(|scale| scale.name()).collect();
+    // Each mapping as `[name, what it does, [its variants], its default]`.
     let mappings: Vec<String> = Mapping::ALL
         .iter()
         .map(|mapping| {
+            let variants: Vec<&str> = mapping.variants().iter().map(|v| v.name()).collect();
             format!(
-                "[{},{}]",
+                "[{},{},{},{}]",
                 json_string(mapping.name()),
-                json_string(mapping.describe())
+                json_string(mapping.describe()),
+                list(&variants),
+                json_string(mapping.default_variant().name())
             )
         })
         .collect();
@@ -276,8 +280,9 @@ enum Output {
 /// no escaping, and a body that is exactly the bytes the writer typed.
 fn compile(request: &Request, output: &Output) -> Response {
     let source = format!("{}{}", header(request), body_of(&request.body));
-    let Some(mappings) = mappings(request) else {
-        return Response::problem(400, "unknown mapping in `off`\n".to_owned());
+    let mappings = match mappings(request) {
+        Ok(mappings) => mappings,
+        Err(reason) => return Response::problem(400, format!("{reason}\n")),
     };
     let profile = match request.param("profile") {
         None => Profile::Machine,
@@ -350,17 +355,43 @@ fn header(request: &Request) -> String {
     out
 }
 
-/// The mappings the request leaves on: all of them, less those named in `off` (comma-separated).
-/// `None` if it names one that does not exist, so a typo is an error rather than a silent no-op.
-fn mappings(request: &Request) -> Option<Mappings> {
-    request
-        .param("off")
-        .unwrap_or("")
-        .split(',')
-        .filter(|name| !name.is_empty())
-        .try_fold(Mappings::all(), |set, name| {
-            Mapping::named(name).map(|mapping| set.without(mapping))
-        })
+/// The mappings the request chooses: every default, then each `name:variant` in `set`
+/// (comma-separated), then each name in `off` switched off. An unknown mapping or variant is an
+/// error naming it, so a typo is refused rather than quietly comparing a setting with itself.
+fn mappings(request: &Request) -> Result<Mappings, String> {
+    let names = |param: &str| -> Vec<String> {
+        request
+            .param(param)
+            .unwrap_or("")
+            .split(',')
+            .filter(|item| !item.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let mut chosen = Mappings::all();
+    for item in names("set") {
+        let (name, variant) = item
+            .split_once(':')
+            .ok_or_else(|| format!("`set` wants name:variant, not `{item}`"))?;
+        let mapping = known(name)?;
+        let choice = mapping.choose_named(variant).ok_or_else(|| {
+            let variants: Vec<&str> = mapping.variants().iter().map(|v| v.name()).collect();
+            format!(
+                "unknown variant `{variant}` of mapping `{name}` (it has {})",
+                variants.join(", ")
+            )
+        })?;
+        chosen = chosen.with(choice);
+    }
+    for name in names("off") {
+        chosen = chosen.without(known(&name)?);
+    }
+    Ok(chosen)
+}
+
+/// The mapping called `name`, or an error naming it.
+fn known(name: &str) -> Result<Mapping, String> {
+    Mapping::named(name).ok_or_else(|| format!("unknown mapping `{name}`"))
 }
 
 /// The poem without any header of its own.
@@ -401,9 +432,13 @@ fn render(source: &str, output: &Output, mappings: &Mappings, profile: Profile) 
             for (key, value) in style.describe() {
                 let _ = writeln!(out, "{key:<12} {value}");
             }
-            let off: Vec<&str> = mappings.off().map(Mapping::name).collect();
-            if !off.is_empty() {
-                let _ = writeln!(out, "{:<12} {}", "left out", off.join(", "));
+            // Every choice that is not the default, so the view says which piece it describes.
+            let changed: Vec<String> = mappings
+                .changed()
+                .map(|choice| format!("{}={}", choice.mapping().name(), choice.variant().name()))
+                .collect();
+            if !changed.is_empty() {
+                let _ = writeln!(out, "{:<12} {}", "mappings", changed.join(", "));
             }
             let _ = writeln!(out);
             out.push_str(&annotate::render(
@@ -423,7 +458,7 @@ fn render(source: &str, output: &Output, mappings: &Mappings, profile: Profile) 
             });
             Ok(report_json(&Report::profiled(&score, sensitivity, profile)))
         }
-        Output::Reading => reading::plan(&poem, &score, &style)
+        Output::Reading => reading::plan(&poem, &score, &style, mappings)
             .map(|reading| reading_json(&reading))
             .context("planning the reading"),
     }
@@ -517,6 +552,8 @@ fn report_json(report: &Report) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
+    use prosody_core::mapping::Variant;
+
     use super::{Mapping, Mappings, Output, Profile, SEED, body_of, json_string, page};
 
     #[test]
@@ -621,6 +658,15 @@ mod tests {
         for mapping in Mapping::ALL {
             assert!(html.contains(mapping.describe()), "{mapping:?} missing");
         }
+        // Each with its variants and its default, for the A/B selectors.
+        assert!(
+            html.contains("[\"bass\",\"stressed foundation vowels play a bass note by height\",[\"off\",\"on\"],\"on\"]"),
+            "the bass selector"
+        );
+        assert!(
+            html.contains("[\"off\",\"arrives\",\"stanza\"],\"arrives\"]"),
+            "the reading selector"
+        );
         assert!(!html.contains("__MAPPINGS__"));
     }
 
@@ -636,9 +682,105 @@ mod tests {
                 .without(Mapping::Outro)
         );
         // A typo is refused rather than quietly comparing a setting with itself.
-        assert!(super::mappings(&request(&[("off", "bass,polka")], "")).is_none());
+        assert_eq!(
+            super::mappings(&request(&[("off", "bass,polka")], "")),
+            Err("unknown mapping `polka`".to_owned())
+        );
         let refused = super::compile(&request(&[("off", "polka")], SEED), &Output::Pattern);
         assert_eq!(refused.status, 400);
+        assert!(refused.body.contains("`polka`"), "{}", refused.body);
+    }
+
+    #[test]
+    fn set_chooses_a_variant_per_mapping() {
+        let chosen =
+            super::mappings(&request(&[("set", "reading:stanza,bass:off,outro:on")], "")).unwrap();
+        assert_eq!(
+            chosen,
+            Mappings::all()
+                .with(Mapping::Reading.choose(Variant::Stanza).unwrap())
+                .without(Mapping::Bass)
+        );
+        // `off` still works beside it, and wins: it is read last.
+        let both = super::mappings(&request(
+            &[("set", "reading:stanza"), ("off", "reading")],
+            "",
+        ))
+        .unwrap();
+        assert_eq!(both.get(Mapping::Reading), Variant::Off);
+        // Unknown names and variants are refused, naming what was wrong.
+        assert_eq!(
+            super::mappings(&request(&[("set", "polka:on")], "")),
+            Err("unknown mapping `polka`".to_owned())
+        );
+        assert_eq!(
+            super::mappings(&request(&[("set", "bass:stanza")], "")),
+            Err("unknown variant `stanza` of mapping `bass` (it has off, on)".to_owned())
+        );
+        assert!(super::mappings(&request(&[("set", "reading")], "")).is_err());
+        let refused = super::compile(&request(&[("set", "reading:loud")], SEED), &Output::Reading);
+        assert_eq!(refused.status, 400);
+        assert!(refused.body.contains("`loud`"), "{}", refused.body);
+    }
+
+    #[test]
+    fn the_reading_follows_its_variant() {
+        // The seed's second stanza transforms the first's loop: four stated bars (slots 0–3),
+        // then four passes of four (SPEC.md §4.6). Pass 1 is |B1 A2 A3 A4| in slots 4–7, pass 2
+        // |B1 B2 A3 A4| in 8–11, and so on, so under `arrives` (0-based) line 4 is read in slot
+        // 4, line 5 in slot 9, line 6 in 14 and line 7 in 19 — five bars apart. Under `stanza`
+        // lines 4–7 are read in slots 4, 5, 6, 7, while the loop is still turning into them.
+        let slots_of = |body: &str| -> Vec<(usize, usize)> {
+            body.split("{\"slot\":")
+                .skip(1)
+                .map(|rest| {
+                    let slot = rest.split(',').next().unwrap().parse().unwrap();
+                    let line = rest.split("\"line\":").nth(1).unwrap();
+                    (slot, line.split(',').next().unwrap().parse().unwrap())
+                })
+                .collect()
+        };
+        let arrives = super::compile(&request(&[], SEED), &Output::Reading);
+        let stanza = super::compile(
+            &request(&[("set", "reading:stanza")], SEED),
+            &Output::Reading,
+        );
+        let off = super::compile(&request(&[("set", "reading:off")], SEED), &Output::Reading);
+        assert_eq!(
+            slots_of(&arrives.body),
+            vec![
+                (0, 0),
+                (1, 1),
+                (2, 2),
+                (3, 3),
+                (4, 4),
+                (9, 5),
+                (14, 6),
+                (19, 7)
+            ]
+        );
+        assert_eq!(
+            slots_of(&stanza.body),
+            (0..8).map(|n| (n, n)).collect::<Vec<_>>()
+        );
+        assert!(off.body.contains("\"cues\":[]"), "{}", off.body);
+        // The pattern and the explain view say which reading this is.
+        assert!(stanza.body.contains("reading = stanza"), "{}", stanza.body);
+        let explain = super::compile(
+            &request(&[("set", "reading:stanza")], SEED),
+            &Output::Explain,
+        );
+        assert!(
+            explain.body.contains("mappings     reading=stanza"),
+            "{}",
+            explain.body
+        );
+        let plain = super::compile(&request(&[], SEED), &Output::Explain);
+        assert!(!plain.body.contains("mappings  "), "{}", plain.body);
+        // The music does not move: the reading is decided after the lowering.
+        let music =
+            |query: &[(&str, &str)]| super::compile(&request(query, SEED), &Output::Pattern).body;
+        assert_eq!(music(&[]), music(&[("set", "reading:off")]));
     }
 
     #[test]

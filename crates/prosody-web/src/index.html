@@ -85,10 +85,11 @@
   .mappings th { color: var(--dim); font-weight: 600; text-align: center; padding: 0 .5rem; }
   .mappings td { padding: .15rem .5rem; vertical-align: top; }
   .mappings td:first-child { padding-left: 0; }
-  .mappings td.check { text-align: center; width: 2.5rem; }
+  .mappings td.check { text-align: center; width: 6rem; }
   .mappings code { font-family: var(--mono); color: var(--ink); }
   .mappings .what { color: var(--dim); }
-  .mappings input { width: auto; }
+  .mappings select { width: auto; font-size: .78rem; padding: .1rem .2rem; }
+  .mappings select.changed { border-color: var(--ink); }
   .reading .check span { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .82rem; }
   .reading input[type=checkbox] { width: auto; }
 
@@ -204,21 +205,25 @@
         <tbody id="mappings"></tbody>
       </table>
       <p>
-        Candidate mappings still under review. Untick one to leave it out of that setting, then
-        switch between A and B while it plays; the Score tab measures both.
+        Candidate mappings still under review. Each is a selector: choose a variant — or
+        <code>off</code> — for each setting, then switch between A and B while it plays; the Score
+        tab measures both. A bold border marks a choice that is not the default.
       </p>
     </div>
     <div class="palette reading">
       <h2>Reading — the poem spoken over the music</h2>
-      <label class="check"><span><input id="readAloud" type="checkbox" checked> read each line aloud</span></label>
       <label>Voice
         <select id="voice"><option value="">browser default</option></select>
       </label>
       <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
       <p>
-        A candidate mapping, on this page only: each line is spoken once, in the bar where it is
-        first heard, fitted to that bar at the piece's tempo. Loops, held and refrain lanes and the
-        outro are never read. Strudel's clock fires each line; your browser's voice speaks it.
+        Whether and when lines are read is the <code>reading</code> mapping above:
+        <code>arrives</code> speaks each line once, in the bar where it is first heard;
+        <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
+        stanza that transforms a loop is read through rather than a line every few bars;
+        <code>off</code> reads nothing. Each line is fitted to its bar at the piece's tempo; loops,
+        lanes and the outro are never read. Strudel's clock fires each line; your browser's voice
+        speaks it.
       </p>
     </div>
   </section>
@@ -287,7 +292,8 @@ const OPTIONS = {
   kit: __KITS__,
   voicing: __VOICINGS__,
 };
-const MAPPINGS = __MAPPINGS__;   // [name, what it does], in the order the core lists them
+// [name, what it does, [its variants], its default], in the order the core lists them
+const MAPPINGS = __MAPPINGS__;
 const PRESETS = __PRESETS__;     // the examples: name, label, poem, and the palette its header set
 const PALETTES = __PALETTES__;   // the named palettes, every control's value, from `Style::preset`
 // The controls each named palette sets (`style::preset_keys`): the sound and mix, and for jazz its
@@ -350,33 +356,61 @@ let fromTheTop = false;
 let latestPattern = '';
 let timer = null;
 
-// The two settings being compared, as the mappings each leaves out. A is the piece as specified
-// and B the piece before any candidate mapping, until the writer says otherwise.
-let settings = { A: [], B: MAPPINGS.map(([name]) => name) };
+// The two settings being compared: a variant for every mapping, by name. A is the piece as
+// specified — every default — and B the piece before any candidate mapping, every one off, until
+// the writer says otherwise.
+const defaults = (pick) => Object.fromEntries(MAPPINGS.map((m) => [m[0], pick(m)]));
+let settings = { A: defaults((m) => m[3]), B: defaults(() => 'off') };
 let hearing = 'A';
 let patterns = { A: '', B: '' };
 // The reading of each setting (`prosody_emit::reading`): a cue pattern and the lines it speaks.
 // Fetched beside the patterns, because which bar a line arrives in depends on the mappings.
 let readings = { A: null, B: null };
 let scores = { A: null, B: null };
+// Saved settings come in two shapes. Today's: `{ A: { name: variant }, B: … }`. Before the
+// mappings became selectors: `{ A: [names left out], B: … }`, with the reading's own on/off in
+// `prosody.read`. The old shape is read as "those off, the rest at their defaults", and a
+// reading switched off then is off on both sides now. Any name or variant the page no longer
+// knows falls back to that mapping's default, so a stale save can never send a 400.
+function restore(side, saved, readOff) {
+  const out = {};
+  for (const [name, , variants, fallback] of MAPPINGS) {
+    let variant = Array.isArray(saved) ? (saved.includes(name) ? 'off' : fallback) : saved?.[name];
+    if (Array.isArray(saved) && name === 'reading' && readOff) variant = 'off';
+    out[name] = variants.includes(variant) ? variant : settings[side][name];
+  }
+  return out;
+}
 try {
   const saved = JSON.parse(localStorage.getItem('prosody.settings') || 'null');
-  if (saved && Array.isArray(saved.A) && Array.isArray(saved.B)) settings = saved;
-} catch (error) { /* no storage: start from the defaults */ }
+  const readOff = localStorage.getItem('prosody.read') === 'off';
+  if (saved && typeof saved.A === 'object' && typeof saved.B === 'object') {
+    settings = { A: restore('A', saved.A, readOff), B: restore('B', saved.B, readOff) };
+  } else if (readOff) {
+    // The old reading box could be unticked without any mapping ever being saved, so the
+    // reading's own off must carry over by itself too. B starts with it off already.
+    settings.A.reading = 'off';
+  }
+} catch (error) { /* no storage, or a save it cannot read: start from the defaults */ }
 
-$('mappings').innerHTML = MAPPINGS.map(([name, what]) => `
+const selector = (side, name, variants, fallback) => `
+  <select data-side="${side}" data-name="${name}" aria-label="${name}, setting ${side}">
+    ${variants.map((v) => `<option value="${v}">${v}${v === fallback ? ' (default)' : ''}</option>`).join('')}
+  </select>`;
+$('mappings').innerHTML = MAPPINGS.map(([name, what, variants, fallback]) => `
   <tr>
     <td><code>${name}</code> <span class="what">— ${what}</span></td>
-    <td class="check"><input type="checkbox" data-side="A" data-name="${name}"></td>
-    <td class="check"><input type="checkbox" data-side="B" data-name="${name}"></td>
+    <td class="check">${selector('A', name, variants, fallback)}</td>
+    <td class="check">${selector('B', name, variants, fallback)}</td>
   </tr>`).join('');
-for (const box of document.querySelectorAll('#mappings input')) {
-  box.checked = !settings[box.dataset.side].includes(box.dataset.name);
-  box.addEventListener('change', () => {
-    const side = box.dataset.side;
-    settings[side] = [...document.querySelectorAll(`#mappings input[data-side=${side}]`)]
-      .filter((other) => !other.checked)
-      .map((other) => other.dataset.name);
+const fallbackOf = Object.fromEntries(MAPPINGS.map((m) => [m[0], m[3]]));
+for (const menu of document.querySelectorAll('#mappings select')) {
+  const { side, name } = menu.dataset;
+  menu.value = settings[side][name];
+  menu.classList.toggle('changed', menu.value !== fallbackOf[name]);
+  menu.addEventListener('change', () => {
+    settings[side][name] = menu.value;
+    menu.classList.toggle('changed', menu.value !== fallbackOf[name]);
     try { localStorage.setItem('prosody.settings', JSON.stringify(settings)); } catch (error) {}
     schedule();
   });
@@ -390,7 +424,7 @@ function status(text, bad = false) {
 function query(side = hearing) {
   const p = new URLSearchParams();
   for (const id of controls) p.set(id, $(id).value);
-  p.set('off', settings[side].join(','));
+  p.set('set', Object.entries(settings[side]).map(([name, v]) => `${name}:${v}`).join(','));
   p.set('profile', $('profile').value);
   return p.toString();
 }
@@ -400,7 +434,7 @@ function showPattern() {
   const reading = readings[hearing];
   // The cue pattern is shown under the music, apart from it: it is not part of what a writer
   // pastes into strudel.cc, where nothing would speak it.
-  $('pattern').textContent = latestPattern + (reading && $('readAloud').checked
+  $('pattern').textContent = latestPattern + (reading && reading.cues.length
     ? '\n// ---- spoken by this page, not part of the pattern above ----\n' + reading.pattern
     : '');
 }
@@ -706,13 +740,6 @@ function quietReading() {
 
 listVoices();
 if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', listVoices);
-try { $('readAloud').checked = localStorage.getItem('prosody.read') !== 'off'; } catch (e) {}
-$('readAloud').addEventListener('change', () => {
-  try { localStorage.setItem('prosody.read', $('readAloud').checked ? 'on' : 'off'); } catch (e) {}
-  showPattern();
-  if (!$('readAloud').checked) quietReading();
-  if (playing) play();
-});
 $('voice').addEventListener('change', () => {
   try { localStorage.setItem('prosody.voice', $('voice').value); } catch (e) {}
 });
@@ -740,7 +767,7 @@ async function play() {
     // The reading is evaluated apart from the music: a cue pattern Strudel refuses costs the
     // reading, never the piece.
     let cues = null, unread = '';
-    if (reading && reading.cues.length && $('readAloud').checked) {
+    if (reading && reading.cues.length) {
       try { cues = cuesOf(reading, generation); } catch (error) {
         unread = ' · the reading could not be cued: ' + error.message;
         console.warn('[reading] cue pattern refused:', error);

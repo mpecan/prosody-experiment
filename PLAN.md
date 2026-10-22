@@ -397,6 +397,41 @@ answer first, and it is a §4.2 question.
 
 ## Log
 
+### Sound and voice, step 4.1 — every candidate mapping is a selector
+
+The user chose selectors with named variants over flat on/off switches, and asked for the reading
+to become one: off-rhythm beats heard in the output were lines being read several bars after the
+music had moved on, because a transforming stanza brings one line in a pass.
+
+- **`prosody_core::mapping`** is generalised. Each `Mapping` has a fixed, ordered list of `Variant`s
+  (always starting with `off`), a default, and a name per variant. `Mappings` stores only the
+  non-default choices (a `BTreeMap`), so equal choices are equal values; it is changed only by a
+  `Choice`, which only `Mapping::choose`/`choose_named`/`off` can make, so a variant a mapping
+  lacks cannot be stored. `Mappings::all()` is every default; `has()` is "not off"; `get()` reads
+  the variant; `changed()` lists non-default choices; `every()` enumerates all 96 combinations.
+  The five machine-cycle switches are `off`/`on`, default `on`: no lowering, snapshot or score
+  changes, and `./scripts/cycle.sh` still reads mean overall 0.743.
+- **`Mapping::Reading`** joins the list: `off`, `arrives` (default — today's reading) and
+  `stanza` (a stanza's lines one a bar from its first hosting slot). `reading::plan` takes the
+  mappings; the cue pattern's first comment names the variant. Hand-worked on the TRANSFORMING
+  fixture: `arrives` reads slots 0 1 2 5, `stanza` slots 0 1 2 3, `off` nothing; on the seed
+  poem `arrives` reads lines 5–8 in slots 4 9 14 19 and `stanza` in 4 5 6 7.
+- **Interfaces.** CLI `--set name=variant,…` (unknown name or variant → an error naming it and the
+  variants it has), `--without` kept as shorthand for `=off`; `--explain` lists non-default
+  choices. Web endpoints take `set=name:variant,…` and still `off=`; unknown → 400 naming it.
+  `scripts/cycle.sh`'s second argument goes to `--set` when it contains `=`, else to `--without`.
+- **The page.** The A/B table is one `<select>` per mapping per side; the separate "read each line
+  aloud" checkbox is gone (the voice picker and the duck stay). Saved settings migrate: the old
+  `{A: [left out], B: [...]}` becomes "those off, the rest default", and an old `prosody.read=off`
+  turns the reading off on both sides; an unknown name or variant falls back to the default. B
+  starts with every mapping off, *including the reading* — so B is silent of speech by default,
+  where before the reading was on for both.
+- **Tests.** The invariants' I1 and "invents nothing" properties draw from every variant
+  combination (`proptest::sample::select` over `Mappings::every()`), not a 5-bit set.
+- Checked in Chromium on port 4881: old saved settings migrated, `reading = stanza` cued lines 1–8
+  in bars 1–8 on The Tyger, B with the reading off cued nothing, every request 200, no console
+  errors.
+
 ### The page plays at the stated tempo
 
 Fixes the half-tempo defect recorded in *Sound and voice, step 2* below, which also corrects that

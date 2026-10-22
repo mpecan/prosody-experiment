@@ -85,9 +85,10 @@
 //!   earlier one. That is what "loops until something takes its place" means, and it was decided
 //!   as such rather than discovered; `prosody-score`'s edit test measures how often it happens.
 //! - **Some of this can be switched off.** The held and refrain lanes, the stanza period and the
-//!   outro are candidates still under review, so [`Mappings`] can leave each one out, to hear the
-//!   piece without it ([`crate::mapping`]). Without the stanza period a bar takes its host line's
-//!   own length and everything under it is stretched or squeezed to that ([`Fit::Stretched`]).
+//!   outro are candidates still under review, each an on/off selector in [`Mappings`], so each can
+//!   be left out to hear the piece without it ([`crate::mapping`]). Without the stanza period a
+//!   bar takes its host line's own length and everything under it is stretched or squeezed to
+//!   that ([`Fit::Stretched`]).
 //! - **I3 holds.** Nothing here reads a style. Looping is the poem's structure, which settles
 //!   `SPEC.md` §9's open question about looping-as-style: it is not style.
 

@@ -1,19 +1,25 @@
-//! Switching a mapping off, to hear what it does.
+//! Choosing between candidate mappings, to hear what each does.
 //!
 //! Some mappings are still candidates: added by a design iteration and marked *pending review* in
-//! `SPEC.md`, they change what a poem becomes, and whether they belong is judged by listening. A
-//! [`Mappings`] set says which of them a lowering applies, so the same poem can be heard with and
-//! without each one, side by side.
+//! `SPEC.md`, they change what a poem becomes, and whether they belong is judged by listening. Each
+//! is a *selector*: a [`Mapping`] has a fixed, ordered list of [`Variant`]s — always including
+//! [`Variant::Off`] — and one of them is its default. A [`Mappings`] value picks one variant per
+//! mapping, so the same poem can be heard under each choice, side by side.
 //!
 //! This is structure, not palette, so it is deliberately **not** part of the style (`SPEC.md` §6,
 //! I3: the style may change only parameters). It is a separate argument to
-//! [`lower::run_with`](crate::lower::run_with), and every invariant holds within one set: the same
-//! poem under the same set is bit-identical, and an edit to one stanza leaves the others' voices
-//! alone. [`Mappings::all`] is the piece as specified, and the default everywhere.
+//! [`lower::run_with`](crate::lower::run_with) (and to the emitter's reading plan), and every
+//! invariant holds within one choice: the same poem under the same choices is bit-identical, and
+//! an edit to one stanza leaves the others' voices alone. [`Mappings::all`] is every mapping at
+//! its default — the piece as specified, and the default everywhere.
+//!
+//! A variant a mapping does not have cannot be stored: a [`Mappings`] is changed only by a
+//! [`Choice`], and a [`Choice`] is made only by [`Mapping::choose`] or [`Mapping::choose_named`],
+//! which refuse a variant outside that mapping's list.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
-/// One mapping that can be switched off.
+/// One candidate mapping, chosen between by its [`Variant`]s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Mapping {
     /// §4.6's held lane: a line whose rhyme is answered later in its stanza sounds until it is.
@@ -27,16 +33,53 @@ pub enum Mapping {
     StanzaPeriod,
     /// §4.6's outro: the loops play one more pass when the poem runs out.
     Outro,
+    /// §4.7's reading: when each line of the poem is spoken over the music. Decided in the
+    /// emitter (`prosody_emit::reading`), not in the lowering, which never reads it.
+    Reading,
 }
+
+/// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Variant {
+    /// The mapping is not applied: what preceded it.
+    Off,
+    /// The mapping is applied — for a mapping that is simply on or off.
+    On,
+    /// The reading's line-by-line variant: each line spoken in the slot where it first arrives.
+    Arrives,
+    /// The reading's stanza variant: a stanza's lines spoken one a bar, in order, from the
+    /// stanza's first hosting slot.
+    Stanza,
+}
+
+impl Variant {
+    /// Its name on a command line or in a query string.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::Arrives => "arrives",
+            Self::Stanza => "stanza",
+        }
+    }
+}
+
+/// The variants of a mapping that is simply on or off.
+const SWITCH: &[Variant] = &[Variant::Off, Variant::On];
+
+/// The reading's variants: off, line by line where each arrives, or a stanza at a time.
+const READING: &[Variant] = &[Variant::Off, Variant::Arrives, Variant::Stanza];
 
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
         Self::StanzaPeriod,
         Self::Outro,
+        Self::Reading,
     ];
 
     /// Its name on a command line or in a query string.
@@ -48,6 +91,7 @@ impl Mapping {
             Self::Bass => "bass",
             Self::StanzaPeriod => "period",
             Self::Outro => "outro",
+            Self::Reading => "reading",
         }
     }
 
@@ -66,45 +110,165 @@ impl Mapping {
             Self::Bass => "stressed foundation vowels play a bass note by height",
             Self::StanzaPeriod => "every bar of a stanza lasts its longest line",
             Self::Outro => "the loops play one more pass at the end",
+            Self::Reading => {
+                "the poem read aloud: each line where it arrives, or a stanza a bar at a time"
+            }
+        }
+    }
+
+    /// Its variants, in a fixed order that always starts with [`Variant::Off`].
+    #[must_use]
+    pub const fn variants(self) -> &'static [Variant] {
+        match self {
+            Self::HeldLane | Self::RefrainLane | Self::Bass | Self::StanzaPeriod | Self::Outro => {
+                SWITCH
+            }
+            Self::Reading => READING,
+        }
+    }
+
+    /// The variant it takes unless told otherwise: the piece as specified.
+    #[must_use]
+    pub const fn default_variant(self) -> Variant {
+        match self {
+            Self::HeldLane | Self::RefrainLane | Self::Bass | Self::StanzaPeriod | Self::Outro => {
+                Variant::On
+            }
+            // SPEC.md §4.7: each line is read where it is first heard — the reading as it shipped.
+            Self::Reading => Variant::Arrives,
+        }
+    }
+
+    /// This mapping set to `variant`, if it is one of its variants.
+    #[must_use]
+    pub fn choose(self, variant: Variant) -> Option<Choice> {
+        self.variants().contains(&variant).then_some(Choice {
+            mapping: self,
+            variant,
+        })
+    }
+
+    /// This mapping set to the variant called `name`, if it has one.
+    #[must_use]
+    pub fn choose_named(self, name: &str) -> Option<Choice> {
+        self.variants()
+            .iter()
+            .find(|variant| variant.name() == name)
+            .and_then(|variant| self.choose(*variant))
+    }
+
+    /// This mapping switched off. Every mapping has [`Variant::Off`].
+    #[must_use]
+    pub const fn off(self) -> Choice {
+        Choice {
+            mapping: self,
+            variant: Variant::Off,
         }
     }
 }
 
-/// Which mappings a lowering applies.
+/// A mapping and one of *its* variants. Made only by [`Mapping::choose`],
+/// [`Mapping::choose_named`] or [`Mapping::off`], so it cannot name a variant its mapping lacks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Choice {
+    mapping: Mapping,
+    variant: Variant,
+}
+
+impl Choice {
+    /// The mapping chosen for.
+    #[must_use]
+    pub const fn mapping(self) -> Mapping {
+        self.mapping
+    }
+
+    /// The variant chosen.
+    #[must_use]
+    pub const fn variant(self) -> Variant {
+        self.variant
+    }
+}
+
+/// One variant for every mapping: what a lowering, and the reading, apply.
+///
+/// Only the choices that differ from a mapping's default are stored, so two values that choose
+/// the same variants are equal however they were built.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Mappings {
-    off: BTreeSet<Mapping>,
+    changed: BTreeMap<Mapping, Variant>,
 }
 
 impl Mappings {
-    /// Every mapping on: the piece as specified.
+    /// Every mapping at its default: the piece as specified.
     #[must_use]
     pub fn all() -> Self {
         Self::default()
     }
 
-    /// The same set with `mapping` switched off.
+    /// The same choices with `choice` made.
     #[must_use]
-    pub fn without(mut self, mapping: Mapping) -> Self {
-        self.off.insert(mapping);
+    pub fn with(mut self, choice: Choice) -> Self {
+        if choice.variant == choice.mapping.default_variant() {
+            self.changed.remove(&choice.mapping);
+        } else {
+            self.changed.insert(choice.mapping, choice.variant);
+        }
         self
     }
 
-    /// Whether `mapping` applies.
+    /// The same choices with `mapping` switched off.
     #[must_use]
-    pub fn has(&self, mapping: Mapping) -> bool {
-        !self.off.contains(&mapping)
+    pub fn without(self, mapping: Mapping) -> Self {
+        self.with(mapping.off())
     }
 
-    /// The mappings switched off, in [`Mapping::ALL`]'s order.
-    pub fn off(&self) -> impl Iterator<Item = Mapping> + '_ {
-        self.off.iter().copied()
+    /// The variant chosen for `mapping`.
+    #[must_use]
+    pub fn get(&self, mapping: Mapping) -> Variant {
+        self.changed
+            .get(&mapping)
+            .copied()
+            .unwrap_or_else(|| mapping.default_variant())
+    }
+
+    /// Whether `mapping` applies at all: any variant but [`Variant::Off`].
+    #[must_use]
+    pub fn has(&self, mapping: Mapping) -> bool {
+        self.get(mapping) != Variant::Off
+    }
+
+    /// Every choice that differs from its mapping's default, in [`Mapping::ALL`]'s order.
+    pub fn changed(&self) -> impl Iterator<Item = Choice> + '_ {
+        self.changed.iter().map(|(mapping, variant)| Choice {
+            mapping: *mapping,
+            variant: *variant,
+        })
+    }
+
+    /// Every way the mappings can be chosen, in a fixed order: each mapping's variants in their
+    /// listed order, the first mapping slowest — so it starts with every mapping off. For a test
+    /// that must cover the whole space.
+    #[must_use]
+    pub fn every() -> Vec<Self> {
+        Mapping::ALL
+            .into_iter()
+            .fold(vec![Self::all()], |sets, mapping| {
+                sets.into_iter()
+                    .flat_map(|set| {
+                        mapping.variants().iter().filter_map(move |variant| {
+                            mapping
+                                .choose(*variant)
+                                .map(|choice| set.clone().with(choice))
+                        })
+                    })
+                    .collect()
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Mapping, Mappings};
+    use super::{Mapping, Mappings, Variant};
 
     #[test]
     fn every_mapping_is_found_by_its_own_name() {
@@ -115,16 +279,81 @@ mod tests {
     }
 
     #[test]
-    fn a_set_has_everything_until_something_is_switched_off() {
+    fn every_mapping_can_be_switched_off_and_defaults_to_a_variant_it_has() {
+        for mapping in Mapping::ALL {
+            assert_eq!(
+                mapping.variants().first(),
+                Some(&Variant::Off),
+                "{mapping:?}"
+            );
+            assert!(mapping.variants().contains(&mapping.default_variant()));
+        }
+    }
+
+    #[test]
+    fn the_defaults_are_todays_piece() {
+        // The five machine-cycle switches are on, the reading reads each line where it arrives.
         let all = Mappings::all();
-        assert!(Mapping::ALL.into_iter().all(|mapping| all.has(mapping)));
-        let some = all.without(Mapping::Outro).without(Mapping::Bass);
+        for mapping in Mapping::ALL {
+            assert!(all.has(mapping), "{mapping:?}");
+        }
+        assert_eq!(all.get(Mapping::Bass), Variant::On);
+        assert_eq!(all.get(Mapping::Reading), Variant::Arrives);
+        assert_eq!(all.changed().count(), 0);
+    }
+
+    #[test]
+    fn a_variant_a_mapping_lacks_cannot_be_chosen() {
+        assert!(Mapping::Bass.choose(Variant::Stanza).is_none());
+        assert!(Mapping::Reading.choose(Variant::On).is_none());
+        assert!(Mapping::Reading.choose_named("on").is_none());
+        assert!(Mapping::Outro.choose_named("polka").is_none());
+        let stanza = Mapping::Reading.choose_named("stanza").unwrap();
+        assert_eq!(
+            (stanza.mapping(), stanza.variant()),
+            (Mapping::Reading, Variant::Stanza)
+        );
+    }
+
+    #[test]
+    fn choices_are_kept_until_set_back_to_the_default() {
+        let some = Mappings::all()
+            .without(Mapping::Outro)
+            .without(Mapping::Bass)
+            .with(Mapping::Reading.choose(Variant::Stanza).unwrap());
         assert!(!some.has(Mapping::Outro));
         assert!(!some.has(Mapping::Bass));
         assert!(some.has(Mapping::HeldLane));
+        assert!(some.has(Mapping::Reading));
+        assert_eq!(some.get(Mapping::Reading), Variant::Stanza);
+        let changed: Vec<(Mapping, Variant)> = some
+            .changed()
+            .map(|choice| (choice.mapping(), choice.variant()))
+            .collect();
         assert_eq!(
-            some.off().collect::<Vec<_>>(),
-            vec![Mapping::Bass, Mapping::Outro]
+            changed,
+            vec![
+                (Mapping::Bass, Variant::Off),
+                (Mapping::Outro, Variant::Off),
+                (Mapping::Reading, Variant::Stanza),
+            ]
         );
+        // Choosing a default again is the same value as never having changed it.
+        let back = some
+            .with(Mapping::Bass.choose(Variant::On).unwrap())
+            .with(Mapping::Outro.choose(Variant::On).unwrap())
+            .with(Mapping::Reading.choose(Variant::Arrives).unwrap());
+        assert_eq!(back, Mappings::all());
+    }
+
+    #[test]
+    fn every_combination_is_listed_once() {
+        // Five on/off switches and a three-way reading: 2^5 × 3 = 96.
+        let every = Mappings::every();
+        assert_eq!(every.len(), 96);
+        for (index, one) in every.iter().enumerate() {
+            assert!(!every[index + 1..].contains(one), "{one:?} twice");
+        }
+        assert!(every.contains(&Mappings::all()));
     }
 }

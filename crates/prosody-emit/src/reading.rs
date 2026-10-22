@@ -1,10 +1,19 @@
-//! The reading: the poem's own lines, spoken over the music where each is first heard.
+//! The reading: the poem's own lines, spoken over the music.
 //!
-//! *A candidate mapping, page-side, pending review* (`SPEC.md` §4.7). Each line is spoken once, in
-//! the slot of the arrangement where it first sounds as a host — [`Cause::Stated`],
-//! [`Cause::Arriving`] or [`Cause::Overruling`] — and never where it only loops, yields, holds,
-//! calls, refrains in its lane or repeats in the outro. So the reading follows the poem in order,
-//! one line per bar it arrives in, and every utterance is traceable to its line's span (I4).
+//! *A candidate mapping, page-side, pending review* (`SPEC.md` §4.7), chosen between by
+//! [`Mapping::Reading`]'s variants:
+//!
+//! - **`arrives`** (the default). Each line is spoken once, in the slot of the arrangement where it
+//!   first sounds as a host — [`Cause::Stated`], [`Cause::Arriving`] or [`Cause::Overruling`] —
+//!   and never where it only loops, yields, holds, calls, refrains in its lane or repeats in the
+//!   outro. So the reading follows the poem in order, one line per bar it arrives in.
+//! - **`stanza`**. A stanza's lines are spoken one a bar, in order, from the first slot any of
+//!   them is heard in that way. A stanza that *transforms* a running loop (§4.6) brings its lines
+//!   in one a pass, so under `arrives` they are read several bars apart; under `stanza` the stanza
+//!   is read through as written, while the music is still turning into it.
+//! - **`off`**. No cues.
+//!
+//! Every utterance is traceable to its line's span (I4) under every variant.
 //!
 //! # Why a separate artefact, and why here
 //!
@@ -14,9 +23,9 @@
 //!   speaking is a callback the page attaches (`Pattern.onTrigger`, `@strudel/web` 1.3.0). Pasted
 //!   into strudel.cc on its own, a cue pattern would ask the default output for a sound named
 //!   nothing — so it must not be in the text a writer pastes.
-//! - It is a candidate the page switches on and off, and the pattern text is what the CLI prints
-//!   and the corpus snapshots pin. Keeping it apart means turning the reading off changes nothing
-//!   the rest of the project measures.
+//! - It is a candidate the page chooses between, and the pattern text is what the CLI prints and
+//!   the corpus snapshots pin. Keeping it apart means changing the reading changes nothing the
+//!   rest of the project measures.
 //! - It carries words, not parameters: the page needs each line's text, which is data, not code.
 //!
 //! It lives in `prosody-emit` rather than in the page because it has to land on the *same* clock
@@ -26,13 +35,14 @@
 //!
 //! # What is structure and what is palette
 //!
-//! *Which* lines are spoken in *which* bar is structure, read from the arrangement alone — no
-//! [`Style`] field moves a cue (I3). *How fast* a line is spoken is a parameter: the rate is fitted
-//! so the line fits its bar at the piece's tempo, and the tempo is palette, so a faster palette
-//! reads faster. Which voice speaks, and whether the reading is on at all, are the page's.
+//! *Which* lines are spoken in *which* bar is structure, read from the arrangement and the chosen
+//! [`Mappings`] alone — no [`Style`] field moves a cue (I3). *How fast* a line is spoken is a
+//! parameter: the rate is fitted so the line fits its bar at the piece's tempo, and the tempo is
+//! palette, so a faster palette reads faster. Which voice speaks is the page's.
 
 use std::fmt::Write as _;
 
+use prosody_core::mapping::{Mapping, Mappings, Variant};
 use prosody_core::parse::Poem;
 use prosody_core::span::Span;
 use prosody_core::voice::Score;
@@ -135,12 +145,13 @@ pub enum ReadingError {
     },
 }
 
-/// The poem's reading: every line once, in the slot where it is first heard.
+/// The poem's reading: every line at most once, in the slot the chosen variant puts it in.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reading {
     cues: Vec<Cue>,
     slots: usize,
     cpm: f64,
+    variant: Variant,
 }
 
 impl Reading {
@@ -159,8 +170,14 @@ impl Reading {
     /// music. Comment lines first, so the pattern says where every cue came from.
     #[must_use]
     pub fn pattern(&self) -> String {
-        let mut out = String::from(
-            "// the reading: each line spoken in the bar it is first heard (SPEC.md §4.7, candidate)\n",
+        let what = match self.variant {
+            Variant::Stanza => "each stanza read a line a bar from where it is first heard",
+            Variant::Off => "switched off, nothing spoken",
+            Variant::Arrives | Variant::On => "each line spoken in the bar it is first heard",
+        };
+        let mut out = format!(
+            "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
+            self.variant.name()
         );
         let _ = writeln!(
             out,
@@ -201,12 +218,18 @@ impl Reading {
     }
 }
 
-/// Plans the reading of `poem` from its lowering and the palette's tempo.
+/// Plans the reading of `poem` from its lowering, the palette's tempo, and the variant
+/// `mappings` chooses for [`Mapping::Reading`].
 ///
 /// # Errors
 ///
 /// [`ReadingError::NotThisPoem`] if `score` was not lowered from `poem`.
-pub fn plan(poem: &Poem, score: &Score, style: &Style) -> Result<Reading, ReadingError> {
+pub fn plan(
+    poem: &Poem,
+    score: &Score,
+    style: &Style,
+    mappings: &Mappings,
+) -> Result<Reading, ReadingError> {
     let lines: Vec<_> = poem
         .stanzas()
         .iter()
@@ -220,24 +243,18 @@ pub fn plan(poem: &Poem, score: &Score, style: &Style) -> Result<Reading, Readin
     }
     let cpm = cycles_per_minute(score, style);
     let bar_seconds = 60.0 / cpm / SCHEDULER_CPS;
+    let slots = score.arrangement().slots().len();
+    let variant = mappings.get(Mapping::Reading);
 
-    let mut spoken = std::collections::BTreeSet::new();
+    let arrivals = arrivals(score);
+    let placed: Vec<(usize, usize)> = match variant {
+        Variant::Off => Vec::new(),
+        Variant::Stanza => by_stanza(poem, &arrivals, slots),
+        Variant::Arrives | Variant::On => arrivals,
+    };
+
     let mut cues = Vec::new();
-    for (index, slot) in score.arrangement().slots().iter().enumerate() {
-        let Some(host) = slot.host() else {
-            continue;
-        };
-        // SPEC.md §4.7: only where a line *arrives* — its stanza stated, overruling, or replacing
-        // the old loop's bar. Everywhere else the line is material already heard, and reading it
-        // again would read the loop, not the poem.
-        let arrives = matches!(
-            host.cause(),
-            Cause::Stated | Cause::Arriving { .. } | Cause::Overruling
-        );
-        let bar = host.bar().get();
-        if !arrives || !matches!(host.lane(), Lane::Layer(_)) || !spoken.insert(bar) {
-            continue;
-        }
+    for (slot, bar) in placed {
         let Some(line) = lines.get(bar) else {
             continue;
         };
@@ -257,7 +274,7 @@ pub fn plan(poem: &Poem, score: &Score, style: &Style) -> Result<Reading, Readin
             sounded
         };
         cues.push(Cue {
-            slot: index,
+            slot,
             line: bar,
             span: line.span(),
             text: text.to_owned(),
@@ -267,9 +284,69 @@ pub fn plan(poem: &Poem, score: &Score, style: &Style) -> Result<Reading, Readin
     }
     Ok(Reading {
         cues,
-        slots: score.arrangement().slots().len(),
+        slots,
         cpm,
+        variant,
     })
+}
+
+/// Each line's first arrival, as `(slot, line)` in slot order: where `arrives` reads it.
+fn arrivals(score: &Score) -> Vec<(usize, usize)> {
+    let mut spoken = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for (index, slot) in score.arrangement().slots().iter().enumerate() {
+        let Some(host) = slot.host() else {
+            continue;
+        };
+        // SPEC.md §4.7: only where a line *arrives* — its stanza stated, overruling, or replacing
+        // the old loop's bar. Everywhere else the line is material already heard, and reading it
+        // again would read the loop, not the poem.
+        let arrives = matches!(
+            host.cause(),
+            Cause::Stated | Cause::Arriving { .. } | Cause::Overruling
+        );
+        let bar = host.bar().get();
+        if arrives && matches!(host.lane(), Lane::Layer(_)) && spoken.insert(bar) {
+            out.push((index, bar));
+        }
+    }
+    out
+}
+
+/// The `stanza` variant: each stanza's lines one a slot, in order, from the earliest slot any of
+/// them arrives in (SPEC.md §4.7).
+///
+/// Reading never runs backwards or doubles up: a line is never put in a slot at or before the
+/// previous cue's, so if a stanza would start before the last one has finished being read, it
+/// waits. A line that would fall past the piece's last slot is not read — the piece has ended.
+/// Only a stanza none of whose lines arrives (none does, in today's arrangement) is skipped.
+fn by_stanza(poem: &Poem, arrivals: &[(usize, usize)], slots: usize) -> Vec<(usize, usize)> {
+    let first_slot: std::collections::BTreeMap<usize, usize> =
+        arrivals.iter().map(|(slot, line)| (*line, *slot)).collect();
+    let mut out = Vec::new();
+    let mut next_free = 0;
+    let mut first_line = 0;
+    for stanza in poem.stanzas() {
+        let count = stanza.lines().len();
+        let lines = first_line..first_line + count;
+        first_line += count;
+        let Some(start) = lines
+            .clone()
+            .filter_map(|line| first_slot.get(&line).copied())
+            .min()
+        else {
+            continue;
+        };
+        for (offset, line) in lines.enumerate() {
+            let slot = (start + offset).max(next_free);
+            if slot >= slots {
+                break;
+            }
+            out.push((slot, line));
+            next_free = slot + 1;
+        }
+    }
+    out
 }
 
 /// `text` made safe to sit inside a `//` comment the page evaluates as JavaScript.
@@ -315,7 +392,9 @@ mod tests {
     use prosody_core::voice::Score;
     use prosody_core::{Cause, Poem, meter, repetition, rhyme, role, sound, surprisal};
 
-    use super::{FASTEST, SLOWEST, comment_safe, fitted, plan};
+    use prosody_core::mapping::{Mapping, Mappings, Variant};
+
+    use super::{FASTEST, SLOWEST, by_stanza, comment_safe, fitted, plan};
     use crate::fmt_param;
     use crate::style::Style;
 
@@ -385,6 +464,9 @@ mod tests {
     /// Two stanzas of two two-foot lines, of one layer: the second transforms the first's loop.
     const TRANSFORMING: &str = "eA eA\nteA teA\n\nbeA beA\ndeA deA\n";
 
+    /// A refrain stanza, a ragged one, and the refrain stanza again.
+    const REFRAIN: &str = "eA eA\nteA teA\n\nbA\nbA bA bA bA bA\n\neA eA\nteA teA\n";
+
     #[test]
     fn a_line_is_read_where_it_arrives_and_nowhere_it_only_loops() {
         let (poem, score) = lowered(TRANSFORMING);
@@ -415,7 +497,7 @@ mod tests {
             ]
         );
 
-        let reading = plan(&poem, &score, &at_120()).unwrap();
+        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
         // Each line once, in the slot it is first heard: line 2 in slot 2 (its first arrival, not
         // its second in slot 4), line 3 in slot 5. Slot 3 yields, slot 4 re-arrives, 6 and 7 are
         // the outro: silent.
@@ -442,11 +524,120 @@ mod tests {
         );
     }
 
+    /// The default choices with the reading set to `variant`.
+    fn reading(variant: Variant) -> Mappings {
+        Mappings::all().with(Mapping::Reading.choose(variant).unwrap())
+    }
+
+    #[test]
+    fn the_stanza_variant_reads_a_transforming_stanza_through_from_its_first_arrival() {
+        // The same arrangement as above. Stanza 1's lines first arrive in slots 0 and 1, so it is
+        // read there as before. Stanza 2's first arrival is line 2 in slot 2; under `stanza` its
+        // lines are read one a bar from there — line 2 in slot 2, line 3 in slot 3 — instead of
+        // line 3 waiting for its own arrival in slot 5, while slot 3 is still the old loop's
+        // yielding line 1.
+        let (poem, score) = lowered(TRANSFORMING);
+        let reading = plan(&poem, &score, &at_120(), &reading(Variant::Stanza)).unwrap();
+        let spoken: Vec<(usize, usize, &str)> = reading
+            .cues()
+            .iter()
+            .map(|cue| (cue.slot(), cue.line(), cue.text()))
+            .collect();
+        assert_eq!(
+            spoken,
+            vec![
+                (0, 0, "eA eA"),
+                (1, 1, "teA teA"),
+                (2, 2, "beA beA"),
+                (3, 3, "deA deA"),
+            ]
+        );
+        let pattern = reading.pattern();
+        assert!(
+            pattern.ends_with("n(\"<0 1 2 3 ~ ~ ~ ~>\").cpm(60.000)\n"),
+            "{pattern}"
+        );
+        assert!(
+            pattern.starts_with("// the reading: each stanza read a line a bar"),
+            "{pattern}"
+        );
+        assert!(pattern.contains("reading = stanza"), "{pattern}");
+        // The rate is fitted to the bar exactly as under `arrives`: four syllables, 1.176.
+        assert_eq!(fmt_param(reading.cues()[3].rate()), "1.176");
+    }
+
+    #[test]
+    fn the_arrives_variant_is_the_default() {
+        let (poem, score) = lowered(TRANSFORMING);
+        let default = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let arrives = plan(&poem, &score, &at_120(), &reading(Variant::Arrives)).unwrap();
+        assert_eq!(default, arrives);
+        assert!(default.pattern().contains("reading = arrives"));
+    }
+
+    #[test]
+    fn the_reading_switched_off_cues_nothing() {
+        let (poem, score) = lowered(TRANSFORMING);
+        let reading = plan(&poem, &score, &at_120(), &reading(Variant::Off)).unwrap();
+        assert!(reading.cues().is_empty());
+        // Eight slots, all rests.
+        assert!(
+            reading
+                .pattern()
+                .ends_with("n(\"<~ ~ ~ ~ ~ ~ ~ ~>\").cpm(60.000)\n"),
+            "{}",
+            reading.pattern()
+        );
+        assert!(reading.pattern().contains("reading = off"));
+    }
+
+    #[test]
+    fn a_stanza_waits_for_the_last_to_be_read_and_stops_with_the_piece() {
+        // Hand-made arrivals, to reach the two edges the arrangement does not reach today. Stanza
+        // 1 (lines 0, 1) first arrives in slot 0, so it takes slots 0 and 1. Stanza 2 (lines 2,
+        // 3) first arrives in slot 1 — already taken — so it waits: line 2 in slot 2, line 3 in
+        // slot 3. With only three slots, line 3 would fall after the piece and is not read.
+        let poem = prosody_core::Poem::parse("eA\nteA\n\nbeA\ndeA\n".to_owned()).unwrap();
+        let arrivals = [(0, 0), (1, 2), (3, 1), (5, 3)];
+        assert_eq!(
+            by_stanza(&poem, &arrivals, 8),
+            vec![(0, 0), (1, 1), (2, 2), (3, 3)]
+        );
+        assert_eq!(by_stanza(&poem, &arrivals, 3), vec![(0, 0), (1, 1), (2, 2)]);
+    }
+
+    #[test]
+    fn under_every_variant_a_line_is_read_at_most_once_and_in_order() {
+        // I4 and the reading's order, for both fixtures and every variant.
+        for source in [TRANSFORMING, REFRAIN] {
+            let (poem, score) = lowered(source);
+            for variant in Mapping::Reading.variants() {
+                let reading = plan(&poem, &score, &at_120(), &reading(*variant)).unwrap();
+                let lines: Vec<usize> = reading.cues().iter().map(super::Cue::line).collect();
+                let slots: Vec<usize> = reading.cues().iter().map(super::Cue::slot).collect();
+                assert!(
+                    lines.windows(2).all(|w| w[0] < w[1]),
+                    "{variant:?}: {lines:?}"
+                );
+                assert!(
+                    slots.windows(2).all(|w| w[0] < w[1]),
+                    "{variant:?}: {slots:?}"
+                );
+                for cue in reading.cues() {
+                    assert_eq!(cue.span().text(poem.source()), Some(cue.text()));
+                }
+            }
+        }
+    }
+
     #[test]
     fn every_cue_is_its_lines_span() {
         // I4: the spoken text is exactly the source under the cue's span.
         let (poem, score) = lowered(TRANSFORMING);
-        for cue in plan(&poem, &score, &at_120()).unwrap().cues() {
+        for cue in plan(&poem, &score, &at_120(), &Mappings::all())
+            .unwrap()
+            .cues()
+        {
             assert_eq!(cue.span().text(poem.source()), Some(cue.text()));
         }
     }
@@ -457,7 +648,7 @@ mod tests {
         // (SPEC.md §4.6): slots 0 and 1. The ragged second stanza is stated in slots 2 and 3, and
         // the third drops in at 4 and 5 — new lines of the poem, so read. The outro after them,
         // and the refrain lane that loops the returning lines, are not.
-        let (poem, score) = lowered("eA eA\nteA teA\n\nbA\nbA bA bA bA bA\n\neA eA\nteA teA\n");
+        let (poem, score) = lowered(REFRAIN);
         let causes: Vec<(usize, Cause)> = score
             .arrangement()
             .slots()
@@ -482,7 +673,7 @@ mod tests {
         );
         assert!(causes.len() > 6, "an outro follows: {causes:?}");
 
-        let reading = plan(&poem, &score, &at_120()).unwrap();
+        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
         let spoken: Vec<(usize, usize)> = reading
             .cues()
             .iter()
@@ -502,13 +693,13 @@ mod tests {
         // 60 / 60 / 1 = one second (SCHEDULER_CPS); 85% of it is 0.85 s. "eA eA" sounds four syllables, 1 s at four a second, so the rate is
         // 1 / 0.85 = 1.176. "teA teA" is the same four syllables.
         let (poem, score) = lowered(TRANSFORMING);
-        let reading = plan(&poem, &score, &at_120()).unwrap();
+        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
         assert_eq!(fmt_param(reading.cues()[0].rate()), "1.176");
         assert_eq!(reading.cues()[0].syllables(), 4);
 
         // Twice the tempo halves the bar, so the same line would need 2.353 — bounded to FASTEST.
         let fast = Style::parse("+++\ntempo_range = [240, 240]\n+++").unwrap();
-        let reading = plan(&poem, &score, &fast).unwrap();
+        let reading = plan(&poem, &score, &fast, &Mappings::all()).unwrap();
         assert_eq!(fmt_param(reading.cues()[0].rate()), fmt_param(FASTEST));
     }
 
@@ -526,10 +717,10 @@ mod tests {
         // I3: which line is read in which bar is structure. A different palette may read faster,
         // not elsewhere.
         let (poem, score) = lowered(TRANSFORMING);
-        let brisk = plan(&poem, &score, &at_120()).unwrap();
+        let brisk = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
         // 90 bpm: a bar of 4/3 s, 85% of it 1.133 s, so four syllables at 0.882.
         let other = Style::parse("+++\ntempo_range = [90, 90]\nscale = \"lydian\"\n+++").unwrap();
-        let steady = plan(&poem, &score, &other).unwrap();
+        let steady = plan(&poem, &score, &other, &Mappings::all()).unwrap();
         let shape = |reading: &super::Reading| -> Vec<(usize, usize)> {
             reading
                 .cues()
@@ -546,9 +737,16 @@ mod tests {
     fn the_same_poem_reads_the_same_bytes() {
         // I1.
         let (poem, score) = lowered(TRANSFORMING);
-        let once = plan(&poem, &score, &at_120()).unwrap().pattern();
+        let once = plan(&poem, &score, &at_120(), &Mappings::all())
+            .unwrap()
+            .pattern();
         let (poem, score) = lowered(TRANSFORMING);
-        assert_eq!(once, plan(&poem, &score, &at_120()).unwrap().pattern());
+        assert_eq!(
+            once,
+            plan(&poem, &score, &at_120(), &Mappings::all())
+                .unwrap()
+                .pattern()
+        );
     }
 
     #[test]
@@ -570,7 +768,7 @@ mod tests {
     fn a_pasted_line_separator_stays_in_the_comment_and_in_the_spoken_text() {
         let source = "bAt\u{2028}dAt\nnAd\n";
         let (poem, score) = lowered(source);
-        let reading = plan(&poem, &score, &at_120()).unwrap();
+        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
         let pattern = reading.pattern();
         // Every evaluated line is a comment or the one `n(...)` line: nothing after a line
         // terminator escapes its comment.
@@ -593,6 +791,6 @@ mod tests {
     fn a_score_from_another_poem_is_refused() {
         let (poem, _) = lowered(TRANSFORMING);
         let (_, other) = lowered("eA eA\n");
-        assert!(plan(&poem, &other, &at_120()).is_err());
+        assert!(plan(&poem, &other, &at_120(), &Mappings::all()).is_err());
     }
 }

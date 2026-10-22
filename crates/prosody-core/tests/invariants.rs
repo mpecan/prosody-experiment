@@ -266,13 +266,19 @@ fn score_with(source: &str, mappings: &Mappings) -> Score {
     .unwrap()
 }
 
-/// A set of mappings, one bit of `bits` per [`Mapping`]: a set bit switches it off.
-fn mappings_from(bits: u8) -> Mappings {
-    Mapping::ALL
-        .into_iter()
-        .enumerate()
-        .filter(|(index, _)| bits & (1 << index) != 0)
-        .fold(Mappings::all(), |set, (_, mapping)| set.without(mapping))
+/// Every combination of every mapping's variants, so a strategy can pick any of them by index.
+fn every_choice() -> Vec<Mappings> {
+    let every = Mappings::every();
+    // Built from each mapping's own variant list, so a variant added to one is covered here
+    // without this file changing — and a count that disagrees means a list went missing.
+    let expected: usize = Mapping::ALL.iter().map(|m| m.variants().len()).product();
+    assert_eq!(every.len(), expected);
+    every
+}
+
+/// Any one way of choosing the mappings.
+fn any_mappings() -> impl Strategy<Value = Mappings> {
+    proptest::sample::select(every_choice())
 }
 
 /// Every line span in the poem, in source order.
@@ -1448,19 +1454,24 @@ proptest! {
         prop_assert_eq!(score_of(&source), score_of(&source));
     }
 
-    /// I1 — and of the mappings it applies: switching some off is just as reproducible.
+    /// I1 — and of the mappings it applies: any choice of variants is just as reproducible.
     #[test]
-    fn i1_lowering_is_reproducible_under_any_mappings(source in poem_source(), bits in 0_u8..32) {
-        let mappings = mappings_from(bits);
+    fn i1_lowering_is_reproducible_under_any_mappings(
+        source in poem_source(),
+        mappings in any_mappings(),
+    ) {
         prop_assert_eq!(score_with(&source, &mappings), score_with(&source, &mappings));
     }
 
-    /// Switching a mapping off takes away; it never invents material. Every set plays the same
-    /// syllables of the same words, and places no line the full piece does not place too.
+    /// Choosing away from the defaults takes away; it never invents material. Every choice plays
+    /// the same syllables of the same words, and places no line the full piece does not place too.
     #[test]
-    fn switching_mappings_off_invents_nothing(source in poem_source(), bits in 0_u8..32) {
+    fn switching_mappings_off_invents_nothing(
+        source in poem_source(),
+        mappings in any_mappings(),
+    ) {
         let full = score_of(&source);
-        let some = score_with(&source, &mappings_from(bits));
+        let some = score_with(&source, &mappings);
         let shape = |score: &Score| -> Vec<(usize, usize, Span)> {
             score
                 .events()

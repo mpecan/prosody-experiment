@@ -158,11 +158,16 @@ carry a higher intrinsic pitch, so the riff follows the vowels; a rhyme word kee
 heard, loops in its own lane until the next refrain line is first heard and takes over. No lane
 doubles a voice already sounding in the bar. A refrain stanza stops both lanes with every loop.
 
-**Auditioning the candidates.** Every mapping above marked *pending review*, and the held and
-refrain lanes, can be left out of a lowering (`prosody_core::mapping`; `--without` on the CLI; the
-A/B table on the web page), so the piece can be heard and measured with and without each. This is
-a separate argument to the lowering, not part of the style: it changes structure, and I3 keeps the
-style out of structure. Every invariant holds within one setting. All on is the piece as specified,
+**Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
+lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list
+of named variants, always including `off`, and a default. A `Mappings` value chooses one variant
+per mapping, and only a variant the mapping lists can be chosen. Today the five above are
+`off`/`on`, default `on`; the reading is `off`/`arrives`/`stanza`, default `arrives`. They are
+chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
+`set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
+page's A/B table, so the piece can be heard and measured under each choice. This is a separate
+argument to the lowering, not part of the style: it changes structure, and I3 keeps the style out
+of structure. Every invariant holds within one choice. Every default is the piece as specified,
 and the default everywhere. Left out, each falls back to what preceded it: no held or refrain lane,
 no bass, a bar as long as its own line with everything under it stretched or squeezed to fit, and
 a piece that ends as the last stanza arrives. A mapping joins the list when a design iteration
@@ -182,11 +187,32 @@ the reading follows the poem in order, and every utterance is the source text un
 span (I4). A refrain stanza is new lines of the poem, so it is read again where it drops in.
 
 This **is a new mapping** — it adds sound events, the spoken words — and so it is structure, not
-palette: no style field can move a cue (I3). But it is decided entirely in the emitter and the
-page, from the arrangement the core already made, and changes nothing the core produces. It is
-therefore not in `prosody_core::mapping`'s list: `prosody_emit::reading` plans it as a separate
-artefact (a cue pattern and the lines it speaks), not part of the Strudel pattern text the CLI
-prints, and the page has its own on/off switch, on by default. *How fast* a line is read is a
+palette: no style field can move a cue (I3). It is decided entirely in the emitter and the page,
+from the arrangement the core already made, and changes nothing the core produces:
+`prosody_emit::reading` plans it as a separate artefact (a cue pattern and the lines it speaks),
+not part of the Strudel pattern text the CLI prints. It is a candidate selector in
+`prosody_core::mapping`'s list all the same — `Mapping::Reading`, chosen per side on the page like
+the others — so it can be compared and switched off with the same controls. The lowering never
+reads it. Its variants (*sound and voice, step 4, candidate*):
+
+- **`arrives`** (default) — each line once, in the slot where it is first heard as a host, as
+  above.
+- **`stanza`** — a stanza's lines are read one per bar, in order, from the stanza's first hosting
+  slot (the earliest slot `arrives` would read any of its lines in), instead of each line waiting
+  for its own arrival. A stanza that transforms a running loop brings one new line in per pass,
+  so under `arrives` its lines are read a loop's length apart (five bars in The Tyger); under
+  `stanza` it is read straight through while the music is still turning into it. Cues never run
+  backwards or share a slot: a stanza that would start before the previous one has been read
+  waits for it, and a line that would fall after the piece's last bar is not read. It decides
+  from the same arrival slots as `arrives` (which already depend on earlier stanzas, §4.6's
+  "duration is poem-wide"); the wait would add a dependence on the previous stanza's length, but
+  only where a stanza starts before the previous one has been read, which today's arrangement —
+  one stanza stated or transformed at a time — never does. Cues are not voices, so I2's voice
+  property is untouched either way.
+- **`off`** — no cues.
+
+The cue pattern's first comment names the variant (`reading = stanza`); the explain view lists it
+when it is not the default. *How fast* a line is read is a
 parameter, fitted from the palette's tempo: the rate at which the line's syllables, at four a
 second at rate 1, fill 85% of its bar, bounded to 0.6–1.6. The voice is the listener's choice. A
 light duck (the music to 0.6 while a line is spoken) is page-side and optional.

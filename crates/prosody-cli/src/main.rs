@@ -16,7 +16,7 @@ use anyhow::{Context as _, Result, bail};
 use prosody_cmudict::CmuDict;
 use prosody_core::annotate;
 use prosody_core::lower::{self, Analyses};
-use prosody_core::mapping::{Mapping, Mappings};
+use prosody_core::mapping::{Choice, Mapping, Mappings};
 use prosody_core::role::PoemRoles;
 use prosody_core::voice::Score;
 use prosody_core::{
@@ -59,7 +59,8 @@ struct Arguments {
     score: bool,
     /// What `--score` judges the piece against.
     profile: Profile,
-    /// Which candidate mappings apply: all of them, less any named by `--without`.
+    /// Which variant of each candidate mapping applies: the defaults, then `--set` and
+    /// `--without` in the order given.
     mappings: Mappings,
     /// Which backend.
     target: Target,
@@ -78,8 +79,10 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20 --explain      print the poem with each token annotated, instead of the pattern\n\
      \x20 --score        print how the piece measures (interest, legibility), instead of the pattern\n\
      \x20 --profile NAME what --score judges against: interest (the default), machine or jazz\n\
-     \x20 --without LIST leave out candidate mappings, comma-separated: held, refrain, bass,\n\
-     \x20                period, outro\n\
+     \x20 --set LIST     choose candidate mappings' variants, comma-separated name=variant:\n\
+     \x20                held, refrain, bass, period, outro = off|on (default on);\n\
+     \x20                reading = off|arrives|stanza (default arrives)\n\
+     \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
@@ -103,14 +106,20 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     let mut expecting_profile = false;
     let mut mappings = Mappings::all();
     let mut expecting_mappings = false;
+    let mut expecting_choices = false;
     for argument in arguments {
         if expecting_mappings {
             for name in argument.split(',').filter(|name| !name.is_empty()) {
-                let mapping = Mapping::named(name)
-                    .with_context(|| format!("unknown mapping `{name}`\n\n{USAGE}"))?;
-                mappings = mappings.without(mapping);
+                mappings = mappings.without(known(name)?);
             }
             expecting_mappings = false;
+            continue;
+        }
+        if expecting_choices {
+            for item in argument.split(',').filter(|item| !item.is_empty()) {
+                mappings = mappings.with(choice(item)?);
+            }
+            expecting_choices = false;
             continue;
         }
         if expecting_profile {
@@ -134,6 +143,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
             "--send" => expecting_address = true,
             "--profile" => expecting_profile = true,
             "--without" => expecting_mappings = true,
+            "--set" => expecting_choices = true,
             flag if flag.starts_with('-') && flag != "-" => {
                 bail!("unknown option `{flag}`\n\n{USAGE}")
             }
@@ -157,6 +167,9 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     if expecting_mappings {
         bail!("--without needs a list of mappings\n\n{USAGE}");
     }
+    if expecting_choices {
+        bail!("--set needs a list of name=variant\n\n{USAGE}");
+    }
     Ok(Some(Arguments {
         source,
         explain,
@@ -167,6 +180,26 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
         watch,
         send,
     }))
+}
+
+/// The mapping called `name`, or an error naming it.
+fn known(name: &str) -> Result<Mapping> {
+    Mapping::named(name).with_context(|| format!("unknown mapping `{name}`\n\n{USAGE}"))
+}
+
+/// One `name=variant` of `--set`, or an error naming what is wrong with it.
+fn choice(item: &str) -> Result<Choice> {
+    let Some((name, variant)) = item.split_once('=') else {
+        bail!("--set wants name=variant, not `{item}`\n\n{USAGE}");
+    };
+    let mapping = known(name)?;
+    mapping.choose_named(variant).with_context(|| {
+        let variants: Vec<&str> = mapping.variants().iter().map(|v| v.name()).collect();
+        format!(
+            "unknown variant `{variant}` of mapping `{name}` (it has {})\n\n{USAGE}",
+            variants.join(", ")
+        )
+    })
 }
 
 fn run() -> Result<()> {
@@ -248,7 +281,7 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
         return report(text, &score, arguments, &phonemiser, &lexicon);
     }
     if arguments.explain {
-        return explain(&poem, &score, &style, &roles);
+        return explain(&poem, &score, &style, &roles, mappings);
     }
 
     match arguments.target {
@@ -374,12 +407,32 @@ fn emit(text: &str) -> Result<()> {
 /// Prints the poem with what each token became written under it — `SPEC.md` §8's debug view.
 ///
 /// The rendering lives in `prosody_core::annotate` so it can be tested without running a binary;
-/// this adds the two things only the IO edge knows: the palette, and the realised tempo.
-fn explain(poem: &Poem, score: &Score, style: &Style, roles: &PoemRoles) -> Result<()> {
+/// this adds what only the IO edge knows: the palette, and the mappings chosen away from their
+/// defaults.
+fn explain(
+    poem: &Poem,
+    score: &Score,
+    style: &Style,
+    roles: &PoemRoles,
+    mappings: &Mappings,
+) -> Result<()> {
     let mut out = String::new();
     let _ = writeln!(out, "style");
     for (key, value) in style.describe() {
         let _ = writeln!(out, "  {key:<12} {value}");
+    }
+    // Every candidate mapping not at its default, so the view says which piece it describes.
+    let changed: Vec<Choice> = mappings.changed().collect();
+    if !changed.is_empty() {
+        let _ = writeln!(out, "mappings");
+        for choice in changed {
+            let _ = writeln!(
+                out,
+                "  {:<12} {}",
+                choice.mapping().name(),
+                choice.variant().name()
+            );
+        }
     }
     let _ = writeln!(
         out,

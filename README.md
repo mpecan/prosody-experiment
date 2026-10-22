@@ -91,17 +91,24 @@ The **example poems…** menu at the top loads any poem in `examples/`, together
 header asks for (the defaults when it has none).
 
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
-review (the held and refrain lanes, the bass, the stanza period, the outro), each with a checkbox
-for two settings, A and B. A starts with everything on, B with everything off. The **hearing A | B**
+review (the held and refrain lanes, the bass, the stanza period, the outro, the reading), each a
+selector of named variants — always including `off` — with one menu per setting, A and B. The
+first five are `off`/`on`; the reading is `off`, `arrives` or `stanza`. A starts with every mapping
+at its default (marked "(default)" in the menu), B with every one off; a menu not at its default
+has a bold border. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
 adds. The **Score A vs B** tab measures both settings side by side (see [Measuring it](#measuring-it))
 with the difference between them, under the machine, jazz or interest profile. The page remembers
 your two settings.
 
-Under the mappings is **Reading — the poem spoken over the music**, on by default: each line is
+Under the mappings is **Reading — the poem spoken over the music**: the voice and the duck. Whether
+and when lines are read is the `reading` mapping above. Under `arrives`, the default, each line is
 spoken once, in your browser's own voice (`speechSynthesis`), in the bar where it is first heard —
 its stanza stated, dropping in as a refrain stanza, or replacing a bar of the old loop — and never
-where it only loops, is held, refrains in its lane or repeats in the outro. Strudel's own clock
+where it only loops, is held, refrains in its lane or repeats in the outro. Under `stanza`, a
+stanza's lines are read one a bar from the first bar any of them is heard in, so a stanza that
+transforms a loop (one new line a pass, five bars apart in The Tyger) is read straight through
+while the music is still turning into it. Under `off`, nothing is read. Strudel's own clock
 fires each line, so it stays on the bar; a line still being spoken when the next is due is cut
 off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
 0.6–1.6. Pick a voice from the menu (the page remembers it), and untick **duck** to stop the music
@@ -227,9 +234,14 @@ recurrence, more scale degrees in use, more accents off the beat, the time still
 the score, before the palette, so swing is neither rewarded nor penalised — a swung piece scores
 as its straight twin does. Its bands are reasoned guesses, like the machine profile's.
 
-`--without held,refrain,bass,period,outro` (any of them) leaves candidate mappings out, for the
-pattern and for `--score` alike; `./scripts/cycle.sh machine bass` scores every example without the
-bass.
+`--set name=variant,…` chooses a candidate mapping's variant — `held`, `refrain`, `bass`,
+`period` and `outro` take `off` or `on` (default `on`), `reading` takes `off`, `arrives` or
+`stanza` (default `arrives`) — for the pattern and for `--score` alike; an unknown name or variant
+is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`.
+`--explain` lists every choice that is not a default. The reading is not in the CLI's pattern, so
+`reading=…` changes only that list. `./scripts/cycle.sh machine bass` scores every example without
+the bass, and `./scripts/cycle.sh machine bass=off,period=off` passes its list to `--set` (any list
+containing `=` does).
 
 ---
 

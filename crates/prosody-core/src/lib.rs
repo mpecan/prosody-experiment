@@ -21,7 +21,8 @@
 //! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
 //! - [`voice`] — the IR of §3: sounding events, with nothing a style could supply.
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
-//! - [`mapping`] — which candidate mappings a lowering applies, so each can be heard without.
+//! - [`mapping`] — which variant of each candidate mapping applies, so each can be heard against
+//!   the others and against its absence.
 //! - [`arrange`] — laying that IR out in time: stanzas loop until a competing stanza transforms
 //!   them or a refrain stanza overrules them.
 //! - [`annotate`] — §8's debug view: the poem, with what each token became written under it.
@@ -53,7 +54,7 @@ pub mod voice;
 
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
 pub use arrange::{Arrangement, Cause, Fit, Lane, Part, Placement, Slot};
-pub use mapping::{Mapping, Mappings};
+pub use mapping::{Choice, Mapping, Mappings, Variant};
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
 };
