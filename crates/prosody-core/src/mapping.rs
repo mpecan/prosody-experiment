@@ -85,6 +85,9 @@ pub enum Variant {
     /// The reading's stanza variant: a stanza's lines spoken one a bar, in order, from the
     /// stanza's first hosting slot.
     Stanza,
+    /// The reading's default: each stanza read through, one line a bar, from where its first line
+    /// is first heard or one silent bar after the previous stanza's reading, whichever is later.
+    Breath,
     /// The harmony's H1: each line's rhyme class is its bar's chord, on the class's degree.
     Rhyme,
     /// The harmony's H2: an open rhyme is the dominant of its degree, its answer the tonic, a
@@ -131,6 +134,7 @@ impl Variant {
             Self::On => "on",
             Self::Arrives => "arrives",
             Self::Stanza => "stanza",
+            Self::Breath => "breath",
             Self::Rhyme => "rhyme",
             Self::Cadence => "cadence",
             Self::Both => "both",
@@ -150,8 +154,14 @@ impl Variant {
 /// The variants of a mapping that is simply on or off.
 const SWITCH: &[Variant] = &[Variant::Off, Variant::On];
 
-/// The reading's variants: off, line by line where each arrives, or a stanza at a time.
-const READING: &[Variant] = &[Variant::Off, Variant::Arrives, Variant::Stanza];
+/// The reading's variants: off, line by line where each arrives, a stanza at a time, or a stanza
+/// at a time with a silent bar between stanzas and never before the music begins one.
+const READING: &[Variant] = &[
+    Variant::Off,
+    Variant::Arrives,
+    Variant::Stanza,
+    Variant::Breath,
+];
 
 /// The harmony's variants: none, the rhyme scheme as harmonic rhythm (H1), rhyme closure as
 /// tension and release (H2), or H2 where it applies and H1 elsewhere.
@@ -239,7 +249,9 @@ impl Mapping {
                  answers as I (cadence), or cadence where it applies and rhyme elsewhere (both)"
             }
             Self::Reading => {
-                "the poem read aloud: each line where it arrives, or a stanza a bar at a time"
+                "the poem read aloud: each line where it arrives (arrives), a stanza a line a bar \
+                 from its first arrival (stanza), or a stanza a line a bar, a silent bar after the \
+                 last and never before the music begins it (breath)"
             }
             Self::Pulse => {
                 "how long a bar lasts: as long as its beats, one beat speed throughout (steady), \
@@ -283,8 +295,11 @@ impl Mapping {
             // The bass as it shipped. The walking variants are candidates the user approved for
             // comparison (`PLAN.md`, the walking-bass proposal), so the default piece keeps it.
             Self::Bass => Variant::Height,
-            // SPEC.md §4.7: each line is read where it is first heard — the reading as it shipped.
-            Self::Reading => Variant::Arrives,
+            // The user decided (PLAN.md, "the reading takes a breath"): a stanza is read whole, a
+            // line a bar, with a silent bar before the next and never before the music has begun
+            // it (SPEC.md §4.7). `arrives` — the reading as it shipped — and `stanza` stay as
+            // variants to hear against it.
+            Self::Reading => Variant::Breath,
             // A candidate the user approved for comparison, not yet the piece as specified: off
             // keeps every existing pattern and score as it was (`PLAN.md`, the harmony proposal).
             Self::Harmony => Variant::Off,
@@ -528,18 +543,48 @@ mod tests {
     #[test]
     fn the_defaults_are_todays_piece() {
         // The four machine-cycle switches are on, the bass is by vowel height, the reading reads
-        // each line where it arrives, and the harmony — a candidate not yet in the piece — is off.
+        // a stanza at a time with a breath between, and the harmony — a candidate not yet in the
+        // piece — is off.
         let all = Mappings::all();
         for mapping in Mapping::ALL {
             assert_eq!(all.has(mapping), mapping != Mapping::Harmony, "{mapping:?}");
         }
         assert_eq!(all.get(Mapping::Pulse), Variant::Steady);
         assert_eq!(all.get(Mapping::Bass), Variant::Height);
-        assert_eq!(all.get(Mapping::Reading), Variant::Arrives);
+        assert_eq!(all.get(Mapping::Reading), Variant::Breath);
         assert_eq!(all.get(Mapping::Harmony), Variant::Off);
         assert_eq!(all.get(Mapping::Stack), Variant::Crossing);
         assert_eq!(all.get(Mapping::Function), Variant::Full);
         assert_eq!(all.changed().count(), 0);
+    }
+
+    #[test]
+    fn the_reading_breathes_unless_another_variant_is_chosen() {
+        assert_eq!(
+            Mapping::Reading.variants(),
+            &[
+                Variant::Off,
+                Variant::Arrives,
+                Variant::Stanza,
+                Variant::Breath
+            ]
+        );
+        assert_eq!(Mappings::all().get(Mapping::Reading), Variant::Breath);
+        let breath = Mapping::Reading.choose_named("breath").unwrap();
+        assert_eq!(breath.variant(), Variant::Breath);
+        assert!(Mapping::Bass.choose_named("breath").is_none());
+        // The default is stored as nothing; the reading as it shipped is a change.
+        assert_eq!(Mappings::all().with(breath), Mappings::all());
+        let arrives = Mappings::all().with(Mapping::Reading.choose_named("arrives").unwrap());
+        assert_eq!(arrives.changed().count(), 1);
+        assert_eq!(arrives.get(Mapping::Reading), Variant::Arrives);
+        // Left out, it is off, like every mapping that can be.
+        assert_eq!(
+            Mappings::all()
+                .without(Mapping::Reading)
+                .get(Mapping::Reading),
+            Variant::Off
+        );
     }
 
     #[test]
@@ -599,17 +644,17 @@ mod tests {
         let back = some
             .with(Mapping::Bass.choose(Variant::Height).unwrap())
             .with(Mapping::Outro.choose(Variant::On).unwrap())
-            .with(Mapping::Reading.choose(Variant::Arrives).unwrap());
+            .with(Mapping::Reading.choose(Variant::Breath).unwrap());
         assert_eq!(back, Mappings::all());
     }
 
     #[test]
     fn every_combination_is_listed_once() {
-        // Four on/off switches, a four-way bass, a four-way harmony, a three-way reading, a
+        // Four on/off switches, a four-way bass, a four-way harmony, a four-way reading, a
         // two-way pulse, a two-way stack and two-way function words:
-        // 2^4 × 4 × 4 × 3 × 2 × 2 × 2 = 6144.
+        // 2^4 × 4 × 4 × 4 × 2 × 2 × 2 = 8192.
         let every = Mappings::every();
-        assert_eq!(every.len(), 6144);
+        assert_eq!(every.len(), 8192);
         for (index, one) in every.iter().enumerate() {
             assert!(!every[index + 1..].contains(one), "{one:?} twice");
         }

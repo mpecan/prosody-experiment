@@ -433,11 +433,13 @@ This is structure, read from the poem, not a style parameter — which answers �
 explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
 poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.
 
-### 4.7 The reading — the poem spoken where each line arrives
+### 4.7 The reading — the poem spoken over the music, a stanza at a time
 
 *Candidate, page-side, pending review (sound and voice, step 2).* A prototype to learn whether
-spoken lines over the music work. Each line is spoken once, by the browser's speech synthesiser,
-in the slot where it is **first heard as a host** — `Stated`, `Arriving` or `Overruling` (§4.6) —
+spoken lines over the music work. Under every variant each line is spoken at most once, by the
+browser's speech synthesiser, and only from where the music has begun its stanza. The reading as
+it shipped (now the `arrives` variant; the default is `breath`, below) speaks each line in the slot
+where it is **first heard as a host** — `Stated`, `Arriving` or `Overruling` (§4.6) —
 and never where it loops, yields, calls, holds, refrains in its lane or repeats in the outro. So
 the reading follows the poem in order, and every utterance is the source text under one line's
 span (I4). A refrain stanza is new lines of the poem, so it is read again where it drops in.
@@ -449,10 +451,44 @@ from the arrangement the core already made, and changes nothing the core produce
 not part of the Strudel pattern text the CLI prints. It is a candidate selector in
 `prosody_core::mapping`'s list all the same — `Mapping::Reading`, chosen per side on the page like
 the others — so it can be compared and switched off with the same controls. The lowering never
-reads it. Its variants (*sound and voice, step 4, candidate*):
+reads it. Its variants (*sound and voice, step 4, candidate*; `breath` *decided by the user and
+made the default, 2026-10-23*):
 
-- **`arrives`** (default) — each line once, in the slot where it is first heard as a host, as
-  above.
+- **`breath`** (default) — each stanza is read through, one line per bar, in order. Stanza *k*
+  starts at the later of (a) the slot its **first line** first arrives in as a host (`Stated`,
+  `Arriving` or `Overruling`, as `arrives` reads it), and (b) the bar after stanza *k − 1*'s last
+  cue **plus one silent bar** — two slots after it. So lines within a stanza are always one bar
+  apart, two stanzas' readings are always separated by at least one silent bar, and a stanza is
+  never read before the music has begun it. A transforming stanza's later lines are read before
+  the loop has turned into them, as under `stanza` — the point is to read the stanza as written.
+  The Tyger: stanza 1 in bars 1–4; stanza 2 arrives in bar 5, the breath, so bars 6–9; stanzas
+  3–6 where they arrive, bars 21, 37, 53 and 69 onwards. A stanza whose first line never arrives
+  starts at the earliest arrival of any of its lines; one none of whose lines arrives is skipped
+  and leaves no breath. **Past the end** (*decided here*): a line that would fall after the
+  piece's last slot is not read, so a stanza that runs out of piece reads the lines that fit and
+  stops, and a stanza that would start after the last slot is not read at all. The cue pattern
+  loops with the music, so a later cue would land on the next round's first bars, over stanza
+  1; starting the stanza earlier would break the breath or read it before the music has begun
+  it. The outro (§4.6) usually gives the last stanza its room: with it on, none of the nine
+  examples loses a line. Without it a reading can run out: Pied Beauty with `outro` off is eleven
+  bars, stanza 2 arrives in bar 7, waits for its breath to bar 8, and its last line ("Praise
+  him.") would fall in bar 12, so it is not read. A poem of many short stanzas can lose lines
+  even with the outro — a run of one-line stanzas, each stated in one bar, needs two bars each to
+  be read with its breath, so the reading falls behind. **A lost line is said, never silent**
+  (CLAUDE.md §6): under every variant but `off`, the reading lists each line it does not read and
+  why ("the piece ends before its turn", or "it never arrives in the music") — in the cue
+  pattern's header (`// 1 of 11 lines not read:` and a line each, with its bytes, I4), in the
+  `/reading` answer's `unread` list, and in the page's status while it plays (`not read: line 11,
+  the piece ends before its turn`). Whether the outro should grow to fit the reading is open. **Disclosed against I2:** where a stanza waits for its breath, its cues depend on the
+  previous stanza's reading — where it started and how many lines it has — so an edit that adds
+  a line to stanza *n* can move stanza *n + 1*'s cues by a bar (and, through it, later ones).
+  Cues are not voices: the music, every voice and every seed are untouched, so I2's voice
+  property holds as before; the reading's own I1, I3 and I4 properties are tested
+  (`prosody-emit/tests/breath.rs`).
+- **`arrives`** — each line once, in the slot where it is first heard as a host, as above. The
+  default until the user chose `breath`: a transforming stanza's lines are read a loop's length
+  apart, and each stanza's first line straight after the previous stanza, so a stanza sounded
+  joined to the one before it and then broken by long pauses.
 - **`stanza`** — a stanza's lines are read one per bar, in order, from the stanza's first hosting
   slot (the earliest slot `arrives` would read any of its lines in), instead of each line waiting
   for its own arrival. A stanza that transforms a running loop brings one new line in per pass,
@@ -467,8 +503,8 @@ reads it. Its variants (*sound and voice, step 4, candidate*):
   property is untouched either way.
 - **`off`** — no cues.
 
-The cue pattern's first comment names the variant (`reading = stanza`); the explain view lists it
-when it is not the default. *How fast* a line is read is a
+The cue pattern's first comment names the variant (`reading = breath`); the explain view lists it
+when it is not the default (`reading=arrives`). *How fast* a line is read is a
 parameter, fitted from the palette's tempo: the rate at which the line's syllables, at four a
 second at rate 1, fill 85% of its bar, bounded to 0.6–1.6. The voice is the listener's choice. A
 light duck (the music to 0.6 while a line is spoken) is page-side and optional.

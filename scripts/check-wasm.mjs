@@ -25,6 +25,7 @@ const settings = [
   '',
   'scale=lydian&root=F%23&swing=0.33&humanise=0.5&density_level=0.5',
   'set=harmony:both,bass:feet,reading:stanza',
+  'set=reading:arrives,pulse:elastic',
   'set=harmony:rhyme,bass:syllables&voicing=seventh',
   'set=harmony:cadence&off=outro,period&profile=jazz',
   'off=held,refrain,bass&profile=interest',

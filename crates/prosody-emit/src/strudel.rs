@@ -3810,11 +3810,15 @@ swing = 0.33
                     assert!(found.is_empty(), "{lane}");
                 }
             }
-            // The reading: each cue in the slot where its line arrives, weighted as the music's
-            // bars, at the music's cycles a minute — so it fires on that bar's first beat.
-            let reading =
-                crate::reading::plan(&poem, &score, &at_120(), &prosody_core::Mappings::all())
-                    .unwrap();
+            // The reading under `arrives`: each cue in the slot where its line arrives, weighted
+            // as the music's bars, at the music's cycles a minute — so it fires on that bar's
+            // first beat.
+            let arrives = prosody_core::Mappings::all().with(
+                prosody_core::Mapping::Reading
+                    .choose(prosody_core::Variant::Arrives)
+                    .unwrap(),
+            );
+            let reading = crate::reading::plan(&poem, &score, &at_120(), &arrives).unwrap();
             let slots: Vec<usize> = reading.cues().iter().map(crate::Cue::slot).collect();
             assert_eq!(slots, vec![0, 1, 2, 5], "{pulse:?}");
             let cue_pattern = reading.pattern();
@@ -3834,6 +3838,30 @@ swing = 0.33
             if pulse == prosody_core::Variant::Steady {
                 assert_eq!(rates, vec!["1.176", "1.176", "1.176", "1.176"]);
             } else {
+                assert_eq!(rates, vec!["1.176", "1.176", "1.569", "1.569"]);
+            }
+
+            // The default, `breath`: stanza 2 (lines 2, 3) arrives in slot 2, the breath after
+            // slot 1, so it is read in slots 3 and 4. Slot 3 is the old loop's three-beat bar
+            // (line 1 yielding), slot 4 a four-beat one — so the cue weights follow the music's
+            // bars, not the line's own, and so does the rate: line 2's eight syllables in a
+            // three-beat bar of 1.5 s are 2 / (0.85 × 1.5) = 1.569, line 3's in a four-beat bar
+            // of 2 s are 1.176.
+            let reading =
+                crate::reading::plan(&poem, &score, &at_120(), &prosody_core::Mappings::all())
+                    .unwrap();
+            let slots: Vec<usize> = reading.cues().iter().map(crate::Cue::slot).collect();
+            assert_eq!(slots, vec![0, 1, 3, 4], "{pulse:?}");
+            let cue_pattern = reading.pattern();
+            let last = cue_pattern.lines().last().unwrap();
+            assert!(last.ends_with(&format!(".cpm({cpm})")), "{last}");
+            let sequence = last.split('"').nth(1).unwrap();
+            let rates: Vec<String> = reading.cues().iter().map(|c| fmt_param(c.rate())).collect();
+            if pulse == prosody_core::Variant::Steady {
+                assert_eq!(sequence, "<0@3 1@3 ~@4 2@3 3@4 ~@4 ~@4 ~@4>");
+                assert_eq!(rates, vec!["1.176", "1.176", "1.569", "1.176"]);
+            } else {
+                assert_eq!(sequence, "<0 1 ~ 2 3 ~ ~ ~>");
                 assert_eq!(rates, vec!["1.176", "1.176", "1.569", "1.569"]);
             }
         }

@@ -692,6 +692,17 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
     );
     let (plain, _, _) = run(&["--explain"], COUPLET);
     assert!(!plain.contains("mappings\n"), "{plain}");
+    // `breath` is the reading's default, so choosing it lists nothing; `arrives`, the reading as
+    // it shipped, is now a choice away from the default and is listed.
+    let (breath, err, code) = run(&["--explain", "--set", "reading=breath"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(breath, plain);
+    let (arrives, err, code) = run(&["--explain", "--set", "reading=arrives"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        arrives.contains("mappings\n  reading       arrives\n\n"),
+        "{arrives}"
+    );
 
     for (given, expected) in [
         ("polka=on", "unknown mapping `polka`"),
@@ -701,7 +712,7 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
         ),
         (
             "reading=on",
-            "unknown variant `on` of mapping `reading` (it has off, arrives, stanza)",
+            "unknown variant `on` of mapping `reading` (it has off, arrives, stanza, breath)",
         ),
         ("reading", "--set wants name=variant, not `reading`"),
     ] {

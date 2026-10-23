@@ -543,7 +543,8 @@ fn render(
 }
 
 /// A reading as JSON: the cue pattern to evaluate, and each cue — the line it speaks, by index
-/// and by span, its text and its rate — for the page to look up when the cue fires.
+/// and by span, its text and its rate — for the page to look up when the cue fires; then each
+/// line left unread, and why, for the page to say.
 ///
 /// `start` and `end` are the line's bytes in the source, for the log; `from` and `to` are where it
 /// is in the text box, for the page to show the line being read (see [`text_box`]).
@@ -568,10 +569,26 @@ fn reading_json(reading: &Reading, source: &str, typed: &str) -> String {
             )
         })
         .collect();
+    // The lines the reading leaves out, so the page can say so (CLAUDE.md §6: a loss is visible).
+    let unread: Vec<String> = reading
+        .unread()
+        .iter()
+        .map(|line| {
+            format!(
+                "{{\"line\":{},\"start\":{},\"end\":{},\"why\":{},\"text\":{}}}",
+                line.line(),
+                line.span().start(),
+                line.span().end(),
+                json_string(line.why().says()),
+                json_string(line.text()),
+            )
+        })
+        .collect();
     format!(
-        "{{\"pattern\":{},\"cues\":[{}]}}\n",
+        "{{\"pattern\":{},\"cues\":[{}],\"unread\":[{}]}}\n",
         json_string(&reading.pattern()),
-        cues.join(",")
+        cues.join(","),
+        unread.join(",")
     )
 }
 
@@ -842,7 +859,7 @@ mod tests {
             "the bass selector"
         );
         assert!(
-            html.contains("[\"off\",\"arrives\",\"stanza\"],\"arrives\"]"),
+            html.contains("[\"off\",\"arrives\",\"stanza\",\"breath\"],\"breath\"]"),
             "the reading selector"
         );
         assert!(
@@ -930,6 +947,8 @@ mod tests {
         // |B1 B2 A3 A4| in 8–11, and so on, so under `arrives` (0-based) line 4 is read in slot
         // 4, line 5 in slot 9, line 6 in 14 and line 7 in 19 — five bars apart. Under `stanza`
         // lines 4–7 are read in slots 4, 5, 6, 7, while the loop is still turning into them.
+        // Under `breath`, the default, stanza 1 is read in slots 0–3 and stanza 2 arrives in slot
+        // 4 — the breath after slot 3 — so it starts at max(4, 3 + 2) = 5: slots 5, 6, 7, 8.
         let slots_of = |body: &str| -> Vec<(usize, usize)> {
             body.split("{\"slot\":")
                 .skip(1)
@@ -940,7 +959,11 @@ mod tests {
                 })
                 .collect()
         };
-        let arrives = super::compile(&request(&[], SEED), &Output::Reading);
+        let breath = super::compile(&request(&[], SEED), &Output::Reading);
+        let arrives = super::compile(
+            &request(&[("set", "reading:arrives")], SEED),
+            &Output::Reading,
+        );
         let stanza = super::compile(
             &request(&[("set", "reading:stanza")], SEED),
             &Output::Reading,
@@ -963,6 +986,28 @@ mod tests {
             slots_of(&stanza.body),
             (0..8).map(|n| (n, n)).collect::<Vec<_>>()
         );
+        assert_eq!(
+            slots_of(&breath.body),
+            vec![
+                (0, 0),
+                (1, 1),
+                (2, 2),
+                (3, 3),
+                (5, 4),
+                (6, 5),
+                (7, 6),
+                (8, 7)
+            ]
+        );
+        assert!(breath.body.contains("reading = breath"), "{}", breath.body);
+        assert_eq!(
+            breath.body,
+            super::compile(
+                &request(&[("set", "reading:breath")], SEED),
+                &Output::Reading
+            )
+            .body
+        );
         assert!(off.body.contains("\"cues\":[]"), "{}", off.body);
         // The pattern and the explain view say which reading this is.
         assert!(stanza.body.contains("reading = stanza"), "{}", stanza.body);
@@ -977,10 +1022,21 @@ mod tests {
         );
         let plain = super::compile(&request(&[], SEED), &Output::Explain);
         assert!(!plain.body.contains("mappings  "), "{}", plain.body);
+        // The reading as it shipped is now a choice away from the default, and is listed.
+        let shipped = super::compile(
+            &request(&[("set", "reading:arrives")], SEED),
+            &Output::Explain,
+        );
+        assert!(
+            shipped.body.contains("mappings      reading=arrives"),
+            "{}",
+            shipped.body
+        );
         // The music does not move: the reading is decided after the lowering.
         let music =
             |query: &[(&str, &str)]| super::compile(&request(query, SEED), &Output::Pattern).body;
         assert_eq!(music(&[]), music(&[("set", "reading:off")]));
+        assert_eq!(music(&[]), music(&[("set", "reading:arrives")]));
     }
 
     #[test]
@@ -1143,6 +1199,44 @@ mod tests {
             .filter_map(|rest| rest.split(',').next()?.parse().ok())
             .collect();
         assert_eq!(lines, (0..8).collect::<Vec<_>>(), "in reading order");
+        assert!(body.ends_with("\"unread\":[]}\n"), "nothing lost: {body}");
+    }
+
+    #[test]
+    fn a_line_the_reading_loses_is_listed_for_the_page() {
+        // Pied Beauty with the outro off — the page's setting B with the reading on breath. Eleven
+        // lines in eleven bars; stanza 2 arrives in bar 7, waits for its breath to bar 8, and its
+        // fifth line would fall in bar 12, past the piece (SPEC.md §4.7). The page is told.
+        let poem = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/hopkins-pied-beauty.poem"),
+        )
+        .unwrap();
+        let response = super::compile(
+            &request(&[("set", "reading:breath,outro:off")], &poem),
+            &Output::Reading,
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = &response.body;
+        let (cues, unread) = body.split_once("\"unread\":").unwrap();
+        assert!(
+            unread.starts_with("[{\"line\":10,")
+                && unread.contains("\"why\":\"the piece ends before its turn\"")
+                && unread.ends_with("Praise him.\"}]}\n"),
+            "{unread}"
+        );
+        assert!(!cues.contains("\"line\":10,"), "{cues}");
+        assert!(cues.contains("// 1 of 11 lines not read:"), "{cues}");
+        // The same piece under `arrives` loses nothing.
+        let arrives = super::compile(
+            &request(&[("set", "reading:arrives,outro:off")], &poem),
+            &Output::Reading,
+        );
+        assert!(
+            arrives.body.ends_with("\"unread\":[]}\n"),
+            "{}",
+            arrives.body
+        );
     }
 
     #[test]

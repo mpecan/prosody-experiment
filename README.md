@@ -128,7 +128,7 @@ including `off`, except the pulse, the stack and the function words, which no pi
 A and B. The held and refrain lanes, the stanza period and the outro are `off`/`on`; the bass is
 `off`, `height` (its default), `syllables` or `feet` (see [the walking bass](#the-walking-bass));
 the harmony is `off` (its default), `rhyme`, `cadence` or `both` (see
-[the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives` or `stanza`; the pulse
+[the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives`, `stanza` or `breath` (its default); the pulse
 is `elastic` or `steady` (its default; see [the pulse](#the-pulse)); the stack is `crossing` (its
 default) or `straight` (see [stacked lines](#stacked-lines-crossing-or-straight)); the function
 words are `full` (their default) or `light` (see [function words](#function-words-full-or-light)).
@@ -143,15 +143,25 @@ with the difference between them, under the machine, jazz or interest profile. T
 your two settings.
 
 Under the mappings is **Reading — the poem spoken over the music**: the voice and the duck. Whether
-and when lines are read is the `reading` mapping above. Under `arrives`, the default, each line is
-spoken once, in your browser's own voice (`speechSynthesis`), in the bar where it is first heard —
-its stanza stated, dropping in as a refrain stanza, or replacing a bar of the old loop — and never
-where it only loops, is held, refrains in its lane or repeats in the outro. Under `stanza`, a
-stanza's lines are read one a bar from the first bar any of them is heard in, so a stanza that
-transforms a loop (one new line a pass, five bars apart in The Tyger) is read straight through
-while the music is still turning into it. Under `off`, nothing is read. Strudel's own clock
-fires each line, so it stays on the bar; a line still being spoken when the next is due is cut
-off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
+and when lines are read is the `reading` mapping above. Under `breath`, the default, each stanza
+is read through in your browser's own voice (`speechSynthesis`), one line a bar, in order; it
+starts in the bar where the music first plays its first line — or one silent bar after the previous
+stanza's last line, if that is later — so lines within a stanza are always a bar apart, two stanzas
+always have at least one silent bar between them, and a stanza is never read before the music has
+begun it. In The Tyger: stanza 1 in bars 1–4, stanza 2 in bars 6–9 (it arrives in bar 5, the
+breath), stanza 3 in 21–24, and so on, each where it arrives. A stanza that would run past the
+piece's last bar reads the lines that fit and loses the rest — no example does with the outro on;
+Pied Beauty with `outro` off loses its last line, "Praise him." — and says so: the reading's
+pattern lists every line it does not read and why, and the status bar says `not read: line 11, …`
+while it plays. Under `arrives`,
+each line is spoken once, in the bar where it is first heard — its stanza stated, dropping in as a
+refrain stanza, or replacing a bar of the old loop — and never where it only loops, is held,
+refrains in its lane or repeats in the outro. Under `stanza`, a stanza's lines are read one a bar
+from the first bar any of them is heard in, so a stanza that transforms a loop (one new line a
+pass, five bars apart in The Tyger under `arrives`) is read straight through while the music is
+still turning into it, with no pause after the stanza before it. Under `off`, nothing is read.
+Strudel's own clock fires each line, so it stays on the bar; a line still being spoken when the
+next is due is cut off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
 0.6–1.6. Pick a voice from the menu (the page remembers it), and untick **duck** to stop the music
 dipping while a line is read. The Pattern tab shows the cue pattern under the music's, and the
 browser console logs every line as it is cued: which bar, which bytes, which rate. Picking a
@@ -320,7 +330,7 @@ machine profile's.
 `--set name=variant,…` chooses a candidate mapping's variant — `held`, `refrain`, `period` and
 `outro` take `off` or `on` (default `on`), `bass` takes `off`, `height`, `syllables` or `feet`
 (default `height`), `harmony` takes `off`, `rhyme`, `cadence` or `both` (default `off`), `reading`
-takes `off`, `arrives` or `stanza` (default `arrives`), `pulse` takes `elastic` or `steady`
+takes `off`, `arrives`, `stanza` or `breath` (default `breath`), `pulse` takes `elastic` or `steady`
 (default `steady`), `stack` takes `crossing` or `straight` (default `crossing`), `function-words`
 takes `full` or `light` (default `full`) — for the pattern
 and for `--score` alike;

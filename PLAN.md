@@ -406,6 +406,76 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The breath says what it leaves unread — a lost line is listed, not silent
+
+Review of the breath step: with `outro` off, Pied Beauty (eleven bars) lost its closing line,
+"Praise him.", under `breath` and nothing said so — the cue header read "10 lines over 11 bars"
+(CLAUDE.md §6: a fallback must be visible). Hand-worked: stanza 1 in bars 1–6; stanza 2 arrives in
+bar 7, waits for its breath, max(7, 6 + 2) = bar 8, so bars 8–12, and bar 12 is past the piece.
+`arrives` and `stanza` read all eleven. The rule is unchanged; the loss is now said.
+
+- **`Reading::unread()`** (`prosody_emit::reading::Unread`, with `Why::PieceEnds` /
+  `Why::NeverArrives`): every line no cue speaks, under every variant but `off`, with its span and
+  text (I4). A line of a stanza that was read in part, or one that arrives, lost its turn to the end
+  of the piece; any other never arrives.
+- **Said in three places:** the cue pattern's header (`// 1 of 11 lines not read:` and
+  `//   line 11 (bytes …) is not read, the piece ends before its turn: Praise him.`), the web
+  `/reading` answer's new `unread` list, and the page's status bar and console while it plays
+  (`not read: line 11, the piece ends before its turn`). Nothing changes when every line is read.
+- **Tests.** Hand-worked: Pied Beauty outro off — 11 slots, arrives bars 1–11, breath 1–6 and 8–11,
+  line 11 unread with `PieceEnds`, both header lines exact; the same through the web `/reading`;
+  a unit test of the reason (a cut stanza's lines `PieceEnds`, a never-heard stanza's
+  `NeverArrives`, bytes 17..20). The breath property now also checks the unread list against the
+  cues on random poems, every example, and every example with the outro off.
+- `SPEC.md` §4.7's heading no longer describes `arrives` ("the poem spoken over the music, a stanza
+  at a time"), and the section says how a lost line is reported. Snapshots and `cycle.sh`: unchanged.
+
+### The reading takes a breath — stanzas read whole, a silent bar between, never ahead
+
+The user decided: under the old default `arrives`, a transforming stanza's lines were read one a
+pass (five bars apart) and each stanza's first line straight after the previous stanza, so a stanza
+sounded joined to the one before and then broken by long pauses (The Tyger: lines 1–4 in bars 1–4,
+line 5 in bar 5, lines 6–8 in bars 10, 15, 20). A **new default variant, `breath`**; `arrives` and
+`stanza` stay as variants.
+
+- **The rule** (`prosody_emit::reading::by_breath`). Each stanza is read through, one line a bar, in
+  order. Stanza *k* starts at max(its first line's first arrival as a host — `Stated`, `Arriving`,
+  `Overruling`, the same arrivals `arrives` reads — , stanza *k − 1*'s last cue + 2). A stanza whose
+  first line never arrives starts at the earliest arrival of any of its lines; one with no arrival
+  is skipped and leaves no breath.
+- **Past the end, decided:** a line that would fall after the piece's last slot is not read (as
+  under `stanza`); a stanza that would start there is not read at all. A later cue would wrap onto
+  the next round's first bars, and starting earlier breaks the breath or reads ahead of the music.
+  No example loses a line; four one-line stanzas do (bars 1, 3, 5 of a five-bar piece, the fourth
+  unread) — raised, not decided further (`SPEC.md` §4.7).
+- **Selector.** `Variant::Breath` (`breath`), `Mapping::Reading`'s fourth variant and its default
+  (`off, arrives, stanza, breath`). It reaches the page's A/B table, the CLI's `--set` and usage, and
+  the web `set=` through `Mapping::variants`; `Mappings::every` grows from 6144 to 8192. The cue
+  pattern's first comment says `reading = breath` and what it does; the explain view (CLI and web)
+  now lists `reading=arrives` when the old reading is chosen, and nothing under the default.
+- **Timing.** Nothing new on the clock: a breath cue is an ordinary cue in a slot, weighted as the
+  music's bar under the steady pulse, and its rate is fitted to *that* slot's bar — which under a
+  breath is often not its own line's bar (the strudel clock test: line 2's eight syllables read in a
+  three-beat bar of the old loop, 1.569, where `arrives` read it in its own four-beat bar, 1.176).
+  The trace, the music, the OSC schedule and the roll are untouched; the page's reading wash follows
+  the cue that fires.
+- **Tests.** Hand-worked: `TRANSFORMING` under breath (0, 1, 3, 4 and its cue pattern
+  `<0@2 1@2 ~@2 2@2 3@2 ~@2 ~@2 ~@2>`), a new three-stanza fixture with its full 24-slot
+  arrangement asserted and the cues of every variant (arrives 0 1 2 3 7 11 12 16 20; stanza
+  0–5, 12–14; breath 0–2, 4–6, 12–14), the refrain fixture (breath 0 1 3 4 6 7), hand-made arrivals
+  for the wait-for-music, wait-for-breath, cut-short, never-started, first-line-late and
+  never-heard edges, the steady/elastic clock test, the web reading test on the seed (breath 0–3,
+  5–8) and the Tyger plan. A proptest (`prosody-emit/tests/breath.rs`) checks every stanza's cues
+  against the arrives plan on random poems and all nine examples (and that every example reads
+  every line), with I1, I3 and I4. `arrives` and `stanza` tests now name their variant and are
+  unchanged.
+- **Snapshots: none changed** (the reading is not in the pattern, the trace or the explain view's
+  default). `cycle.sh` machine and jazz: identical before and after (0.743, 0.737) — the scorer
+  never reads the reading.
+- **I2, disclosed in `SPEC.md` §4.7:** a stanza that waits for its breath has cues that depend on
+  the previous stanza's reading, so adding a line to stanza *n* can move stanza *n + 1*'s cues by a
+  bar. Cues are not voices; the voice property is untouched.
+
 ### The melody over the harmony — single rhyme notes on top of the chord lane
 
 The user decided: with the jazz palette (`voicing = "seventh"`) and a harmony variant on, the rhyme

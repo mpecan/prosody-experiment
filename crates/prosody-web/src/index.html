@@ -335,6 +335,8 @@
         <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
         <p>
           Whether and when lines are read is the <code>reading</code> mapping above:
+          <code>breath</code> (the default) reads each stanza through, a line a bar, with a silent
+          bar before the next stanza and never before the music has begun it;
           <code>arrives</code> speaks each line once, in the bar where it is first heard;
           <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
           stanza that transforms a loop is read through rather than a line every few bars;
@@ -991,7 +993,12 @@ async function play() {
     playing = true;
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
-    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread, !!unread);
+    // A line the reading leaves out is said, not left for the listener to miss (SPEC.md §4.7).
+    const lost = reading?.unread?.length
+      ? ' · not read: ' + reading.unread.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ')
+      : '';
+    if (lost) console.log('[reading]' + lost);
+    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread + lost, !!unread);
   } catch (error) {
     status('Strudel refused the pattern: ' + error.message, true);
   }
