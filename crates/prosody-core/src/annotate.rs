@@ -135,6 +135,7 @@ pub struct Syllable {
     of: usize,
     foot: FootKind,
     velocity: Velocity,
+    light: bool,
 }
 
 impl Syllable {
@@ -154,6 +155,13 @@ impl Syllable {
     #[must_use]
     pub const fn velocity(&self) -> Velocity {
         self.velocity
+    }
+
+    /// Whether the light function words struck it lightly ([`Event::is_light`]): the row's gain
+    /// was decided by `Mapping::Function`, not by the dictionary's stress alone.
+    #[must_use]
+    pub const fn is_light(&self) -> bool {
+        self.light
     }
 }
 
@@ -352,6 +360,9 @@ pub struct Annotated {
     /// [`Score::straightened_beats`]: each fitted beat of a slot once, as the pattern header and
     /// the OSC schedule count it — not once per line fitted there.
     straightened_beats: usize,
+    function: Variant,
+    /// [`Score::lightened`]: the syllables the light function words struck lightly.
+    lightened: usize,
     lengths: Vec<usize>,
 }
 
@@ -379,6 +390,18 @@ impl Annotated {
     #[must_use]
     pub const fn straightened_beats(&self) -> usize {
         self.straightened_beats
+    }
+
+    /// Which variant of the function words struck the syllables (`SPEC.md` §4.2).
+    #[must_use]
+    pub const fn function(&self) -> Variant {
+        self.function
+    }
+
+    /// How many syllables the light function words struck lightly ([`Score::lightened`]).
+    #[must_use]
+    pub const fn lightened(&self) -> usize {
+        self.lightened
     }
 
     /// Every bar length of the piece, in beats, smallest first, once each: what the pulse
@@ -525,6 +548,8 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         pulse: score.pulse(),
         stack: score.stack(),
         straightened_beats: score.straightened_beats(),
+        function: score.function(),
+        lightened: score.lightened(),
         lengths: {
             let mut lengths: Vec<usize> = score
                 .arrangement()
@@ -548,6 +573,7 @@ const fn syllable(event: &Event) -> Syllable {
         of: event.subdivision().of(),
         foot: event.foot(),
         velocity: event.velocity(),
+        light: event.is_light(),
     }
 }
 
@@ -640,6 +666,16 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             out,
             "stack straight · a line stacked under a bar's line is fitted to its subdivision \
              where the two would cross: {fitted} beat(s) (§4.2, §4.6)"
+        );
+    }
+    // The light function words (§4.2), named only when chosen, like the straight stack: under
+    // the default every gain below is its syllable's dictionary stress.
+    if annotated.function() == Variant::Light {
+        let _ = writeln!(
+            out,
+            "function-words light · a one-syllable function word off the metre's strong \
+             positions is struck at 0.67, not full force: {} syllable(s) (§4.2)",
+            annotated.lightened()
         );
     }
     let _ = writeln!(out);
@@ -1168,6 +1204,10 @@ fn render_token(out: &mut String, source: &str, token: &Annotation, walking: boo
                 from.push("phoneme(guessed)");
             }
         }
+        // Per syllable, not per token: this gain is the light function words' (§4.2).
+        if syllable.is_light() {
+            from.push("function-words");
+        }
 
         let _ = writeln!(
             out,
@@ -1254,6 +1294,11 @@ mod tests {
     struct ByLength;
 
     impl Lexicon for ByLength {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, word: &str) -> Rarity {
             Rarity::band(u8::try_from(word.chars().count()).unwrap_or(u8::MAX))
         }

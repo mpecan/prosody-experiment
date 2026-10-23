@@ -4,8 +4,9 @@
 //! `SPEC.md`, they change what a poem becomes, and whether they belong is judged by listening. Each
 //! is a *selector*: a [`Mapping`] has a fixed, ordered list of [`Variant`]s — always including
 //! a first variant that is what preceded the mapping ([`Variant::Off`] for every mapping but the
-//! pulse, which cannot be left out and goes back to [`Variant::Elastic`], and the stack, whose
-//! lines always sound somehow and which goes back to [`Variant::Crossing`]) — and one of them is
+//! pulse, which cannot be left out and goes back to [`Variant::Elastic`], the stack, whose
+//! lines always sound somehow and which goes back to [`Variant::Crossing`], and the function
+//! words, which are always struck somehow and go back to [`Variant::Full`]) — and one of them is
 //! its default. A [`Mappings`] value picks one variant per
 //! mapping, so the same poem can be heard under each choice, side by side.
 //!
@@ -61,6 +62,15 @@ pub enum Mapping {
     ///
     /// [`Score::placed_in`]: crate::voice::Score::placed_in
     Stack,
+    /// §4.2's "stress → accent" for a one-syllable function word ("or", "thy", "what", "the",
+    /// "and", …), which the dictionary gives full stress. [`Variant::Full`] (the default): struck
+    /// at its dictionary stress, like any word. [`Variant::Light`]: struck lightly — secondary
+    /// force — unless the meter's scansion puts it on a strong position (`crate::accent`). Which
+    /// words are function words is the lexicon's to say
+    /// ([`Lexicon::is_function_word`](crate::surprisal::Lexicon::is_function_word)). How hard an
+    /// event is struck is structure, not palette (I3): it decides which syllables are accents,
+    /// and so where the bass plays and what the scorer counts as syncopation.
+    Function,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -104,6 +114,12 @@ pub enum Variant {
     /// The stack straightened: where a stacked line's beat would cross its host's, its syllables
     /// are fitted to the host's subdivision of that beat, each still its own event.
     Straight,
+    /// The function words as they were, and their default: every syllable struck at its
+    /// dictionary stress, so "or" in "hand or eye" is as loud as "hand".
+    Full,
+    /// The function words lightened: a one-syllable function word off the meter's strong
+    /// positions is struck at secondary force, so it no longer reads as an accent.
+    Light,
 }
 
 impl Variant {
@@ -125,6 +141,8 @@ impl Variant {
             Self::Elastic => "elastic",
             Self::Crossing => "crossing",
             Self::Straight => "straight",
+            Self::Full => "full",
+            Self::Light => "light",
         }
     }
 }
@@ -161,9 +179,13 @@ const PULSE: &[Variant] = &[Variant::Elastic, Variant::Steady];
 /// always divides its beats somehow, so the stack has no [`Variant::Off`] — then straight.
 const STACK: &[Variant] = &[Variant::Crossing, Variant::Straight];
 
+/// The function words' variants: full first, because it is what preceded the mapping — a word is
+/// always struck somehow, so there is no [`Variant::Off`] — then light.
+const FUNCTION: &[Variant] = &[Variant::Full, Variant::Light];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -173,6 +195,7 @@ impl Mapping {
         Self::Reading,
         Self::Pulse,
         Self::Stack,
+        Self::Function,
     ];
 
     /// Its name on a command line or in a query string.
@@ -188,6 +211,7 @@ impl Mapping {
             Self::Reading => "reading",
             Self::Pulse => "pulse",
             Self::Stack => "stack",
+            Self::Function => "function-words",
         }
     }
 
@@ -226,12 +250,18 @@ impl Mapping {
                  against two where the feet differ (crossing), or fitted to the bar's line's \
                  subdivision wherever they would cross (straight)"
             }
+            Self::Function => {
+                "a one-syllable function word (or, thy, the, and, …): struck at its dictionary \
+                 stress like any word (full), or lightly unless the metre puts it on a strong \
+                 position (light)"
+            }
         }
     }
 
     /// Its variants, in a fixed order that starts with what preceded the mapping:
-    /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`], and the
-    /// stack, which starts with [`Variant::Crossing`].
+    /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`], the
+    /// stack, which starts with [`Variant::Crossing`], and the function words, which start with
+    /// [`Variant::Full`].
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
@@ -241,6 +271,7 @@ impl Mapping {
             Self::Harmony => HARMONY,
             Self::Pulse => PULSE,
             Self::Stack => STACK,
+            Self::Function => FUNCTION,
         }
     }
 
@@ -265,6 +296,11 @@ impl Mapping {
             // the piece, and straight is a variant to hear against it. SPEC.md §4.2's "syllable →
             // subdivision within the foot" is what crosses; straight bends it only under a host.
             Self::Stack => Variant::Crossing,
+            // The user decided (PLAN.md, "softening function words"): full stays the piece, and
+            // light is a variant to hear against it. SPEC.md §4.2 maps stress to accent, and the
+            // dictionary's stress on "or" is lexical, not the line's; light lets the meter's
+            // scansion overrule it where the meter calls the position weak.
+            Self::Function => Variant::Full,
         }
     }
 
@@ -288,7 +324,8 @@ impl Mapping {
 
     /// This mapping left out: its first variant, what preceded it — [`Variant::Off`] for every
     /// mapping but the pulse, which a piece cannot be without, and which goes back to
-    /// [`Variant::Elastic`], and the stack, which goes back to [`Variant::Crossing`].
+    /// [`Variant::Elastic`], the stack, which goes back to [`Variant::Crossing`], and the
+    /// function words, which go back to [`Variant::Full`].
     #[must_use]
     pub const fn off(self) -> Choice {
         let variant = match self.variants() {
@@ -367,7 +404,7 @@ impl Mappings {
     }
 
     /// Whether `mapping` applies at all: any variant but [`Variant::Off`]. Always true of the
-    /// pulse and the stack, which have no off.
+    /// pulse, the stack and the function words, which have no off.
     #[must_use]
     pub fn has(&self, mapping: Mapping) -> bool {
         self.get(mapping) != Variant::Off
@@ -422,6 +459,7 @@ mod tests {
             let preceded = match mapping {
                 Mapping::Pulse => Variant::Elastic,
                 Mapping::Stack => Variant::Crossing,
+                Mapping::Function => Variant::Full,
                 _ => Variant::Off,
             };
             assert_eq!(mapping.variants().first(), Some(&preceded), "{mapping:?}");
@@ -469,6 +507,25 @@ mod tests {
     }
 
     #[test]
+    fn function_words_are_full_unless_light_is_chosen() {
+        assert_eq!(
+            Mapping::Function.variants(),
+            &[Variant::Full, Variant::Light]
+        );
+        assert_eq!(Mapping::named("function-words"), Some(Mapping::Function));
+        assert_eq!(Mappings::all().get(Mapping::Function), Variant::Full);
+        assert!(Mapping::Function.choose(Variant::Off).is_none());
+        assert!(Mapping::Function.choose_named("off").is_none());
+        assert!(Mapping::Function.choose_named("straight").is_none());
+        let light = Mappings::all().with(Mapping::Function.choose_named("light").unwrap());
+        assert_eq!(light.get(Mapping::Function), Variant::Light);
+        assert_eq!(light.changed().count(), 1);
+        // Left out, it is what preceded it: full, the default, so nothing is stored.
+        assert_eq!(light.without(Mapping::Function), Mappings::all());
+        assert!(Mappings::all().has(Mapping::Function));
+    }
+
+    #[test]
     fn the_defaults_are_todays_piece() {
         // The four machine-cycle switches are on, the bass is by vowel height, the reading reads
         // each line where it arrives, and the harmony — a candidate not yet in the piece — is off.
@@ -481,6 +538,7 @@ mod tests {
         assert_eq!(all.get(Mapping::Reading), Variant::Arrives);
         assert_eq!(all.get(Mapping::Harmony), Variant::Off);
         assert_eq!(all.get(Mapping::Stack), Variant::Crossing);
+        assert_eq!(all.get(Mapping::Function), Variant::Full);
         assert_eq!(all.changed().count(), 0);
     }
 
@@ -548,9 +606,10 @@ mod tests {
     #[test]
     fn every_combination_is_listed_once() {
         // Four on/off switches, a four-way bass, a four-way harmony, a three-way reading, a
-        // two-way pulse and a two-way stack: 2^4 × 4 × 4 × 3 × 2 × 2 = 3072.
+        // two-way pulse, a two-way stack and two-way function words:
+        // 2^4 × 4 × 4 × 3 × 2 × 2 × 2 = 6144.
         let every = Mappings::every();
-        assert_eq!(every.len(), 3072);
+        assert_eq!(every.len(), 6144);
         for (index, one) in every.iter().enumerate() {
             assert!(!every[index + 1..].contains(one), "{one:?} twice");
         }

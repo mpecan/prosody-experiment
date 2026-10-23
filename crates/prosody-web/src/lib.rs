@@ -848,6 +848,14 @@ mod tests {
             html.contains("[\"crossing\",\"straight\"],\"crossing\"]"),
             "the stack selector"
         );
+        assert!(
+            html.contains("[\"function-words\","),
+            "the function words' selector, by name"
+        );
+        assert!(
+            html.contains("[\"full\",\"light\"],\"full\"]"),
+            "the function words' selector"
+        );
         // B starts at each mapping's first variant — what preceded it — not at `off`, which the
         // pulse does not have: so B is elastic and A steady until the writer chooses.
         assert!(html.contains("B: defaults((m) => m[2][0])"), "B's defaults");
@@ -1442,6 +1450,70 @@ mod tests {
         );
         assert!(explain.body.contains("pulse=elastic"), "{}", explain.body);
         assert!(explain.body.contains("pulse elastic ·"), "{}", explain.body);
+    }
+
+    #[test]
+    fn light_function_words_reach_the_pattern_the_explain_view_and_the_score() {
+        // The Tyger, asked for with `set=function-words:light`: the pattern header and the explain
+        // view name it and agree on how many syllables it struck lightly; "or" in "hand or eye"
+        // is one of them; the score's syncopation is measured on the lightened accents. Under
+        // the default none of it appears.
+        let tyger = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "blake-tyger")
+            .map(|(_, _, text)| body_of(text))
+            .unwrap();
+        let light = &[("set", "function-words:light")];
+        let pattern = super::compile(&request(light, tyger), &Output::Pattern);
+        let explain = super::compile(&request(light, tyger), &Output::Explain);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(explain.status, 200, "{}", explain.body);
+        let marked = explain
+            .body
+            .lines()
+            .filter(|line| line.ends_with(",function-words"))
+            .count();
+        assert!(marked > 0, "{}", explain.body);
+        assert!(
+            pattern.body.contains(&format!(
+                "//   function-words = light: a one-syllable function word off the metre's \
+                 strong positions is struck at 2/3 of full force, in {marked} syllable(s)"
+            )),
+            "{}",
+            pattern.body
+        );
+        assert!(
+            explain.body.contains("function-words=light"),
+            "{}",
+            explain.body
+        );
+        let or = explain
+            .body
+            .lines()
+            .find(|line| line.trim_start().starts_with("or             2.2.1/2"))
+            .unwrap();
+        assert!(or.contains(" 0.67 "), "{or}");
+        let full = super::compile(&request(&[], tyger), &Output::Pattern);
+        assert!(!full.body.contains("function-words"));
+        let sync = |query: &[(&str, &str)]| -> String {
+            let score = super::compile(&request(query, tyger), &Output::Score);
+            assert_eq!(score.status, 200, "{}", score.body);
+            score
+                .body
+                .lines()
+                .find(|line| line.contains("syncopation"))
+                .unwrap()
+                .to_owned()
+        };
+        assert_ne!(sync(&[]), sync(light));
+        assert!(
+            super::compile(
+                &request(&[("set", "function-words:off")], tyger),
+                &Output::Pattern
+            )
+            .status
+                >= 400
+        );
     }
 
     #[test]

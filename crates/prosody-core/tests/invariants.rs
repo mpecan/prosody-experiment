@@ -33,6 +33,13 @@ use prosody_core::{
 struct LengthLexicon;
 
 impl Lexicon for LengthLexicon {
+    // A closed class by spelling — every word of one or two letters, and the repetitive poems'
+    // "and" and "the" — so the properties run under any mappings exercise the light function
+    // words (`Mapping::Function`) rather than holding vacuously for them.
+    fn is_function_word(&self, word: &str) -> bool {
+        word.chars().count() <= 2 || word == "and" || word == "the"
+    }
+
     fn rarity(&self, word: &str) -> Rarity {
         Rarity::band(u8::try_from(word.chars().count()).unwrap_or(u8::MAX))
     }

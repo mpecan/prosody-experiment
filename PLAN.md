@@ -406,6 +406,85 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Softening function words — a variant, full kept
+
+The user decided: `CMUdict` gives one-syllable function words primary stress, so §4.2's "stress →
+accent" strikes "or" in The Tyger's "hand or eye" like "hand"; today's behaviour stays the default
+and a **light** variant softens them where the metre does not need them. A new selector,
+`Mapping::Function` (`function-words`): **`full`** (default, first — what preceded it; no `off`)
+and **`light`**.
+
+- **The rule** (`prosody_core::accent`). Under `light`, a syllable is struck at
+  `Velocity::SECONDARY` (2/3) when its word is a function word (the lexicon says), has one syllable,
+  carries primary stress, and is *not* on a strong position of the meter's own scansion: its foot's
+  template stressed there (read from `Event::foot` and `Event::subdivision`, nothing re-scanned).
+  The spondee is read further, because the meter makes one exactly where a function word's
+  dictionary stress meets a content word: its strong position is the first in a falling line (more
+  trochees/dactyls than iambs/anapests), the second in a rising one, and in a level line the content
+  word's (two function words: the one on the beat). Hand-worked: "What immortal hand or eye" scans
+  trochee, trochee, spondee, single — falling — so "or" is light and "What" (a trochee's head)
+  stays; "In the forests of the night" scans anapest, iamb, iamb, and "of" (an iamb's strong half)
+  stays; "Did he who made the Lamb make thee" scans spondee, spondee, iamb, spondee — rising — so
+  "Did" and "who" are light and the rhyme word "thee" stays. The direction rule was added after the
+  first version (spondee → content word always) lightened Blake's rhyme word "thee" in that line.
+- **Where the list lives.** `Lexicon::is_function_word` — a *required* method on the core's
+  language-agnostic `Lexicon` trait, so a second language must answer it — with the English closed
+  class in `prosody-lexicon/src/function.rs`, beside the frequency table: word class is language
+  data (§9), and the lexicon is already the one English-word table every caller passes in, so no
+  call site of the pipeline changed. A fixed sorted list (binary search, a test checks the order):
+  articles, pronouns incl. thou/thee/thy/thine, possessives, conjunctions, short prepositions,
+  auxiliaries and their archaic forms. Left out on purpose: negatives, quantifiers, `so`/`yet`/
+  `when`/`where`/`how`/`while`, `up`/`down`/`out`/`off`, `there`, `art` (Tyger's "what art").
+  The surprisal pass, which already asks the lexicon about each word, records the answer
+  (`WordSurprisal::is_function_word`); it plays no part in surprisal.
+- **Every consumer.** Decided once in the lowering, right after the rhythm and before the bass, on
+  `Event::velocity` itself: Strudel gains, OSC velocities, the scorer's accents, the height bass
+  (primary syllables only — a light "or" loses its bass note) and W2's strongest syllable all read
+  it. `Event::is_light` marks the event; `Score::function` and `Score::lightened` name and count.
+- **Visible.** Pattern header `function-words = light: … in N syllable(s)`; OSC
+  `# function-words = light: …`; the explain view's `function-words light · … N syllable(s)` line and
+  `function-words` in the *from* column of each light row; the CLI help; the page's mapping table
+  (from `Mapping::ALL`, unchanged code). Under the default nothing new is printed, so **no snapshot
+  changed** (the insta suites passed untouched; no `.snap.new`).
+- **Tests (hand-worked).** Core `tests/accent.rs` (a table phonemiser with `CMUdict`'s stresses):
+  the three lines above, full vs light, with their scansions asserted first; a level line ("hand or
+  eye": "or" light; "or thy hand": "thy" light, "or" keeps the beat); a two-syllable "function word"
+  left alone; the height bass losing "or"'s note and nothing else moving; the explain view; a
+  property under every other mapping choice that only force changes and only on lightened
+  one-syllable function words off a non-spondee strong position; an I2 property (an edit to stanza 1
+  leaves the last stanza's forces alone). Mutation-checked: removing the one-syllable clause, the
+  spondee rule, the direction or the strong-position test each fails a test. Lexicon: list order,
+  members, omissions, case/apostrophe matching. Emit (real `CMUdict`): "or"'s gain 1.000 → 0.667 in
+  both passes of the one-line poem, the bass lane `[36 36]` → `[36 ~]`, every other pattern line
+  identical; OSC: exactly the two "or" messages change, velocity 1.000 → 0.667, degree 36 → −1.
+  Scorer: `dAda dAda dA dO da dA` syncopation 0.25 → 0, pitched 5/8 → 1/2, pulse/steadiness/
+  cross-rhythm/layering/recurrence equal. CLI: the counts agree across header, OSC and explain;
+  `--without function-words` is the default; `function-words=off` refused; `node --check` passes.
+  Web: the selector, `/pattern` and `/explain` agree, the score's syncopation moves. `check-wasm.sh`
+  gained two `function-words:light` settings: 495 answers byte-identical. The invariants' lexicon
+  now calls words of ≤ 2 letters and "and"/"the" function words, so the I1/I4 properties under any
+  mappings exercise `light`; the stack property's `pick` range grew to cover the doubled space (6144).
+- **Measured** (`./scripts/cycle.sh`, mean overall). Default: machine 0.743, jazz 0.737 — every row
+  byte-identical to before. `function-words=light`: machine **0.710**, jazz **0.747**. Syllables
+  lightened: Tyger 24, Sonnet 24, Whitman 18, Dickinson 15, Poe 13, Hopkins 9, Jabberwocky 7,
+  Wilde 4, Prešeren 0. Syncopation rises almost everywhere (Dickinson 0.362 → 0.694, Sonnet 0.364 →
+  0.657, Jabberwocky 0.600 → 0.738, Whitman 0.150 → 0.331, Tyger 0.017 → 0.020): a light function
+  word *on a beat* (a rising line's spondee head, "Could", "Did") leaves that beat unaccented after
+  the previous offbeat accent, which is exactly what LHL counts. Machine's band (0.1–0.4) punishes
+  that, jazz's (0.45–0.9) rewards it — the Sonnet 0.880 → 0.926 under jazz, 0.733 → 0.636 under
+  machine. Pitched falls with the lost bass notes (Tyger 0.681 → 0.570). Legibility unchanged
+  (Tyger 116 of 143 explained). The scorer reads it, as it should; whether it sounds better is the
+  user's call.
+- **In the browser** (Chromium, the page's Tyger preset — its first two stanzas — A `full`, B
+  `light`, every other B mapping set to A's): B's header counts 6 (bars 0–7: "or" ×2, "Could",
+  "thy", "thine", "what" — the same rows the CLI marks); evaluating each side's pattern, "or" at bar 2
+  beat 2½ is `bd` gain 1 plus a bass note on A and `bd` gain 0.667 with no bass note on B; on both
+  sides every trace onset in a 6 s window was a music onset on the scheduler's clock (22 of 22); the
+  lit poem followed the lines in order; no console errors or warnings.
+- **Raised, not done.** Secondary (2/3) or unstressed (1/3) for a light word; whether a spondee's
+  direction should come from the stanza rather than the line; phrasal stress beyond function words
+  (§9's "content" noun/adjective) is still not attempted.
+
 ### Straightening stacked lines — a variant, crossing kept
 
 The user decided: where a line stacked under the bar's host divides a beat incompatibly with it

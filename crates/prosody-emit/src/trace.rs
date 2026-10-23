@@ -239,6 +239,11 @@ mod tests {
     struct Flat;
 
     impl Lexicon for Flat {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, _word: &str) -> Rarity {
             Rarity::band(1)
         }

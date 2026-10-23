@@ -25,6 +25,22 @@
 //! poem is a word that is rare *in poems*; web frequencies would call "thee" and "hath" exotic and
 //! "click" ordinary, which is backwards for this instrument. The cost is that nothing after 1929
 //! is in it, so `phone` and `jazz` score as maximally rare.
+//!
+//! # Function words
+//!
+//! The lexicon also answers which words are English *function words* — articles, pronouns,
+//! possessives, conjunctions, short prepositions, auxiliaries — for the light variant of
+//! `Mapping::Function` (`SPEC.md` §4.2). A fixed, written-out list, not derived from the counts:
+//! frequency and word class are different facts ("thou" is rare in prose and closed-class
+//! everywhere). See `src/function.rs` for the list and what was left out of it.
+
+// Tests may unwrap and index freely; production code may not. See CLAUDE.md §3.
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
+)]
+
+mod function;
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -63,9 +79,19 @@ impl Lexicon for EnglishLexicon {
     /// Unknown words are [`Rarity::RAREST`] — a coinage or a proper noun really is unusual, and
     /// `SPEC.md` §4.4 wants exactly that to cut through.
     fn rarity(&self, word: &str) -> Rarity {
-        let key = word.trim_matches(['\'', '\u{2019}']).to_lowercase();
-        bands().get(&key).copied().unwrap_or(Rarity::RAREST)
+        bands().get(&key(word)).copied().unwrap_or(Rarity::RAREST)
     }
+
+    /// The closed class listed in `src/function.rs`, matched like [`Lexicon::rarity`]: any case, edge
+    /// apostrophes ignored.
+    fn is_function_word(&self, word: &str) -> bool {
+        function::contains(&key(word))
+    }
+}
+
+/// A word as both tables are keyed: lowercase, with edge apostrophes (straight or curly) trimmed.
+fn key(word: &str) -> String {
+    word.trim_matches(['\'', '\u{2019}']).to_lowercase()
 }
 
 /// A `BTreeMap` rather than a `HashMap`, per `CLAUDE.md` §4 — nothing iterates it today, but the
@@ -157,6 +183,17 @@ mod tests {
                 lexicon.rarity(word) < Rarity::RAREST,
                 "{word} should be known"
             );
+        }
+    }
+
+    #[test]
+    fn function_words_are_matched_like_rarity() {
+        let lexicon = EnglishLexicon::new();
+        for word in ["or", "Thy", "WHAT", "'the'", "I", "thee\u{2019}"] {
+            assert!(lexicon.is_function_word(word), "{word}");
+        }
+        for word in ["hand", "Tyger", "symmetry", "krapplesnaffle", ""] {
+            assert!(!lexicon.is_function_word(word), "{word}");
         }
     }
 

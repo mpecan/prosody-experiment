@@ -55,6 +55,12 @@ impl Phonemiser for Toy {
 struct Flat;
 
 impl Lexicon for Flat {
+    // One closed-class word, `dO` (looked up lowercased, as every lexicon is asked), for the
+    // light function words' test below. Under the default, full, it changes nothing.
+    fn is_function_word(&self, word: &str) -> bool {
+        word == "do"
+    }
+
     fn rarity(&self, _: &str) -> Rarity {
         Rarity::band(3)
     }
@@ -426,4 +432,60 @@ fn straightened_a_loop_is_re_timed_by_an_edit_to_its_host_in_another_stanza() {
     }
     assert_eq!(crossing.local(), 9);
     assert_eq!(straightened.local(), 8);
+}
+
+#[test]
+fn a_light_function_word_is_no_accent_to_the_scorer() {
+    // `dAda dAda dA dO da dA`, `dO` a function word: S w S w S S w S, scanned trochee, trochee,
+    // spondee, iamb — two falling feet to one rising, so the spondee's strong position is its
+    // first and `dO`, on the offbeat of beat 2, is weak. One bar of four beats, played twice (the
+    // outro). Depths: downbeat 0, beat 1, offbeat 2; a syncopation is an accent followed, before
+    // the next accent, by an unaccented stronger position, by the difference.
+    //
+    // Full, accents at 0, 1, 2, 2½, 3½ of each bar. 2½ is followed by beat 3's unaccented `da`:
+    // 2 − 1 = 1. 3½ is followed by the next bar's downbeat, which is accented (`dA`), and in the
+    // last bar by nothing: 0. The rest are followed only by weaker offbeats. 1 + 1 = 2 over 8
+    // beats: 0.25.
+    //
+    // Light, `dO` unaccented: beat 2's accent is followed by 2½ and beat 3, neither stronger than
+    // a beat, so nothing syncopates: 0.
+    let source = "dAda dAda dA dO da dA\n";
+    let light = prosody_core::Mappings::all().with(
+        prosody_core::Mapping::Function
+            .choose(prosody_core::Variant::Light)
+            .unwrap(),
+    );
+    let (full, light) = (
+        compile_under(source, &prosody_core::Mappings::all()),
+        compile_under(source, &light),
+    );
+    assert_eq!(light.lightened(), 1);
+    assert!((metric(&full, "syncopation") - 0.25).abs() < 1e-9);
+    assert!(metric(&light, "syncopation").abs() < 1e-9);
+    // Only accents moved: when things sound, and how many lines and instruments, did not —
+    // read under the jazz profile, which measures the pulse, its steadiness and cross-rhythm too.
+    let jazz = |score: &Score, name: &str| {
+        measure_as(score, Profile::Jazz)
+            .into_iter()
+            .find(|metric| metric.name() == name)
+            .unwrap()
+            .value()
+    };
+    for name in [
+        "pulse",
+        "steadiness",
+        "cross_rhythm",
+        "layering",
+        "recurrence",
+    ] {
+        assert!(
+            (jazz(&full, name) - jazz(&light, name)).abs() < 1e-9,
+            "{name}"
+        );
+    }
+    // The height bass plays primary-stressed foundation syllables, and a one-line poem's last
+    // word rhymes with nothing, so under full the four `dA`s and `dO` carry a bass note: 5 of 8
+    // hits a bar. Under light `dO` is no longer primary: 4 of 8.
+    assert!((jazz(&full, "pitched") - 5.0 / 8.0).abs() < 1e-9);
+    assert!((jazz(&light, "pitched") - 0.5).abs() < 1e-9);
 }

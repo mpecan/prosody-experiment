@@ -228,6 +228,7 @@ pub struct Schedule {
     unsent_bass: usize,
     elastic_unapplied: bool,
     straightened: Option<usize>,
+    lightened: Option<usize>,
 }
 
 /// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
@@ -303,6 +304,14 @@ impl Schedule {
         self.straightened
     }
 
+    /// Under the light function words (`Mapping::Function`), how many syllables were struck
+    /// lightly — their velocity is the score's, applied here as in the Strudel pattern; `None`
+    /// under full, the default.
+    #[must_use]
+    pub const fn lightened(&self) -> Option<usize> {
+        self.lightened
+    }
+
     /// How long the piece lasts, in beats.
     #[must_use]
     pub fn beats(&self) -> f64 {
@@ -361,6 +370,13 @@ impl Schedule {
                 out,
                 "# stack = straight: a stacked line fitted to its bar's line's subdivision in \
                  {beats} beat(s)"
+            );
+        }
+        if let Some(syllables) = self.lightened {
+            let _ = writeln!(
+                out,
+                "# function-words = light: a one-syllable function word off the metre's strong \
+                 positions sent at 2/3 velocity, in {syllables} syllable(s)"
             );
         }
         if self.unsent_chords > 0 {
@@ -469,6 +485,8 @@ impl Backend for Osc {
             elastic_unapplied: score.pulse() == prosody_core::Variant::Elastic,
             straightened: (score.stack() == prosody_core::Variant::Straight)
                 .then(|| crate::strudel::straightened(score)),
+            lightened: (score.function() == prosody_core::Variant::Light)
+                .then(|| score.lightened()),
         })
     }
 }
@@ -675,6 +693,11 @@ mod tests {
     struct Flat;
 
     impl Lexicon for Flat {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, _: &str) -> Rarity {
             Rarity::band(3)
         }

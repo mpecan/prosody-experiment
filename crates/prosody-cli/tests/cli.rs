@@ -821,6 +821,90 @@ fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
 }
 
 #[test]
+fn function_words_are_full_unless_set_light_and_have_no_off() {
+    // The Tyger, whose "What immortal hand or eye" strikes "or" as hard as "hand". Under the
+    // default nothing new is printed; `function-words=light` names itself, and every surface
+    // counts the same syllables: the pattern header, the OSC schedule, the explain view's summary
+    // line and its rows marked `function-words`.
+    let poem = std::fs::read_to_string(examples().join("blake-tyger.poem")).unwrap();
+    let (full, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!full.contains("function-words"), "{full}");
+    let (without, _, _) = run(&["--without", "function-words"], &poem);
+    assert_eq!(without, full);
+    let (_, err, code) = run(&["--set", "function-words=off"], &poem);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `function-words` (it has full, light)"),
+        "{err}"
+    );
+
+    let (view, err, code) = run(&["--explain", "--set", "function-words=light"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    let marked = view
+        .lines()
+        .filter(|line| line.ends_with(",function-words"))
+        .count();
+    assert!(marked > 0, "{view}");
+    assert!(
+        view.contains(&format!(
+            "function-words light · a one-syllable function word off the metre's strong \
+             positions is struck at 0.67, not full force: {marked} syllable(s) (§4.2)"
+        )),
+        "{view}"
+    );
+    // "or" in bar 2 — the spondee "hand or" of a falling line — is light; "hand" is not.
+    let row = |view: &str, start: &str| {
+        view.lines()
+            .find(|line| line.trim_start().starts_with(start))
+            .unwrap()
+            .to_owned()
+    };
+    let or = row(&view, "or             2.2.1/2");
+    assert!(
+        or.contains(" 0.67 ") && or.ends_with(",function-words"),
+        "{or}"
+    );
+    assert!(!row(&view, "hand           2.2.0/2").contains("function-words"));
+    let (full_view, _, _) = run(&["--explain"], &poem);
+    assert!(row(&full_view, "or             2.2.1/2").contains(" 1.00 "));
+
+    let (light, err, code) = run(&["--set", "function-words=light"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        light.contains(&format!(
+            "//   function-words = light: a one-syllable function word off the metre's strong \
+             positions is struck at 2/3 of full force, in {marked} syllable(s)"
+        )),
+        "{light}"
+    );
+    let (schedule, err, code) = run(&["--osc", "--set", "function-words=light"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        schedule.contains(&format!(
+            "# function-words = light: a one-syllable function word off the metre's strong \
+             positions sent at 2/3 velocity, in {marked} syllable(s)"
+        )),
+        "{schedule}"
+    );
+    // And the pattern is JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-function-words-light.js");
+        std::fs::write(&file, &light).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}
+
+#[test]
 fn the_stack_crosses_unless_set_straight_and_has_no_off() {
     // Wilde's Theocritus stacks dactylic line-ends against iambs: the default pattern keeps them
     // crossing and says nothing new; `stack=straight` names itself and fits 38 beats — the 38

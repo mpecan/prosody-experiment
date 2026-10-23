@@ -49,6 +49,11 @@ impl Phonemiser for Toy {
 struct Flat;
 
 impl Lexicon for Flat {
+    // No closed class: every word keeps its dictionary stress under either variant.
+    fn is_function_word(&self, _: &str) -> bool {
+        false
+    }
+
     fn rarity(&self, _: &str) -> Rarity {
         Rarity::band(3)
     }
@@ -290,7 +295,7 @@ proptest! {
     #[test]
     fn straight_only_moves_stacked_onsets_onto_the_hosts_grid(
         source in stacking_poem(),
-        pick in 0_usize..4096,
+        pick in 0_usize..1 << 16,
     ) {
         let every = Mappings::every();
         let mappings = every[pick % every.len()].clone();

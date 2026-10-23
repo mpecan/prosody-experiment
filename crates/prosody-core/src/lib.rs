@@ -21,6 +21,8 @@
 //! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
 //! - [`voice`] — the IR of §3: sounding events, with nothing a style could supply.
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
+//! - [`accent`] — the light function words, a candidate: a one-syllable function word struck
+//!   lightly where the meter's scansion calls its position weak (§4.2's stress → accent).
 //! - [`mapping`] — which variant of each candidate mapping applies, so each can be heard against
 //!   the others and against its absence.
 //! - [`bass`] — §4.6's bass: by vowel height, or walking on every syllable or every foot.
@@ -41,6 +43,7 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod accent;
 pub mod annotate;
 pub mod arrange;
 pub mod bass;

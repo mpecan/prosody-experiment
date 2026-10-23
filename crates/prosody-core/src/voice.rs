@@ -438,6 +438,7 @@ pub struct Event {
     family: Option<Family>,
     anchor: Option<Anchor>,
     bank: Option<Phoneme>,
+    light: bool,
 }
 
 impl Event {
@@ -484,6 +485,16 @@ impl Event {
     #[must_use]
     pub const fn velocity(self) -> Velocity {
         self.velocity
+    }
+
+    /// Whether the light function words (`Mapping::Function`, `crate::accent`) struck this
+    /// syllable at [`Velocity::SECONDARY`] rather than its dictionary's primary stress: a
+    /// one-syllable function word on a position the meter calls weak. Always false under the
+    /// default, full. Carried so the debug view can say which pass decided the gain (`SPEC.md`
+    /// §8), and so a backend's header can count them.
+    #[must_use]
+    pub const fn is_light(self) -> bool {
+        self.light
     }
 
     /// Its note, if this syllable is the one the line's rhyme rests on.
@@ -562,6 +573,7 @@ pub struct Score {
     bass: Variant,
     pulse: Variant,
     stack: Variant,
+    function: Variant,
 }
 
 impl Score {
@@ -582,6 +594,7 @@ impl Score {
             bass: Variant::Off,
             pulse: Variant::Steady,
             stack: Variant::Crossing,
+            function: Variant::Full,
         }
     }
 
@@ -628,6 +641,31 @@ impl Score {
     #[must_use]
     pub const fn stack(&self) -> Variant {
         self.stack
+    }
+
+    /// The same score, recording which variant of the function words struck its syllables.
+    pub(crate) const fn with_function(mut self, variant: Variant) -> Self {
+        self.function = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Function`](crate::mapping::Mapping::Function) struck the
+    /// piece's syllables: [`Variant::Full`], every one at its dictionary stress, or
+    /// [`Variant::Light`], a one-syllable function word off the meter's strong positions at
+    /// secondary force ([`Event::is_light`]). Unlike the pulse and the stack, it is already applied
+    /// to [`Score::events`]; it is recorded so the backends and the debug view can name it.
+    #[must_use]
+    pub const fn function(&self) -> Variant {
+        self.function
+    }
+
+    /// How many syllables of the poem the light function words struck lightly
+    /// ([`Event::is_light`]): each once, however many slots its line sounds in. Zero under
+    /// [`Variant::Full`]. The one count the pattern header, the OSC schedule and the explain view
+    /// print.
+    #[must_use]
+    pub fn lightened(&self) -> usize {
+        self.events.iter().filter(|event| event.is_light()).count()
     }
 
     /// The same score, with each line's harmony ([`crate::harmony`]).
@@ -1089,7 +1127,15 @@ impl Event {
             family: None,
             anchor: None,
             bank: None,
+            light: false,
         }
+    }
+
+    /// The same syllable struck lightly: secondary force, marked as the function words' doing.
+    pub(crate) const fn lightened(mut self) -> Self {
+        self.velocity = Velocity::SECONDARY;
+        self.light = true;
+        self
     }
 
     pub(crate) const fn with_anchor(mut self, anchor: Anchor) -> Self {

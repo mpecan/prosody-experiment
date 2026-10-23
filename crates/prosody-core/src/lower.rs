@@ -5,7 +5,9 @@
 //! enough at poem scale." So this is four steps:
 //!
 //! 1. `rhythm` — every syllable placed in time, from the meter. This builds the whole event list;
-//!    the three after it only decorate what it produced.
+//!    the steps after it only decorate what it produced. Under the light function words
+//!    ([`crate::accent`]) a one-syllable function word the meter calls weak is then struck
+//!    lightly, before anything reads a velocity.
 //! 2. `melody` — pitch, on the rhyming words.
 //! 3. the bass ([`crate::bass`]) — a bass note on foundation syllables or feet, after the harmony
 //!    layer ([`crate::harmony`]) has decided each line's chord, which W2 walks on.
@@ -114,6 +116,10 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
 
     let by_line = lines_by_voice(analyses);
     let (mut events, bars, nuclei) = rhythm(analyses, &by_line);
+    // Straight after the rhythm, before anything reads a velocity: the light function words
+    // (§4.2, `crate::accent`) decide which syllables are accents, and the bass plays accents.
+    let function = mappings.get(Mapping::Function);
+    crate::accent::run(&mut events, analyses.surprisal, function);
     let degrees = degrees(analyses.rhyme);
     melody(&mut events, analyses, &degrees);
     // The harmony layer reads the rhyme and the roles and nothing the arrangement decides: a chord
@@ -138,7 +144,9 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
         .with_pulse(mappings.get(Mapping::Pulse))
         // Recorded, never read here: a stacked line is fitted to its host slot by slot, where the
         // arrangement has put the two together (`Score::placed_in`, §4.2 and §4.6).
-        .with_stack(mappings.get(Mapping::Stack));
+        .with_stack(mappings.get(Mapping::Stack))
+        // Already applied to the events above; recorded so the backends can name it.
+        .with_function(function);
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,
@@ -468,6 +476,11 @@ mod tests {
     struct Flat;
 
     impl Lexicon for Flat {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, _: &str) -> Rarity {
             Rarity::band(3)
         }

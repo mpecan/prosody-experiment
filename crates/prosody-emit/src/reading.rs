@@ -191,7 +191,9 @@ impl Reading {
             | Variant::Steady
             | Variant::Elastic
             | Variant::Crossing
-            | Variant::Straight => "each line spoken in the bar it is first heard",
+            | Variant::Straight
+            | Variant::Full
+            | Variant::Light => "each line spoken in the bar it is first heard",
         };
         let mut out = format!(
             "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
@@ -296,7 +298,9 @@ pub fn plan(
         | Variant::Steady
         | Variant::Elastic
         | Variant::Crossing
-        | Variant::Straight => arrivals,
+        | Variant::Straight
+        | Variant::Full
+        | Variant::Light => arrivals,
     };
 
     let mut cues = Vec::new();
@@ -476,6 +480,11 @@ mod tests {
     struct Flat;
 
     impl Lexicon for Flat {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, _word: &str) -> Rarity {
             Rarity::band(1)
         }

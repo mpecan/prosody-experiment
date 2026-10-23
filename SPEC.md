@@ -154,6 +154,46 @@ under the edited one. The pattern's header names `straight` and counts the beats
 explain view prints the same count (each fitted beat of a slot once, however many lines were fitted
 in it, `Score::straightened_beats`) and lists each line's fitted beats.
 
+**Function words** (*decided 2026-10-23 by the user: full stays the default, light is a variant
+to compare*). "Stress → accent" takes the dictionary's stress, and `CMUdict` gives most
+one-syllable function words primary stress — "or" `AO1 R`, "thy" `DH AY1`, "what" `W AH1 T` — so
+they are struck as hard as the content words beside them, often off the beat: The Tyger's "What
+immortal hand or eye" strikes "or" like "hand". Lexical stress is not the line's stress. How hard a
+syllable is struck decides which syllables are accents, so this is structure, a selector,
+`Mapping::Function` (`function-words`), with no `off` (a word is always struck somehow; its first
+variant is what preceded it):
+
+- **`full`** (the default) — every syllable at its dictionary stress, as before.
+- **`light`** — a one-syllable function word with primary stress is struck at secondary force
+  (2/3, "a light accent") unless the meter's own scansion puts it on a strong position. Nothing is
+  re-scanned: a position is strong where its foot's template is stressed (the second syllable of an
+  iamb, the first of a trochee, a single's only one), so "of" in "In the forests of the night",
+  the strong half of an iamb, keeps its accent. The one foot read further is the spondee, which the
+  meter makes exactly where a dictionary stress on a function word meets a content word ("hand
+  or"): a beat takes one accent, so the spondee's strong position is its first in a falling line
+  (more trochees and dactyls than iambs and anapests), its second in a rising one, and in a line
+  with neither the content word's (both function words: the one on the beat). "What immortal hand
+  or eye" falls, so "or" is light; "Did he who made the Lamb make thee?" rises, so "Did" and "who"
+  are light and the rhyme word "thee" keeps its accent.
+
+Which words are function words is the lexicon's to say (`Lexicon::is_function_word`, §9): a fixed,
+written-out English closed class — articles, pronouns with the archaic thou/thee/thy/thine,
+possessives, conjunctions, short prepositions, auxiliaries — in `prosody-lexicon`, never in the
+core, and a second language's lexicon brings its own. Left out on purpose: negatives, quantifiers,
+the adverbs that double as conjunctions (`so`, `when`, `where`), stressed particles (`up`, `out`),
+`there`, and `art` (The Tyger's "what art" is a noun). A word of more than one syllable keeps its
+dictionary pattern. Prešeren's Slovenian matches none of the English list, so `light` changes
+nothing in it — the §9 limitation, visible.
+
+It is decided once, in the lowering, right after the rhythm and before anything reads a velocity,
+so every consumer reads the same value: the Strudel gains, the OSC velocities, the scorer's accents
+(primary force), and the bass — the height bass plays primary-stressed foundation syllables, so a
+light function word loses its bass note with its accent (The Tyger: "or", "Could", "thy", … no
+longer carry one). No event moves, is added or removed. Locality holds (I2): the decision reads a
+syllable's own word and its own line's feet, nothing else. The pattern's header names `light` and
+counts the syllables (`function-words = light: … in 24 syllable(s)` for The Tyger), as do the OSC
+schedule and the explain view, whose rows credit those gains to `function-words`.
+
 ### 4.3 Repetition → structure (highest-value pass)
 
 Repetition is not one thing. Distinguish:

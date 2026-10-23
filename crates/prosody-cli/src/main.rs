@@ -85,10 +85,12 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20                harmony = off|rhyme|cadence|both (default off);\n\
      \x20                reading = off|arrives|stanza (default arrives);\n\
      \x20                pulse = elastic|steady (default steady);\n\
-     \x20                stack = crossing|straight (default crossing)\n\
+     \x20                stack = crossing|straight (default crossing);\n\
+     \x20                function-words = full|light (default full)\n\
      \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
-     \x20                (the pulse and the stack have no off: --without pulse is\n\
-     \x20                pulse=elastic, --without stack is stack=crossing)\n\
+     \x20                (the pulse, the stack and the function words have no off:\n\
+     \x20                --without pulse is pulse=elastic, --without stack is\n\
+     \x20                stack=crossing, --without function-words is function-words=full)\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\

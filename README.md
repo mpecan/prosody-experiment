@@ -120,16 +120,19 @@ header asks for (the defaults when it has none).
 
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
 review (the held and refrain lanes, the bass, the stanza period, the outro, the harmony, the
-reading, the pulse, the stack), each a selector of named variants — always including `off`, except
-the pulse and the stack, which no piece can be without — with one menu per setting,
+reading, the pulse, the stack, the function words), each a selector of named variants — always
+including `off`, except the pulse, the stack and the function words, which no piece can be without
+— with one menu per setting,
 A and B. The held and refrain lanes, the stanza period and the outro are `off`/`on`; the bass is
 `off`, `height` (its default), `syllables` or `feet` (see [the walking bass](#the-walking-bass));
 the harmony is `off` (its default), `rhyme`, `cadence` or `both` (see
 [the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives` or `stanza`; the pulse
 is `elastic` or `steady` (its default; see [the pulse](#the-pulse)); the stack is `crossing` (its
-default) or `straight` (see [stacked lines](#stacked-lines-crossing-or-straight)).
+default) or `straight` (see [stacked lines](#stacked-lines-crossing-or-straight)); the function
+words are `full` (their default) or `light` (see [function words](#function-words-full-or-light)).
 A starts with every mapping at its default (marked "(default)" in the menu), B with every one at its
-first variant — `off`, for the pulse `elastic` and for the stack `crossing`, the way the page played
+first variant — `off`, for the pulse `elastic`, for the stack `crossing` and for the function words
+`full`, the way the page played
 before; a menu not at its default
 has a bold border. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
@@ -316,12 +319,13 @@ machine profile's.
 `outro` take `off` or `on` (default `on`), `bass` takes `off`, `height`, `syllables` or `feet`
 (default `height`), `harmony` takes `off`, `rhyme`, `cadence` or `both` (default `off`), `reading`
 takes `off`, `arrives` or `stanza` (default `arrives`), `pulse` takes `elastic` or `steady`
-(default `steady`), `stack` takes `crossing` or `straight` (default `crossing`) — for the pattern
+(default `steady`), `stack` takes `crossing` or `straight` (default `crossing`), `function-words`
+takes `full` or `light` (default `full`) — for the pattern
 and for `--score` alike;
 an unknown name or variant
 is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`
-(`--without pulse` is `pulse=elastic` and `--without stack` is `stack=crossing`: neither has an
-`off`).
+(`--without pulse` is `pulse=elastic`, `--without stack` is `stack=crossing` and
+`--without function-words` is `function-words=full`: none of them has an `off`).
 `--explain` lists every choice that is not a default. The reading is not in the CLI's pattern, so
 `reading=…` changes only that list. `./scripts/cycle.sh machine bass` scores every example without
 the bass, and `./scripts/cycle.sh machine bass=off,period=off` passes its list to `--set` (any list
@@ -395,6 +399,27 @@ remember Sicily": `straight 2 into 3 at 4.0 · 3 into 2 at 3.1 3.2 4.1 … — f
 all read the same fitted onsets — the one-word edit test included, so where a line is fitted to a
 host in another stanza, an edit to the host counts as reaching it: Theocritus's *local* share falls
 from 29 to 18 of 61 edits under `straight`, its *explained* share (and legibility) stays 50 of 61.
+
+### Function words: full or light
+
+*Decided: `full` stays the default; `light` is a variant to hear against it* (`SPEC.md` §4.2,
+`--set function-words=…`, or the `function-words` menu on the page). The dictionary stresses most
+one-syllable function words — "or", "thy", "what", "and", "of" — as hard as "hand", so The Tyger's
+"What immortal hand or eye" strikes "or" at full force, off the beat.
+
+- **`full`** — every syllable at its dictionary stress, as before.
+- **`light`** — a one-syllable function word is struck at 2/3 unless the meter's scansion puts it
+  on a strong position: "of" in "In the forests of the night" is the strong half of an iamb and
+  keeps its accent; "or", in the spondee "hand or" of a falling line, is light. In a rising line a
+  spondee's second syllable is the strong one, so "Did he who made the Lamb make thee?" keeps "thee".
+
+The word list is English, fixed and written out, and lives with the English lexicon
+(`crates/prosody-lexicon/src/function.rs`, which also says what was left out and why). A light
+function word is no longer an accent anywhere: the drum gain, the OSC velocity, the scorer — and the
+height bass, which plays accents, so it loses its bass note. The pattern's header and the OSC
+schedule name `light` and count the syllables (The Tyger 24, the Sonnet 24, Whitman 18, Dickinson
+15, Poe 13, Hopkins 9, Jabberwocky 7, Wilde 4, Prešeren 0 — Slovenian matches no English function
+word); `--explain` marks each light row `function-words`.
 
 ### The harmony layer
 

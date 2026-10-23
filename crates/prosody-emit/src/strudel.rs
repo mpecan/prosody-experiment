@@ -602,6 +602,21 @@ fn stack_header(out: &mut String, score: &Score) {
     );
 }
 
+/// The header's line for the light function words, which names the variant and how many
+/// syllables it struck lightly. Full — every syllable at its dictionary stress — is the piece as it
+/// shipped, and says nothing new.
+fn function_header(out: &mut String, score: &Score) {
+    if score.function() != Variant::Light {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   function-words = light: a one-syllable function word off the metre's strong \
+         positions is struck at 2/3 of full force, in {} syllable(s) (SPEC.md §4.2, candidate)",
+        score.lightened()
+    );
+}
+
 /// How many beats of the piece the straight stack fitted: [`Score::straightened_beats`], the
 /// count the explain view prints too.
 pub(crate) fn straightened(score: &Score) -> usize {
@@ -760,6 +775,7 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     bass_header(out, score, has_chords);
     pulse_header(out, score, style);
     stack_header(out, score);
+    function_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
         let _ = writeln!(
@@ -1765,6 +1781,11 @@ mod tests {
     struct ByLength;
 
     impl Lexicon for ByLength {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, word: &str) -> Rarity {
             Rarity::band(u8::try_from(word.chars().count()).unwrap_or(u8::MAX))
         }
