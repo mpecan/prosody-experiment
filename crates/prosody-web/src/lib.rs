@@ -26,7 +26,7 @@ use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surpri
 use prosody_emit::style::{
     BANKS, KITS, PRESETS as PALETTES, RIDE_FALLBACKS, SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
 };
-use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading};
+use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading, trace};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
 use prosody_score::{DEFAULT_PROBES, Profile, Report, sensitivity};
@@ -92,6 +92,7 @@ impl Site {
             ("POST", "/explain") => compile(request, &Output::Explain),
             ("POST", "/score") => compile(request, &Output::Score),
             ("POST", "/reading") => compile(request, &Output::Reading),
+            ("POST", "/trace") => compile(request, &Output::Trace),
             _ => Response::problem(404, "no such thing here\n".to_owned()),
         }
     }
@@ -315,6 +316,9 @@ enum Output {
     /// The reading's cues and cue pattern, as JSON (`prosody_emit::reading`): the page speaks
     /// them on Strudel's clock, when it is asked to.
     Reading,
+    /// Which syllable sounds when, as JSON (`prosody_emit::trace`): the page lights the poem from
+    /// it while the piece plays.
+    Trace,
 }
 
 /// Compiles the request body under the palette in its query string.
@@ -334,7 +338,7 @@ fn compile(request: &Request, output: &Output) -> Response {
             None => return Response::problem(400, format!("unknown profile `{name}`\n")),
         },
     };
-    match render(&source, output, &mappings, profile) {
+    match render(&source, &request.body, output, &mappings, profile) {
         Ok(text) => Response::text(text),
         // A poem that will not compile is what the middle of a keystroke looks like, so the reason
         // goes back with a 400 and the page shows it rather than blanking.
@@ -467,8 +471,15 @@ fn body_of(text: &str) -> &str {
         .map_or(text, |body| body.trim_start_matches('\n'))
 }
 
-/// Compiles a poem, the way the CLI does.
-fn render(source: &str, output: &Output, mappings: &Mappings, profile: Profile) -> Result<String> {
+/// Compiles a poem, the way the CLI does. `source` is what compiles — the controls' header and
+/// the poem — and `typed` the text box as the writer has it, which the trace's positions are in.
+fn render(
+    source: &str,
+    typed: &str,
+    output: &Output,
+    mappings: &Mappings,
+    profile: Profile,
+) -> Result<String> {
     let poem = Poem::parse(source.to_owned()).context("parsing the poem")?;
     let style = Style::parse_optional(poem.frontmatter().and_then(|s| s.text(poem.source())))
         .context("reading the palette")?;
@@ -520,20 +531,28 @@ fn render(source: &str, output: &Output, mappings: &Mappings, profile: Profile) 
             Ok(report_json(&Report::profiled(&score, sensitivity, profile)))
         }
         Output::Reading => reading::plan(&poem, &score, &style, mappings)
-            .map(|reading| reading_json(&reading))
+            .map(|reading| reading_json(&reading, source, typed))
             .context("planning the reading"),
+        Output::Trace => Ok(trace_json(&trace::plan(&score, &style), source, typed)),
     }
 }
 
 /// A reading as JSON: the cue pattern to evaluate, and each cue — the line it speaks, by index
 /// and by span, its text and its rate — for the page to look up when the cue fires.
-fn reading_json(reading: &Reading) -> String {
+///
+/// `start` and `end` are the line's bytes in the source, for the log; `from` and `to` are where it
+/// is in the text box, for the page to show the line being read (see [`text_box`]).
+fn reading_json(reading: &Reading, source: &str, typed: &str) -> String {
+    let at = text_box(source, typed);
     let cues: Vec<String> = reading
         .cues()
         .iter()
         .map(|cue| {
+            let (from, to) = at(cue.span().start())
+                .zip(at(cue.span().end()))
+                .unwrap_or((0, 0));
             format!(
-                "{{\"slot\":{},\"line\":{},\"start\":{},\"end\":{},\"syllables\":{},\"rate\":{},\"text\":{}}}",
+                "{{\"slot\":{},\"line\":{},\"start\":{},\"end\":{},\"from\":{from},\"to\":{to},\"syllables\":{},\"rate\":{},\"text\":{}}}",
                 cue.slot(),
                 cue.line(),
                 cue.span().start(),
@@ -548,6 +567,54 @@ fn reading_json(reading: &Reading) -> String {
         "{{\"pattern\":{},\"cues\":[{}]}}\n",
         json_string(&reading.pattern()),
         cues.join(",")
+    )
+}
+
+/// Where a byte of the source is in the text box the writer typed.
+///
+/// The text box is not the source: the source is the controls' header followed by the poem with
+/// any pasted header of its own removed ([`body_of`]). So a byte is moved back onto the text box,
+/// and counted in UTF-16 units, which is what a JavaScript string is indexed by — a poem with an
+/// em dash in it would otherwise light the wrong letters from there on. `None` for a byte inside
+/// the generated header, which has no words.
+fn text_box<'a>(source: &str, typed: &'a str) -> impl Fn(usize) -> Option<usize> + 'a {
+    let body = body_of(typed);
+    let header = source.len().saturating_sub(body.len());
+    let skipped = typed.len().saturating_sub(body.len());
+    move |byte: usize| {
+        let byte = byte.checked_sub(header)? + skipped;
+        typed
+            .get(..byte)
+            .map(|before| before.encode_utf16().count())
+    }
+}
+
+/// A trace as JSON: the pattern to query, and each mark — where its syllable is in the text box
+/// ([`text_box`]), its colour, and whether its line is new here or looping.
+fn trace_json(trace: &prosody_emit::Trace, source: &str, typed: &str) -> String {
+    let at = text_box(source, typed);
+    let marks: Vec<String> = trace
+        .marks()
+        .iter()
+        .map(|mark| {
+            // A mark inside the generated header cannot happen — the header has no syllables — so
+            // a position that does not map is shown as nothing rather than guessed at.
+            let (start, end) = at(mark.span().start())
+                .zip(at(mark.span().end()))
+                .unwrap_or((0, 0));
+            format!(
+                "{{\"start\":{start},\"end\":{end},\"colour\":{},\"fresh\":{},\"melody\":{},\"bass\":{}}}",
+                json_string(mark.colour()),
+                mark.fresh(),
+                mark.melody(),
+                mark.bass(),
+            )
+        })
+        .collect();
+    format!(
+        "{{\"pattern\":{},\"marks\":[{}]}}\n",
+        json_string(trace.pattern()),
+        marks.join(",")
     )
 }
 
@@ -1028,9 +1095,12 @@ mod tests {
         assert!(!body.contains("\"line\":8,"), "{body}");
         // Spans are in the compiled source, after the 41-byte header the controls write
         // (`+++`, `[style]`, `tempo_range = [110, 130]`, `+++`, each with its newline). The line is
-        // 28 bytes and seven syllables: Ty-ger Ty-ger burn-ing bright.
+        // 28 bytes and seven syllables: Ty-ger Ty-ger burn-ing bright. In the text box it is the
+        // first 28 units.
         assert!(
-            body.contains("\"line\":0,\"start\":41,\"end\":69,\"syllables\":7,"),
+            body.contains(
+                "\"line\":0,\"start\":41,\"end\":69,\"from\":0,\"to\":28,\"syllables\":7,"
+            ),
             "{body}"
         );
         assert!(
@@ -1232,9 +1302,65 @@ mod tests {
     }
 
     #[test]
+    fn the_trace_points_at_the_text_box_not_the_source() {
+        // Hand-worked: "Tyger" is the first word of the seed, so some mark starts at 0 of the text
+        // box. With a pasted header of its own in front, the same syllable is that header's
+        // length further on — counted in UTF-16 units, where "—" is one unit and three bytes.
+        let plain = super::compile(&request(&[], SEED), &Output::Trace);
+        assert_eq!(plain.status, 200, "{}", plain.body);
+        assert!(
+            plain.body.contains("{\"start\":0,\"end\":"),
+            "{}",
+            plain.body
+        );
+        assert!(plain.body.contains("\"pattern\":\"// the trace:"));
+
+        let pasted = format!("+++\n# a note — mine\n+++\n{SEED}");
+        let shift = "+++\n# a note — mine\n+++\n".encode_utf16().count();
+        let shifted = super::compile(&request(&[], &pasted), &Output::Trace);
+        assert_eq!(shifted.status, 200, "{}", shifted.body);
+        assert!(
+            shifted
+                .body
+                .contains(&format!("{{\"start\":{shift},\"end\":")),
+            "{}",
+            shifted.body
+        );
+        // Every mark lands on a letter of the text box, never on the header the page adds.
+        let typed: Vec<u16> = pasted.encode_utf16().collect();
+        for piece in shifted.body.split("\"start\":").skip(1) {
+            let start: usize = piece.split(',').next().unwrap().parse().unwrap();
+            assert!(start >= shift && start < typed.len(), "{start}");
+        }
+    }
+
+    #[test]
+    fn a_reading_cue_says_where_its_line_is_in_the_text_box() {
+        // Hand-worked: the seed's first line, "Tyger Tyger, burning bright," is 28 units long and
+        // is read first; with a pasted header in front, it moves by that header's length.
+        let plain = super::compile(&request(&[], SEED), &Output::Reading);
+        assert!(
+            plain.body.contains("\"from\":0,\"to\":28,"),
+            "{}",
+            plain.body
+        );
+        let pasted = format!("+++\n# a note — mine\n+++\n{SEED}");
+        let shift = "+++\n# a note — mine\n+++\n".encode_utf16().count();
+        let shifted = super::compile(&request(&[], &pasted), &Output::Reading);
+        assert!(
+            shifted
+                .body
+                .contains(&format!("\"from\":{shift},\"to\":{},", shift + 28)),
+            "{}",
+            shifted.body
+        );
+    }
+
+    #[test]
     fn the_seed_poem_compiles() {
         // The page opens by compiling it, so a broken one would greet every visitor with an error.
         let rendered = super::render(
+            SEED,
             SEED,
             &super::Output::Pattern,
             &Mappings::all(),

@@ -406,6 +406,59 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Watching it play — the roll and the lit poem
+
+A **Watch** tab, the page's new default, shows the piece while it plays. No mapping changed and no
+event moved; the pattern text gained one display-only call per layer.
+
+- **The roll** is Strudel's own (`@strudel/draw` 1.2.6, the release matching the page's Strudel
+  core), loaded after Strudel starts so its `@strudel/core` imports resolve to the playing Strudel
+  through the import map, as the soundfonts' do (`strudel-globals.mjs` now also exports `State`,
+  `TimeSpan`, `getTime`, `isPattern`). Its `Drawer` runs on the page's scheduler; `drawPianoroll`
+  paints onto the tab's own canvas, two seconds either side of the playhead, rows folded to the
+  sounds in use. Notes are coloured by layer through `.color("#…")`, which the emitter now writes on
+  every layer (`strudel::Colour`) — read by Strudel's visualisations, never by its sound. Every
+  pattern snapshot changed by exactly those calls and nothing else (checked by stripping them).
+- **The lit poem** comes from a new artefact, the trace (`prosody_emit::trace`, `POST /trace`): one
+  silent pattern lane per lane of the music's rhythm layers, built by the music's own
+  `grid_by_slot` walk with an event id where the music has a sample, closed by the music's own swing
+  and tempo (`strudel::clock`, now shared). So a trace event begins where its sound does by
+  construction — the emitter's history has one bug from walking bars twice. Each id is a mark: the
+  syllable's span, its layer colour, whether its line is new in that slot (stated, arriving,
+  overruling) or looping, and whether it also plays a rhyme or bass note. The page queries the trace
+  at the drawer's time each frame and lights the matching pieces of the poem; the roll and the verse
+  share one clock and cannot disagree.
+- **Positions are the text box's.** The source the server compiles is the controls' header plus the
+  poem with any pasted header removed, so `/trace` moves each span back onto the text as typed and
+  counts in UTF-16 units, as JavaScript does — tested with a pasted header containing an em dash.
+- The verse is set in Spectral (Google Fonts; Georgia otherwise); a long poem scrolls to keep the
+  line being heard anew in view, smoothly unless the system asks for reduced motion. The writing
+  column now scrolls as a whole, so the controls no longer squeeze the poem to one line.
+- Verified in Chromium on the seed, Wilde (jazz palette, harmony and walking bass on B, switched
+  while playing) and Poe (scrolling): no console errors; syllables light fresh and looping as the
+  arrangement says; Stop clears it. `check-wasm.sh` now compares `/trace` too.
+- Nobody has watched it with sound on. Humanise's few milliseconds of stray are not in the trace,
+  so a lit syllable can lead its sound by that much.
+- **Then, at the user's request, the layout.** The poem's text box is now the lit verse: a
+  transparent `<textarea>` over the verse it lights, both laid out identically (font, padding,
+  wrapping, scrollbar gutter) and scrolled together, so typing, the caret and selection are the
+  text box's own while the colour beneath shows what sounds. Marks apply only while the text box
+  says exactly what they were compiled from; mid-edit the verse is plain until the recompile. The
+  roll shows a set number of bars (2, 4, 8 or 16; a bar is a poem line, `60 / cpm` on the
+  scheduler) with bar lines, instead of two seconds either side. Roll, palette, mappings, reading
+  and the pattern/annotation/score views are folding `<details>` panels in the right column,
+  remembered per browser; the poem has the left column to itself. Checked in Chromium at 1440 and
+  390 px: the two layers measure the same, a selection sits on its letters, an edit while playing
+  recompiles and lights again, folding persists, no console errors.
+- **The reading, shown apart from the music.** The music has the letters (colour by layer,
+  underline for a note); the reading now has the background: a pale wash behind the line being
+  read, a brighter one behind the word being said, driven by the utterance's `boundary` events
+  (voices that send none show the line only). `/reading`'s cues carry `from`/`to` in the text box's
+  UTF-16 units (one `text_box` mapping now serves the trace and the reading), and the verse is cut
+  at those edges too. A cancelled utterance's late `end` cannot clear the line that replaced it.
+  Checked in headless Chromium, which has a voice: the wash followed "Burnt the fire of thine
+  eyes?" word by word and cleared at the line's end; Stop clears everything.
+
 ### The page without a server — the compiler in WebAssembly
 
 The page now also builds as static files that compile in the browser (`scripts/build-site.sh`).

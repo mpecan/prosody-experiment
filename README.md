@@ -68,6 +68,27 @@ and the annotation on the right, and Play/Stop at the top. It recompiles as you 
 third of a second after you stop — and if it is already playing it switches to the new version
 without stopping, so you can rewrite a line and hear the difference immediately.
 
+The poem you write in is also the poem you watch. While it plays, it lights up syllable by syllable
+as each one sounds, in its layer's colour — pulse, ornament, bass, rhyme note, chords — at full
+strength where its line is heard anew and dimmer where it is only looping (held, refrain, call, a
+yielding loop, the outro), underlined where the syllable also plays a rhyme or bass note. A long
+poem scrolls to follow the line being heard, unless the caret is in it. The reading has the other channel:
+a pale wash behind the line being read aloud and a brighter one behind the word being said (where
+the browser's voice reports its words), so the voice and the music stay legible where they meet —
+the music colours the letters, the voice lights what lies behind them. Keep typing while it plays:
+the verse goes plain for the moment it takes to recompile, then lights again.
+
+Beside it, every panel folds away and the page remembers which: the **roll** (Strudel's own piano
+roll, `@strudel/draw`, showing a set number of bars — poem lines — with faint lines where one bar
+hands over to the next), the **palette**, the **mappings** A and B, the **reading**, and the
+pattern, annotation and score views.
+
+The lighting is `SPEC.md` §8's traceability made visible: every lit syllable is the span the sound
+came from. The page gets it from `/trace` (`prosody_emit::trace`), a silent pattern of syllable ids
+built by the same walk of bars and beats as the music and on the same clock, so the light lands
+where the sound does. Each layer in the pattern carries `.color(...)` for the roll, which Strudel's
+drawing reads and its sound ignores; `pianoroll()` on strudel.cc uses it too.
+
 The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, swing, sample bank,
 the bass and melody instruments, and the mix. Changing one of them changes what you hear and
 provably not what happens — the page recompiles and the bar, voice and event counts stay put,

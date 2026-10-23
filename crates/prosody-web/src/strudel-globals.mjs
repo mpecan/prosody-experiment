@@ -8,6 +8,9 @@
 // instead, so the soundfonts register into the Strudel that plays. Import this only after
 // `initStrudel()` has resolved: the bindings below are read once, when the module evaluates.
 //
+// `@strudel/draw` (the page's roll) imports from `@strudel/core` too, which is why `State`,
+// `TimeSpan`, `getTime` and `isPattern` are here.
+//
 // `sfumato` is the `.sf2` loader; this page uses only the General MIDI fonts, so its two entry
 // points refuse rather than load a second synthesis engine.
 
@@ -18,6 +21,10 @@ export const {
   noteToMidi,
   getSoundIndex,
   Pattern,
+  State,
+  TimeSpan,
+  getTime,
+  isPattern,
   getPlayableNoteValue,
   getAudioContext,
   getADSRValues,

@@ -37,6 +37,7 @@ pub mod osc;
 pub mod reading;
 pub mod strudel;
 pub mod style;
+pub mod trace;
 
 use prosody_core::voice::Score;
 
@@ -46,6 +47,7 @@ pub use strudel::{Strudel, StrudelError};
 pub use style::{
     Bpm, Kit, Note, Octave, RideFallback, Scale, Style, StyleError, Swing, TempoRange, Voicing,
 };
+pub use trace::{Mark, Trace};
 
 /// A target that can play a poem.
 ///
