@@ -15,7 +15,7 @@
 //! than dropped: a line whose words are half unknown must not read as a confident short line.
 
 use crate::parse::{Line, Poem, Stanza};
-use crate::phoneme::{Phonemiser, Provenance, Stress};
+use crate::phoneme::{Phoneme, Phonemiser, Provenance, Stress};
 use crate::span::Span;
 
 /// How many syllables something has — the subdivision count of `SPEC.md` §4.2.
@@ -57,6 +57,8 @@ pub struct Beat {
     pub word: Span,
     /// Which syllable of that word this is, counting from zero.
     pub index: usize,
+    /// Its vowel — what the bass is pitched by (`SPEC.md` §4.2, `lower`'s bass pass).
+    pub nucleus: Phoneme,
     /// How strongly it is stressed.
     pub stress: Stress,
     /// Whether the pronunciation it came from was looked up or guessed.
@@ -568,6 +570,7 @@ fn scan_line(line: &Line, source: &str, phonemiser: &impl Phonemiser) -> LineMet
                     beats.push(Beat {
                         word: span,
                         index,
+                        nucleus: syllable.nucleus(),
                         stress: syllable.stress(),
                         provenance,
                     });

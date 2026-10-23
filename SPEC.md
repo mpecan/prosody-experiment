@@ -78,6 +78,18 @@ This is the load-bearing decision. It means writing a tight regular stanza *is* 
 
 Consequence worth embracing rather than correcting: iambic pentameter yields five beats. Poetry naturally produces odd meters. Don't quantise to 4/4.
 
+*Observed 2026-10-22 (the off-rhythm trace; no mapping changed).* Two consequences of this mapping,
+heard as "off-rhythm beats" and now named. **Cross-rhythm:** a foot of three syllables divides its
+beat in three, one of two in two, so when lines with different feet sound in one bar (§4.6's held,
+refrain and call lanes stack them) the beat carries 3 against 2 — Theocritus's dactylic line-ends
+("Sicily", "Persephone") against its iambic tetrameter in 30% of its beats, The Tyger's "In the
+forests" against "Tyger Tyger," in 3%. `prosody-score`'s jazz profile measures it (`cross_rhythm`).
+**The elastic beat is still in the Strudel backend:** a cycle is a slot at one `.cpm` for the
+piece (tempo ÷ the integer mean bar length), so a bar of four beats among bars of three plays its
+beats a third faster — Theocritus's four-beat bars run at 161 bpm against its stated 121. The OSC
+backend and the scorer keep the beat constant; the page plays the Strudel text. Fixing it is a
+backend question raised in `PLAN.md`'s log, not decided here.
+
 ### 4.3 Repetition → structure (highest-value pass)
 
 Repetition is not one thing. Distinguish:
@@ -115,6 +127,211 @@ Treat rhyme as an **equivalence relation**. Rhyme class → scale degree, assign
 
 Then the elegant part: **perfect rhyme → exact pitch; slant rhyme → detune or neighbour tone.** Rhyme precision maps to pitch precision. Score rhyme quality continuously (nucleus + coda phoneme match) rather than boolean.
 
+### 4.6 Arrangement — stanzas loop until something takes their place
+
+*Decided 2026-10-08, after the scorer measured every poem as a single line of sound.*
+
+A stanza, once stated, **keeps looping** until something stops it. One loop per layer (§4.1):
+
+- **A competing stanza** — the next stanza of the *same* layer — transforms the running loop into
+  itself, one bar per pass: `|B1 A2 A3 A4|B1 B2 A3 A4|B1 B2 B3 A4|B1 B2 B3 B4|`. The other layer's
+  loop keeps playing underneath.
+- **A refrain stanza** — every line a refrain — overrules: all loops stop and it is stated alone,
+  like a chorus dropping in. A real *chord progression* would be the other natural overrule; the
+  harmony layer below now exists as a candidate, but it does not overrule anything — its chords
+  follow the foundation's loops.
+
+Bar-locked: each bar of the piece takes its length from the stanza of the line arriving in it — the
+stanza's *period*, its longest line — so a stanza is a loop of one length and the meter changes only
+where the stanza does (*machine cycle 2, pending review*; before, a bar took its own line's length).
+A line that fits the bar keeps one beat per foot and rests for the remainder; a longer loop is
+squeezed into the bar.
+
+**The outro** (*machine cycle 3b, pending review*). When the poem runs out nothing has stopped the
+loops, so they play one more pass — the last stanza again, with the other layer and every lane
+under it — and then the piece ends. A one-stanza poem therefore loops once.
+
+**The call lane** (§4.1's second tier, decided the same day). The half-line before a line's first
+internal caesura — its *call*: "Tyger Tyger," — is lifted out once its line has been heard, and
+loops in a third lane under everything until the next line with a caesura is first heard. A refrain
+stanza stops it with the other loops. Caesurae are sparse, so each one leaves a figure that
+persists; this is what lets a poem whose stanzas share one layer sound more than one thing at once.
+
+**The held lane** (decided the same day). A line whose rhyme is answered later in its own stanza
+keeps sounding until the answer arrives, and stops there: an open rhyme is a suspension, and its
+answer resolves it. ABAB holds each line under the next; ABBA holds the A line under both Bs. An
+answer must come within the stanza, so a class of one, or a rhyme answered stanzas later, is never
+held.
+
+**The bass** (*machine cycle, pending review*). Every primary-stressed syllable of a foundation
+line is pitched by its vowel's height: open → root, mid → third degree, close → fifth. Close vowels
+carry a higher intrinsic pitch, so the riff follows the vowels; a rhyme word keeps §4.5's note.
+
+**The walking bass** (*the jazz plan's step 4, two candidates approved for comparison; neither is
+the default*). `Mapping::Bass` is a selector: `off`, **`height`** (the default — the bass
+above), and the proposal's two walks. A bass note is its own field of an event, beside the
+melody's note, so under a walk a rhyme word sounds both; `height` keeps its old rule and leaves a
+rhyme word to the melody, so the default piece is unchanged.
+
+- **`syllables` (W1) — the syllables walk.** Every syllable of a foundation line sounds a note,
+  traced to its word (I4). A primary-stressed syllable keeps its height note. The last syllable
+  before a stressed one is a **chromatic approach**: a semitone below that stressed note. Any other
+  unstressed syllable between two stressed ones is a **passing tone**, a scale step at a time from
+  the first stressed note towards the second, holding one step short of it (between two equal notes,
+  the upper neighbour). *Choices the proposal left open, made here:* an unstressed syllable before
+  the line's first stressed one climbs into it by step (the **lead-in**), one after the last steps
+  down from it (the **tail**), so every syllable has a note; secondary stress counts as unstressed
+  (the height bass follows the primary accents only); and a line with no primary-stressed syllable
+  has nothing to walk between, so no bass.
+- **`feet` (W2) — the feet walk.** One note per foot, on its first syllable — on the beat — held
+  for the beat and traced to the whole foot (I4, coarser than a syllable). The foot's stressed vowel
+  (its most stressed syllable's, the first on a tie) chooses the **chord tone** by height: root,
+  third or fifth of the bar's chord when the harmony layer gave the bar one, of the scale (degree 0)
+  otherwise. Its accent is that syllable's. *The proposal's direction rule, as built:* chord tones
+  sit in one octave in height order, so a higher next vowel already makes the move to it go up;
+  where the foot's tone would repeat the walk's last note, it **steps** instead — up if the next
+  foot's vowel is higher, down if it is lower, the same, or there is no next foot. A walk never
+  looks past its line.
+- **One walk a bar.** A line sounding under another — held, refrain, call — keeps its drums and
+  its melody, but under a walk only the bar's foundation-layer line (the one its chord comes from,
+  `Score::sounds_bass`) sounds its bass. Two or three walks stacked in one bar landed their passing
+  and approach tones a semitone apart (The Tyger under `syllables`: 59 of 257 bass onsets), where
+  two `height` notes are chord tones and only ever agree — so `height` still sounds under every
+  line, as before. A line's explain view says where it walks and where it is silent.
+
+Spans: a W1 note's is its syllable's word, a W2 note's its foot. Register is palette: the root of a
+W2 chord is folded into one octave of the scale, as the chord lane folds it, and a step below the
+root sounds below it. **Disclosed against I2:** a walk stays inside its line, so an edit elsewhere
+reaches a line's bass only through what it already read — its stanza's layer (§4.1), which of its
+words are rhyme words (`height` only), and under W2 with the harmony on, its bar's chord, whose
+function follows the stanza's rhyme pattern and whose root is §4.5's poem-wide numbering. The I2
+property is scoped to that: when the stanza's layer and rhyme pattern are unchanged, which
+syllables carry a note, on which step, by which rule, are unchanged; the root is not compared. The
+OSC schedule sends a bass note as the message's pitch where there is no melody note, struck at the
+bass note's own accent (under W2, its foot's stressed syllable's, as the Strudel backend strikes
+it), and says how many bass notes under rhyme words it cannot send (a message has one pitch). One
+message is both the syllable's drum hit and its pitched note, so it carries two accents: `gain`,
+the drum's, is always the syllable's own stress (§4.2) — a walk never moves it — and a last
+argument, the note's.
+
+**The refrain lane** — §4.3's "literal loop of that voice" at line scale. A refrain line, once
+heard, loops in its own lane until the next refrain line is first heard and takes over. No lane
+doubles a voice already sounding in the bar. A refrain stanza stops both lanes with every loop.
+
+**The harmony layer** (*sound and voice step 5, candidate approved for comparison, off by
+default*). Every bar of a **foundation** stanza gets one chord, held for the bar, in a chord lane of
+its own. Its span is the rhyme word of the line the bar hosts — the line's last pronounceable word
+(I4). The lowering decides which bars have a chord, on which degree, with which function; the
+emitter voices it (palette, §5). A chord is a fact about its line, and sounds wherever the
+arrangement plays that line in the foundation layer — stated, arriving, yielding, looping under a
+flourish host, repeating in the outro — and never in the call, held or refrain lanes, so a bar has
+at most one chord. Three variants of `Mapping::Harmony`, from `PLAN.md`'s proposal:
+
+- **`rhyme` (H1) — the rhyme scheme is the harmonic rhythm.** A line's chord is I on its rhyme
+  class's degree (§4.5's numbering, so the chord's root is the rhyme note's degree): ABAB →
+  i–ii–i–ii, AABB → i–i–ii–ii. A line that rhymes with nothing has no degree, so its bar has no
+  chord.
+- **`cadence` (H2) — rhyme closure is tension and release.** A line whose rhyme is answered later
+  in its stanza (the held lane's test) is open: V of its degree (*d*+4). Its answer closes: I on the
+  degree. A line that is both — the middle A of AAA — is open, since its class is still unresolved.
+  A line with no rhyme within its stanza is IV of the stanza's key (*k*+3), the key being the degree
+  of the stanza's first in-stanza rhyme, or 0. The stanza's last bar (of two or more) is the
+  **turnaround**: V of the stanza's own first chord, replacing whatever that bar had. The I it
+  resolves to is the loop's first bar, played next on every pass.
+- **`both`** — H2 where it applies (open and closing lines, the turnaround), H1 in every other bar;
+  so a line rhymed only across stanzas takes I on its degree, and an unrhymed line no chord.
+
+A flourish stanza carries no harmony. Degrees are counted like a rhyme class's and may run past
+the scale's length (V of degree 5 is degree 9); the emitter folds a root into one octave. The
+proposal's turnaround resolved onto the *next* stanza's first chord, which would make stanza *n*'s
+last bar depend on stanza *n*+1's first rhyme; this one loops back onto its own stanza, so it never
+crosses a stanza boundary. **Disclosed against I2:** a chord still depends on §4.5's poem-wide
+degree numbering (as the melody's note does), and on the rhyme analysis, whose classes are
+poem-wide — an edit elsewhere can give a line a partner in another stanza (H1 then gives it a
+chord) or merge two of a stanza's classes through a third word. The I2 property for the harmony is
+scoped to exactly that: when a stanza's rhyme pattern and layer are unchanged by an edit to another
+stanza, its harmony — which bars have chords, which function by which rule, which rests and why —
+is unchanged. The OSC schedule has no chord message, and says how many chords it leaves out.
+
+**Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
+lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list
+of named variants, always including `off`, and a default. A `Mappings` value chooses one variant
+per mapping, and only a variant the mapping lists can be chosen. Today the held and refrain
+lanes, the stanza period and the outro are `off`/`on`, default `on`; the bass is
+`off`/`height`/`syllables`/`feet`, default `height`; the harmony is `off`/`rhyme`/`cadence`/`both`,
+default `off`; the reading is `off`/`arrives`/`stanza`, default `arrives`. They are
+chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
+`set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
+page's A/B table, so the piece can be heard and measured under each choice. This is a separate
+argument to the lowering, not part of the style: it changes structure, and I3 keeps the style out
+of structure. Every invariant holds within one choice. Every default is the piece as specified,
+and the default everywhere — except the harmony, a candidate whose default is `off`, so a piece
+that does not choose it is the piece it was; likewise the bass's walks are variants beside its
+default, `height`. Left out, each falls back to what preceded it: no held or refrain lane,
+no bass, a bar as long as its own line with everything under it stretched or squeezed to fit, and
+a piece that ends as the last stanza arrives. A mapping joins the list when a design iteration
+proposes it, so the comparison stays available as long as the question is open.
+
+This is structure, read from the poem, not a style parameter — which answers §9's "looping as an
+explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
+poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.
+
+### 4.7 The reading — the poem spoken where each line arrives
+
+*Candidate, page-side, pending review (sound and voice, step 2).* A prototype to learn whether
+spoken lines over the music work. Each line is spoken once, by the browser's speech synthesiser,
+in the slot where it is **first heard as a host** — `Stated`, `Arriving` or `Overruling` (§4.6) —
+and never where it loops, yields, calls, holds, refrains in its lane or repeats in the outro. So
+the reading follows the poem in order, and every utterance is the source text under one line's
+span (I4). A refrain stanza is new lines of the poem, so it is read again where it drops in.
+
+This **is a new mapping** — it adds sound events, the spoken words — and so it is structure, not
+palette: no style field can move a cue (I3). It is decided entirely in the emitter and the page,
+from the arrangement the core already made, and changes nothing the core produces:
+`prosody_emit::reading` plans it as a separate artefact (a cue pattern and the lines it speaks),
+not part of the Strudel pattern text the CLI prints. It is a candidate selector in
+`prosody_core::mapping`'s list all the same — `Mapping::Reading`, chosen per side on the page like
+the others — so it can be compared and switched off with the same controls. The lowering never
+reads it. Its variants (*sound and voice, step 4, candidate*):
+
+- **`arrives`** (default) — each line once, in the slot where it is first heard as a host, as
+  above.
+- **`stanza`** — a stanza's lines are read one per bar, in order, from the stanza's first hosting
+  slot (the earliest slot `arrives` would read any of its lines in), instead of each line waiting
+  for its own arrival. A stanza that transforms a running loop brings one new line in per pass,
+  so under `arrives` its lines are read a loop's length apart (five bars in The Tyger); under
+  `stanza` it is read straight through while the music is still turning into it. Cues never run
+  backwards or share a slot: a stanza that would start before the previous one has been read
+  waits for it, and a line that would fall after the piece's last bar is not read. It decides
+  from the same arrival slots as `arrives` (which already depend on earlier stanzas, §4.6's
+  "duration is poem-wide"); the wait would add a dependence on the previous stanza's length, but
+  only where a stanza starts before the previous one has been read, which today's arrangement —
+  one stanza stated or transformed at a time — never does. Cues are not voices, so I2's voice
+  property is untouched either way.
+- **`off`** — no cues.
+
+The cue pattern's first comment names the variant (`reading = stanza`); the explain view lists it
+when it is not the default. *How fast* a line is read is a
+parameter, fitted from the palette's tempo: the rate at which the line's syllables, at four a
+second at rate 1, fill 85% of its bar, bounded to 0.6–1.6. The voice is the listener's choice. A
+light duck (the music to 0.6 while a line is spoken) is page-side and optional.
+
+Two things it does not promise. The audio of the speech is the browser's, so it is not
+bit-identical across machines — the *cues* are (I1). And speech is not on the grid: it starts on
+the bar's first beat and runs at its own pace; a line still speaking when the next is due is cut
+off rather than allowed to drift.
+
+"In order" holds from the first bar. Strudel's scheduler keeps its cycle count when it is handed a
+new pattern, so a change while playing would start the new piece partway through. The page
+therefore restarts the clock at bar 1 when the poem is replaced by a preset or the listener
+switches A/B, and reads from the first line. A live edit keeps the clock running, because the
+writer is listening in place: the reading carries on from the bar the clock has reached, and any
+line before that bar waits until the arrangement loops round. A line already queued or being
+spoken from the previous version is dropped when the new one starts. The cue pattern's comments
+escape line terminators and control characters (a pasted U+2028 would otherwise end the comment
+early), and the page evaluates the cue pattern separately, so a reading it cannot cue never stops
+the music.
+
 ---
 
 ## 5. Style header
@@ -132,6 +349,106 @@ synth       = "karplus"       # or fm, subtractive, physical
 ```
 
 Never structure. See invariant I3.
+
+*Extended 2026-10-22 (sound and voice, step 1).* The palette also names an instrument for each
+pitched role — `bass` and `melody`, a synth name above or a General MIDI soundfont (`gm_epiano1`,
+`gm_acoustic_bass`, …); `synth` still sets both — and a mix, every amount range-checked at the
+boundary: `reverb`, `room_size`, `delay` (melody only), `high_cut` (the top of §4.4's brightness
+range, scaled rather than clipped), `drive`, `compress`, `humanise`, and a level per role
+(`drums_gain`, `bass_gain`, `melody_gain`). `preset = "default" | "warm" | "raw"` starts from a
+named palette. A role's level is never zero (`0.1..=2`): a muted role would leave its events in
+the score and inaudible, which I4 forbids as surely as a fully closed filter. The register a role
+plays in was at first fixed in the Strudel backend (bass MIDI 36, melody 60); it is now palette —
+see the step 4.2 extension below.
+
+`humanise` is the one palette value that draws randomness, and it obeys I2: each syllable's stray
+(up to 30 ms late, up to 30% softer, scaled by the amount) comes from its *line's* voice seed under
+its own child stream, restarted per bar, so a line strays identically wherever it sounds and an
+edit elsewhere cannot move it. It changes when an event sounds by milliseconds and how loud; it
+cannot add, remove or reorder an event.
+
+*Extended 2026-10-22 (sound and voice, step 3 — jazz, the palette part).* Two more palette keys.
+`kit = "machine" | "ride"` names which drum carries each layer of §4.1: kick and hat, or a ride
+keeping the time on the foundation and the snare comping on the flourish. `voicing = "note" |
+"seventh"` voices each rhyme note (§4.5) as one tone or as the seventh chord on its degree — the
+degree with every other degree of the style's scale above it, *d*, *d*+2, *d*+4, *d*+6, sharing the
+melody's level between its tones. This is palette and not harmony: each chord is the one event of
+one rhyme word, at its onset, with its gain, cutoff and stray; it is built from that event's degree
+and the scale alone, never from a neighbouring chord, stanza or bass note, so it cannot express a
+progression (I3; the argument is on `prosody_emit::Voicing`, and a property test checks that the
+lowest tone of every chord is the note `note` voicing plays and that nothing else moves). A
+harmony layer — a progression derived from the poem — would be a §4 mapping, and is a proposal in
+`PLAN.md`, not part of this. A fourth preset, `jazz`, is the first that sets more than the sound
+and the mix: Rhodes sevenths over an upright bass, the ride kit on the sampled acoustic `r8` bank
+(no brushed kit exists in the sample map), triplet swing `0.33`, dorian, a warmer room. Its
+scale, swing and bank are palette like the rest; it simply moves notes where the other presets
+never do, and any header key still overrides it. A bank without a ride (the TR-808 and TR-707
+samples have none) keeps time on its open hat under `kit = "ride"`, and the pattern's header says
+so: a missing sample would otherwise silence the whole foundation, which no palette may do. In a
+scale without seven notes, `seventh` still stacks every other degree — fourths in
+`pentatonic_minor` — and the header names it as that rather than as a seventh.
+
+*Extended 2026-10-22 (sound and voice, step 4.2 — palette the user asked to be able to change).*
+Three more keys, every one palette:
+
+- **`bass_octave`** (`1..=3`, default `2`, MIDI 36) and **`melody_octave`** (`3..=5`, default `4`,
+  MIDI 60) — the octave each pitched role plays in, in scientific pitch notation (MIDI of its C =
+  12 × (octave + 1)). Whole numbers only. They move every note of a role by octaves and no event;
+  the ranges meet at octave 3 and never cross, so the melody is never under the bass. The Strudel
+  backend reads them; OSC still sends every pitch from 36 (it does not split the roles), and
+  says so: a schedule whose header moves either key, or `density_level`, carries a
+  `# not applied here: …` line, and `--send` prints the same on stderr.
+- **`ride_fallback = "open_hat" | "crash"`** (default `open_hat`) — what keeps time under
+  `kit = "ride"` on a bank with no ride sample (TR-808, TR-707). The stand-in strikes exactly where
+  the ride would; the `plays:` line of the pattern's header names it ("crash in place of the ride,
+  which RolandTR808 does not have"). A bank with a ride ignores it.
+- **`density_level`** (`0..=1`, default `0`, today's fixed levels) — levels that follow density.
+  Every gain in a bar is multiplied by *n*^−`density_level`, where *n* is the number of lines
+  sounding in that bar (every placement of the arrangement that plays at least one event): at
+  `0.5` a bar of *n* lines is divided by √*n* (the power of *n* uncorrelated lines held at one
+  line's), at `1` by *n* (their summed peak, when their hits coincide). A bar of one line is never
+  changed. This is the one palette value that *reads* the score's structure; it changes only gain
+  values — no event, onset or pattern step — and the I3 property test varies it and checks that
+  the output differs from `0` in `.gain` values alone, each no louder. **Disclosed against I2:** a
+  line's level in a bar it shares depends on how many other lines share it, so with
+  `density_level > 0` an edit to stanza *n* that changes how many lines sound in a bar (a stanza
+  that loops longer) changes the *level* of stanza *m*'s line in that bar. Its events and its voice
+  are untouched — I2's property tests are about the score and still hold — but the emitted gains
+  of a shared bar are not stanza-local. At the default `0` nothing crosses. The `warm` and `jazz`
+  presets set `0.5`; `default` and `raw` keep `0`.
+
+The pattern header lists these four keys only when they differ from their default, so a pattern
+that does not use them reads byte for byte as before; when `density_level` is set, the header also
+names the factor for each line count the piece has. The explain view always lists them.
+
+*Extended 2026-10-22 (sound and voice, step 5 — the harmony layer's palette).* Two more keys,
+both palette: **`chord_sound`** (any instrument `bass` and `melody` take; `gm_pad_warm` by default,
+`gm_epiano1` under `warm` and `jazz`, `triangle` under `raw`) and **`chord_gain`** (`0.1..=2`;
+0.40, `warm` 0.35, `raw` 1, `jazz` 0.45 — estimates, not measured mixes). They colour the chord
+lane of §4.6's harmony layer and nothing else. The chord itself is voiced by `voicing`: under
+`note` the triad on the chord's root (one tone would be no chord), under `seventh` the seventh
+chord, every other degree of the style's scale either way, an octave below `melody_octave`, its
+level shared between the tones like the melody's and times the bar's `density_level` factor, with a
+soft attack and release. No palette value can add, move or remove a chord; an I3 property checks
+it. The pattern header lists the two keys, and every line's chord, only when the piece has a chord.
+
+The chord's numerals (I, IV, V) are counted in seven steps — V is four degrees above its root, IV
+three — so they name a dominant and a subdominant only in a seven-note scale. Under
+`pentatonic_minor`, `whole_tone` or `chromatic` the same steps land elsewhere (in five notes "V"
+folds onto the degree just below the root), and the header says so (`… has 5 notes, not 7, so the
+numerals below count steps of it, not functions`) and calls the chords "three-tone chords on every
+other degree" rather than triads. Which bars have a chord and on which degree stays the poem's.
+
+The root sounds folded into one octave of the scale; the scorer, which reads the score before any
+palette, cannot know that fold, so a chord's root is left out of its pitch entropy (the melody's
+alone) — counting the unfolded roots credited the harmony with variety nobody hears. A chord still
+counts as pitched and as an instrument of its own.
+
+*Fixed 2026-10-22 (step 5 review): swing is applied to the bar.* `swingBy(x, n)` slices a cycle
+into `n`; `.cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6), after which a cycle is the
+scheduler's second, not a bar. The pattern chained `.cpm(c).swingBy(x, n)`, so swing sliced the
+second — onsets moved to irregular times, and a held chord could be skipped or struck twice. It is
+now `.swingBy(x, n).cpm(c)`: the bar's beats are swung, then the bar is set to the tempo.
 
 ---
 
@@ -175,7 +492,7 @@ Property tests worth having early:
 - **CMUdict is English-only.** Multilingual poems, Slovenian, Italian, German — all unsupported. Options: eSpeak-NG phonemisation (broad language coverage, permissive licence, but a different phoneme inventory and lower quality), or per-language dictionaries with a pluggable phonemiser trait. Design the trait boundary now even if only English is implemented; retrofitting a phoneme inventory abstraction later is grim.
 - **Free verse.** Poems with no regular meter make §4.1 degenerate — everything reads as high-variance flourish with no foundation. Needs a fallback: possibly a global-variance-relative threshold rather than absolute, so the *most* regular stanza in a poem always anchors.
 - **Stress detection ambiguity.** CMUdict gives lexical stress, not phrasal stress. "Content" (noun) vs "content" (adj) differ. Accept the error rate initially; do not build a POS tagger in week one.
-- **Very short poems** produce very little structure. Define minimum viable input, or make looping/development an explicit style parameter (which arguably violates I3 — think it through).
+- **Very short poems** produce very little structure. Define minimum viable input, or make looping/development an explicit style parameter (which arguably violates I3 — think it through). *Looping is now structure (§4.6), not style. A single-stanza poem loops once, in the outro (machine cycle 3b, pending review).*
 - **Aesthetic risk.** The mapping can be perfectly principled and still sound bad. Budget time for tuning the *ranges* (which is palette work, and legitimately belongs in the style layer).
 
 ---

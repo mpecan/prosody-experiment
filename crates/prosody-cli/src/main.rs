@@ -16,13 +16,17 @@ use anyhow::{Context as _, Result, bail};
 use prosody_cmudict::CmuDict;
 use prosody_core::annotate;
 use prosody_core::lower::{self, Analyses};
+use prosody_core::mapping::{Choice, Mapping, Mappings};
 use prosody_core::role::PoemRoles;
 use prosody_core::voice::Score;
-use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
+use prosody_core::{
+    Fallback, Lexicon, Phonemiser, Poem, meter, repetition, rhyme, role, sound, surprisal,
+};
 use prosody_emit::osc::Schedule;
 use prosody_emit::{Backend as _, Osc, Strudel, Style};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
+use prosody_score::{DEFAULT_PROBES, Profile, Report, sensitivity};
 
 fn main() -> ExitCode {
     match run() {
@@ -51,6 +55,13 @@ struct Arguments {
     source: Option<PathBuf>,
     /// Print the analysis instead of the pattern.
     explain: bool,
+    /// Print how interesting and how legible the piece measures, instead of the pattern.
+    score: bool,
+    /// What `--score` judges the piece against.
+    profile: Profile,
+    /// Which variant of each candidate mapping applies: the defaults, then `--set` and
+    /// `--without` in the order given.
+    mappings: Mappings,
     /// Which backend.
     target: Target,
     /// Recompile whenever the file changes (§7.8's live reload).
@@ -66,7 +77,15 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \n\
      options:\n\
      \x20 --explain      print the poem with each token annotated, instead of the pattern\n\
-     \x20 --osc          emit a schedule of OSC messages instead of Strudel text\n\
+     \x20 --score        print how the piece measures (interest, legibility), instead of the pattern\n\
+     \x20 --profile NAME what --score judges against: interest (the default), machine or jazz\n\
+     \x20 --set LIST     choose candidate mappings' variants, comma-separated name=variant:\n\
+     \x20                held, refrain, period, outro = off|on (default on);\n\
+     \x20                bass = off|height|syllables|feet (default height);\n\
+     \x20                harmony = off|rhyme|cadence|both (default off);\n\
+     \x20                reading = off|arrives|stanza (default arrives)\n\
+     \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
+     \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
      \x20 -              read the poem from standard input\n\
@@ -80,11 +99,37 @@ fn parse_arguments() -> Result<Option<Arguments>> {
 fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments>> {
     let mut source = None;
     let mut explain = false;
+    let mut score = false;
     let mut target = Target::Strudel;
     let mut watch = false;
     let mut send = None;
+    let mut profile = Profile::Interest;
     let mut expecting_address = false;
+    let mut expecting_profile = false;
+    let mut mappings = Mappings::all();
+    let mut expecting_mappings = false;
+    let mut expecting_choices = false;
     for argument in arguments {
+        if expecting_mappings {
+            for name in argument.split(',').filter(|name| !name.is_empty()) {
+                mappings = mappings.without(known(name)?);
+            }
+            expecting_mappings = false;
+            continue;
+        }
+        if expecting_choices {
+            for item in argument.split(',').filter(|item| !item.is_empty()) {
+                mappings = mappings.with(choice(item)?);
+            }
+            expecting_choices = false;
+            continue;
+        }
+        if expecting_profile {
+            profile = Profile::named(&argument)
+                .with_context(|| format!("unknown profile `{argument}`\n\n{USAGE}"))?;
+            expecting_profile = false;
+            continue;
+        }
         if expecting_address {
             send = Some(argument);
             target = Target::Osc;
@@ -94,9 +139,13 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
         match argument.as_str() {
             "-h" | "--help" => return Ok(None),
             "--explain" => explain = true,
+            "--score" => score = true,
             "--osc" => target = Target::Osc,
             "--watch" => watch = true,
             "--send" => expecting_address = true,
+            "--profile" => expecting_profile = true,
+            "--without" => expecting_mappings = true,
+            "--set" => expecting_choices = true,
             flag if flag.starts_with('-') && flag != "-" => {
                 bail!("unknown option `{flag}`\n\n{USAGE}")
             }
@@ -114,13 +163,45 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     if expecting_address {
         bail!("--send needs an address\n\n{USAGE}");
     }
+    if expecting_profile {
+        bail!("--profile needs a name\n\n{USAGE}");
+    }
+    if expecting_mappings {
+        bail!("--without needs a list of mappings\n\n{USAGE}");
+    }
+    if expecting_choices {
+        bail!("--set needs a list of name=variant\n\n{USAGE}");
+    }
     Ok(Some(Arguments {
         source,
         explain,
+        score,
+        profile,
+        mappings,
         target,
         watch,
         send,
     }))
+}
+
+/// The mapping called `name`, or an error naming it.
+fn known(name: &str) -> Result<Mapping> {
+    Mapping::named(name).with_context(|| format!("unknown mapping `{name}`\n\n{USAGE}"))
+}
+
+/// One `name=variant` of `--set`, or an error naming what is wrong with it.
+fn choice(item: &str) -> Result<Choice> {
+    let Some((name, variant)) = item.split_once('=') else {
+        bail!("--set wants name=variant, not `{item}`\n\n{USAGE}");
+    };
+    let mapping = known(name)?;
+    mapping.choose_named(variant).with_context(|| {
+        let variants: Vec<&str> = mapping.variants().iter().map(|v| v.name()).collect();
+        format!(
+            "unknown variant `{variant}` of mapping `{name}` (it has {})\n\n{USAGE}",
+            variants.join(", ")
+        )
+    })
 }
 
 fn run() -> Result<()> {
@@ -195,25 +276,14 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
         .context("the phonemisers disagree about their inventory")?;
     let lexicon = EnglishLexicon::new();
 
-    let meter = meter::scan(&poem, &phonemiser);
-    let rhyme = rhyme::analyse(&poem, &phonemiser);
-    let repetition = repetition::analyse(&poem);
-    let sound = sound::analyse(&poem, &phonemiser);
-    let surprisal = surprisal::analyse(&poem, &phonemiser, &lexicon);
-    let roles = role::assign(&meter, &repetition).context("role assignment")?;
-    let score = lower::run(Analyses {
-        poem: &poem,
-        meter: &meter,
-        rhyme: &rhyme,
-        repetition: &repetition,
-        sound: &sound,
-        surprisal: &surprisal,
-        roles: &roles,
-    })
-    .context("lowering the poem to a score")?;
+    let mappings = &arguments.mappings;
+    let (score, roles) = lower_poem(&poem, &phonemiser, &lexicon, mappings)?;
 
+    if arguments.score {
+        return report(text, &score, arguments, &phonemiser, &lexicon);
+    }
     if arguments.explain {
-        return explain(&poem, &score, &style, &roles);
+        return explain(&poem, &score, &style, &roles, mappings);
     }
 
     match arguments.target {
@@ -233,6 +303,56 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
             emit(&schedule.to_text())
         }
     }
+}
+
+/// Runs every analysis pass and lowers the result — the whole pipeline between a parsed poem and a
+/// backend.
+fn lower_poem(
+    poem: &Poem,
+    phonemiser: &impl Phonemiser,
+    lexicon: &impl Lexicon,
+    mappings: &Mappings,
+) -> Result<(Score, PoemRoles)> {
+    let meter = meter::scan(poem, phonemiser);
+    let rhyme = rhyme::analyse(poem, phonemiser);
+    let repetition = repetition::analyse(poem);
+    let sound = sound::analyse(poem, phonemiser);
+    let surprisal = surprisal::analyse(poem, phonemiser, lexicon);
+    let roles = role::assign(&meter, &repetition).context("role assignment")?;
+    let score = lower::run_with(
+        Analyses {
+            poem,
+            meter: &meter,
+            rhyme: &rhyme,
+            repetition: &repetition,
+            sound: &sound,
+            surprisal: &surprisal,
+            roles: &roles,
+        },
+        mappings,
+    )
+    .context("lowering the poem to a score")?;
+    Ok((score, roles))
+}
+
+/// Prints how the piece measures: the interest metrics and the one-word edit test.
+///
+/// The edit test recompiles the poem once per word, through exactly the pipeline above, so what it
+/// measures is what `prosody` itself would play.
+fn report(
+    text: &str,
+    score: &Score,
+    arguments: &Arguments,
+    phonemiser: &impl Phonemiser,
+    lexicon: &impl Lexicon,
+) -> Result<()> {
+    let sensitivity = sensitivity::measure(text, DEFAULT_PROBES, |edited| {
+        let poem = Poem::parse(edited.to_owned()).ok()?;
+        lower_poem(&poem, phonemiser, lexicon, &arguments.mappings)
+            .ok()
+            .map(|(score, _)| score)
+    });
+    emit(&Report::profiled(score, sensitivity, arguments.profile).to_text())
 }
 
 /// Sends every message of a schedule over UDP.
@@ -256,6 +376,22 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
         schedule.messages().len(),
         schedule.beats_per_minute()
     );
+    // A header key the schedule does not apply is said out loud, not dropped (`CLAUDE.md` §6).
+    for (key, value) in schedule.unapplied() {
+        eprintln!("prosody: {key} = {value} is not applied to an OSC schedule");
+    }
+    if schedule.unsent_chords() > 0 {
+        eprintln!(
+            "prosody: {} chords of the harmony layer are not sent: OSC has no chord message",
+            schedule.unsent_chords()
+        );
+    }
+    if schedule.unsent_bass() > 0 {
+        eprintln!(
+            "prosody: {} bass notes under rhyme words are not sent: a message has one pitch",
+            schedule.unsent_bass()
+        );
+    }
     Ok(())
 }
 
@@ -289,12 +425,35 @@ fn emit(text: &str) -> Result<()> {
 /// Prints the poem with what each token became written under it — `SPEC.md` §8's debug view.
 ///
 /// The rendering lives in `prosody_core::annotate` so it can be tested without running a binary;
-/// this adds the two things only the IO edge knows: the palette, and the realised tempo.
-fn explain(poem: &Poem, score: &Score, style: &Style, roles: &PoemRoles) -> Result<()> {
+/// this adds what only the IO edge knows: the palette, and the mappings chosen away from their
+/// defaults.
+fn explain(
+    poem: &Poem,
+    score: &Score,
+    style: &Style,
+    roles: &PoemRoles,
+    mappings: &Mappings,
+) -> Result<()> {
     let mut out = String::new();
     let _ = writeln!(out, "style");
-    for (key, value) in style.describe() {
-        let _ = writeln!(out, "  {key:<12} {value}");
+    let fields = style.describe();
+    // Pad to the longest key, so a key added to the palette cannot push its value off the column.
+    let width = fields.keys().map(|key| key.len()).max().unwrap_or(0);
+    for (key, value) in fields {
+        let _ = writeln!(out, "  {key:<width$} {value}");
+    }
+    // Every candidate mapping not at its default, so the view says which piece it describes.
+    let changed: Vec<Choice> = mappings.changed().collect();
+    if !changed.is_empty() {
+        let _ = writeln!(out, "mappings");
+        for choice in changed {
+            let _ = writeln!(
+                out,
+                "  {:<width$} {}",
+                choice.mapping().name(),
+                choice.variant().name()
+            );
+        }
     }
     let _ = writeln!(
         out,

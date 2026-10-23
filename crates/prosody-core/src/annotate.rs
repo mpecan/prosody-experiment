@@ -32,6 +32,10 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use crate::arrange::Cause;
+use crate::bass::{BassNote, BassReason, Chromatic, Direction, Height};
+use crate::harmony::{Chord, Harmony, Reason, Silence};
+use crate::mapping::Variant;
 use crate::meter::FootKind;
 use crate::parse::{Poem, Token};
 use crate::phoneme::{Phoneme, Provenance};
@@ -62,6 +66,12 @@ pub enum Pass {
     Phoneme,
     /// Per-unit seeding.
     Seed,
+    /// Which bars of the piece a line sounds in: stated, looping, transforming, overruling.
+    Arrange,
+    /// Which chord a line's bar has, or why it has none — only when the harmony layer is on.
+    Harmony,
+    /// Why each note of a walking bass is the note it is — only when the bass walks.
+    Bass,
 }
 
 impl Pass {
@@ -77,6 +87,9 @@ impl Pass {
             Self::Rhyme => "rhyme",
             Self::Phoneme => "phoneme",
             Self::Seed => "seed",
+            Self::Arrange => "arrange",
+            Self::Harmony => "harmony",
+            Self::Bass => "bass",
         }
     }
 
@@ -84,7 +97,8 @@ impl Pass {
     #[must_use]
     pub const fn section(self) -> &'static str {
         match self {
-            Self::Role => "§4.1",
+            Self::Role | Self::Arrange => "§4.1",
+            Self::Harmony | Self::Bass => "§4.6",
             Self::Meter => "§4.2",
             Self::Repetition | Self::Sound => "§4.3",
             Self::Surprisal => "§4.4",
@@ -94,8 +108,10 @@ impl Pass {
         }
     }
 
-    /// Every pass, for the legend.
-    pub const ALL: [Self; 8] = [
+    /// Every pass, for the legend. The legend lists [`Pass::Harmony`] only when the poem has a
+    /// harmony, and [`Pass::Bass`] only when the bass walks, so a view without either reads as it
+    /// did before they existed. (The height bass is listed as the `role` pass, as it always was.)
+    pub const ALL: [Self; 11] = [
         Self::Role,
         Self::Meter,
         Self::Repetition,
@@ -104,6 +120,9 @@ impl Pass {
         Self::Rhyme,
         Self::Phoneme,
         Self::Seed,
+        Self::Arrange,
+        Self::Harmony,
+        Self::Bass,
     ];
 }
 
@@ -144,6 +163,8 @@ pub struct Annotation {
     span: Span,
     syllables: Vec<Syllable>,
     pitch: Option<Pitch>,
+    bass: Option<BassNote>,
+    basses: Vec<Option<BassNote>>,
     modulation: Option<Family>,
     sharpness: Option<crate::surprisal::Surprisal>,
     bank: Option<Phoneme>,
@@ -169,6 +190,19 @@ impl Annotation {
     #[must_use]
     pub const fn pitch(&self) -> Option<Pitch> {
         self.pitch
+    }
+
+    /// Its first bass note, if the bass gave it one ([`crate::bass`]).
+    #[must_use]
+    pub const fn bass(&self) -> Option<BassNote> {
+        self.bass
+    }
+
+    /// The bass note on each of its syllables, index for index with [`Annotation::syllables`]:
+    /// a walking bass can put a different note on every one.
+    #[must_use]
+    pub fn basses(&self) -> &[Option<BassNote>] {
+        &self.basses
     }
 
     /// Its place in a word family — `SPEC.md` §8's "modulation" ([`Pass::Sound`]).
@@ -220,6 +254,10 @@ pub struct AnnotatedLine {
     basis: Option<LineBasis>,
     voice: Option<crate::repetition::VoiceId>,
     seed: Option<Seed>,
+    sounds: Vec<(usize, Cause)>,
+    walks: Vec<(usize, Cause)>,
+    harmony: Option<Harmony>,
+    bass: Vec<(Syllable, BassNote)>,
     tokens: Vec<Annotation>,
 }
 
@@ -260,6 +298,34 @@ impl AnnotatedLine {
         self.seed
     }
 
+    /// Every bar of the piece it sounds in, and why ([`Pass::Arrange`]), in playing order.
+    #[must_use]
+    pub fn sounds(&self) -> &[(usize, Cause)] {
+        &self.sounds
+    }
+
+    /// The bars of [`AnnotatedLine::sounds`] where its bass sounds too ([`Score::sounds_bass`]):
+    /// all of them under the height bass, and under a walking bass only those where it is the
+    /// bar's foundation line — one walk a bar.
+    #[must_use]
+    pub fn walks(&self) -> &[(usize, Cause)] {
+        &self.walks
+    }
+
+    /// Its bar's chord, or why it has none ([`Pass::Harmony`]) — `None` when the harmony layer
+    /// is off.
+    #[must_use]
+    pub const fn harmony(&self) -> Option<Harmony> {
+        self.harmony
+    }
+
+    /// Every bass note of the line, with the syllable it sounds on, in playing order
+    /// ([`crate::bass`]).
+    #[must_use]
+    pub fn bass(&self) -> &[(Syllable, BassNote)] {
+        &self.bass
+    }
+
     /// Its tokens, in source order.
     #[must_use]
     pub fn tokens(&self) -> &[Annotation] {
@@ -272,6 +338,7 @@ impl AnnotatedLine {
 pub struct Annotated {
     stanzas: Vec<Vec<AnnotatedLine>>,
     basis: Vec<StanzaBasis>,
+    bass: Variant,
 }
 
 impl Annotated {
@@ -279,6 +346,12 @@ impl Annotated {
     #[must_use]
     pub fn stanzas(&self) -> &[Vec<AnnotatedLine>] {
         &self.stanzas
+    }
+
+    /// Which variant of the bass made the bass notes.
+    #[must_use]
+    pub const fn bass(&self) -> Variant {
+        self.bass
     }
 
     /// Why each stanza got its layer.
@@ -344,6 +417,9 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         .map(|(_, line)| (line.span(), (line.layer(), line.basis())))
         .collect();
 
+    // Every line's bar, counted the way the score counts them — one per line in reading order —
+    // so a line with no events still finds its harmony.
+    let mut next_bar = 0_usize;
     let stanzas = poem
         .stanzas()
         .iter()
@@ -352,6 +428,8 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                 .lines()
                 .iter()
                 .map(|line| {
+                    let index = next_bar;
+                    next_bar += 1;
                     let tokens: Vec<Annotation> = line
                         .words()
                         .map(|token| annotate(*token, &by_token, &silent, &family_sizes))
@@ -373,6 +451,21 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                         basis: line_roles.get(&line.span()).map(|(_, basis)| *basis),
                         voice,
                         seed: voice.and_then(|id| score.voice(id)).map(|v| v.seed()),
+                        sounds: bars
+                            .get(&line.span())
+                            .map(|&bar| sounds_of(score, bar))
+                            .unwrap_or_default(),
+                        walks: bars
+                            .get(&line.span())
+                            .map(|&bar| bass_sounds_of(score, bar))
+                            .unwrap_or_default(),
+                        harmony: score.harmony_of(index),
+                        bass: score
+                            .events()
+                            .iter()
+                            .filter(|event| event.bar().get() == index)
+                            .filter_map(|event| Some((syllable(event), event.bass()?)))
+                            .collect(),
                         tokens,
                     }
                 })
@@ -387,6 +480,19 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
             .iter()
             .map(crate::role::StanzaRole::basis)
             .collect(),
+        bass: score.bass(),
+    }
+}
+
+/// Where an event sounds, as the view shows it.
+const fn syllable(event: &Event) -> Syllable {
+    Syllable {
+        bar: event.bar().get(),
+        beat: event.beat().get(),
+        index: event.subdivision().index(),
+        of: event.subdivision().of(),
+        foot: event.foot(),
+        velocity: event.velocity(),
     }
 }
 
@@ -408,17 +514,7 @@ fn annotate(
 ) -> Annotation {
     let events = by_token.get(&token.span());
     let syllables = events.map_or_else(Vec::new, |events| {
-        events
-            .iter()
-            .map(|event| Syllable {
-                bar: event.bar().get(),
-                beat: event.beat().get(),
-                index: event.subdivision().index(),
-                of: event.subdivision().of(),
-                foot: event.foot(),
-                velocity: event.velocity(),
-            })
-            .collect()
+        events.iter().map(|event| syllable(event)).collect()
     });
     let first = events.and_then(|events| events.first().copied());
 
@@ -426,6 +522,10 @@ fn annotate(
         span: token.span(),
         syllables,
         pitch: events.and_then(|events| events.iter().find_map(|event| event.pitch())),
+        bass: events.and_then(|events| events.iter().find_map(|event| event.bass())),
+        basses: events.map_or_else(Vec::new, |events| {
+            events.iter().map(|event| event.bass()).collect()
+        }),
         modulation: first.and_then(|event| event.family()).filter(|family| {
             // Only a family with company: more events in the family than this word contributes.
             // See the note where `family_sizes` is built.
@@ -452,7 +552,12 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
     let mut out = String::new();
 
     let _ = writeln!(out, "passes");
+    let harmonised = annotated.lines().any(|line| line.harmony().is_some());
+    let walking = walks(annotated.bass());
     for pass in Pass::ALL {
+        if (pass == Pass::Harmony && !harmonised) || (pass == Pass::Bass && !walking) {
+            continue;
+        }
         let _ = writeln!(out, "  {:<11} {}", pass.name(), pass.section());
     }
     let _ = writeln!(out);
@@ -487,13 +592,22 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
                 line.seed()
                     .map_or_else(|| "-".to_owned(), |seed| format!("{seed}")[..8].to_owned()),
             );
+            if !line.sounds().is_empty() {
+                let _ = writeln!(out, "  sounds {}", describe_sounds(line.sounds()));
+            }
+            if let Some(harmony) = line.harmony() {
+                let _ = writeln!(out, "  harmony {}", describe_harmony(harmony));
+            }
+            if walking && !line.bass().is_empty() {
+                render_bass(&mut out, source, annotated.bass(), harmonised, line);
+            }
             let _ = writeln!(
                 out,
-                "    {:<14} {:<10} {:<7} {:<7} {:<9} {:<7} {:<6} from",
+                "    {:<14} {:<10} {:<7} {:<9} {:<9} {:<7} {:<6} from",
                 "token", "beat", "gain", "pitch", "modulation", "sharp", "bank"
             );
             for token in line.tokens() {
-                render_token(&mut out, source, token);
+                render_token(&mut out, source, token, walking);
             }
         }
         let _ = writeln!(out);
@@ -501,13 +615,360 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
     out
 }
 
+/// Whether the bass walks: W1 or W2. The height bass is shown in the pitch column, as before.
+const fn walks(variant: Variant) -> bool {
+    matches!(variant, Variant::Syllables | Variant::Feet)
+}
+
+/// A walking line's bass, one note a row: where it sounds, what it traces to, its note, and the
+/// rule that chose it (`SPEC.md` §4.6, the bass).
+fn render_bass(
+    out: &mut String,
+    source: &str,
+    variant: Variant,
+    harmonised: bool,
+    line: &AnnotatedLine,
+) {
+    let what = match variant {
+        Variant::Feet => "feet · a note a foot on the beat, by the foot's vowel height (W2)",
+        _ => "syllables · every syllable walks: stressed by height, steps between (W1)",
+    };
+    let _ = writeln!(out, "  bass {what}");
+    // One walk a bar (`Score::sounds_bass`): where the line sounds under another bar's foundation
+    // line — held, refrain, call — its walk is silent, so two walks never clash by a semitone.
+    let silent: Vec<(usize, Cause)> = line
+        .sounds()
+        .iter()
+        .filter(|sound| !line.walks().contains(sound))
+        .copied()
+        .collect();
+    let _ = writeln!(
+        out,
+        "    walks in {}",
+        if line.walks().is_empty() {
+            "no bar".to_owned()
+        } else {
+            describe_sounds(line.walks())
+        }
+    );
+    if !silent.is_empty() {
+        let _ = writeln!(
+            out,
+            "    silent in {} — one walk a bar, the bar's foundation line's",
+            describe_sounds(&silent)
+        );
+    }
+    for (syllable, note) in line.bass() {
+        let (bar, beat, index, of) = syllable.position();
+        let _ = writeln!(
+            out,
+            "    {:<14} {:<10} {:<9} {}",
+            note.span().text(source).unwrap_or("<lost>"),
+            format!("{bar}.{beat}.{index}/{of}"),
+            tone(*note),
+            describe_bass(*note, harmonised)
+        );
+    }
+}
+
+/// A bass note's tone: its step above the root, `-` when a semitone below it, and `@root` when it
+/// counts from a chord's root rather than the scale's.
+fn tone(note: BassNote) -> String {
+    let below = match note.chromatic() {
+        Chromatic::Diatonic => "",
+        Chromatic::SemitoneBelow => "-",
+    };
+    let root = note.root().get();
+    if root == 0 {
+        format!("step {}{below}", note.step().get())
+    } else {
+        format!("{}{below}@{root}", note.step().get())
+    }
+}
+
+/// The tone a height names, as words: `AY is open, so the root`.
+fn height_words(vowel: crate::phoneme::Phoneme) -> String {
+    Height::of(vowel).map_or_else(
+        || format!("{} has no height", vowel.symbol()),
+        |height| {
+            format!(
+                "{} is {}, so the {}",
+                vowel.symbol(),
+                height.name(),
+                height.tone_name()
+            )
+        },
+    )
+}
+
+/// Which chord a W2 note's tones come from.
+fn chord_words(chord: Option<Chord>, harmonised: bool) -> String {
+    match chord {
+        Some(chord) => format!("{} deg {}", chord.function().numeral(), chord.root().get()),
+        None if harmonised => "the scale (this bar has no chord)".to_owned(),
+        None => "the scale (harmony off)".to_owned(),
+    }
+}
+
+/// Why a bass note is the note it is.
+fn describe_bass(note: BassNote, harmonised: bool) -> String {
+    match note.why() {
+        BassReason::Height(vowel) => format!("height: {}", height_words(vowel)),
+        BassReason::Passing { from, toward } if from == toward => {
+            format!("passing: between two {}s, the step above", from.get())
+        }
+        BassReason::Passing { from, toward } => format!(
+            "passing: a step from {} towards {}, held one short of it",
+            from.get(),
+            toward.get()
+        ),
+        BassReason::Approach { onto } => format!(
+            "approach: a semitone below the next stressed note, {}",
+            onto.get()
+        ),
+        BassReason::LeadIn { toward } => format!(
+            "lead-in: climbing a step at a time into the first stressed note, {}",
+            toward.get()
+        ),
+        BassReason::Tail { from } => format!(
+            "tail: stepping down from the last stressed note, {}",
+            from.get()
+        ),
+        BassReason::ChordTone { vowel, chord } => format!(
+            "chord tone: {} of {}",
+            height_words(vowel),
+            chord_words(chord, harmonised)
+        ),
+        BassReason::Step {
+            vowel,
+            chord,
+            direction,
+            next,
+        } => {
+            let way = match direction {
+                Direction::Up => "up",
+                Direction::Down => "down",
+            };
+            let because = match (next, direction) {
+                (Some(next), Direction::Up) => {
+                    format!("the next foot's {} is higher", next.symbol())
+                }
+                (Some(next), Direction::Down) => {
+                    format!("the next foot's {} is not higher", next.symbol())
+                }
+                (None, _) => "no next foot".to_owned(),
+            };
+            format!(
+                "step {way}: {} of {} would repeat the last note; {because}",
+                height_words(vowel),
+                chord_words(chord, harmonised)
+            )
+        }
+    }
+}
+
+/// `V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza`: which chord, on which
+/// degree, and the rule that chose it — or `no chord · ` and why not.
+fn describe_harmony(harmony: Harmony) -> String {
+    match harmony {
+        Harmony::Chord(chord) => {
+            let numeral = chord.function().numeral();
+            let root = chord.root().get();
+            let of = chord.of().get();
+            let chord_text = if of == root {
+                format!("{numeral} deg {root}")
+            } else {
+                format!("{numeral} deg {root} ({numeral} of deg {of})")
+            };
+            let why = match chord.reason() {
+                Reason::Class(class) => {
+                    format!("rhyme: class {}, on its degree", class.letter())
+                }
+                Reason::Opens(class) => format!(
+                    "cadence: {} opens, answered later in its stanza",
+                    class.letter()
+                ),
+                Reason::Closes(class) => format!(
+                    "cadence: {} closes, answering an earlier line of its stanza",
+                    class.letter()
+                ),
+                Reason::Unanswered { key } => format!(
+                    "cadence: no rhyme in its stanza, so IV of the stanza's key, deg {}",
+                    key.get()
+                ),
+                Reason::Turnaround { onto } => format!(
+                    "cadence: the stanza's last bar, turning round onto its first chord, deg {}",
+                    onto.get()
+                ),
+            };
+            format!("{chord_text} · {why}")
+        }
+        Harmony::Rest(rest) => format!(
+            "no chord · {}",
+            match rest.why() {
+                Silence::Unrhymed => "rhyme: the line rhymes with nothing, so it has no degree",
+                Silence::Wordless => "no pronounceable word to carry a chord (I4)",
+                Silence::Flourish => "a flourish stanza carries no harmony",
+            }
+        ),
+    }
+}
+
+/// Every slot of the arrangement a source bar sounds in.
+fn sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .enumerate()
+        .flat_map(|(index, slot)| {
+            slot.placements()
+                .iter()
+                .filter(move |placement| placement.bar().get() == bar)
+                .map(move |placement| (index, placement.cause()))
+        })
+        .collect()
+}
+
+/// Every slot a source bar sounds in where its bass sounds too ([`Score::sounds_bass`]).
+fn bass_sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .enumerate()
+        .flat_map(|(index, slot)| {
+            slot.placements()
+                .iter()
+                .filter(move |placement| {
+                    placement.bar().get() == bar && score.sounds_bass(slot, placement)
+                })
+                .map(move |placement| (index, placement.cause()))
+        })
+        .collect()
+}
+
+/// `stated 0 · looping 2-3 5 · arriving 4(1) 6(2) · calling 7-12`: each cause with the bars it
+/// accounts for, runs of consecutive bars collapsed, and a transformation's pass in brackets.
+fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
+    // Each cause's name, and whether a cause is that one — with its pass, where it has one.
+    type Select = fn(Cause) -> Option<Option<usize>>;
+    let kinds: [(&str, Select); 9] = [
+        ("stated", |c| matches!(c, Cause::Stated).then_some(None)),
+        ("overruling", |c| {
+            matches!(c, Cause::Overruling).then_some(None)
+        }),
+        ("arriving", |c| match c {
+            Cause::Arriving { pass } => Some(Some(pass)),
+            _ => None,
+        }),
+        ("yielding", |c| match c {
+            Cause::Yielding { pass } => Some(Some(pass)),
+            _ => None,
+        }),
+        ("looping", |c| matches!(c, Cause::Looping).then_some(None)),
+        ("calling", |c| matches!(c, Cause::Calling).then_some(None)),
+        ("holding", |c| matches!(c, Cause::Holding).then_some(None)),
+        ("refraining", |c| {
+            matches!(c, Cause::Refraining).then_some(None)
+        }),
+        ("repeating", |c| {
+            matches!(c, Cause::Repeating).then_some(None)
+        }),
+    ];
+    let mut parts = Vec::new();
+    for (name, select) in kinds {
+        let picked: Vec<(usize, Option<usize>)> = sounds
+            .iter()
+            .filter_map(|&(slot, cause)| select(cause).map(|pass| (slot, pass)))
+            .collect();
+        if picked.is_empty() {
+            continue;
+        }
+        let mut words: Vec<String> = Vec::new();
+        let mut run: Option<(usize, usize)> = None;
+        let flush = |run: Option<(usize, usize)>, words: &mut Vec<String>| {
+            if let Some((first, last)) = run {
+                words.push(if first == last {
+                    first.to_string()
+                } else {
+                    format!("{first}-{last}")
+                });
+            }
+        };
+        for (slot, pass) in picked {
+            if let Some(pass) = pass {
+                flush(run.take(), &mut words);
+                words.push(format!("{slot}({pass})"));
+                continue;
+            }
+            run = match run {
+                Some((first, last)) if last + 1 == slot => Some((first, slot)),
+                other => {
+                    flush(other, &mut words);
+                    Some((slot, slot))
+                }
+            };
+        }
+        flush(run, &mut words);
+        parts.push(format!("{name} {}", words.join(" ")));
+    }
+    parts.join(" · ")
+}
+
+/// The pitch column of a token's `nth` syllable's row.
+fn pitch_cell(token: &Annotation, nth: usize, walking: bool) -> String {
+    let first = nth == 0;
+    if walking {
+        // Walking, a token can carry a different bass note on every syllable, and a rhyme
+        // word both its melody note and a bass note: each row shows what sounds on its own
+        // syllable, as the line's bass rows do (`deg 0~ bass 0@4`).
+        let melody = token.pitch().filter(|_| first).map(|pitch| {
+            if pitch.detune().is_exact() {
+                format!("deg {}", pitch.degree().get())
+            } else {
+                format!("deg {}~", pitch.degree().get())
+            }
+        });
+        let bass = token
+            .basses()
+            .get(nth)
+            .copied()
+            .flatten()
+            .map(|note| format!("bass {}", tone(note).trim_start_matches("step ")));
+        match (melody, bass) {
+            (Some(melody), Some(bass)) => format!("{melody} {bass}"),
+            (Some(one), None) | (None, Some(one)) => one,
+            (None, None) if first => "—".to_owned(),
+            (None, None) => String::new(),
+        }
+    } else if first {
+        match (token.pitch(), token.bass()) {
+            (Some(pitch), _) if pitch.detune().is_exact() => {
+                format!("deg {}", pitch.degree().get())
+            }
+            (Some(pitch), _) => format!("deg {}~", pitch.degree().get()),
+            // The height bass: `bass 2 AH`, its degree and the vowel that chose it.
+            (None, Some(note)) => match note.why() {
+                BassReason::Height(vowel) => {
+                    format!("bass {} {}", note.step().get(), vowel.symbol())
+                }
+                _ => format!("bass {}", tone(note).trim_start_matches("step ")),
+            },
+            (None, None) => "—".to_owned(),
+        }
+    } else {
+        String::new()
+    }
+}
+
 /// One token's row, or several when it sounds more than one syllable.
-fn render_token(out: &mut String, source: &str, token: &Annotation) {
+fn render_token(out: &mut String, source: &str, token: &Annotation, walking: bool) {
     let text = token.span().text(source).unwrap_or("<lost>");
     if token.syllables().is_empty() {
         let _ = writeln!(
             out,
-            "    {text:<14} {:<10} {:<7} {:<7} {:<9} {:<7} {:<6} {}",
+            "    {text:<14} {:<10} {:<7} {:<9} {:<9} {:<7} {:<6} {}",
             "—",
             "—",
             "—",
@@ -528,20 +989,7 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
         // Everything a token contributes is a property of the word, so it is written once, on the
         // row of its first syllable — repeating it would read as several different pitches.
         let first = nth == 0;
-        let pitch = if first {
-            token.pitch().map_or_else(
-                || "—".to_owned(),
-                |pitch| {
-                    if pitch.detune().is_exact() {
-                        format!("deg {}", pitch.degree().get())
-                    } else {
-                        format!("deg {}~", pitch.degree().get())
-                    }
-                },
-            )
-        } else {
-            String::new()
-        };
+        let pitch = pitch_cell(token, nth, walking);
         let modulation = if first {
             token.modulation().map_or_else(
                 || "—".to_owned(),
@@ -570,6 +1018,12 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
             if token.pitch().is_some() {
                 from.push("rhyme");
             }
+            match token.bass() {
+                Some(_) if walking => from.push("bass"),
+                // The height bass was always credited to the role pass: it is the foundation's.
+                Some(_) if token.pitch().is_none() => from.push("role"),
+                _ => {}
+            }
             if token.modulation().is_some() {
                 from.push("sound");
             }
@@ -586,7 +1040,7 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
 
         let _ = writeln!(
             out,
-            "    {:<14} {:<10} {:<7} {:<7} {:<9} {:<7} {:<6} {}",
+            "    {:<14} {:<10} {:<7} {:<9} {:<9} {:<7} {:<6} {}",
             if first { text } else { "" },
             format!("{bar}.{beat}.{index}/{of}"),
             format!("{:.2}", syllable.velocity().as_f64()),
@@ -601,7 +1055,28 @@ fn render_token(out: &mut String, source: &str, token: &Annotation) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Pass, render, run};
+    use super::{Pass, describe_sounds, render, run};
+    use crate::arrange::Cause;
+
+    #[test]
+    fn where_a_line_sounds_reads_as_runs_per_cause() {
+        // A line stated at bar 0, looping at 2, 3 and 5, then yielding on the first pass of a
+        // transformation at bar 7.
+        let sounds = [
+            (0, Cause::Stated),
+            (2, Cause::Looping),
+            (3, Cause::Looping),
+            (5, Cause::Looping),
+            (7, Cause::Yielding { pass: 1 }),
+            (8, Cause::Calling),
+            (9, Cause::Calling),
+        ];
+        assert_eq!(
+            describe_sounds(&sounds),
+            "stated 0 · yielding 7(1) · looping 2-3 5 · calling 8-9"
+        );
+    }
+
     use crate::lower::{self, Analyses};
     use crate::phoneme::arpabet::ARPABET;
     use crate::phoneme::{
@@ -654,6 +1129,10 @@ mod tests {
     }
 
     fn view(source: &str) -> (String, super::Annotated) {
+        view_with(source, &crate::mapping::Mappings::all())
+    }
+
+    fn view_with(source: &str, mappings: &crate::mapping::Mappings) -> (String, super::Annotated) {
         let poem = Poem::parse(source.to_owned()).unwrap();
         let meter = meter::scan(&poem, &Spelled);
         let rhyme = rhyme::analyse(&poem, &Spelled);
@@ -661,15 +1140,18 @@ mod tests {
         let sound = sound::analyse(&poem, &Spelled);
         let surprisal = surprisal::analyse(&poem, &Spelled, &ByLength);
         let roles = role::assign(&meter, &repetition).unwrap();
-        let score = lower::run(Analyses {
-            poem: &poem,
-            meter: &meter,
-            rhyme: &rhyme,
-            repetition: &repetition,
-            sound: &sound,
-            surprisal: &surprisal,
-            roles: &roles,
-        })
+        let score = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme,
+                repetition: &repetition,
+                sound: &sound,
+                surprisal: &surprisal,
+                roles: &roles,
+            },
+            mappings,
+        )
         .unwrap();
         let annotated = run(&poem, &score, &roles);
         (render(&poem, &annotated), annotated)
@@ -742,12 +1224,268 @@ mod tests {
     fn the_view_names_the_pass_that_decided_each_value() {
         // The half that turns "that sounds wrong" into "that pass is wrong".
         let (text, _) = view(RICH);
-        for pass in Pass::ALL {
+        // The harmony pass is listed only when the harmony layer is on, and the bass pass only
+        // when the bass walks; see their own tests.
+        for pass in Pass::ALL
+            .into_iter()
+            .filter(|pass| !matches!(pass, Pass::Harmony | Pass::Bass))
+        {
             assert!(text.contains(pass.name()), "{} missing", pass.name());
             assert!(text.contains(pass.section()), "{} missing", pass.section());
         }
         // ...and a pitched token says the rhyme pass put it there.
         assert!(text.contains("meter,rhyme"), "{text}");
+    }
+
+    /// Choosing the harmony's `variant`.
+    fn harmony(variant: crate::mapping::Variant) -> crate::mapping::Mappings {
+        crate::mapping::Mappings::all()
+            .with(crate::mapping::Mapping::Harmony.choose(variant).unwrap())
+    }
+
+    /// Choosing the bass's and the harmony's variants.
+    fn bass(
+        bass: crate::mapping::Variant,
+        harmony: crate::mapping::Variant,
+    ) -> crate::mapping::Mappings {
+        crate::mapping::Mappings::all()
+            .with(crate::mapping::Mapping::Bass.choose(bass).unwrap())
+            .with(crate::mapping::Mapping::Harmony.choose(harmony).unwrap())
+    }
+
+    /// Each bass row of bar `line` (counting lines from 0): its tone and why, as the view writes
+    /// them.
+    fn bass_rows(text: &str, line: usize) -> Vec<(String, String)> {
+        let block = text
+            .split("\n  bass ")
+            .filter(|block| block.starts_with("syllables") || block.starts_with("feet"))
+            .nth(line)
+            .expect("a bass block for the line");
+        // `    {word:<14} {position:<10} {tone:<9} {why}`: the tone at column 30, the why at 40.
+        block
+            .lines()
+            .skip(1)
+            .filter(|row| {
+                let row = row.trim_start();
+                !row.starts_with("walks in") && !row.starts_with("silent in")
+            })
+            .take_while(|row| !row.trim_start().starts_with("token"))
+            .map(|row| (row[30..39].trim_end().to_owned(), row[40..].to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn the_view_says_why_each_note_of_a_syllable_walk_is_what_it_is() {
+        use crate::mapping::Variant;
+        // W1: `bo de de bA` — OW mid (the third, 2), a passing tone towards AA's root (1), the
+        // approach a semitone below the root (0-), then the root.
+        let source = "bo de de bA\nso te te sA\n";
+        let (text, annotated) = view_with(source, &bass(Variant::Syllables, Variant::Off));
+        assert_eq!(annotated.bass(), Variant::Syllables);
+        let row = |tone: &str, why: &str| (tone.to_owned(), why.to_owned());
+        assert_eq!(
+            bass_rows(&text, 0),
+            vec![
+                row("step 2", "height: OW is mid, so the third"),
+                row(
+                    "step 1",
+                    "passing: a step from 2 towards 0, held one short of it"
+                ),
+                row(
+                    "step 0-",
+                    "approach: a semitone below the next stressed note, 0"
+                ),
+                row("step 0", "height: AA is open, so the root"),
+            ]
+        );
+        assert!(
+            text.contains("\n  bass        §4.6\n"),
+            "the legend lists it:\n{text}"
+        );
+        assert!(
+            text.contains("meter,rhyme,bass"),
+            "a rhyme word carries both:\n{text}"
+        );
+        // The height bass, the default, has no block and no legend entry: the view is as it was.
+        let (plain, _) = view(source);
+        assert!(!plain.contains("\n  bass "), "{plain}");
+    }
+
+    /// The pitch column of each token row in bar `line`'s table, by the row's beat position —
+    /// for a line of one-syllable words, whose every row is a token's first and so has all four
+    /// one-word columns after the pitch (modulation, sharp, bank, from).
+    fn pitch_cells(text: &str, line: usize) -> Vec<(String, String)> {
+        let table = text
+            .split("\n    token ")
+            .nth(line + 1)
+            .expect("a token table for the line");
+        // `    {token:<14} {beat:<10} {gain:<7} {pitch:<9} …`: the beat at column 19, the pitch
+        // from 38 — wider than its column when a rhyme word carries both notes.
+        table
+            .lines()
+            .skip(1)
+            .take_while(|row| row.starts_with("    ") && row.len() > 38)
+            .map(|row| {
+                let words: Vec<&str> = row[38..].split_whitespace().collect();
+                let cell = words[..words.len() - 4].join(" ");
+                (row[19..29].trim_end().to_owned(), cell)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_pitch_column_shows_what_each_syllable_of_a_walk_sounds() {
+        use crate::mapping::Variant;
+        // W1 over `bo de de bA`: each syllable's own bass note on its own row — 2, 1, a semitone
+        // below 0, then 0 — and the rhyme word `bA` both its melody degree (the first class, 0)
+        // and its bass note, as the bass rows above list them.
+        let (text, _) = view_with(
+            "bo de de bA\nso te te sA\n",
+            &bass(Variant::Syllables, Variant::Off),
+        );
+        let cell = |beat: &str, pitch: &str| (beat.to_owned(), pitch.to_owned());
+        assert_eq!(
+            pitch_cells(&text, 0),
+            vec![
+                cell("0.0.0/2", "bass 2"),
+                cell("0.0.1/2", "bass 1"),
+                cell("0.1.0/2", "bass 0-"),
+                cell("0.1.1/2", "deg 0 bass 0"),
+            ],
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_view_says_where_a_held_line_walks_and_where_it_is_silent() {
+        use crate::mapping::Variant;
+        // ABAB: the A line sounds stated in slot 0, held under the B line in slot 1, and again in
+        // the outro's slot 4. One walk a bar (`Score::sounds_bass`): it walks where it is the
+        // bar's foundation line and not where it is held.
+        let (text, annotated) = view_with(
+            "de bA de bA\nde bo de bo\nse sA se sA\nse so se so\n",
+            &bass(Variant::Feet, Variant::Off),
+        );
+        let first = annotated.lines().next().unwrap();
+        assert_eq!(
+            first.walks(),
+            &[(0, Cause::Stated), (4, Cause::Repeating)][..]
+        );
+        assert!(
+            text.contains("    walks in stated 0 · repeating 4\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains(
+                "    silent in holding 1 — one walk a bar, the bar's foundation line's\n"
+            ),
+            "{text}"
+        );
+        // The height bass sounds wherever its line does.
+        let (_, plain) = view("de bA de bA\nde bo de bo\nse sA se sA\nse so se so\n");
+        let first = plain.lines().next().unwrap();
+        assert_eq!(first.walks(), first.sounds());
+    }
+
+    #[test]
+    fn the_view_says_which_chord_tone_each_foot_lands_on() {
+        use crate::mapping::Variant;
+        // W2 under H1. Lines end O, A, O, A, so O is degree 0 and A degree 1; bar 0 is I on 0,
+        // bar 1 I on 1. Bar 1's feet: `de bo` (OW, mid: the third) then `de bA` (AA, open: the
+        // root), counted from degree 1.
+        let source = "de bA de bo\nde bo de bA\nse sA se so\nse so se sA\n";
+        let (text, _) = view_with(source, &bass(Variant::Feet, Variant::Rhyme));
+        let row = |tone: &str, why: &str| (tone.to_owned(), why.to_owned());
+        assert_eq!(
+            bass_rows(&text, 1),
+            vec![
+                row("2@1", "chord tone: OW is mid, so the third of I deg 1"),
+                row("0@1", "chord tone: AA is open, so the root of I deg 1"),
+            ]
+        );
+        // Harmony off, the same feet stand on the scale.
+        let (text, _) = view_with(source, &bass(Variant::Feet, Variant::Off));
+        assert_eq!(
+            bass_rows(&text, 1),
+            vec![
+                row(
+                    "step 2",
+                    "chord tone: OW is mid, so the third of the scale (harmony off)"
+                ),
+                row(
+                    "step 0",
+                    "chord tone: AA is open, so the root of the scale (harmony off)"
+                ),
+            ]
+        );
+        // A repeated tone steps, and says which vowel chose the direction: `dA dA` repeats the
+        // root with no next foot, so down.
+        let (text, _) = view_with(
+            "de bA de bA\nse sA se sA\n",
+            &bass(Variant::Feet, Variant::Off),
+        );
+        assert_eq!(
+            bass_rows(&text, 0)[1],
+            row(
+                "step -1",
+                "step down: AA is open, so the root of the scale (harmony off) would repeat the \
+                 last note; no next foot"
+            )
+        );
+    }
+
+    #[test]
+    fn the_view_says_which_chord_each_bar_has_and_why() {
+        // ABAB of one-syllable stressed words, every line two of them: a foundation stanza. A is
+        // degree 0 and B degree 1. Under cadence: A opens (V of 0 = deg 4), B opens (V of 1 =
+        // deg 5), A closes (I on 0), and the last bar turns round onto the first chord (V of 4).
+        let source = "dA bA\nro bo\nsA tA\nno do\n";
+        let (text, annotated) = view_with(source, &harmony(crate::mapping::Variant::Cadence));
+        let rows: Vec<&str> = text
+            .lines()
+            .filter_map(|line| line.strip_prefix("  harmony "))
+            .filter(|row| !row.starts_with(' '))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                "V deg 4 (V of deg 0) · cadence: A opens, answered later in its stanza",
+                "V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza",
+                "I deg 0 · cadence: A closes, answering an earlier line of its stanza",
+                "V deg 8 (V of deg 4) · cadence: the stanza's last bar, turning round onto \
+                 its first chord, deg 4",
+            ]
+        );
+        assert!(text.contains("  harmony     §4.6"), "{text}");
+        assert_eq!(
+            annotated.lines().filter(|l| l.harmony().is_some()).count(),
+            4
+        );
+    }
+
+    #[test]
+    fn the_view_says_why_a_bar_has_no_chord() {
+        // H1: `ro bAn` ends on AA N, which nothing else ends on — a class of one, so no chord.
+        let source = "dA bA\nro bAn\nsA tA\n";
+        let (text, _) = view_with(source, &harmony(crate::mapping::Variant::Rhyme));
+        assert!(
+            text.contains(
+                "harmony no chord · rhyme: the line rhymes with nothing, so it has no degree"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("harmony I deg 0 · rhyme: class A, on its degree"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn without_the_harmony_the_view_is_as_it_was() {
+        // Off is the default: no harmony row and no harmony in the legend.
+        let (text, annotated) = view("dA bA\nro bo\nsA tA\nno do\n");
+        assert!(!text.contains("harmony"), "{text}");
+        assert!(annotated.lines().all(|line| line.harmony().is_none()));
     }
 
     #[test]

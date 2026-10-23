@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>prosody</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
     color-scheme: dark;
@@ -55,6 +56,7 @@
   }
   .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .78rem; }
   label { display: flex; flex-direction: column; gap: .2rem; font-size: .74rem; color: var(--dim); }
+  header select { width: auto; }
   select, input {
     font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 5px;
     border: 1px solid var(--line); background: #17161f; color: var(--ink);
@@ -73,14 +75,51 @@
   }
   pre.wrapped { white-space: pre-wrap; word-break: break-all; }
   .hidden { display: none; }
+
+  .ab { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .ab span { padding: .4rem .6rem; color: var(--dim); font-size: .8rem; }
+  .ab button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: .4rem .8rem; }
+  .ab button[aria-pressed=true] { background: var(--accent); color: #191423; }
+
+  .mappings table { grid-column: 1 / -1; border-collapse: collapse; font-size: .8rem; }
+  .mappings th { color: var(--dim); font-weight: 600; text-align: center; padding: 0 .5rem; }
+  .mappings td { padding: .15rem .5rem; vertical-align: top; }
+  .mappings td:first-child { padding-left: 0; }
+  .mappings td.check { text-align: center; width: 6rem; }
+  .mappings code { font-family: var(--mono); color: var(--ink); }
+  .mappings .what { color: var(--dim); }
+  .mappings select { width: auto; font-size: .78rem; padding: .1rem .2rem; }
+  .mappings select.changed { border-color: var(--ink); }
+  .reading .check span { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .82rem; }
+  .reading input[type=checkbox] { width: auto; }
+
+  #score { flex: 1; overflow: auto; padding: 1rem 1.2rem; }
+  #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
+  #score table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  #score th { color: var(--dim); font-weight: 600; text-align: right; padding: .2rem .7rem; }
+  #score th:first-child, #score td:first-child { text-align: left; padding-left: 0; }
+  #score td { text-align: right; padding: .2rem .7rem; border-top: 1px solid var(--line); }
+  #score td.out { color: var(--warn); }
+  #score td.up { color: #9be3a5; }
+  #score td.down { color: var(--warn); }
+  #score tr.total td { font-weight: 700; }
+  #score p { color: var(--dim); font-size: .8rem; max-width: 46rem; }
 </style>
 </head>
 <body>
 
 <header>
   <h1>prosody <span>— a poem is the score</span></h1>
+  <select id="preset" title="Load one of the example poems, with its palette">
+    <option value="">example poems…</option>
+  </select>
   <button id="play" class="primary">▶ Play</button>
   <button id="stop" disabled>■ Stop</button>
+  <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
+    <span>hearing</span>
+    <button id="hearA" aria-pressed="true">A</button>
+    <button id="hearB" aria-pressed="false">B</button>
+  </span>
   <span id="status">ready</span>
 </header>
 
@@ -98,8 +137,32 @@
       <label>Bank
         <select id="bank"></select>
       </label>
-      <label>Synth
-        <select id="synth"></select>
+      <label>Sound
+        <select id="palette" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are — except jazz, which also sets its scale, swing and bank."></select>
+      </label>
+      <label>Bass
+        <select id="bass"></select>
+      </label>
+      <label>Melody
+        <select id="melody"></select>
+      </label>
+      <label>Chords
+        <select id="chord_sound" title="The instrument of the chord lane, which plays only when a side's harmony mapping is not off"></select>
+      </label>
+      <label>Kit
+        <select id="kit" title="Which drum carries each layer: kick and hat, or ride and snare"></select>
+      </label>
+      <label>Voicing
+        <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree"></select>
+      </label>
+      <label>Ride stand-in
+        <select id="ride_fallback" title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash"></select>
+      </label>
+      <label>Bass octave <span id="bass_octaveOut"></span>
+        <input id="bass_octave" type="range" min="1" max="3" step="1" title="The octave the bass plays in: 2 is MIDI 36">
+      </label>
+      <label>Melody octave <span id="melody_octaveOut"></span>
+        <input id="melody_octave" type="range" min="3" max="5" step="1" title="The octave the rhyme melody plays in: 4 is MIDI 60, middle C">
       </label>
       <label>Tempo range (bpm)
         <span class="row">
@@ -107,12 +170,78 @@
           <input id="high" type="number" min="1" max="400" value="130">
         </span>
       </label>
-      <label>Swing <span id="swingOut">0.00</span>
-        <input id="swing" type="range" min="0" max="100" value="0">
+      <label>Swing <span id="swingOut"></span>
+        <input id="swing" type="range" min="0" max="1" step="0.01">
+      </label>
+      <h2>Mix</h2>
+      <label>Reverb <span id="reverbOut"></span>
+        <input id="reverb" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Room size (s) <span id="room_sizeOut"></span>
+        <input id="room_size" type="range" min="0.1" max="10" step="0.1">
+      </label>
+      <label>Echo on melody <span id="delayOut"></span>
+        <input id="delay" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>High cut (Hz) <span id="high_cutOut"></span>
+        <input id="high_cut" type="range" min="1000" max="20000" step="100">
+      </label>
+      <label>Drive <span id="driveOut"></span>
+        <input id="drive" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Compress <span id="compressOut"></span>
+        <input id="compress" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Humanise <span id="humaniseOut"></span>
+        <input id="humanise" type="range" min="0" max="1" step="0.01">
+      </label>
+      <label>Drums level <span id="drums_gainOut"></span>
+        <input id="drums_gain" type="range" min="0.1" max="2" step="0.01">
+      </label>
+      <label>Bass level <span id="bass_gainOut"></span>
+        <input id="bass_gain" type="range" min="0.1" max="2" step="0.01">
+      </label>
+      <label>Melody level <span id="melody_gainOut"></span>
+        <input id="melody_gain" type="range" min="0.1" max="2" step="0.01">
+      </label>
+      <label>Chords level <span id="chord_gainOut"></span>
+        <input id="chord_gain" type="range" min="0.1" max="2" step="0.01" title="The chord lane's level, shared between a chord's tones; heard only with the harmony mapping on">
+      </label>
+      <label>Levels follow density <span id="density_levelOut"></span>
+        <input id="density_level" type="range" min="0" max="1" step="0.01" title="Each bar's gains divided by n to this power, n = the lines sounding in it: 0 fixed levels, 0.5 by √n, 1 by n">
       </label>
       <p>
         The poem decides where in the tempo range it sits, from how densely its syllables pack
-        into bars. Everything else here is colour.
+        into bars. Everything else here is colour. Humanise strays each syllable a little late and
+        soft, drawn from its own line, so the same poem always strays the same way.
+      </p>
+    </div>
+    <div class="palette mappings">
+      <h2>Mappings — changes what happens</h2>
+      <table>
+        <thead><tr><th></th><th>A</th><th>B</th></tr></thead>
+        <tbody id="mappings"></tbody>
+      </table>
+      <p>
+        Candidate mappings still under review. Each is a selector: choose a variant — or
+        <code>off</code> — for each setting, then switch between A and B while it plays; the Score
+        tab measures both. A bold border marks a choice that is not the default.
+      </p>
+    </div>
+    <div class="palette reading">
+      <h2>Reading — the poem spoken over the music</h2>
+      <label>Voice
+        <select id="voice"><option value="">browser default</option></select>
+      </label>
+      <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
+      <p>
+        Whether and when lines are read is the <code>reading</code> mapping above:
+        <code>arrives</code> speaks each line once, in the bar where it is first heard;
+        <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
+        stanza that transforms a loop is read through rather than a line every few bars;
+        <code>off</code> reads nothing. Each line is fitted to its bar at the piece's tempo; loops,
+        lanes and the outro are never read. Strudel's clock fires each line; your browser's voice
+        speaks it.
       </p>
     </div>
   </section>
@@ -121,76 +250,338 @@
     <nav>
       <button id="tabPattern" aria-selected="true">Pattern</button>
       <button id="tabExplain" aria-selected="false">What each word became</button>
+      <button id="tabScore" aria-selected="false">Score A vs B</button>
     </nav>
     <pre id="pattern" class="wrapped"></pre>
     <pre id="explain" class="hidden"></pre>
+    <div id="score" class="hidden">
+      <div class="bar">
+        <label>Judged against
+          <select id="profile">
+            <option value="machine">machine — Kraftwerk, Daft Punk, psytrance</option>
+            <option value="jazz">jazz — a piano trio, a modal quartet</option>
+            <option value="interest">interest — generic</option>
+          </select>
+        </label>
+      </div>
+      <table>
+        <thead><tr><th>metric</th><th>band</th><th>A</th><th>B</th><th>B − A</th></tr></thead>
+        <tbody id="scoreRows"></tbody>
+      </table>
+      <p>
+        A value outside its band is marked; its fit falls with the distance. Interest is the
+        geometric mean of the fits; legibility comes from recompiling the poem with each word
+        swapped, and asks whether every change is heard where the word is. Overall is the two
+        multiplied. The bands are reasoned guesses, not measurements of records — trust your ears
+        over them.
+      </p>
+    </div>
   </section>
 </main>
 
+<!--
+  `@strudel/soundfonts` imports `@strudel/core` and `@strudel/webaudio` by name. Answering those
+  from a CDN would give it a second Strudel that the playing one never hears, so the import map
+  sends both to the Strudel `@strudel/web` already put on the page (see strudel-globals.mjs).
+-->
+<script type="importmap">
+{ "imports": {
+  "@strudel/core": "./strudel-globals.mjs",
+  "@strudel/webaudio": "./strudel-globals.mjs",
+  "sfumato": "./strudel-globals.mjs"
+} }
+</script>
 <script src="https://unpkg.com/@strudel/web@1.3.0"></script>
 <script>
 const $ = (id) => document.getElementById(id);
-const controls = ['scale', 'root', 'bank', 'synth', 'low', 'high', 'swing'];
+
+// Where the page's questions go. Served by `prosody-web`, they are HTTP requests to it; built as
+// static files (`scripts/build-site.sh`), the whole compiler is `prosody_bg.wasm` beside the page
+// (bound by `prosody.js`) and answers the same requests in-process, so a static host needs nothing
+// else. Either way the answer is a `Response`, so nothing below knows which. Kept before
+// `initStrudel`, which fills the global scope with names of its own.
+const TRANSPORT = __TRANSPORT__;
+const NativeResponse = Response;
+let compiler = null;
+function loadCompiler() {
+  // The generated module finds `prosody_bg.wasm` beside itself.
+  compiler ??= import('./prosody.js').then(async (bindings) => {
+    await bindings.default();
+    return bindings;
+  });
+  return compiler;
+}
+async function ask(path, query, body) {
+  if (TRANSPORT === 'server') return fetch(path + '?' + query, { method: 'POST', body });
+  const { respond } = await loadCompiler();
+  const answer = respond(path + '?' + query, body);
+  const reply = new NativeResponse(answer.body, { status: answer.status });
+  answer.free();
+  return reply;
+}
+// Every palette control's id is its key in the style header, and every value is in header units.
+const SOUND = ['bass', 'melody', 'kit', 'ride_fallback', 'voicing', 'bass_octave', 'melody_octave',
+  'chord_sound', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress', 'humanise', 'drums_gain',
+  'bass_gain', 'melody_gain', 'chord_gain', 'density_level'];
+const controls = ['scale', 'root', 'bank', 'low', 'high', 'swing', ...SOUND];
+const SLIDERS = ['swing', 'bass_octave', 'melody_octave', 'reverb', 'room_size', 'delay', 'high_cut', 'drive',
+  'compress', 'humanise', 'drums_gain', 'bass_gain', 'melody_gain', 'chord_gain', 'density_level'];
 
 const OPTIONS = {
   scale: __SCALES__,
   root: ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'],
   bank: __BANKS__,
-  synth: __SYNTHS__,
+  bass: __INSTRUMENTS__,
+  melody: __INSTRUMENTS__,
+  chord_sound: __INSTRUMENTS__,
+  kit: __KITS__,
+  voicing: __VOICINGS__,
+  ride_fallback: __RIDE_FALLBACKS__,
 };
+// [name, what it does, [its variants], its default], in the order the core lists them
+const MAPPINGS = __MAPPINGS__;
+const PRESETS = __PRESETS__;     // the examples: name, label, poem, and the palette its header set
+const PALETTES = __PALETTES__;   // the named palettes, every control's value, from `Style::preset`
+// The controls each named palette sets (`style::preset_keys`): the sound and mix, and for jazz its
+// scale, swing and bank too. The menu applies these and leaves every other control alone.
+const PALETTE_KEYS = __PALETTE_KEYS__;
 for (const [id, values] of Object.entries(OPTIONS)) {
   $(id).innerHTML = values.map((v) => `<option>${v}</option>`).join('');
 }
-$('scale').value = 'minor';
-$('root').value = 'C';
-$('bank').value = 'tr909';
-$('synth').value = 'triangle';
+$('palette').innerHTML = Object.keys(PALETTES).map((name) => `<option>${name}</option>`).join('')
+  + '<option value="custom" disabled>custom</option>';
+
+function showValues() {
+  for (const id of SLIDERS) $(id + 'Out').textContent = $(id).value;
+}
+
+// The palette menu names the palette the sound controls currently match, or "custom".
+function syncPaletteMenu() {
+  const same = (a, b) => (isNaN(Number(a)) ? a === b : Number(a) === Number(b));
+  const match = Object.entries(PALETTES)
+    .find(([name, values]) => PALETTE_KEYS[name].every((id) => same($(id).value, values[id])));
+  $('palette').value = match ? match[0] : 'custom';
+}
+
+function setControls(values, ids) {
+  for (const id of ids) if (id in values && $(id)) $(id).value = values[id];
+  showValues();
+  syncPaletteMenu();
+}
+
+setControls(PALETTES.default, controls);
 $('poem').value = __SEED_POEM__;
+
+$('palette').addEventListener('input', () => {
+  const values = PALETTES[$('palette').value];
+  if (!values) return;
+  // Its own keys only: the sound and mix, and jazz's scale, swing and bank. Root and tempo stay.
+  setControls(values, PALETTE_KEYS[$('palette').value]);
+  schedule();
+});
+
+$('preset').innerHTML += PRESETS.map((p) => `<option value="${p.name}">${p.label}</option>`).join('');
+$('preset').addEventListener('input', () => {
+  const preset = PRESETS.find((p) => p.name === $('preset').value);
+  if (!preset) return;
+  $('poem').value = preset.poem;
+  setControls(preset.palette, controls);
+  $('poem').scrollTop = 0;
+  fromTheTop = true;   // a new poem starts at its first bar, so the reading starts at its first line
+  compile();
+});
 
 let strudelReady = false;
 let playing = false;
+// Set when the next play() must restart Strudel's clock at cycle 0 rather than hand the running
+// scheduler a new pattern: after a preset or an A/B switch. Strudel keeps its cycle count across
+// `setPattern`, so without the restart the new piece (at its own `.cpm`) starts partway through
+// and its reading begins at whatever line that bar first hosts. A live edit keeps the clock
+// running instead — the writer is listening in place — and the reading carries on from there.
+let fromTheTop = false;
 let latestPattern = '';
 let timer = null;
+
+// The two settings being compared: a variant for every mapping, by name. A is the piece as
+// specified — every default — and B the piece before any candidate mapping, every one off, until
+// the writer says otherwise.
+const defaults = (pick) => Object.fromEntries(MAPPINGS.map((m) => [m[0], pick(m)]));
+let settings = { A: defaults((m) => m[3]), B: defaults(() => 'off') };
+let hearing = 'A';
+let patterns = { A: '', B: '' };
+// The reading of each setting (`prosody_emit::reading`): a cue pattern and the lines it speaks.
+// Fetched beside the patterns, because which bar a line arrives in depends on the mappings.
+let readings = { A: null, B: null };
+let scores = { A: null, B: null };
+// Saved settings come in two shapes. Today's: `{ A: { name: variant }, B: … }`. Before the
+// mappings became selectors: `{ A: [names left out], B: … }`, with the reading's own on/off in
+// `prosody.read`. The old shape is read as "those off, the rest at their defaults", and a
+// reading switched off then is off on both sides now. Any name or variant the page no longer
+// knows falls back to that mapping's default, so a stale save can never send a 400.
+function restore(side, saved, readOff) {
+  const out = {};
+  for (const [name, , variants, fallback] of MAPPINGS) {
+    let variant = Array.isArray(saved) ? (saved.includes(name) ? 'off' : fallback) : saved?.[name];
+    if (Array.isArray(saved) && name === 'reading' && readOff) variant = 'off';
+    out[name] = variants.includes(variant) ? variant : settings[side][name];
+  }
+  return out;
+}
+try {
+  const saved = JSON.parse(localStorage.getItem('prosody.settings') || 'null');
+  const readOff = localStorage.getItem('prosody.read') === 'off';
+  if (saved && typeof saved.A === 'object' && typeof saved.B === 'object') {
+    settings = { A: restore('A', saved.A, readOff), B: restore('B', saved.B, readOff) };
+  } else if (readOff) {
+    // The old reading box could be unticked without any mapping ever being saved, so the
+    // reading's own off must carry over by itself too. B starts with it off already.
+    settings.A.reading = 'off';
+  }
+} catch (error) { /* no storage, or a save it cannot read: start from the defaults */ }
+
+const selector = (side, name, variants, fallback) => `
+  <select data-side="${side}" data-name="${name}" aria-label="${name}, setting ${side}">
+    ${variants.map((v) => `<option value="${v}">${v}${v === fallback ? ' (default)' : ''}</option>`).join('')}
+  </select>`;
+$('mappings').innerHTML = MAPPINGS.map(([name, what, variants, fallback]) => `
+  <tr>
+    <td><code>${name}</code> <span class="what">— ${what}</span></td>
+    <td class="check">${selector('A', name, variants, fallback)}</td>
+    <td class="check">${selector('B', name, variants, fallback)}</td>
+  </tr>`).join('');
+const fallbackOf = Object.fromEntries(MAPPINGS.map((m) => [m[0], m[3]]));
+for (const menu of document.querySelectorAll('#mappings select')) {
+  const { side, name } = menu.dataset;
+  menu.value = settings[side][name];
+  menu.classList.toggle('changed', menu.value !== fallbackOf[name]);
+  menu.addEventListener('change', () => {
+    settings[side][name] = menu.value;
+    menu.classList.toggle('changed', menu.value !== fallbackOf[name]);
+    try { localStorage.setItem('prosody.settings', JSON.stringify(settings)); } catch (error) {}
+    schedule();
+  });
+}
 
 function status(text, bad = false) {
   $('status').textContent = text;
   $('status').classList.toggle('bad', bad);
 }
 
-function query() {
+function query(side = hearing) {
   const p = new URLSearchParams();
   for (const id of controls) p.set(id, $(id).value);
+  p.set('set', Object.entries(settings[side]).map(([name, v]) => `${name}:${v}`).join(','));
+  p.set('profile', $('profile').value);
   return p.toString();
 }
 
+function showPattern() {
+  latestPattern = patterns[hearing];
+  const reading = readings[hearing];
+  // The cue pattern is shown under the music, apart from it: it is not part of what a writer
+  // pastes into strudel.cc, where nothing would speak it.
+  $('pattern').textContent = latestPattern + (reading && reading.cues.length
+    ? '\n// ---- spoken by this page, not part of the pattern above ----\n' + reading.pattern
+    : '');
+}
+
+function hear(side) {
+  hearing = side;
+  $('hearA').setAttribute('aria-pressed', side === 'A');
+  $('hearB').setAttribute('aria-pressed', side === 'B');
+  showPattern();
+  if (playing && latestPattern) { fromTheTop = true; play(); }
+  else status(side + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', ''));
+  ask('/explain', query(), $('poem').value)
+    .then((response) => response.text())
+    .then((text) => { $('explain').textContent = text; })
+    .catch(() => {});
+}
+
+async function measure(poem) {
+  const one = async (side) => {
+    const response = await ask('/score', query(side), poem);
+    return response.ok ? response.json() : null;
+  };
+  $('scoreRows').innerHTML = '<tr><td colspan="5">measuring…</td></tr>';
+  try {
+    [scores.A, scores.B] = await Promise.all([one('A'), one('B')]);
+  } catch (error) {
+    scores = { A: null, B: null };
+  }
+  renderScores();
+}
+
+function renderScores() {
+  const { A, B } = scores;
+  if (!A || !B) {
+    $('scoreRows').innerHTML = '<tr><td colspan="5">nothing to measure</td></tr>';
+    return;
+  }
+  const delta = (a, b) => {
+    if (a == null || b == null) return '<td></td>';
+    const d = b - a;
+    const shown = (d > 0 ? '+' : '') + d.toFixed(3);
+    return `<td class="${d > 0.0005 ? 'up' : d < -0.0005 ? 'down' : ''}">${Math.abs(d) < 0.0005 ? '·' : shown}</td>`;
+  };
+  const cell = (metric) =>
+    `<td class="${metric.fit < 1 ? 'out' : ''}" title="fit ${metric.fit.toFixed(3)}">${metric.value.toFixed(3)}</td>`;
+  const rows = A.metrics.map((metric, index) => {
+    const other = B.metrics[index];
+    return `<tr><td>${metric.name}</td><td>${metric.low.toFixed(2)}–${metric.high.toFixed(2)}</td>`
+      + cell(metric) + cell(other) + delta(metric.value, other.value) + '</tr>';
+  });
+  for (const key of ['interest', 'legibility', 'overall']) {
+    const show = (value) => (value == null ? '—' : value.toFixed(3));
+    rows.push(`<tr class="total"><td>${key}</td><td></td><td>${show(A[key])}</td>`
+      + `<td>${show(B[key])}</td>${delta(A[key], B[key])}</tr>`);
+  }
+  $('scoreRows').innerHTML = rows.join('');
+}
+
 async function compile() {
-  $('swingOut').textContent = ($('swing').value / 100).toFixed(2);
+  showValues();
   const poem = $('poem').value;
   if (!poem.trim()) {
     latestPattern = '';
+    patterns = { A: '', B: '' };
+    readings = { A: null, B: null };
+    scores = { A: null, B: null };
     $('pattern').textContent = '';
     $('explain').textContent = '';
+    renderScores();
     status('nothing to compile');
     return;
   }
   status('compiling…');
   try {
-    const [pattern, explain] = await Promise.all([
-      fetch('/pattern?' + query(), { method: 'POST', body: poem }),
-      fetch('/explain?' + query(), { method: 'POST', body: poem }),
+    const [patternA, patternB, explain, readingA, readingB] = await Promise.all([
+      ask('/pattern', query('A'), poem),
+      ask('/pattern', query('B'), poem),
+      ask('/explain', query(), poem),
+      ask('/reading', query('A'), poem),
+      ask('/reading', query('B'), poem),
     ]);
-    const patternText = await pattern.text();
+    readings = {
+      A: readingA.ok ? await readingA.json() : null,
+      B: readingB.ok ? await readingB.json() : null,
+    };
+    const texts = { A: await patternA.text(), B: await patternB.text() };
     $('explain').textContent = await explain.text();
-    if (!pattern.ok) {
-      $('pattern').textContent = patternText;
+    const failed = !patternA.ok ? texts.A : !patternB.ok ? texts.B : null;
+    if (failed !== null) {
+      $('pattern').textContent = failed;
       latestPattern = '';
-      status(patternText.split('\n')[0], true);
+      patterns = { A: '', B: '' };
+      status(failed.split('\n')[0], true);
       return;
     }
-    $('pattern').textContent = patternText;
-    latestPattern = patternText;
+    patterns = texts;
+    showPattern();
+    measure(poem);
+    const patternText = latestPattern;
     const summary = patternText.split('\n')[1] || '';
-    status(summary.replace('// ', '') + (playing ? ' · playing' : ''));
+    status(hearing + ' · ' + summary.replace('// ', '') + (playing ? ' · playing' : ''));
     if (playing) play();          // live reload: keep going with the new version
   } catch (error) {
     status('server unreachable — is `prosody-web` still running?', true);
@@ -202,12 +593,209 @@ function schedule() {
   timer = setTimeout(compile, 350);
 }
 
+// Where the sounds come from. The drum machines are the same sample map strudel.cc loads; without
+// it every `.bank(...)` asks for a sample nobody registered and the drums are silent.
+const SAMPLES = 'https://strudel.b-cdn.net';
+const SOUNDFONTS = 'https://unpkg.com/@strudel/soundfonts@1.3.0/dist/index.mjs';
+
+async function startStrudel() {
+  const repl = await initStrudel({
+    prebake: () => Promise.all([
+      samples(`${SAMPLES}/tidal-drum-machines.json`, `${SAMPLES}/tidal-drum-machines/machines/`, {
+        prebake: true,
+        tag: 'drum-machines',
+      }),
+      // Imported only now: the import map answers its Strudel imports from the globals that
+      // `initStrudel` has just created.
+      import(SOUNDFONTS).then((soundfonts) => soundfonts.registerSoundfonts()),
+    ]),
+  });
+  // The pattern says its tempo with `.cpm`, which in `@strudel/core` assumes one cycle a second;
+  // the scheduler starts at half that. strudel.cc's REPL rewrites `.cpm` against its scheduler,
+  // but this page evaluates with a plain `eval`, so it sets the scheduler instead — without this
+  // every piece played at half its tempo. `reading::SCHEDULER_CPS` must say the same number.
+  repl.setCps(1);
+  // `initStrudel` loads Strudel's effect worklets (crush, shape, …) on the *next* mousedown, but
+  // it is called from inside the Play click, after that click's mousedown — so the first play ran
+  // without them and every drum layer, which carries `.crush`, failed to build. Load them now.
+  await initAudio();
+  honourNudge();
+}
+
+// Strudel's sampler starts a sample `nudge` seconds late; its oscillators and soundfonts ignore
+// the field. The palette's humanise writes `.nudge` on every layer, so every other sound is
+// wrapped to start that much later too — one meaning of `nudge` for the whole piece.
+function honourNudge() {
+  for (const [name, sound] of Object.entries(soundMap.get())) {
+    if (sound.data?.type === 'sample' || sound.data?.nudged) continue;
+    const trigger = sound.onTrigger;
+    registerSound(name, (time, value, ...rest) =>
+      trigger(time + (Number(value?.nudge) || 0), value, ...rest), { ...sound.data, nudged: true });
+  }
+}
+
+// The master: everything Strudel plays, summed, through two fixed stages that are page-side and
+// not palette. Strudel compresses each event's own chain; nothing in it watches the total, and a
+// villanelle sounds many lines at once.
+//
+// 1. A gentle compressor, the glue. It cannot be the ceiling: its 2 ms attack lets a drum onset
+//    through above its threshold, and Chrome adds makeup gain after it (a steady 0.5 sine comes out
+//    at 0.61), so a DynamicsCompressor alone measured peaks of 1.18 on the Wilde villanelle.
+// 2. A soft clipper, which is. A WaveShaper clamps any input beyond its curve's ends to those ends,
+//    so its output can never exceed the curve's largest value: transparent below CLIP_KNEE,
+//    bending smoothly towards CLIP_CEILING above it, and flat at the ceiling for anything that
+//    arrives up to CLIP_RANGE (and beyond — clamped). No oversampling, because its interpolation
+//    filter can overshoot the curve and the point of this stage is that nothing does.
+const CLIP_KNEE = 0.6, CLIP_CEILING = 0.95, CLIP_RANGE = 4;
+function softClipCurve(points = 4097) {
+  const curve = new Float32Array(points);
+  const bend = CLIP_CEILING - CLIP_KNEE;
+  for (let i = 0; i < points; i++) {
+    const v = (i / (points - 1) * 2 - 1) * CLIP_RANGE;
+    const a = Math.abs(v);
+    curve[i] = Math.sign(v) * (a <= CLIP_KNEE ? a : CLIP_KNEE + bend * Math.tanh((a - CLIP_KNEE) / bend));
+  }
+  return curve;
+}
+let limited = null;
+function limitTheMaster() {
+  const output = getSuperdoughAudioController().output;
+  const gain = output?.destinationGain;
+  if (!gain || limited === gain) return;
+  const ctx = getAudioContext();
+  const glue = new DynamicsCompressorNode(ctx, {
+    threshold: -6, knee: 6, ratio: 8, attack: 0.003, release: 0.15,
+  });
+  // The shaper's curve spans −1…1; scaling by 1/CLIP_RANGE first lets it cover ±CLIP_RANGE.
+  const into = new GainNode(ctx, { gain: 1 / CLIP_RANGE });
+  const clip = new WaveShaperNode(ctx, { curve: softClipCurve(), oversample: 'none' });
+  // The reading's duck goes first, so the glue and the ceiling see the ducked sum.
+  duckGain = new GainNode(ctx, { gain: 1 });
+  gain.disconnect();
+  gain.connect(duckGain).connect(glue).connect(into).connect(clip).connect(ctx.destination);
+  limited = gain;
+}
+
+// Every sound a pattern asks for, loaded before it starts: a soundfont or sample still loading
+// when its first note is due is skipped, so the first bars would play with holes in them. Each is
+// triggered once at zero gain, through Strudel's own path, which loads and caches it.
+const warmed = new Set();
+async function warmUp(code) {
+  const wanted = [];
+  for (const line of code.split('\n')) {
+    const pattern = (name) => (line.match(new RegExp(`(?:^|[.\\s])${name}\\("([^"]*)"\\)`)) || [])[1];
+    const tokens = (text) => text.replace(/[<>\[\],]/g, ' ').split(/\s+/).filter((t) => t && t !== '~');
+    const notes = pattern('note');
+    if (notes !== undefined) {
+      const sound = pattern('sound');
+      for (const note of new Set(tokens(notes))) wanted.push({ s: sound, note: Number(note) });
+    }
+    const drums = line.trimStart().startsWith('s(') ? pattern('s') : undefined;
+    if (drums !== undefined) {
+      const bank = pattern('bank');
+      for (const s of new Set(tokens(drums))) wanted.push({ s, bank });
+    }
+  }
+  const ctx = getAudioContext();
+  await Promise.all(wanted.map((value) => {
+    const key = JSON.stringify(value);
+    if (warmed.has(key)) return null;
+    warmed.add(key);
+    return superdough({ ...value, gain: 0 }, ctx.currentTime + 0.05, 0.05).catch(() => warmed.delete(key));
+  }));
+}
+
+// ---- The reading ----
+//
+// Its functions are named `readLine`, `readingDuck` and `quietReading` because `initStrudel` puts
+// Strudel's own `speak`, `duck` and `silence` on the global scope, over any page function of
+// that name: a `speak` here was silently replaced by Strudel's pattern function and said nothing.
+//
+// Each cue is an event of the reading's own pattern, `n("<0 1 ~ 2 …>").cpm(…)`, one element per
+// bar at the music's cycles per minute, so Strudel's scheduler fires it as the bar begins. Its
+// callback is attached with `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the
+// `true` makes it the cue's only output, so the default webaudio output never tries to sound an
+// event with no `s`). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
+// audio-context seconds — so the speech waits out the difference, as Strudel's own
+// `onTriggerTime` does.
+let voices = [];
+const pendingSpeech = new Set();
+// Which cue pattern is current. Every play() starts a new generation; a cue from an older one —
+// a hap Strudel had already scheduled from the previous pattern, or its pending timer — is
+// dropped, so a line of the previous poem or setting is never read over the new music.
+let readingGeneration = 0;
+let generations = 0;   // handed out one per play(), so two overlapping plays never share one
+let duckGain = null;
+const DUCK = 0.6;   // the music under a spoken line, as a fraction of its level
+
+function listVoices() {
+  if (!('speechSynthesis' in window)) return;
+  voices = speechSynthesis.getVoices();
+  const chosen = $('voice').value || (() => { try { return localStorage.getItem('prosody.voice') || ''; } catch (e) { return ''; } })();
+  $('voice').innerHTML = '<option value="">browser default</option>'
+    + voices.map((v) => `<option value="${v.name.replace(/"/g, '&quot;')}">${v.name} (${v.lang})</option>`).join('');
+  if (voices.some((v) => v.name === chosen)) $('voice').value = chosen;
+}
+
+function cuesOf(reading, generation) {
+  const byLine = new Map(reading.cues.map((cue) => [cue.line, cue]));
+  return (0, eval)(reading.pattern).onTrigger((hap, currentTime, cps, targetTime) => {
+    if (generation !== readingGeneration) return;
+    const cue = byLine.get(Number(hap.value?.n));
+    if (!cue) return;
+    const wait = Math.max(0, targetTime - currentTime);
+    // The trace: which line, from which bytes, at which cycle of Strudel's clock.
+    console.log(`[reading] cycle ${hap.whole.begin.valueOf()} (bar ${cue.slot + 1}): line ${cue.line + 1}`
+      + ` bytes ${cue.start}..${cue.end}, rate ${cue.rate}, in ${wait.toFixed(3)} s: ${cue.text}`);
+    const timer = setTimeout(() => {
+      pendingSpeech.delete(timer);
+      if (generation === readingGeneration) readLine(cue);
+    }, wait * 1000);
+    pendingSpeech.add(timer);
+  }, true);
+}
+
+function readLine(cue) {
+  if (!('speechSynthesis' in window)) return;
+  // A line still being read when the next is due is cut off, so the reading stays on the bar.
+  speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(cue.text);
+  utterance.rate = cue.rate;
+  const voice = voices.find((v) => v.name === $('voice').value);
+  if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
+  utterance.onstart = () => readingDuck(true);
+  utterance.onend = () => readingDuck(false);
+  utterance.onerror = () => readingDuck(false);
+  speechSynthesis.speak(utterance);
+}
+
+function readingDuck(down) {
+  if (!duckGain) return;
+  const now = getAudioContext().currentTime;
+  const level = down && $('duck').checked ? DUCK : 1;
+  duckGain.gain.cancelScheduledValues(now);
+  duckGain.gain.setTargetAtTime(level, now, 0.08);
+}
+
+function quietReading() {
+  for (const timer of pendingSpeech) clearTimeout(timer);
+  pendingSpeech.clear();
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  readingDuck(false);
+}
+
+listVoices();
+if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', listVoices);
+$('voice').addEventListener('change', () => {
+  try { localStorage.setItem('prosody.voice', $('voice').value); } catch (e) {}
+});
+
 async function play() {
   if (!latestPattern) return;
   if (!strudelReady) {
-    status('loading Strudel and samples…');
+    status('loading Strudel, drum machines and soundfonts…');
     try {
-      await initStrudel();
+      await startStrudel();
       strudelReady = true;
     } catch (error) {
       status('could not start Strudel: ' + error.message, true);
@@ -218,12 +806,34 @@ async function play() {
     // The generated code is a `stack(...)` expression built from Strudel's own functions, which
     // `initStrudel` puts in global scope. Mini-notation inside `s("…")` and `note("…")` is parsed
     // by those functions, so no transpiler step is needed.
-    const pattern = (0, eval)(latestPattern);
+    const code = latestPattern;
+    const music = (0, eval)(code);
+    const reading = readings[hearing];
+    const generation = ++generations;
+    // The reading is evaluated apart from the music: a cue pattern Strudel refuses costs the
+    // reading, never the piece.
+    let cues = null, unread = '';
+    if (reading && reading.cues.length) {
+      try { cues = cuesOf(reading, generation); } catch (error) {
+        unread = ' · the reading could not be cued: ' + error.message;
+        console.warn('[reading] cue pattern refused:', error);
+      }
+    }
+    const pattern = cues ? stack(music, cues) : music;
+    limitTheMaster();
+    status('loading the instruments this pattern uses…');
+    await warmUp(code);
+    if (code !== latestPattern) return;   // a newer version arrived while loading; it plays itself
+    // From here the old pattern's cues are stale: drop the queued ones and the line being read.
+    readingGeneration = generation;
+    quietReading();
+    if (fromTheTop && playing && typeof hush === 'function') hush();   // restart at cycle 0
+    fromTheTop = false;
     pattern.play();
     playing = true;
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
-    status((latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing');
+    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread, !!unread);
   } catch (error) {
     status('Strudel refused the pattern: ' + error.message, true);
   }
@@ -231,6 +841,8 @@ async function play() {
 
 function stop() {
   if (typeof hush === 'function') hush();
+  readingGeneration = ++generations;   // nothing the stopped pattern cued is read
+  quietReading();
   playing = false;
   $('stop').disabled = true;
   $('play').textContent = '▶ Play';
@@ -242,17 +854,24 @@ $('stop').addEventListener('click', stop);
 $('poem').addEventListener('input', schedule);
 for (const id of controls) {
   $(id).addEventListener('input', () => {
-    if (id === 'swing') $('swingOut').textContent = ($('swing').value / 100).toFixed(2);
+    showValues();
+    // Any key some palette sets — jazz sets scale, swing and bank too — can stop the controls
+    // matching the palette the menu names, and a stale name could not be re-chosen to restore it.
+    if (Object.values(PALETTE_KEYS).some((keys) => keys.includes(id))) syncPaletteMenu();
     schedule();
   });
 }
 $('tabPattern').addEventListener('click', () => showTab('pattern'));
 $('tabExplain').addEventListener('click', () => showTab('explain'));
+$('tabScore').addEventListener('click', () => showTab('score'));
+$('hearA').addEventListener('click', () => hear('A'));
+$('hearB').addEventListener('click', () => hear('B'));
+$('profile').addEventListener('input', () => measure($('poem').value));
 function showTab(which) {
-  $('pattern').classList.toggle('hidden', which !== 'pattern');
-  $('explain').classList.toggle('hidden', which !== 'explain');
-  $('tabPattern').setAttribute('aria-selected', which === 'pattern');
-  $('tabExplain').setAttribute('aria-selected', which === 'explain');
+  for (const tab of ['pattern', 'explain', 'score']) {
+    $(tab).classList.toggle('hidden', which !== tab);
+    $('tab' + tab[0].toUpperCase() + tab.slice(1)).setAttribute('aria-selected', which === tab);
+  }
 }
 
 compile();

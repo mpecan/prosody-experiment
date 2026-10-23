@@ -1,0 +1,17 @@
+[package]
+name = "prosody-score"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prosody-core.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+prosody-cmudict.workspace = true
+prosody-lexicon.workspace = true
+prosody-lts.workspace = true
+
+[lints]
+workspace = true

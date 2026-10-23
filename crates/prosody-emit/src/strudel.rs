@@ -33,10 +33,24 @@
 //! | which cycle, which step, which subdivision | `Event` position | §4.2 |
 //! | `.gain` | `Event::velocity` | §4.2, stress → accent |
 //! | `.note` | `Event::pitch` through the style's scale | §4.5 |
+//! | a rhyme note's chord tones | the same degree, stacked in the style's scale ([`Voicing`]) | §5 |
 //! | `.lpf`, `.attack`, `.room` | `Event::sharpness` | §4.4 |
 //! | `.vowel` | `Event::bank` — the alliterating phoneme | §4.3, alliteration |
 //! | `.crush` depth | `Event::family` — distance from the family's root | §4.3, morphology |
-//! | which sample, which synth, tempo, swing | [`Style`] | §5 |
+//! | which sample, which instrument, tempo, swing | [`Style`] | §5 |
+//! | `.room` floor, `.roomsize`, `.delay`, `.shape`, `.compressor`, `.postgain` | [`Style::mix`] | §5, §9 "tuning the ranges" |
+//! | `.nudge`, `.velocity` — the human stray | each line's own seed, scaled by [`Style::mix`] | §6 I2 |
+//! | the chord lane: which bar has a chord, on which degree | `Score::chord_in` — the harmony mapping | §4.6, candidate |
+//! | the chord lane's sound, tones, register, level | [`Style::chord_sound`], [`Voicing`], the melody's octave less one, `chord_gain` | §5 |
+//!
+//! # Three pitched and percussive roles
+//!
+//! Every line's voice is a drum (§4.1's foundation and flourish). The pitched events split by what
+//! pitched them into the **melody** (`Event::pitch`, a rhyme word, §4.5) and the **bass**
+//! (`Event::bass`, §4.6 — by vowel height, or walking under the bass mapping's W1 and W2). They are
+//! separate layers only so that each can have its own instrument and level; which events exist and
+//! where they fall is the score's, and splitting them moves nothing. Under the walking variants
+//! one event can carry both, and then both layers play it.
 //!
 //! `Event::anchor` (§4.3's anaphora and epistrophe rows) is **not** rendered: Strudel places a
 //! step by its position in the cycle, so "downbeat-anchored" has nowhere to go that the position
@@ -46,10 +60,13 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+use prosody_core::mapping::Variant;
 use prosody_core::role::Layer;
 use prosody_core::voice::{Event, Score, Voice};
+use prosody_core::{BassNote, Chord, Chromatic, Harmony, Silence, VoiceId};
+use rand_core::Rng as _;
 
-use crate::style::{Named, Style};
+use crate::style::{Kit, Named, RideFallback, Style, Voicing};
 use crate::{Backend, fmt_param};
 
 /// Renders a score as Strudel pattern text.
@@ -90,16 +107,33 @@ impl Backend for Strudel {
             return Err(StrudelError::Silent);
         }
 
+        // `cpm` is *cycles* per minute and a cycle is a bar, so the tempo in beats has to be
+        // divided by how many beats a bar holds. Emitting the BPM directly ran every poem at
+        // roughly five times its stated tempo, which made `SPEC.md` §5's window decorative.
+        let tempo = style
+            .tempo_range()
+            .at_density(score.events().len(), score.bars());
+
         let mut out = String::new();
         header(&mut out, score, style);
 
+        let strays = strays(score);
+        let density = density(score, style);
         let mut layers: Vec<(String, String)> = Vec::new();
         for voice in score.voices() {
-            layers.push(rhythm_layer(score, style, *voice));
+            layers.extend(rhythm_layer(score, style, &strays, &density, *voice));
         }
-        if let Some(melody) = melody_layer(score, style) {
-            layers.push(melody);
+        for role in [Pitched::Melody, Pitched::Bass] {
+            layers.extend(pitched_layer(
+                score,
+                style,
+                &strays,
+                &density,
+                role,
+                tempo.get(),
+            ));
         }
+        layers.extend(chord_layer(score, style, &density));
 
         out.push_str("stack(\n");
         for (index, (code, note)) in layers.iter().enumerate() {
@@ -111,22 +145,18 @@ impl Backend for Strudel {
         }
         out.push_str(")\n");
 
-        // `cpm` is *cycles* per minute and a cycle is a bar, so the tempo in beats has to be
-        // divided by how many beats a bar holds. Emitting the BPM directly ran every poem at
-        // roughly five times its stated tempo, which made `SPEC.md` §5's window decorative.
-        let tempo = style
-            .tempo_range()
-            .at_density(score.events().len(), score.bars());
-        let beats = mean_beats(score).max(1);
-        let _ = writeln!(
-            out,
-            "  .cpm({})",
-            fmt_param(f64::from(tempo.get()) / f64::from(beats))
-        );
         if style.swing().hundredths() > 0 {
             // `swingBy(x, n)` slices the *cycle* into `n` and delays the back half of each
             // slice. A cycle is a bar, so the slices must be its beats — with `n = 2` this was a
             // rubato across half a line rather than a shuffle between syllables.
+            //
+            // It must come *before* `.cpm`. `cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6
+            // `pattern.mjs`, which `@strudel/web` 1.3.0 pins), so after it a cycle is the
+            // scheduler's one second, not a bar: `swingBy` then sliced the second into `n`, out
+            // of step with the bar's beats — onsets moved to irregular times, and a held chord's
+            // onset could fall in no slice's front half (never sounding) or be split across two
+            // (sounding twice). Swinging first slices the bar, and `cpm` then speeds the swung
+            // bar up as a whole.
             let _ = writeln!(
                 out,
                 "  .swingBy({}, {})",
@@ -134,6 +164,11 @@ impl Backend for Strudel {
                 mean_beats(score).max(1)
             );
         }
+        let _ = writeln!(
+            out,
+            "  .cpm({})",
+            fmt_param(cycles_per_minute(score, style))
+        );
         Ok(out)
     }
 }
@@ -150,39 +185,288 @@ const fn strudel_bank(bank: Named) -> &'static str {
         b"tr707" => "RolandTR707",
         b"linn" => "AkaiLinn",
         b"casio" => "CasioRZ1",
+        b"r8" => "RolandR8",
         // `tr909` and anything a later `BANKS` adds before this match does.
         _ => "RolandTR909",
     }
 }
 
-/// The Strudel synth a palette name plays.
+/// Which pitched role a layer plays.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pitched {
+    /// The rhyme words (`SPEC.md` §4.5).
+    Melody,
+    /// The bass notes (§4.6): stressed foundation vowels, or a walking bass.
+    Bass,
+}
+
+impl Pitched {
+    /// Whether this role sounds `event`: the melody a rhyme note, the bass a bass note.
+    const fn plays(self, event: &Event) -> bool {
+        match self {
+            Self::Melody => event.pitch().is_some(),
+            Self::Bass => event.bass().is_some(),
+        }
+    }
+}
+
+/// The Strudel sound a palette instrument plays in a role.
 ///
-/// `SPEC.md` §5 names `karplus`, `fm`, `subtractive` and `physical`. Strudel's built-in oscillators
-/// are the four plain waveforms, so each named synth maps to the nearest one this backend can
-/// actually make a sound with. A richer backend — the OSC one of §7.8 — can honour the names
-/// properly; asking Strudel for `karplus` produces nothing at all.
-const fn strudel_synth(synth: Named) -> &'static str {
-    match synth.get().as_bytes() {
-        b"fm" | b"sine" => "sine",
-        b"subtractive" | b"sawtooth" => "sawtooth",
-        b"square" => "square",
-        // `karplus` and `physical` name things Strudel has no oscillator for, so they take the
-        // nearest one it does have — as does anything a later `SYNTHS` adds before this match does.
+/// A soundfont name (`gm_…`) is Strudel's own and passes through. `SPEC.md` §5's four synth names
+/// are models Strudel does not have, so each takes the recorded instrument nearest the model,
+/// per role: Karplus–Strong is a plucked string, so a plucked bass and a nylon guitar; FM's
+/// signature sound is the DX7 electric piano and its synth bass; physical modelling's classic
+/// case is a struck bar. An earlier version mapped all three to bare oscillators, which is why
+/// every example poem sounded like a test tone. The plain waveforms stay what they say.
+fn strudel_instrument(instrument: Named, role: Pitched) -> &'static str {
+    let name = instrument.get();
+    if name.starts_with("gm_") {
+        return name;
+    }
+    match (name.as_bytes(), role) {
+        (b"karplus" | b"physical", Pitched::Bass) => "gm_acoustic_bass",
+        (b"karplus", Pitched::Melody) => "gm_acoustic_guitar_nylon",
+        (b"fm", Pitched::Bass) => "gm_synth_bass_2",
+        (b"fm", Pitched::Melody) => "gm_epiano1",
+        (b"physical", Pitched::Melody) => "gm_marimba",
+        (b"sine", _) => "sine",
+        (b"subtractive" | b"sawtooth", _) => "sawtooth",
+        (b"square", _) => "square",
+        // `triangle`, and anything a later `SYNTHS` adds before this match does.
         _ => "triangle",
     }
 }
 
-/// How many beats a bar holds, on average across the poem.
+/// The key that identifies one event within the score, for looking up its stray.
+type EventKey = (VoiceId, usize, usize, usize);
+
+const fn key(event: &Event) -> EventKey {
+    (
+        event.voice(),
+        event.bar().get(),
+        event.beat().get(),
+        event.subdivision().index(),
+    )
+}
+
+/// One event's stray from the machine: how late, and how much softer, each a fraction in `0..1`
+/// that [`Style::mix`]'s `humanise` scales.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Stray {
+    late: f64,
+    soft: f64,
+}
+
+/// The latest an event strays at `humanise = 1`, in seconds. Thirty milliseconds is a loose
+/// human player; past it a stray stops sounding like feel and starts sounding like a mistake.
+const MAX_LATE: f64 = 0.030;
+
+/// The most an event is softened at `humanise = 1`. Only ever softer, never louder, so the stray
+/// cannot push a mix that fits into clipping.
+const MAX_SOFTEN: f64 = 0.30;
+
+/// Every event's stray, drawn from its own line's seed.
+///
+/// `CLAUDE.md` §4 and invariant I2: the randomness is the voice's [`Voice::seed`] — derived from
+/// the line's own text — under a child named for this decision, and the draws restart for every
+/// bar the voice sounds in. So a line's strays depend on that line and nothing else: an edit in
+/// another stanza cannot move them, and a refrain line, which shares its voice and its text,
+/// strays identically every time it returns — §4.3's "literal loop". Only late, never early:
+/// Strudel's sampler starts a nudged sample after its envelope opens, and an early start would
+/// sound before it, as a click.
+fn strays(score: &Score) -> BTreeMap<EventKey, Stray> {
+    let mut out = BTreeMap::new();
+    for voice in score.voices() {
+        let seed = voice.seed().child("humanise");
+        let mut by_bar: BTreeMap<usize, Vec<&Event>> = BTreeMap::new();
+        for event in score.events_of(voice.id()) {
+            by_bar.entry(event.bar().get()).or_default().push(event);
+        }
+        for events in by_bar.values_mut() {
+            events.sort_by_key(|event| key(event));
+            let mut rng = seed.rng();
+            for event in events.iter() {
+                let late = unit(rng.next_u32());
+                let soft = unit(rng.next_u32());
+                out.insert(key(event), Stray { late, soft });
+            }
+        }
+    }
+    out
+}
+
+/// A draw as a fraction in `0..1`. A value only — it never decides anything (`CLAUDE.md` §4).
+fn unit(draw: u32) -> f64 {
+    f64::from(draw) / 4_294_967_296.0
+}
+
+/// `.nudge` and `.velocity` for a layer's events, or nothing when `humanise` is zero.
+fn humanised(lane: Lane<'_>, style: &Style, strays: &BTreeMap<EventKey, Stray>) -> String {
+    let amount = style.mix().humanise();
+    if amount.is_off() {
+        return String::new();
+    }
+    let stray = |event: &Event| {
+        strays.get(&key(event)).copied().unwrap_or(Stray {
+            late: 0.0,
+            soft: 0.0,
+        })
+    };
+    let nudges = grid(
+        lane,
+        &|event| fmt_param(stray(event).late * amount.as_f64() * MAX_LATE),
+        "~",
+    );
+    let velocities = grid(
+        lane,
+        &|event| fmt_param(1.0 - stray(event).soft * amount.as_f64() * MAX_SOFTEN),
+        "~",
+    );
+    format!(".nudge(\"{nudges}\").velocity(\"{velocities}\")")
+}
+
+/// The calls every layer shares: the reverb's size, compression, and the layer's level.
+///
+/// Reverb and echo are per orbit in Strudel, not per event, so `roomsize` must be the same on
+/// every layer or each event would rebuild the room — it is written everywhere for that reason.
+///
+/// `share` divides the level between the tones of a chord ([`chord_share`]); it is 1 for a single
+/// sound.
+fn bus(style: &Style, level: crate::style::Amount, share: f64) -> String {
+    let mix = style.mix();
+    let mut calls = format!(
+        ".roomsize({})",
+        fmt_param(f64::from(mix.room_size_tenths()) / 10.0)
+    );
+    if !mix.compress().is_off() {
+        // From a gentle −4 dB at 2:1 to −24 dB at 7:1. Strudel compresses each event's own
+        // chain; a fixed master stage on the page (compressor, then a soft clipper) catches the
+        // sum.
+        let amount = mix.compress().as_f64();
+        let _ = write!(
+            calls,
+            ".compressor({}).compressorRatio({})",
+            fmt_param(-4.0 - 20.0 * amount),
+            fmt_param(2.0 + 5.0 * amount)
+        );
+    }
+    let _ = write!(calls, ".postgain({})", fmt_param(level.as_f64() * share));
+    calls
+}
+
+/// The level each tone of a chord takes, so a role's level is the level of the chord.
+///
+/// One over the square root of the tone count: soundfont tones at different pitches are
+/// uncorrelated, so their powers add, and four tones at half level carry the power of one at full.
+/// The melody level a palette sets therefore means the same thing under either voicing.
+fn chord_share(voicing: Voicing) -> f64 {
+    let tones = u32::try_from(voicing.degrees().len()).unwrap_or(1).max(1);
+    1.0 / f64::from(tones).sqrt()
+}
+
+/// How many cycles — slots of the arrangement — the piece plays a minute.
+///
+/// One number for every consumer that has to land on the same clock: the pattern's own `.cpm`,
+/// and the reading ([`crate::reading`]), whose cues must fall on the bars they name.
+pub(crate) fn cycles_per_minute(score: &Score, style: &Style) -> f64 {
+    let tempo = style
+        .tempo_range()
+        .at_density(score.events().len(), score.bars());
+    f64::from(tempo.get()) / f64::from(mean_beats(score).max(1))
+}
+
+/// How many beats a bar holds, on average across the piece — over the arrangement's slots, since a
+/// cycle is a slot.
 ///
 /// Bars genuinely differ in length — `SPEC.md` §4.2 insists on it — but a cycle is a fixed span,
 /// so one number has to stand for the piece when converting beats to cycles. Integer arithmetic,
 /// so the tempo stays byte-stable (`CLAUDE.md` §4).
 fn mean_beats(score: &Score) -> u16 {
-    if score.bars() == 0 {
+    let slots = score.arrangement().slots();
+    if slots.is_empty() {
         return 1;
     }
-    let total: usize = (0..score.bars()).map(|bar| score.beats_in(bar)).sum();
-    u16::try_from(total / score.bars()).unwrap_or(1).max(1)
+    let total: usize = slots.iter().map(prosody_core::Slot::beats).sum();
+    u16::try_from(total / slots.len()).unwrap_or(1).max(1)
+}
+
+/// How many events the piece plays: every line's syllables, once for each slot it sounds in.
+///
+/// Not `score.events().len()`, which counts each line's material once — a looping stanza plays its
+/// syllables many times, and the OSC backend sends a message for every one of them. The header
+/// and the schedule must count the same piece.
+fn sounded(score: &Score) -> usize {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .flat_map(prosody_core::Slot::placements)
+        .map(|placement| score.placed(*placement).events().len())
+        .sum()
+}
+
+/// The palette keys the header lists only when the piece has a chord lane: they colour nothing
+/// else, and a pattern without the harmony mapping reads as it did before they existed.
+const LISTED_WITH_CHORDS: &[&str] = &["chord_sound", "chord_gain"];
+
+/// The palette keys the header lists only when they are not at their default (see [`header`]).
+const LISTED_WHEN_SET: &[&str] = &[
+    "bass_octave",
+    "melody_octave",
+    "density_level",
+    "ride_fallback",
+];
+
+/// How many lines sound in each slot of the arrangement, in slot order: every placement that plays
+/// at least one event — a stated line, a stanza looping under the next, a held line, a call.
+fn lines_sounding(score: &Score) -> Vec<usize> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| {
+            slot.placements()
+                .iter()
+                .filter(|placement| !score.placed(**placement).events().is_empty())
+                .count()
+        })
+        .collect()
+}
+
+/// The level a bar of `lines` lines takes at this density exponent: `lines^-exponent`, and exactly
+/// 1 for a bar of one line or none. A value only (`CLAUDE.md` §4).
+fn level_for(lines: usize, exponent: f64) -> f64 {
+    if lines <= 1 {
+        return 1.0;
+    }
+    let lines = f64::from(u32::try_from(lines).unwrap_or(u32::MAX));
+    lines.powf(-exponent)
+}
+
+/// Each slot's level under the palette's `density_level`, in slot order — every 1 at zero.
+///
+/// # Why this is palette (invariant I3)
+///
+/// It is the one palette value that reads the score's structure: how many lines a bar sounds.
+/// It reads it and changes only gain *values* — every event, onset and pattern step stays where it
+/// was, and a bar of one line is untouched — the way a mixing engineer rides the faders in a dense
+/// chorus without touching the arrangement. The I3 arrangement property varies it. It was asked
+/// for because a villanelle's bars of three lines drove the page's master soft clipper (PLAN.md,
+/// *sound and voice, step 1*).
+///
+/// What it costs, disclosed in `SPEC.md` §5: a line's level in a bar it shares now depends on how
+/// many *other* lines share it, so an edit that changes how many lines sound in a bar — a stanza
+/// that loops longer — changes the level of another stanza's line in that bar. Levels only; its
+/// events, and its voice in the score, are untouched, which is what I2's property tests check.
+fn density(score: &Score, style: &Style) -> Vec<f64> {
+    let exponent = style.mix().density_level().as_f64();
+    if style.mix().density_level().is_off() {
+        return vec![1.0; score.arrangement().slots().len()];
+    }
+    lines_sounding(score)
+        .into_iter()
+        .map(|lines| level_for(lines, exponent))
+        .collect()
 }
 
 /// The comment block: what the poem is, and what the palette did to it.
@@ -194,13 +478,94 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     out.push_str("// compiled from a poem by prosody\n");
     let _ = writeln!(
         out,
-        "// {} bars, {} voices, {} events",
+        "// {} bars from {} lines, {} voices, {} events",
+        score.arrangement().slots().len(),
         score.bars(),
         score.voices().len(),
-        score.events().len()
+        sounded(score)
     );
+    // Keys added after the corpus was recorded are listed only when they are set away from their
+    // default, so a pattern that does not use them reads exactly as it did before they existed.
+    let defaults = Style::default().describe();
+    let has_chords = score.chords().next().is_some();
     for (key, value) in style.describe() {
+        if LISTED_WHEN_SET.contains(&key) && defaults.get(key) == Some(&value) {
+            continue;
+        }
+        if LISTED_WITH_CHORDS.contains(&key) && !has_chords {
+            continue;
+        }
         let _ = writeln!(out, "//   {key} = {value}");
+    }
+    // The translation from the palette's words to Strudel's sounds, so `karplus` in a header is
+    // not a mystery in the output.
+    let ride = ride_stand_in(style).map_or_else(
+        || "ride".to_owned(),
+        |bank| {
+            format!(
+                "{} in place of the ride, which {bank} does not have,",
+                style.ride_fallback().spoken()
+            )
+        },
+    );
+    let (pulse, ornament) = match style.kit() {
+        Kit::Machine => ("kick", "hat"),
+        Kit::Ride => (ride.as_str(), "snare"),
+    };
+    // Stacking every other degree makes a seventh chord only in a seven-note scale; elsewhere it
+    // makes something else, and the header names what is heard rather than what was asked for.
+    let scale = style.scale();
+    let chords = match style.voicing() {
+        Voicing::Note => String::new(),
+        Voicing::Seventh if scale.len() == 7 => {
+            " as seventh chords (each rhyme word's degree with \
+             the 3rd, 5th and 7th above it in the scale)"
+                .to_owned()
+        }
+        Voicing::Seventh => format!(
+            " as four-tone chords on every other degree of {} (not sevenths: the scale has {} \
+             notes, not 7)",
+            scale.name(),
+            scale.len()
+        ),
+    };
+    let _ = writeln!(
+        out,
+        "//   plays: drums from {} ({pulse} on the foundation, {ornament} on the flourish), melody on {}{chords}, bass on {}",
+        strudel_bank(style.bank()),
+        strudel_instrument(style.melody(), Pitched::Melody),
+        strudel_instrument(style.bass(), Pitched::Bass)
+    );
+    if has_chords {
+        chords_header(out, score, style);
+    }
+    bass_header(out, score, has_chords);
+    let humanise = style.mix().humanise();
+    if !humanise.is_off() {
+        let _ = writeln!(
+            out,
+            "//   humanise: each syllable up to {} s late and {} softer, drawn from its own line's seed",
+            fmt_param(humanise.as_f64() * MAX_LATE),
+            fmt_param(humanise.as_f64() * MAX_SOFTEN)
+        );
+    }
+    if !style.mix().density_level().is_off() {
+        // Which bars were turned down, and by how much: the mapping from "lines sounding" to a
+        // level is the one place this palette value reads the score, so it is spelled out.
+        let exponent = style.mix().density_level().as_f64();
+        let mut counts: Vec<usize> = lines_sounding(score);
+        counts.sort_unstable();
+        counts.dedup();
+        let factors: Vec<String> = counts
+            .iter()
+            .map(|n| format!("{n}: ×{}", fmt_param(level_for(*n, exponent))))
+            .collect();
+        let _ = writeln!(
+            out,
+            "//   density: every gain in a bar divided by n^{}, n = the lines sounding in it ({})",
+            fmt_param(exponent),
+            factors.join(", ")
+        );
     }
     if !score.silent().is_empty() {
         // CLAUDE.md §6: a fallback must be visible. A word nobody could pronounce makes no sound,
@@ -213,31 +578,47 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     }
 }
 
-/// One voice: every syllable it sounds, and what §4.3 and §4.4 do to each.
-fn rhythm_layer(score: &Score, style: &Style, voice: Voice) -> (String, String) {
-    let events: Vec<&Event> = score.events_of(voice.id()).collect();
-    let sample = sample_for(style, voice);
-
-    let mut layer = format!(
-        "  s(\"{}\")",
-        grid(score, &events, &|_| sample.to_owned(), "~")
-    );
-    // §4.2: stress becomes accent.
-    let _ = write!(layer, ".gain(\"{}\")", gains(score, &events));
-    // §4.4: distinctiveness drives brightness, attack and how wet the event sits.
-    let _ = write!(layer, ".lpf(\"{}\")", cutoffs(score, &events));
-    let _ = write!(layer, ".attack(\"{}\")", attacks(score, &events));
-    let _ = write!(layer, ".room(\"{}\")", rooms(score, &events));
-    // §4.3: words of one morphological family are one voice with varied parameters — the row the
-    // spec says earns the project. Distance from the root drives the modulation.
-    let _ = write!(layer, ".crush(\"{}\")", crushes(score, &events));
-    // §4.3: alliteration and assonance are "timbral continuity — same sample bank".
-    if let Some(colours) = vowels(score, &events) {
-        let _ = write!(layer, ".vowel(\"{colours}\")");
+/// The header's line for a walking bass, which names its variant. The bass by vowel height is the
+/// piece as it shipped, and its header says nothing new.
+fn bass_header(out: &mut String, score: &Score, has_chords: bool) {
+    match score.bass() {
+        Variant::Syllables => {
+            let _ = writeln!(
+                out,
+                "//   walking bass (mapping bass = syllables): a note on every foundation \
+                 syllable — a stressed one on its vowel-height note, the ones between by scale \
+                 step, the last before each a semitone below it (SPEC.md §4.6, candidate W1); \
+                 one walk a bar, the bar's foundation line's"
+            );
+        }
+        Variant::Feet => {
+            let _ = writeln!(
+                out,
+                "//   walking bass (mapping bass = feet): a note a foot on the beat — the chord \
+                 tone the foot's vowel height chooses ({}), a scale step where it would repeat \
+                 (SPEC.md §4.6, candidate W2); one walk a bar, the bar's foundation line's",
+                if has_chords {
+                    "of the bar's chord, or the scale's where a bar has none"
+                } else {
+                    "root, third, fifth of the scale: no harmony"
+                }
+            );
+        }
+        _ => {}
     }
-    let _ = write!(layer, ".bank(\"{}\")", strudel_bank(style.bank()));
+}
 
-    let note = format!(
+/// One voice: every syllable it sounds, and what §4.3 and §4.4 do to each.
+fn rhythm_layer(
+    score: &Score,
+    style: &Style,
+    strays: &BTreeMap<EventKey, Stray>,
+    density: &[f64],
+    voice: Voice,
+) -> Vec<(String, String)> {
+    let events: Vec<&Event> = score.events_of(voice.id()).collect();
+    let sample = sample_for(style, voice.layer());
+    let name = format!(
         "voice {} — {}",
         voice.id().get(),
         match voice.layer() {
@@ -245,7 +626,38 @@ fn rhythm_layer(score: &Score, style: &Style, voice: Voice) -> (String, String) 
             Layer::Flourish => "flourish",
         }
     );
-    (layer, note)
+
+    let mut layers = Vec::new();
+    for lane in Lane::all(score, &events, false) {
+        let mut layer = format!("  s(\"{}\")", grid(lane, &|_| sample.to_owned(), "~"));
+        // §4.2: stress becomes accent.
+        let _ = write!(layer, ".gain(\"{}\")", gains(lane, density));
+        // §4.4: distinctiveness drives brightness, attack and how wet the event sits.
+        let _ = write!(layer, ".lpf(\"{}\")", cutoffs(lane, style));
+        let _ = write!(layer, ".attack(\"{}\")", attacks(lane));
+        let _ = write!(layer, ".room(\"{}\")", rooms(lane, style));
+        // §4.3: words of one morphological family are one voice with varied parameters — the row
+        // the spec says earns the project. Distance from the root drives the modulation.
+        let _ = write!(layer, ".crush(\"{}\")", crushes(lane));
+        // §4.3: alliteration and assonance are "timbral continuity — same sample bank".
+        if let Some(colours) = vowels(lane) {
+            let _ = write!(layer, ".vowel(\"{colours}\")");
+        }
+        let _ = write!(layer, ".bank(\"{}\")", strudel_bank(style.bank()));
+        layer.push_str(&humanised(lane, style, strays));
+        if !style.mix().drive().is_off() {
+            // Soft saturation, at most half of Strudel's `shape`: past that it is distortion, not
+            // warmth, and it gets loud.
+            let _ = write!(
+                layer,
+                ".shape({})",
+                fmt_param(style.mix().drive().as_f64() * 0.5)
+            );
+        }
+        layer.push_str(&bus(style, style.mix().drums_gain(), 1.0));
+        layers.push((layer, lane.label(&name)));
+    }
+    layers
 }
 
 /// Which sample a voice plays.
@@ -254,10 +666,179 @@ fn rhythm_layer(score: &Score, style: &Style, voice: Voice) -> (String, String) 
 /// layer (drums, bass, ostinato)" and "high variance → aperiodic → flourish layer (fills, stabs,
 /// one-shots, ornament)". Which *sounds* those are is palette; that a foundation is the pulse and
 /// a flourish ornaments it is structure, and comes from the score.
-const fn sample_for(_style: &Style, voice: Voice) -> &'static str {
-    match voice.layer() {
-        Layer::Foundation => "bd",
-        Layer::Flourish => "hh",
+///
+/// The [`Kit`] is that palette choice: the drum machine's kick and hat, or a jazz section's ride
+/// keeping time and snare comping round it. Either way the foundation is the time and the flourish
+/// the ornament.
+///
+/// Not every bank has a ride: the TR-808 and TR-707 in the sample map have none. Asking for one
+/// there makes Strudel log "sound not found" on every hit and the whole pulse layer go silent, so a
+/// palette choice would in effect remove events — which is not palette's to do (I3) and leaves
+/// sound nobody can trace (I4). Such a bank plays the palette's [`RideFallback`] instead — its
+/// open hat by default, the drum machine's usual stand-in for a ride, or its crash — and the
+/// pattern's header says so ([`ride_stand_in`]).
+fn sample_for(style: &Style, layer: Layer) -> &'static str {
+    match (style.kit(), layer) {
+        (Kit::Machine, Layer::Foundation) => "bd",
+        (Kit::Machine, Layer::Flourish) => "hh",
+        (Kit::Ride, Layer::Foundation) => {
+            if bank_has(strudel_bank(style.bank()), RIDE) {
+                RIDE
+            } else {
+                stand_in(style.ride_fallback())
+            }
+        }
+        (Kit::Ride, Layer::Flourish) => "sd",
+    }
+}
+
+/// The ride cymbal's sample name in the drum-machine sample map.
+const RIDE: &str = "rd";
+
+/// What a bank without a ride plays in its place — the palette's [`RideFallback`]: the open hat or
+/// the crash, which every bank in [`BANK_SAMPLES`] has.
+const fn stand_in(fallback: RideFallback) -> &'static str {
+    match fallback {
+        RideFallback::OpenHat => "oh",
+        RideFallback::Crash => "cr",
+    }
+}
+
+/// `Some(bank)` when the style asks for a ride its bank does not have, so the header can say which
+/// drum stands in — `CLAUDE.md` §6: a fallback must be visible.
+fn ride_stand_in(style: &Style) -> Option<&'static str> {
+    let bank = strudel_bank(style.bank());
+    (style.kit() == Kit::Ride && !bank_has(bank, RIDE)).then_some(bank)
+}
+
+/// The samples each bank has in the sample map the page loads (`tidal-drum-machines.json` on
+/// `strudel.b-cdn.net`, checked 2026-10-22). Only what a kit can ask for has to be right here; the
+/// rest is listed so the table reads as the map does.
+const BANK_SAMPLES: &[(&str, &[&str])] = &[
+    (
+        "RolandTR909",
+        &[
+            "bd", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rd", "rim", "sd",
+        ],
+    ),
+    (
+        "RolandTR808",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "perc", "rim", "sd", "sh",
+        ],
+    ),
+    (
+        "RolandTR707",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rim", "sd", "tb",
+        ],
+    ),
+    (
+        "AkaiLinn",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rd", "sd", "sh", "tb",
+        ],
+    ),
+    (
+        "CasioRZ1",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "rd", "rim", "sd",
+        ],
+    ),
+    (
+        "RolandR8",
+        &[
+            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "perc", "rd", "rim", "sd", "sh",
+            "tb",
+        ],
+    ),
+];
+
+/// Whether a Strudel bank has a sample of that name.
+fn bank_has(bank: &str, sample: &str) -> bool {
+    BANK_SAMPLES
+        .iter()
+        .any(|(name, samples)| *name == bank && samples.contains(&sample))
+}
+
+/// One of the lines a layer sounds at the same time, as one pattern of its own.
+///
+/// A layer can sound several lines in one bar — a stanza looping under the next, a held line under
+/// its answer, a call under everything. An earlier version stacked them inside each pattern with
+/// mini-notation's `,`. That is right for `s("…")` alone and wrong for everything chained after
+/// it: Strudel matches each parameter pattern to the events by time, so an event in a bar of two
+/// stacked lines met *both* lines' gains, both cutoffs, both crushes — and became one event per
+/// combination. Two lines and five parameters made one syllable thirty-two drum hits; a bass note
+/// under a held line sounded thirty-two times over and clipped the page at twelve times full
+/// scale. Events that are not in the score are invariant I4 broken, audibly.
+///
+/// So each simultaneous line is its own stack element: lane 0 is the first line sounding in every
+/// bar, lane 1 the second where there is one, and so on, each a pattern with no `,` in it whose
+/// parameters therefore meet exactly one event each.
+#[derive(Clone, Copy)]
+struct Lane<'a> {
+    score: &'a Score,
+    events: &'a [&'a Event],
+    index: usize,
+    /// Whether each event fills its whole beat instead of its syllable's share of it: the walking
+    /// bass's W2, whose note is its foot's (`prosody_core::bass`). Every pattern of the lane is
+    /// written the same way, so its parameters still meet exactly one event each.
+    whole_beats: bool,
+    /// Whether this is the bass, which sounds only where [`Score::sounds_bass`] says: under a
+    /// walking bass, one walk a bar — the bar's foundation line's — rather than one per line.
+    bass: bool,
+}
+
+impl<'a> Lane<'a> {
+    /// Every lane a layer of these events needs: as many as the most lines it sounds in one bar.
+    /// `is_bass` counts only the lines whose bass sounds there ([`Score::sounds_bass`]).
+    fn all(score: &'a Score, events: &'a [&'a Event], is_bass: bool) -> Vec<Self> {
+        let bars: std::collections::BTreeSet<usize> =
+            events.iter().map(|event| event.bar().get()).collect();
+        let deepest = score
+            .arrangement()
+            .slots()
+            .iter()
+            .map(|slot| {
+                slot.placements()
+                    .iter()
+                    .filter(|placement| {
+                        (!is_bass || score.sounds_bass(slot, placement))
+                            && bars.contains(&placement.bar().get())
+                            && events.iter().any(|event| {
+                                event.bar() == placement.bar()
+                                    && placement.part().covers(event.span())
+                            })
+                    })
+                    .count()
+            })
+            .max()
+            .unwrap_or(0)
+            .max(1);
+        (0..deepest)
+            .map(|index| Self {
+                score,
+                events,
+                index,
+                whole_beats: false,
+                bass: is_bass,
+            })
+            .collect()
+    }
+
+    /// The same lane, each event filling its whole beat.
+    const fn whole_beats(mut self) -> Self {
+        self.whole_beats = true;
+        self
+    }
+
+    /// The comment that names it, after the layer's own.
+    fn label(self, layer: &str) -> String {
+        if self.index == 0 {
+            layer.to_owned()
+        } else {
+            format!("{layer} (lane {})", self.index + 1)
+        }
     }
 }
 
@@ -271,12 +852,14 @@ const fn sample_for(_style: &Style, voice: Voice) -> &'static str {
 ///
 /// `value` renders one event; `absent` fills a beat with no event in this pattern, so the melody
 /// can rest where the rhythm sounds while keeping the same grid.
-fn grid(
-    score: &Score,
-    events: &[&Event],
-    value: &dyn Fn(&Event) -> String,
-    absent: &str,
-) -> String {
+fn grid(lane: Lane<'_>, value: &dyn Fn(&Event) -> String, absent: &str) -> String {
+    grid_by_slot(lane, &|event, _| value(event), absent)
+}
+
+/// [`grid`], with each value also told which slot of the arrangement it sounds in — for the one
+/// parameter that differs between the passes of a line: its level under `density_level`.
+fn grid_by_slot(lane: Lane<'_>, value: &dyn Fn(&Event, usize) -> String, absent: &str) -> String {
+    let (score, events) = (lane.score, lane.events);
     let mut by_bar: BTreeMap<usize, BTreeMap<usize, Vec<&Event>>> = BTreeMap::new();
     for event in events {
         by_bar
@@ -287,56 +870,55 @@ fn grid(
             .push(event);
     }
 
+    // One element per slot of the arrangement, not per line: a stanza sounds again wherever it
+    // loops or yields (`prosody_core::arrange`). A cycle is a slot; a line divides it into the
+    // slot's beats, or its own when it has more — which is the bar-locked fitting. Lines sounding
+    // together are *not* stacked with `,` inside the pattern: see [`Lane`]. This pattern carries
+    // the `lane.index`-th of them, and rests where a bar has fewer.
     let mut bars = Vec::new();
-    for bar in 0..score.bars() {
-        // The bar's width comes from the score, not from the events in *this* pattern, so the
-        // melody and the rhythm divide the bar the same way and a note lands on its own syllable.
-        let beats = score.beats_in(bar);
-        let Some(present) = by_bar.get(&bar) else {
-            bars.push("~".to_owned());
-            continue;
-        };
-        let mut steps = Vec::new();
-        for beat in 0..beats {
-            match present.get(&beat) {
-                None => steps.push(absent.to_owned()),
-                // A foot divided into one part is the whole beat. More than one, and the beat is
-                // subdivided — *even when this pattern has only one value for it*, which is the
-                // melody's usual case: a rhyme word is the second syllable of a final iambic foot,
-                // so its note belongs in the second half of the beat, not across the whole of it.
-                Some(syllables)
-                    if syllables.len() == 1
-                        && syllables.first().is_some_and(|e| e.subdivision().of() == 1) =>
-                {
-                    steps.push(
-                        syllables
-                            .first()
-                            .map_or_else(|| absent.to_owned(), |e| value(e)),
-                    );
-                }
-                Some(syllables) => {
-                    // A foot's syllables subdivide its beat. Where this pattern has no value for
-                    // one of them — an unpitched syllable in the melody — it rests, so the ones
-                    // that do sound keep their place inside the foot.
-                    let width = syllables
-                        .first()
-                        .map_or(syllables.len(), |e| e.subdivision().of())
-                        .max(syllables.len());
-                    let mut inner = vec![absent.to_owned(); width];
-                    for event in syllables {
-                        if let Some(slot) = inner.get_mut(event.subdivision().index()) {
-                            *slot = value(event);
-                        }
-                    }
-                    steps.push(format!("[{}]", inner.join(" ")));
-                }
-            }
-        }
-        bars.push(if steps.is_empty() {
-            "~".to_owned()
-        } else {
-            steps.join(" ")
-        });
+    for (index, slot) in score.arrangement().slots().iter().enumerate() {
+        let value = |event: &Event| value(event, index);
+        let lines: Vec<String> = slot
+            .placements()
+            .iter()
+            .filter(|placement| !lane.bass || score.sounds_bass(slot, placement))
+            .filter_map(|placement| {
+                // A whole line, or a call lifted out of one: its own events, its beats counted
+                // from where it starts. A line's width comes from the score, not from the events
+                // in *this* pattern, so the melody and the rhythm divide it the same way and a
+                // note lands on its own syllable.
+                let placed = score.placed(*placement);
+                let present: BTreeMap<usize, Vec<&Event>> = by_bar
+                    .get(&placement.bar().get())?
+                    .iter()
+                    .filter_map(|(beat, syllables)| {
+                        let covered: Vec<&Event> = syllables
+                            .iter()
+                            .copied()
+                            .filter(|event| placement.part().covers(event.span()))
+                            .collect();
+                        (!covered.is_empty())
+                            .then(|| (beat.saturating_sub(placed.first_beat()), covered))
+                    })
+                    .collect();
+                // A line given less than the whole bar keeps one beat per foot and rests for the
+                // rest of the cycle; one given all of it fills the cycle with its own beats,
+                // squeezed or stretched (`Slot::room_for`).
+                let steps = if slot.room_for(placed.beats()) < slot.beats() {
+                    slot.beats()
+                } else {
+                    placed.beats()
+                };
+                (!present.is_empty())
+                    .then(|| line(&present, steps, &value, absent, lane.whole_beats))
+            })
+            .collect();
+        bars.push(
+            lines
+                .into_iter()
+                .nth(lane.index)
+                .unwrap_or_else(|| "~".to_owned()),
+        );
     }
 
     match bars.len() {
@@ -357,45 +939,120 @@ fn grid(
     }
 }
 
-/// `SPEC.md` §4.2: stress becomes accent.
-fn gains(score: &Score, events: &[&Event]) -> String {
-    grid(
-        score,
-        events,
-        &|event| fmt_param(event.velocity().as_f64()),
+/// One line's events in this pattern, as the steps of one cycle: a step per beat, subdivided by
+/// its syllables.
+fn line(
+    present: &BTreeMap<usize, Vec<&Event>>,
+    beats: usize,
+    value: &dyn Fn(&Event) -> String,
+    absent: &str,
+    whole_beats: bool,
+) -> String {
+    let mut steps = Vec::new();
+    for beat in 0..beats {
+        match present.get(&beat) {
+            None => steps.push(absent.to_owned()),
+            // A note that is its whole foot (W2) holds the beat, whichever syllable it rides on.
+            Some(syllables) if whole_beats => steps.push(
+                syllables
+                    .first()
+                    .map_or_else(|| absent.to_owned(), |e| value(e)),
+            ),
+            // A foot divided into one part is the whole beat. More than one, and the beat is
+            // subdivided — *even when this pattern has only one value for it*, which is the
+            // melody's usual case: a rhyme word is the second syllable of a final iambic foot,
+            // so its note belongs in the second half of the beat, not across the whole of it.
+            Some(syllables)
+                if syllables.len() == 1
+                    && syllables.first().is_some_and(|e| e.subdivision().of() == 1) =>
+            {
+                steps.push(
+                    syllables
+                        .first()
+                        .map_or_else(|| absent.to_owned(), |e| value(e)),
+                );
+            }
+            Some(syllables) => {
+                // A foot's syllables subdivide its beat. Where this pattern has no value for
+                // one of them — an unpitched syllable in the melody — it rests, so the ones
+                // that do sound keep their place inside the foot.
+                let width = syllables
+                    .first()
+                    .map_or(syllables.len(), |e| e.subdivision().of())
+                    .max(syllables.len());
+                let mut inner = vec![absent.to_owned(); width];
+                for event in syllables {
+                    if let Some(slot) = inner.get_mut(event.subdivision().index()) {
+                        *slot = value(event);
+                    }
+                }
+                steps.push(format!("[{}]", inner.join(" ")));
+            }
+        }
+    }
+    if steps.is_empty() {
+        "~".to_owned()
+    } else {
+        steps.join(" ")
+    }
+}
+
+/// `SPEC.md` §4.2: stress becomes accent — times the bar's level under `density_level`, which is 1
+/// unless the palette asks levels to follow density ([`density`]).
+fn gains(lane: Lane<'_>, density: &[f64]) -> String {
+    gains_of(lane, density, &|event| event.velocity())
+}
+
+/// [`gains`], with the stress read from `velocity` — for the bass, whose W2 note takes its foot's
+/// stressed syllable's accent rather than the syllable it rides on.
+fn gains_of(
+    lane: Lane<'_>,
+    density: &[f64],
+    velocity: &dyn Fn(&Event) -> prosody_core::Velocity,
+) -> String {
+    grid_by_slot(
+        lane,
+        &|event, slot| {
+            let level = density.get(slot).copied().unwrap_or(1.0);
+            fmt_param(velocity(event).as_f64() * level)
+        },
         "~",
     )
 }
 
 /// `SPEC.md` §4.4: distinctiveness becomes brightness.
 ///
-/// 400 Hz to 4400 Hz spans dull to bright without ever closing the filter completely — a silent
-/// event would be an event that cannot be traced to its word.
-fn cutoffs(score: &Score, events: &[&Event]) -> String {
+/// 400 Hz up to the palette's high cut (4400 Hz by default) spans dull to bright without ever
+/// closing the filter completely — a silent event would be an event that cannot be traced to its
+/// word. The high cut scales the range rather than clipping it, so under a darker palette a
+/// striking word is still brighter than a plain one (§9: tuning the ranges is palette work).
+fn cutoffs(lane: Lane<'_>, style: &Style) -> String {
+    let span = f64::from(style.mix().high_cut()) - 400.0;
     grid(
-        score,
-        events,
-        &|event| fmt_param(400.0 + event.sharpness().as_f64() * 4000.0),
+        lane,
+        &|event| fmt_param(400.0 + event.sharpness().as_f64() * span),
         "~",
     )
 }
 
 /// `SPEC.md` §4.4: distinctiveness becomes attack time, inverted — a sharper word strikes faster.
-fn attacks(score: &Score, events: &[&Event]) -> String {
+fn attacks(lane: Lane<'_>) -> String {
     grid(
-        score,
-        events,
+        lane,
         &|event| fmt_param(0.04 * (1.0 - event.sharpness().as_f64())),
         "~",
     )
 }
 
 /// `SPEC.md` §4.4: distinctiveness becomes dry/wet — a striking word rings in more space.
-fn rooms(score: &Score, events: &[&Event]) -> String {
+///
+/// The palette's reverb raises the floor the mapping stands on, at half strength for the drums so
+/// a kick does not wash out; the rise with distinctiveness is the same under every palette.
+fn rooms(lane: Lane<'_>, style: &Style) -> String {
+    let floor = style.mix().reverb().as_f64() * 0.5;
     grid(
-        score,
-        events,
-        &|event| fmt_param(event.sharpness().as_f64() * 0.4),
+        lane,
+        &|event| fmt_param(floor + event.sharpness().as_f64() * 0.4),
         "~",
     )
 }
@@ -405,10 +1062,9 @@ fn rooms(score: &Score, events: &[&Event]) -> String {
 /// Distance from the family's root becomes bit-crush depth, so "burn", "burnt" and "burning" are
 /// audibly one instrument at three degrees of erosion. 16 bits is untouched; each phoneme of
 /// difference takes two away, to a floor of 4 — still the same instrument, never a different one.
-fn crushes(score: &Score, events: &[&Event]) -> String {
+fn crushes(lane: Lane<'_>) -> String {
     grid(
-        score,
-        events,
+        lane,
         &|event| {
             let depth = event
                 .family()
@@ -424,13 +1080,12 @@ fn crushes(score: &Score, events: &[&Event]) -> String {
 ///
 /// `None` when no word in this voice alliterates, so the filter is not applied at all rather than
 /// applied neutrally — a poem with no sound figures should sound untouched by them.
-fn vowels(score: &Score, events: &[&Event]) -> Option<String> {
-    if !events.iter().any(|event| event.bank().is_some()) {
+fn vowels(lane: Lane<'_>) -> Option<String> {
+    if !lane.events.iter().any(|event| event.bank().is_some()) {
         return None;
     }
     Some(grid(
-        score,
-        events,
+        lane,
         &|event| {
             event.bank().map_or_else(
                 || "a".to_owned(),
@@ -455,59 +1110,359 @@ fn vowel_for(symbol: &str) -> &'static str {
     }
 }
 
-/// The melody: every pitched event, which is every rhyme word (`SPEC.md` §4.5).
+/// A pitched layer: the melody (every rhyme word, `SPEC.md` §4.5) or the bass (every
+/// primary-stressed syllable of a foundation line, by its vowel — `prosody_core::lower`).
 ///
-/// `None` when nothing rhymes, which is ordinary in free verse — a class of one expresses no
-/// melodic relation, so there is no melody to emit rather than a monotone to invent.
+/// `None` when nothing in the poem is pitched that way.
 ///
 /// Built on the same [`grid`] as the rhythm, and that is the point: an earlier version derived its
 /// own subdivision from how many pitched events happened to fall in a beat, so a rhyme word in the
 /// second half of a final iambic foot sounded half a foot before its own drum hit — in every line
-/// of every iambic poem.
-fn melody_layer(score: &Score, style: &Style) -> Option<(String, String)> {
+/// of every iambic poem. A pitched event is the same [`Event`] as its drum hit, so it takes the
+/// same stray too and the note stays on its syllable.
+fn pitched_layer(
+    score: &Score,
+    style: &Style,
+    strays: &BTreeMap<EventKey, Stray>,
+    density: &[f64],
+    role: Pitched,
+    tempo: u16,
+) -> Vec<(String, String)> {
     let pitched: Vec<&Event> = score
         .events()
         .iter()
-        .filter(|event| event.pitch().is_some())
+        .filter(|event| role.plays(event))
         .collect();
     if pitched.is_empty() {
-        return None;
+        return Vec::new();
     }
+    // Which octave a role sits in is palette (`SPEC.md` §5, `bass_octave` and `melody_octave`):
+    // it moves every note of the role by whole octaves and no event. By default the bass is in the
+    // second (MIDI 36), where a bass instrument has its body, and the melody two octaves above
+    // (MIDI 60), where keys and mallets sing. Before the roles were split both sat at 36, so the
+    // rhyme melody was in the bass.
+    let base = match role {
+        Pitched::Melody => style.melody_octave().midi_c(),
+        Pitched::Bass => style.bass_octave().midi_c(),
+    };
 
-    let notes = grid(
-        score,
-        &pitched,
-        &|event| {
-            event.pitch().map_or_else(
-                || "~".to_owned(),
-                |pitch| {
-                    // Degree through the style's scale, from the style's root, in the third
-                    // octave. Which note that is, is palette; that two lines take the *same* note
-                    // is the poem's doing.
-                    let semitone = 36
+    // The melody may be voiced as chords (`Voicing`, palette — its doc argues it against I3); the
+    // bass is always one note, the root a chord would stand on.
+    let voicing = match role {
+        Pitched::Melody => style.voicing(),
+        Pitched::Bass => Voicing::Note,
+    };
+    let note = |event: &Event| match role {
+        Pitched::Melody => melody_note(event, style, base, voicing),
+        Pitched::Bass => event
+            .bass()
+            .map_or_else(|| "~".to_owned(), |note| bass_note(note, style).to_string()),
+    };
+    let mix = style.mix();
+    let instrument = strudel_instrument(
+        match role {
+            Pitched::Melody => style.melody(),
+            Pitched::Bass => style.bass(),
+        },
+        role,
+    );
+    let name = match role {
+        Pitched::Melody => "the melody — a note per rhyme word",
+        Pitched::Bass => bass_name(score.bass()),
+    };
+
+    let mut layers = Vec::new();
+    for lane in Lane::all(score, &pitched, role == Pitched::Bass) {
+        // W2's note is its foot: it holds the beat (`prosody_core::bass`).
+        let lane = if role == Pitched::Bass && score.bass() == Variant::Feet {
+            lane.whole_beats()
+        } else {
+            lane
+        };
+        let mut layer = format!("  note(\"{}\")", grid(lane, &note, "~"));
+        let _ = write!(layer, ".sound(\"{instrument}\")");
+        let gain = match role {
+            Pitched::Melody => gains(lane, density),
+            Pitched::Bass => gains_of(lane, density, &|event| {
+                event
+                    .bass()
+                    .map_or_else(|| event.velocity(), BassNote::velocity)
+            }),
+        };
+        let _ = write!(layer, ".gain(\"{gain}\")");
+        // §4.4 reaches the pitched layers too — the rhyme word is the most prominent event in the
+        // piece, and an earlier version was the only layer distinctiveness never touched.
+        let _ = write!(layer, ".lpf(\"{}\")", cutoffs(lane, style));
+        layer.push_str(&humanised(lane, style, strays));
+        // A struck note rings past its syllable rather than stopping dead at the next one: a
+        // soundfont's own release is a hundredth of a second, which made every note a click.
+        let (release, room) = match role {
+            Pitched::Melody => (0.4, mix.reverb().as_f64()),
+            // The bass sits nearly dry, so the low end stays clear.
+            Pitched::Bass => (0.15, mix.reverb().as_f64() * 0.3),
+        };
+        let _ = write!(
+            layer,
+            ".release({}).room({})",
+            fmt_param(release),
+            fmt_param(room)
+        );
+        match role {
+            Pitched::Melody if !mix.delay().is_off() => {
+                // An echo a dotted eighth behind — three quarters of a beat at this piece's tempo,
+                // so it falls between the syllables rather than on them.
+                let _ = write!(
+                    layer,
+                    ".delay({}).delaytime({}).delayfeedback(0.350)",
+                    fmt_param(mix.delay().as_f64()),
+                    fmt_param(0.75 * 60.0 / f64::from(tempo.max(1)))
+                );
+            }
+            Pitched::Bass if !mix.drive().is_off() => {
+                let _ = write!(layer, ".shape({})", fmt_param(mix.drive().as_f64() * 0.5));
+            }
+            _ => {}
+        }
+        layer.push_str(&bus(
+            style,
+            match role {
+                Pitched::Melody => mix.melody_gain(),
+                Pitched::Bass => mix.bass_gain(),
+            },
+            chord_share(voicing),
+        ));
+        layers.push((layer, lane.label(name)));
+    }
+    layers
+}
+
+/// One melody event's note — or chord, under the seventh voicing — as a mini-notation step: its
+/// rhyme's degree through the style's scale from `base`, detuned by how far the rhyme is off.
+fn melody_note(event: &Event, style: &Style, base: i32, voicing: Voicing) -> String {
+    event.pitch().map_or_else(
+        || "~".to_owned(),
+        |pitch| {
+            let tones: Vec<String> = voicing
+                .degrees()
+                .iter()
+                .map(|above| {
+                    // Degree through the style's scale, from the style's root. Which note that
+                    // is, is palette; that two lines take the *same* note is the poem's doing.
+                    // A chord tone is the same degree plus every other step above it, in the
+                    // same scale — nothing from any other event.
+                    let semitone = base
                         + i32::from(style.root().semitones())
-                        + style.scale().degree(pitch.degree().get());
-                    // §4.5: "perfect rhyme → exact pitch; slant rhyme → detune or neighbour tone."
-                    // The mapping interpolates between the two: a whole step off at a total
-                    // mismatch, so a half-match lands exactly on the neighbour.
+                        + style.scale().degree(pitch.degree().get() + above);
+                    // §4.5: "perfect rhyme → exact pitch; slant rhyme → detune or neighbour
+                    // tone." The mapping interpolates between the two: a whole step off at a
+                    // total mismatch, so a half-match lands exactly on the neighbour. A chord
+                    // is detuned as a whole, so a slant rhyme's chord is off as one.
                     if pitch.detune().is_exact() {
                         format!("{semitone}")
                     } else {
                         fmt_param(f64::from(semitone) + pitch.detune().as_f64() * 2.0)
                     }
-                },
-            )
+                })
+                .collect();
+            // One tone is the note itself. Several are one mini-notation step stacked with
+            // `,` — the only `,` the emitter writes inside a pattern. It cannot multiply
+            // events the way stacked *lines* did (see [`Lane`]): every parameter pattern
+            // still has exactly one value at this step, so each tone takes that value, and
+            // the one event sounds as its chord, once.
+            match tones.as_slice() {
+                [one] => one.clone(),
+                _ => format!("[{}]", tones.join(",")),
+            }
         },
-        "~",
-    );
+    )
+}
 
-    let mut layer = format!("  note(\"{notes}\")");
-    let _ = write!(layer, ".sound(\"{}\")", strudel_synth(style.synth()));
-    let _ = write!(layer, ".gain(\"{}\")", gains(score, &pitched));
-    // §4.4 reaches the melody too — the rhyme word is the most prominent event in the piece, and
-    // an earlier version was the only layer distinctiveness never touched.
-    let _ = write!(layer, ".lpf(\"{}\")", cutoffs(score, &pitched));
-    Some((layer, "the melody — one note per rhyme word".to_owned()))
+/// The layer comment that names the bass, by the variant that made it.
+const fn bass_name(variant: Variant) -> &'static str {
+    match variant {
+        Variant::Syllables => {
+            "the bass — walking every foundation syllable: stressed by vowel height, steps between, \
+             a semitone approach before each (mapping bass = syllables)"
+        }
+        Variant::Feet => {
+            "the bass — walking a note a foot on the beat: the chord tone the foot's vowel height \
+             chooses, a step where it would repeat (mapping bass = feet)"
+        }
+        _ => "the bass — every stressed foundation vowel, by its height",
+    }
+}
+
+/// One bass note's MIDI number: its steps above its root through the style's scale, from the
+/// style's root note in the bass octave, a semitone lower for W1's approach tone.
+///
+/// The root is a chord's under W2 and is folded into one octave of the scale, as the chord lane
+/// folds it (`chord_note`), so the walk stays in the bass's register while the harmony moves;
+/// a step below the root sounds below it ([`crate::style::Scale::step`]). Register is palette.
+fn bass_note(note: BassNote, style: &Style) -> i32 {
+    let scale = style.scale();
+    let root = note.root().get() % scale.len().max(1);
+    let step = i64::try_from(root).unwrap_or(0) + i64::from(note.step().get());
+    let below = match note.chromatic() {
+        Chromatic::Diatonic => 0,
+        Chromatic::SemitoneBelow => 1,
+    };
+    style.bass_octave().midi_c() + i32::from(style.root().semitones()) + scale.step(step) - below
+}
+
+/// The scale-degree offsets a chord of the chord lane stacks on its root: the triad under
+/// [`Voicing::Note`] — one tone would be no chord — and the seventh chord under
+/// [`Voicing::Seventh`], every other degree of the style's scale either way.
+const fn chord_tones(voicing: Voicing) -> &'static [usize] {
+    match voicing {
+        Voicing::Note => &[0, 2, 4],
+        Voicing::Seventh => &[0, 2, 4, 6],
+    }
+}
+
+/// One chord's tones, as a mini-notation stack: its root folded into one octave of the style's
+/// scale, then [`chord_tones`] above it, an octave below the melody's.
+///
+/// Folding is register, so palette: the core counts V of degree 5 as degree 9, which in a
+/// seven-note scale is degree 2 an octave up; the chord lane sounds it in the same octave as every
+/// other chord, so the harmony moves by its roots rather than climbing with the degree numbers.
+fn chord_note(chord: Chord, style: &Style) -> String {
+    let scale = style.scale();
+    let root = chord.root().get() % scale.len().max(1);
+    let base = style.melody_octave().midi_c() - 12 + i32::from(style.root().semitones());
+    let tones: Vec<String> = chord_tones(style.voicing())
+        .iter()
+        .map(|above| format!("{}", base + scale.degree(root + above)))
+        .collect();
+    format!("[{}]", tones.join(","))
+}
+
+/// The Strudel sound the chord lane plays: a soundfont as named, a synth name as the melody would
+/// play it — a chord is keys, not a bass.
+fn chord_instrument(style: &Style) -> &'static str {
+    strudel_instrument(style.chord_sound(), Pitched::Melody)
+}
+
+/// One pattern element per slot of the arrangement, as [`grid_by_slot`] writes them.
+fn per_slot(elements: Vec<String>) -> String {
+    match elements.len() {
+        0 => "~".to_owned(),
+        1 => elements
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "~".to_owned()),
+        _ => format!("<{}>", elements.join(" ")),
+    }
+}
+
+/// The chord lane: one chord a slot, held for the bar, wherever the arrangement plays a foundation
+/// line the harmony mapping gave a chord (`SPEC.md` §4.6, [`Score::chord_in`]); a rest elsewhere.
+///
+/// `None` when the score has no chord — the mapping is off, or nothing in the poem earned one — so
+/// a piece without the harmony is byte for byte what it was.
+///
+/// Which slots have a chord, and on which degree, is the score's. Everything here is palette: the
+/// instrument (`chord_sound`), how many tones ([`chord_tones`], from the [`Voicing`]), the
+/// register (an octave below the melody, between it and the bass), the level (`chord_gain`,
+/// shared between the tones like the melody's, times the bar's density level) and a soft
+/// envelope, so a held chord swells in under the syllables rather than striking with them.
+fn chord_layer(score: &Score, style: &Style, density: &[f64]) -> Option<(String, String)> {
+    let chords: Vec<Option<Chord>> = score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| score.chord_in(slot))
+        .collect();
+    if chords.iter().all(Option::is_none) {
+        return None;
+    }
+    let notes = per_slot(
+        chords
+            .iter()
+            .map(|chord| chord.map_or_else(|| "~".to_owned(), |chord| chord_note(chord, style)))
+            .collect(),
+    );
+    let gains = per_slot(
+        chords
+            .iter()
+            .enumerate()
+            .map(|(slot, chord)| {
+                chord.map_or_else(
+                    || "~".to_owned(),
+                    |_| fmt_param(density.get(slot).copied().unwrap_or(1.0)),
+                )
+            })
+            .collect(),
+    );
+    let mix = style.mix();
+    let mut layer = format!(
+        "  note(\"{notes}\").sound(\"{}\").gain(\"{gains}\")",
+        chord_instrument(style)
+    );
+    let _ = write!(
+        layer,
+        ".attack(0.050).release(0.600).lpf({}).room({})",
+        mix.high_cut(),
+        fmt_param(mix.reverb().as_f64())
+    );
+    let tones = u32::try_from(chord_tones(style.voicing()).len()).unwrap_or(1);
+    layer.push_str(&bus(
+        style,
+        mix.chord_gain(),
+        1.0 / f64::from(tones.max(1)).sqrt(),
+    ));
+    Some((
+        layer,
+        "the chords — one a bar of a foundation stanza, from the harmony mapping".to_owned(),
+    ))
+}
+
+/// The header's account of the chord lane: what plays it, and each line's chord or rest.
+fn chords_header(out: &mut String, score: &Score, style: &Style) {
+    let scale = style.scale();
+    let heptatonic = scale.len() == 7;
+    let voiced = match style.voicing() {
+        Voicing::Note if heptatonic => "triads",
+        Voicing::Note => "three-tone chords on every other degree",
+        Voicing::Seventh if heptatonic => "seventh chords",
+        Voicing::Seventh => "four-tone chords on every other degree",
+    };
+    let _ = writeln!(
+        out,
+        "//   chords: on {}, as {voiced} in {} an octave below the melody, each root folded into \
+         one octave; one a bar of a foundation stanza (SPEC.md §4.6, the harmony mapping)",
+        chord_instrument(style),
+        scale.name()
+    );
+    // The core counts a chord's function in seven steps — V is four degrees above, IV three — so
+    // the numerals name a dominant and a subdominant only in a seven-note scale. In any other
+    // scale the same steps land elsewhere (in a five-note one, "V" folds onto the degree just
+    // below its root), and the header says so rather than letting the numerals mislead.
+    if !heptatonic {
+        let _ = writeln!(
+            out,
+            "//   chords: {} has {} notes, not 7, so the numerals below count steps of it, not \
+             functions: V is not a dominant nor IV a subdominant here",
+            scale.name(),
+            scale.len()
+        );
+    }
+    // Line by line, counting from 1 as a reader does: `V/4` is V on degree 4, `-` a rest. Flourish
+    // lines carry no harmony and are left out.
+    let lines: Vec<String> = score
+        .harmony()
+        .iter()
+        .filter_map(|harmony| match harmony {
+            Harmony::Chord(chord) => Some(format!(
+                "{}:{}/{}",
+                chord.bar().get() + 1,
+                chord.function().numeral(),
+                chord.root().get()
+            )),
+            Harmony::Rest(rest) if rest.why() == Silence::Flourish => None,
+            Harmony::Rest(rest) => Some(format!("{}:-", rest.bar().get() + 1)),
+        })
+        .collect();
+    let _ = writeln!(out, "//   chords by line: {}", lines.join(" "));
 }
 
 #[cfg(test)]
@@ -523,9 +1478,9 @@ mod tests {
 
     use prosody_core::role::Layer;
 
-    use super::{Strudel, StrudelError};
+    use super::{BANK_SAMPLES, Strudel, StrudelError, bank_has, sample_for, strudel_bank};
     use crate::Backend as _;
-    use crate::style::Style;
+    use crate::style::{BANKS, KITS, RIDE_FALLBACKS, Style};
 
     /// Spelling is pronunciation: `A` and `o` are stressed vowels, `e` unstressed, `i` secondary.
     struct Spelled;
@@ -617,24 +1572,32 @@ mod tests {
     #[test]
     fn a_foot_is_a_step_and_its_syllables_subdivide_it() {
         // SPEC.md §4.2, straight through to mini-notation. "eA" is an iamb, so one step holding
-        // two syllables; two of them is two steps.
+        // two syllables; two of them is two steps. One cycle for the line, one for the outro.
         let text = render("eA eA\n", &Style::default());
-        assert_eq!(argument(&text, "s"), "[bd bd] [bd bd]");
+        assert_eq!(
+            argument(&text, "s"),
+            "<[[bd bd] [bd bd]] [[bd bd] [bd bd]]>"
+        );
     }
 
     #[test]
     fn stress_becomes_gain_and_all_three_levels_survive() {
         // Hand-worked: `e` unstressed is a third, `i` secondary two thirds, `A` primary full.
+        // Twice: the line, then the outro.
         let text = render("eiA\n", &Style::default());
-        assert_eq!(argument(&text, "gain"), "[0.333 0.667 1.000]");
+        assert_eq!(
+            argument(&text, "gain"),
+            "<[[0.333 0.667 1.000]] [[0.333 0.667 1.000]]>"
+        );
     }
 
     #[test]
     fn a_bar_a_voice_does_not_play_is_a_rest_not_a_shift() {
         // A voice must not have its later bars pulled forward into the gap, or every line after a
         // silence plays at the wrong time.
+        // Voice 0 plays bar 0 and rests in bar 1 — in the statement and again in the outro.
         let text = render("bA\ntA\n", &Style::default());
-        assert_eq!(argument(&text, "s"), "<bd ~>", "{text}");
+        assert_eq!(argument(&text, "s"), "<bd ~ bd ~>", "{text}");
     }
 
     #[test]
@@ -697,8 +1660,9 @@ mod tests {
     #[test]
     fn a_slant_rhyme_lands_off_the_note_and_a_perfect_one_on_it() {
         // SPEC.md §4.5: "perfect rhyme → exact pitch; slant rhyme → detune or neighbour tone."
-        // A perfect rhyme prints a whole semitone number; a slant one prints a fraction.
-        let perfect = render("teA bAn\nteA bAn\n", &Style::default());
+        // A perfect rhyme prints a whole semitone number; a slant one prints a fraction. `te` is
+        // unstressed, so the rhyme word is the only note — no bass ahead of it.
+        let perfect = render("te bAn\nte bAn\n", &Style::default());
         assert!(
             !argument(&perfect, "note").contains('.'),
             "a perfect rhyme sits exactly on its degree: {perfect}"
@@ -714,7 +1678,7 @@ mod tests {
         // Hand-worked: "bAn" ends `AA N` and "bon" ends `OW N`, a suffix match of 1 in 2, so the
         // detune is 1/2 of a step and a step is two semitones. Both lines share a class, so both
         // take degree 0 — the note moves only because the rhyme is imperfect.
-        let slant = render("teA bAn\nteA bon\n", &Style::default());
+        let slant = render("te bAn\nte bon\n", &Style::default());
         let value: f64 = first_note(&slant).parse().unwrap_or(f64::NAN);
         assert!(
             (value - exact).abs() > 0.5,
@@ -730,18 +1694,18 @@ mod tests {
             "+++\nbank = \"casio\"\nsynth = \"subtractive\"\nroot = \"D\"\nscale = \"lydian\"\n+++",
         )
         .unwrap();
-        let text = render("teA bAn\nteA bAn\n", &style);
+        let text = render("te bAn\nte bAn\n", &style);
         // The palette's name, translated to the identifier Strudel actually knows. Passing the
         // poem's word through unchanged asked for a sample that does not exist, so §5's own
         // example header played silence.
         assert!(text.contains(".bank(\"CasioRZ1\")"), "{text}");
         assert!(text.contains(".sound(\"sawtooth\")"), "{text}");
-        // D lydian, third octave: 36 + 2 + 0 = 38.
-        assert_eq!(first_note(&text), "38");
+        // D lydian, the melody's octave (MIDI 60): 60 + 2 + 0 = 62.
+        assert_eq!(first_note(&text), "62");
 
         let other = Style::parse("+++\nroot = \"C\"\nscale = \"lydian\"\n+++").unwrap();
-        let moved = render("teA bAn\nteA bAn\n", &other);
-        assert_eq!(first_note(&moved), "36", "the root moves every note");
+        let moved = render("te bAn\nte bAn\n", &other);
+        assert_eq!(first_note(&moved), "60", "the root moves every note");
     }
 
     #[test]
@@ -755,8 +1719,9 @@ mod tests {
         // because this emitter also brackets a whole bar — an earlier version of this test matched
         // the bar's bracket and passed whether the melody used the subdivision or not.
         // Two monosyllables form one foot, and the rhyme is the second of them — so exactly one
-        // of the foot's two syllables is pitched, which is the case the subdivision is for.
-        let source = "bo bAn\nro bAn\n";
+        // of the foot's two syllables is pitched, which is the case the subdivision is for. The
+        // first is unstressed, so the bass (stressed foundation vowels) leaves it unpitched.
+        let source = "be bAn\nre bAn\n";
         let text = render(source, &Style::default());
         let steps_per_bar = |pattern: &str| -> Vec<usize> {
             let trimmed = pattern.trim_start_matches('<').trim_end_matches('>');
@@ -807,8 +1772,8 @@ mod tests {
             .filter(|token| *token != "~")
             .count();
         assert_eq!(
-            sounding, 2,
-            "one note per rhyme word, and no others: {melody}"
+            sounding, 4,
+            "one note per rhyme word, and no others — two words, two passes: {melody}"
         );
     }
 
@@ -880,8 +1845,9 @@ mod tests {
     #[test]
     fn a_five_foot_line_emits_five_steps() {
         // SPEC.md §4.2: "Don't quantise to 4/4."
+        // Five syllables a pass, and two passes: the statement and the outro (§4.6).
         let text = render("bA bA bA bA bA\n", &Style::default());
-        assert_eq!(argument(&text, "s").split_whitespace().count(), 5);
+        assert_eq!(argument(&text, "s").split_whitespace().count(), 10);
     }
 
     #[test]
@@ -935,10 +1901,11 @@ mod tests {
         let text = render(source, &Style::default());
         assert!(
             text.contains(&format!(
-                "// {} bars, {} voices, {} events",
+                "// {} bars from {} lines, {} voices, {} events",
+                score.arrangement().slots().len(),
                 score.bars(),
                 score.voices().len(),
-                score.events().len()
+                super::sounded(&score)
             )),
             "{text}"
         );
@@ -973,7 +1940,12 @@ mod tests {
             .split_whitespace()
             .filter_map(|token| token.parse().ok())
             .collect();
-        assert_eq!(depths.len(), 2, "{crush}");
+        // Two words, in the statement and again in the outro.
+        assert_eq!(
+            depths,
+            [depths[0], depths[1], depths[0], depths[1]],
+            "{crush}"
+        );
         assert!(
             depths[0] > depths[1],
             "the root is untouched and the variation eroded: {crush}"
@@ -996,5 +1968,1072 @@ mod tests {
         // CLAUDE.md §6: a fallback must be visible. A listener would otherwise hear a short line.
         let text = render("bA zz\n", &Style::default());
         assert!(text.contains("no pronunciation"), "{text}");
+    }
+
+    #[test]
+    fn a_stanza_keeps_playing_under_the_next() {
+        // Stanza 1 (`bA` / six `bA`s) is ragged, so it is the flourish; stanza 2 is regular, so
+        // the foundation. The arrangement states stanza 1, then states stanza 2 with stanza 1
+        // looping under it — so the first line's voice, one stressed syllable on a hi-hat, sounds
+        // in cycles 0 and 2, and rests in 1 and 3. In cycle 0 the bar is stanza 1's period, the
+        // three iambs of its long line, so `bA` takes the first beat and rests for two; in cycle 2
+        // the bar is stanza 2's one beat, which `bA` fills.
+        let text = render("bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n", &Style::default());
+        let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
+        // The outro repeats stanza 2, and stanza 1 keeps looping under it from bar 0: `hh ~`.
+        assert!(
+            first.starts_with("  s(\"<[hh ~ ~] ~ hh ~ hh ~>\")"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_call_is_its_own_cycle() {
+        // The first line's voice plays the whole line in cycle 0 — two iambs, two beats — and only
+        // its call, `de dA`, in cycle 1: one beat of two syllables, then a rest, because the bar
+        // lasts two beats and a loop that fits keeps its pace.
+        let text = render("de dA, se sA\nne nA ne nA\n", &Style::default());
+        let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
+        assert!(
+            // ...and then both again, in the outro: the line with its call silent under it, and
+            // the call under bar 1.
+            first.starts_with(
+                "  s(\"<[[bd bd] [bd bd]] [[bd bd] ~] [[bd bd] [bd bd]] [[bd bd] ~]>\")"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn lines_sounding_together_are_separate_lanes_so_no_event_is_multiplied() {
+        // Stanza 1 loops under stanza 2 within one voice's bars, so some bar sounds two lines of
+        // the same layer. Stacked with `,` inside one pattern, Strudel matched every parameter
+        // pattern to both lines and multiplied each event by every combination — two lines and
+        // five parameters made one syllable 32 hits. Each lane is its own pattern now: no
+        // pattern holds a `,`, and the hits across all drum lanes are exactly the syllables the
+        // score sounds, placement by placement.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let score = score_of(source);
+        let text = render(source, &Style::default());
+        for line in text
+            .lines()
+            .filter(|l| l.starts_with("  s(") || l.starts_with("  note("))
+        {
+            for (index, part) in line.split('"').enumerate() {
+                assert!(
+                    index % 2 == 0 || !part.contains(','),
+                    "a stacked pattern: {line}"
+                );
+            }
+        }
+        assert!(
+            text.contains("(lane 2)"),
+            "the fixture must stack lines: {text}"
+        );
+        let hits: usize = text
+            .lines()
+            .filter(|l| l.starts_with("  s("))
+            .map(|l| {
+                l.split('"')
+                    .nth(1)
+                    .unwrap()
+                    .replace(['<', '>', '[', ']'], " ")
+                    .split_whitespace()
+                    .filter(|t| *t != "~")
+                    .count()
+            })
+            .sum();
+        assert_eq!(hits, super::sounded(&score), "{text}");
+    }
+
+    /// The numbers inside the first `name("…")` pattern on the line that starts with `prefix`.
+    fn values_on(text: &str, prefix: &str, name: &str) -> Vec<f64> {
+        let line = text
+            .lines()
+            .find(|line| line.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no {prefix} in:\n{text}"));
+        let needle = format!(".{name}(\"");
+        let Some(start) = line.find(&needle) else {
+            return Vec::new();
+        };
+        let rest = &line[start + needle.len()..];
+        rest[..rest.find('"').unwrap()]
+            .replace(['<', '>', '[', ']', ','], " ")
+            .split_whitespace()
+            .filter(|t| *t != "~")
+            .map(|t| t.parse().unwrap())
+            .collect()
+    }
+
+    fn humanised(amount: &str) -> Style {
+        Style::parse(&format!("+++\nhumanise = {amount}\n+++")).unwrap()
+    }
+
+    #[test]
+    fn the_bass_and_the_melody_are_separate_instruments() {
+        // "bAn" ends both lines, so it is a rhyme word and takes the melody; "rot" is a stressed
+        // foundation vowel in a non-rhyming position, so it is bass. Two layers, each with its
+        // palette's instrument, in its own octave.
+        let source = "rot bAn\nrot bAn\n";
+        let style = Style::parse(
+            "+++\nbass = \"gm_electric_bass_finger\"\nmelody = \"gm_vibraphone\"\n+++",
+        )
+        .unwrap();
+        let text = render(source, &style);
+        let melody = text.lines().find(|l| l.contains("the melody")).unwrap();
+        let bass = text.lines().find(|l| l.contains("the bass")).unwrap();
+        assert!(melody.contains(".sound(\"gm_vibraphone\")"), "{melody}");
+        assert!(
+            bass.contains(".sound(\"gm_electric_bass_finger\")"),
+            "{bass}"
+        );
+        // Hand-worked, C minor: the rhyme class is degree 0, so 60. "rot" is OW, a mid vowel, so
+        // the third degree — minor's 3 semitones — in the bass octave: 36 + 3 = 39.
+        assert!(values_on(&text, "  note(", "gain").len() > 1);
+        let notes = |line: &str| -> Vec<String> {
+            line.split('"')
+                .nth(1)
+                .unwrap()
+                .replace(['<', '>', '[', ']'], " ")
+                .split_whitespace()
+                .filter(|t| *t != "~")
+                .map(ToOwned::to_owned)
+                .collect()
+        };
+        assert!(notes(melody).iter().all(|n| n == "60"), "{melody}");
+        assert!(notes(bass).iter().all(|n| n == "39"), "{bass}");
+    }
+
+    #[test]
+    fn a_seventh_voicing_stacks_the_scale_on_each_rhyme_degree() {
+        // Two rhyme classes, "bAn" (degree 0) then "dos" (degree 1), under D dorian:
+        // D E F G A B C = 62 64 65 67 69 71 72 74 from MIDI 60 + 2. Hand-worked:
+        //   degree 0 + {0, 2, 4, 6} = D F A C = 62 65 69 72  (Dm7)
+        //   degree 1 + {0, 2, 4, 6} = E G B D = 64 67 71 74  (Em7)
+        let source = "rot bAn\nrot bAn\nrot dos\nrot dos\n";
+        let header = "+++\nroot = \"D\"\nscale = \"dorian\"\nvoicing = \"seventh\"\n+++";
+        let text = render(source, &Style::parse(header).unwrap());
+        let melody = text.lines().find(|l| l.contains("the melody")).unwrap();
+        let chords: Vec<&str> = melody
+            .split('"')
+            .nth(1)
+            .unwrap()
+            .split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+            .map(|t| t.trim_start_matches('[').trim_end_matches(']'))
+            .filter(|t| !t.is_empty() && *t != "~")
+            .collect();
+        assert!(chords.contains(&"62,65,69,72"), "{melody}");
+        assert!(chords.contains(&"64,67,71,74"), "{melody}");
+        assert!(chords.iter().all(|c| c.split(',').count() == 4), "{melody}");
+        // The level is the chord's: four tones at 1/√4 of the melody level, 0.75 × 0.5.
+        assert!(melody.contains(".postgain(0.375)"), "{melody}");
+        // The bass is never voiced: "rot" is OW, mid, so the third degree of dorian (3
+        // semitones) from 36 + 2 = 41, one note.
+        let bass = text.lines().find(|l| l.contains("the bass")).unwrap();
+        assert!(!bass.split('"').nth(1).unwrap().contains(','), "{bass}");
+        assert!(bass.contains("41"), "{bass}");
+        assert!(bass.contains(".postgain(0.320)"), "{bass}");
+        assert!(
+            text.contains("as seventh chords"),
+            "named in the header: {text}"
+        );
+
+        // Note voicing is the same piece with each chord's lowest tone alone.
+        let single = render(
+            source,
+            &Style::parse("+++\nroot = \"D\"\nscale = \"dorian\"\n+++").unwrap(),
+        );
+        let melody_single = single.lines().find(|l| l.contains("the melody")).unwrap();
+        assert!(melody_single.contains("62") && !melody_single.contains("65,"));
+    }
+
+    #[test]
+    fn every_kit_asks_every_bank_for_a_sample_the_bank_has() {
+        // A sample a bank lacks is not an error Strudel raises: it logs "sound not found" on every
+        // hit and the layer goes silent. So every pair a header can write must name a real one,
+        // and every bank a header can name must be in the table checked against the sample map.
+        for (bank, kit, fallback) in BANKS.iter().flat_map(|bank| {
+            KITS.iter()
+                .flat_map(move |kit| RIDE_FALLBACKS.iter().map(move |f| (bank, kit, f)))
+        }) {
+            {
+                let style = Style::parse(&format!(
+                    "+++\nkit = \"{kit}\"\nbank = \"{bank}\"\nride_fallback = \"{fallback}\"\n+++"
+                ))
+                .unwrap();
+                let strudel = strudel_bank(style.bank());
+                assert!(
+                    BANK_SAMPLES.iter().any(|(name, _)| *name == strudel),
+                    "{bank} → {strudel} is not in the sample table"
+                );
+                for layer in [Layer::Foundation, Layer::Flourish] {
+                    let sample = sample_for(&style, layer);
+                    assert!(
+                        bank_has(strudel, sample),
+                        "{kit} on {bank} ({fallback}) asks {strudel} for `{sample}` ({layer:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_bank_without_a_ride_keeps_time_on_its_open_hat_and_says_so() {
+        // tidal-drum-machines.json has no RolandTR808_rd and no RolandTR707_rd; both have `oh`.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        for (bank, strudel) in [("tr808", "RolandTR808"), ("tr707", "RolandTR707")] {
+            let header = format!("+++\npreset = \"jazz\"\nbank = \"{bank}\"\n+++");
+            let text = render(source, &Style::parse(&header).unwrap());
+            let drums: Vec<String> = text
+                .lines()
+                .filter(|l| l.starts_with("  s("))
+                .map(|l| argument(l, "s"))
+                .collect();
+            assert!(drums.iter().any(|d| d.contains("oh")), "{text}");
+            assert!(drums.iter().any(|d| d.contains("sd")), "{text}");
+            assert!(!drums.iter().any(|d| d.contains("rd")), "{text}");
+            assert!(
+                text.contains(&format!(
+                    "open hat in place of the ride, which {strudel} does not have,"
+                )),
+                "the stand-in is visible: {text}"
+            );
+        }
+        // A bank that has a ride plays it, and the header claims no stand-in.
+        let text = render(
+            source,
+            &Style::parse("+++\npreset = \"jazz\"\nbank = \"linn\"\n+++").unwrap(),
+        );
+        assert!(text.contains("(ride on the foundation"), "{text}");
+        assert!(!text.contains("in place of the ride"), "{text}");
+    }
+
+    #[test]
+    fn a_bank_without_a_ride_can_keep_time_on_its_crash_instead() {
+        // tidal-drum-machines.json has RolandTR808_cr and RolandTR707_cr.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let crash = "+++\npreset = \"jazz\"\nbank = \"tr808\"\nride_fallback = \"crash\"\n+++";
+        let text = render(source, &Style::parse(crash).unwrap());
+        let drums: Vec<String> = text
+            .lines()
+            .filter(|l| l.starts_with("  s("))
+            .map(|l| argument(l, "s"))
+            .collect();
+        assert!(drums.iter().any(|d| d.contains("cr")), "{text}");
+        assert!(drums.iter().any(|d| d.contains("sd")), "{text}");
+        assert!(
+            !drums.iter().any(|d| d.contains("oh") || d.contains("rd")),
+            "{text}"
+        );
+        assert!(
+            text.contains("(crash in place of the ride, which RolandTR808 does not have, on"),
+            "the stand-in is named on the plays line: {text}"
+        );
+        assert!(text.contains("//   ride_fallback = crash\n"), "{text}");
+        // The same piece but for that one sample name: the stand-in strikes where the hat did.
+        let hat = render(
+            source,
+            &Style::parse("+++\npreset = \"jazz\"\nbank = \"tr808\"\n+++").unwrap(),
+        );
+        let music = |t: &str| -> Vec<String> {
+            t.lines()
+                .filter(|l| !l.starts_with("//"))
+                .map(|l| {
+                    l.replace("\"cr", "\"oh")
+                        .replace(" cr", " oh")
+                        .replace("[cr", "[oh")
+                })
+                .collect()
+        };
+        assert_eq!(music(&text), music(&hat));
+        // A bank that has a ride plays it whatever the fallback, and the header names no stand-in.
+        let linn = render(
+            source,
+            &Style::parse(
+                "+++\npreset = \"jazz\"\nbank = \"linn\"\nride_fallback = \"crash\"\n+++",
+            )
+            .unwrap(),
+        );
+        assert!(linn.contains("(ride on the foundation"), "{linn}");
+        assert!(!linn.contains("in place of the ride"), "{linn}");
+    }
+
+    #[test]
+    fn each_role_plays_in_its_palettes_octave() {
+        // Hand-worked, C minor, as in `the_bass_and_the_melody_are_separate_instruments`: the
+        // rhyme class is degree 0 and "rot" is the third degree (3 semitones). Melody octave 5
+        // starts at MIDI 72, so 72; bass octave 1 at 24, so 24 + 3 = 27. And octave 3 for both,
+        // where the ranges meet: 48 and 51.
+        let source = "rot bAn\nrot bAn\n";
+        let notes = |text: &str, role: &str| -> Vec<String> {
+            let line = text.lines().find(|l| l.contains(role)).unwrap();
+            argument(line, "note")
+                .replace(['<', '>', '[', ']'], " ")
+                .split_whitespace()
+                .filter(|t| *t != "~")
+                .map(ToOwned::to_owned)
+                .collect()
+        };
+        for (header, melody, bass) in [
+            ("bass_octave = 1\nmelody_octave = 5", "72", "27"),
+            ("bass_octave = 3\nmelody_octave = 3", "48", "51"),
+            ("", "60", "39"),
+        ] {
+            let text = render(
+                source,
+                &Style::parse(&format!("+++\n{header}\n+++")).unwrap(),
+            );
+            let (m, b) = (notes(&text, "the melody"), notes(&text, "the bass"));
+            assert!(
+                !m.is_empty() && m.iter().all(|n| n == melody),
+                "{header}: {m:?}"
+            );
+            assert!(
+                !b.is_empty() && b.iter().all(|n| n == bass),
+                "{header}: {b:?}"
+            );
+        }
+        // Listed in the header when set, and only then — so a pattern that does not use them
+        // reads exactly as it did before the keys existed.
+        let moved = render(
+            source,
+            &Style::parse("+++\nbass_octave = 1\nmelody_octave = 5\n+++").unwrap(),
+        );
+        assert!(moved.contains("//   bass_octave = 1\n"), "{moved}");
+        assert!(moved.contains("//   melody_octave = 5\n"), "{moved}");
+        let plain = render(source, &Style::default());
+        for key in [
+            "bass_octave",
+            "melody_octave",
+            "density_level",
+            "ride_fallback",
+        ] {
+            assert!(!plain.contains(key), "{key} listed at its default: {plain}");
+        }
+    }
+
+    #[test]
+    fn levels_follow_density_only_in_bars_of_several_lines() {
+        // The arrangement of `a_stanza_keeps_playing_under_the_next`: stanza 1 stated alone (two
+        // slots of one line), then stanza 2 with stanza 1 looping under it, then the outro, which
+        // repeats stanza 2 over the same loop — so one line, one line, then two lines in each of
+        // the last four slots.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let score = score_of(source);
+        assert_eq!(super::lines_sounding(&score), vec![1, 1, 2, 2, 2, 2]);
+
+        let at = |level: &str| {
+            render(
+                source,
+                &Style::parse(&format!("+++\ndensity_level = {level}\n+++")).unwrap(),
+            )
+        };
+        // Zero is today's piece, byte for byte, header included.
+        assert_eq!(at("0"), render(source, &Style::default()));
+
+        // Voice 0 is stanza 1's first line, `bA`: one stressed syllable at full velocity, sounding
+        // in slots 0, 2 and 4 (`<[hh ~ ~] ~ hh ~ hh ~>`). Hand-worked levels: slot 0 has one line
+        // and keeps 1; slots 2 and 4 have two, so 2^-1 = 0.5 at density 1 and 2^-0.5 = 0.707 at
+        // density 0.5.
+        let voice_0 = |text: &str| values_on(text, "  s(\"<[hh", "gain");
+        assert_eq!(voice_0(&at("0")), vec![1.0, 1.0, 1.0]);
+        assert_eq!(voice_0(&at("1")), vec![1.0, 0.5, 0.5]);
+        assert_eq!(voice_0(&at("0.5")), vec![1.0, 0.707, 0.707]);
+
+        // Only gain values change: every other line, and every other parameter of every layer, is
+        // byte for byte the same — the arrangement, the samples, the notes, the filters.
+        let without_gain = |text: &str| -> Vec<String> {
+            text.lines()
+                .filter(|l| !l.starts_with("//"))
+                .map(|l| {
+                    let mut kept = String::new();
+                    let mut rest = l;
+                    while let Some(at) = rest.find(".gain(\"") {
+                        kept.push_str(&rest[..at]);
+                        let after = &rest[at + 7..];
+                        rest = &after[after.find('"').unwrap() + 2..];
+                    }
+                    kept.push_str(rest);
+                    kept
+                })
+                .collect()
+        };
+        assert_eq!(without_gain(&at("1")), without_gain(&at("0")));
+        assert_ne!(at("1"), at("0"));
+        // ...and the header says what it did.
+        assert!(at("1").contains("//   density_level = 1.00\n"));
+        assert!(
+            at("0.5").contains(
+                "//   density: every gain in a bar divided by n^0.500, n = the lines sounding in \
+                 it (1: ×1.000, 2: ×0.707)"
+            ),
+            "{}",
+            at("0.5")
+        );
+    }
+
+    #[test]
+    fn a_seventh_voicing_outside_a_seven_note_scale_is_named_for_what_it_stacks() {
+        // C pentatonic minor: C Eb F G Bb = 0 3 5 7 10. Hand-worked:
+        //   degree 0 + {0, 2, 4, 6} = degrees 0 2 4 6 = C F Bb Eb' = 60 65 70 75 (stacked fourths)
+        //   degree 1 + {0, 2, 4, 6} = degrees 1 3 5 7 = Eb G C' F' = 63 67 72 77
+        let source = "rot bAn\nrot bAn\nrot dos\nrot dos\n";
+        let header = "+++\nscale = \"pentatonic_minor\"\nvoicing = \"seventh\"\n+++";
+        let text = render(source, &Style::parse(header).unwrap());
+        let melody = text.lines().find(|l| l.contains("the melody")).unwrap();
+        assert!(melody.contains("[60,65,70,75]"), "{melody}");
+        assert!(melody.contains("[63,67,72,77]"), "{melody}");
+        assert!(!text.contains("as seventh chords"), "{text}");
+        assert!(
+            text.contains(
+                "as four-tone chords on every other degree of pentatonic_minor (not sevenths: \
+                 the scale has 5 notes, not 7)"
+            ),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_ride_kit_keeps_time_on_the_ride_and_comps_on_the_snare() {
+        // The same poem as `the_layer_chooses_the_instrument`: a regular stanza and a ragged one.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let style = Style::parse("+++\nkit = \"ride\"\nbank = \"r8\"\n+++").unwrap();
+        let text = render(source, &style);
+        let drums: Vec<&str> = text.lines().filter(|l| l.starts_with("  s(")).collect();
+        assert!(
+            drums.iter().any(|l| l.contains("rd")),
+            "the foundation: {text}"
+        );
+        assert!(
+            drums.iter().any(|l| l.contains("sd")),
+            "the flourish: {text}"
+        );
+        assert!(
+            !drums.iter().any(|l| l.contains("bd") || l.contains("hh")),
+            "{text}"
+        );
+        assert!(
+            drums.iter().all(|l| l.contains(".bank(\"RolandR8\")")),
+            "{text}"
+        );
+        // Same layers, same steps: only the sound's name moved.
+        let machine = render(source, &Style::default());
+        let skeleton = |text: &str| -> Vec<String> {
+            text.lines()
+                .filter(|l| l.starts_with("  s("))
+                .map(|l| argument(l, "s").replace("rd", "bd").replace("sd", "hh"))
+                .collect()
+        };
+        assert_eq!(skeleton(&text), skeleton(&machine));
+    }
+
+    #[test]
+    fn a_synth_name_becomes_the_nearest_recorded_instrument() {
+        // SPEC.md §5 names models Strudel lacks. Each takes the instrument nearest its model, per
+        // role; the plain waveforms stay oscillators.
+        let source = "rot bAn\nrot bAn\n";
+        let sound = |synth: &str, role: &str| {
+            let text = render(
+                source,
+                &Style::parse(&format!("+++\nsynth = \"{synth}\"\n+++")).unwrap(),
+            );
+            let line = text.lines().find(|l| l.contains(role)).unwrap().to_owned();
+            line.split(".sound(\"")
+                .nth(1)
+                .unwrap()
+                .split('"')
+                .next()
+                .unwrap()
+                .to_owned()
+        };
+        assert_eq!(sound("karplus", "the melody"), "gm_acoustic_guitar_nylon");
+        assert_eq!(sound("karplus", "the bass"), "gm_acoustic_bass");
+        assert_eq!(sound("fm", "the melody"), "gm_epiano1");
+        assert_eq!(sound("fm", "the bass"), "gm_synth_bass_2");
+        assert_eq!(sound("physical", "the melody"), "gm_marimba");
+        assert_eq!(sound("triangle", "the melody"), "triangle");
+        assert_eq!(sound("subtractive", "the bass"), "sawtooth");
+    }
+
+    #[test]
+    fn the_high_cut_scales_the_brightness_range_rather_than_clipping_it() {
+        // §4.4's mapping is 400 Hz + sharpness × (high cut − 400). Hand-worked for the same word
+        // under two cuts: the excess over 400 Hz scales by (2400 − 400) / (4400 − 400) = 1/2.
+        let source = "bA bAnAnAnA\n";
+        let bright = values_on(&render(source, &Style::default()), "  s(", "lpf");
+        let dark = values_on(
+            &render(source, &Style::parse("+++\nhigh_cut = 2400\n+++").unwrap()),
+            "  s(",
+            "lpf",
+        );
+        assert_eq!(bright.len(), dark.len());
+        for (b, d) in bright.iter().zip(&dark) {
+            assert!(((d - 400.0) - (b - 400.0) / 2.0).abs() < 0.002, "{b} {d}");
+        }
+        // ...so the order between words survives: the striking word is still the brighter one.
+        assert!(dark[1] > dark[0], "{dark:?}");
+    }
+
+    #[test]
+    fn the_mix_reaches_every_layer() {
+        let style = Style::parse(
+            "+++\nreverb = 0.4\nroom_size = 3\ndelay = 0.5\ncompress = 1\ndrive = 0.2\n\
+             drums_gain = 0.5\nbass_gain = 1.5\nmelody_gain = 0.75\ntempo_range = [120, 120]\n+++",
+        )
+        .unwrap();
+        let text = render("rot bAn\nrot bAn\n", &style);
+        let line = |needle: &str| {
+            text.lines()
+                .find(|l| l.contains(needle))
+                .unwrap()
+                .to_owned()
+        };
+        let (drums, melody, bass) = (line("voice 0"), line("the melody"), line("the bass"));
+        for layer in [&drums, &melody, &bass] {
+            // One room for the whole piece: Strudel's reverb is per orbit.
+            assert!(layer.contains(".roomsize(3.000)"), "{layer}");
+            // compress = 1: −24 dB at 7:1.
+            assert!(
+                layer.contains(".compressor(-24.000).compressorRatio(7.000)"),
+                "{layer}"
+            );
+        }
+        assert!(drums.contains(".postgain(0.500)"), "{drums}");
+        assert!(bass.contains(".postgain(1.500)"), "{bass}");
+        assert!(melody.contains(".postgain(0.750)"), "{melody}");
+        // The echo is the melody's alone: a dotted eighth at 120 bpm is 0.75 × 0.5 s.
+        assert!(
+            melody.contains(".delay(0.500).delaytime(0.375)"),
+            "{melody}"
+        );
+        assert!(!drums.contains(".delay(") && !bass.contains(".delay("));
+        // Drive is saturation on the drums and bass, at half its amount.
+        assert!(drums.contains(".shape(0.100)") && bass.contains(".shape(0.100)"));
+        assert!(!melody.contains(".shape("));
+        // The melody sends the whole reverb amount, the bass three tenths of it.
+        assert!(melody.contains(".room(0.400)") && bass.contains(".room(0.120)"));
+        // The drums' send is half the reverb plus §4.4's rise: never below 0.2 here.
+        assert!(
+            values_on(&text, "  s(", "room")
+                .iter()
+                .all(|r| *r >= 0.2 - 1e-9)
+        );
+
+        // ...and the raw preset has none of it.
+        let raw = render("rot bAn\nrot bAn\n", &Style::preset("raw").unwrap());
+        for absent in [
+            ".compressor(",
+            ".delay(",
+            ".shape(",
+            ".nudge(",
+            ".velocity(",
+        ] {
+            assert!(!raw.contains(absent), "{absent} in raw:\n{raw}");
+        }
+    }
+
+    #[test]
+    fn humanise_zero_is_a_machine() {
+        let text = render("teA bAn\nteA rAn\n", &humanised("0"));
+        assert!(
+            !text.contains(".nudge(") && !text.contains(".velocity("),
+            "{text}"
+        );
+        assert!(!text.contains("humanise:"), "{text}");
+    }
+
+    #[test]
+    fn humanise_strays_late_and_soft_within_its_amount_and_in_proportion_to_it() {
+        // Hand-worked bounds: at humanise h, each event is 0..=0.030·h s late and multiplied by
+        // 1 − 0..0.30·h. The draws are the line's, so doubling h doubles every stray exactly.
+        let source = "teA bAn rot\nteA rAn sot\n\nbo do\nro so\n";
+        let half = render(source, &humanised("0.5"));
+        let full = render(source, &humanised("1"));
+        for prefix in ["  s(", "  note("] {
+            let (late_half, late_full) = (
+                values_on(&half, prefix, "nudge"),
+                values_on(&full, prefix, "nudge"),
+            );
+            let (vel_half, vel_full) = (
+                values_on(&half, prefix, "velocity"),
+                values_on(&full, prefix, "velocity"),
+            );
+            assert!(!late_full.is_empty(), "{full}");
+            assert_eq!(late_half.len(), late_full.len());
+            for (h, f) in late_half.iter().zip(&late_full) {
+                assert!((0.0..=0.030).contains(f), "{f}");
+                assert!((f - 2.0 * h).abs() <= 0.0015, "{h} {f}");
+            }
+            for (h, f) in vel_half.iter().zip(&vel_full) {
+                assert!((0.70..=1.0).contains(f), "{f}");
+                assert!(((1.0 - f) - 2.0 * (1.0 - h)).abs() <= 0.0015, "{h} {f}");
+            }
+            // Not a constant: a stray that is the same everywhere is a delay, not a feel.
+            assert!(
+                late_full.iter().any(|v| (v - late_full[0]).abs() > 0.001),
+                "{late_full:?}"
+            );
+        }
+        assert!(full.contains("humanise: each syllable up to 0.030 s late and 0.300 softer"));
+    }
+
+    #[test]
+    fn a_note_strays_with_its_own_drum_hit() {
+        // A pitched event is the same event as its drum hit, so they must stray together or the
+        // note would drift off its syllable. "bAn" is the second word: its drum stray is the
+        // second value of the line's nudge, and its note's is the melody's first.
+        let text = render("te bAn\nte bAn\n", &humanised("1"));
+        let drum = values_on(&text, "  s(", "nudge");
+        let note = values_on(&text, "  note(", "nudge");
+        assert!((drum[1] - note[0]).abs() < 1e-9, "{drum:?} {note:?}");
+    }
+
+    /// Each line's strays as `(line text, strays in order)`, for the lines of the score's voices.
+    fn strays_by_line(source: &str) -> std::collections::BTreeMap<String, Vec<(u64, u64)>> {
+        let score = score_of(source);
+        let strays = super::strays(&score);
+        let mut out = std::collections::BTreeMap::new();
+        for voice in score.voices() {
+            let first_bar = score
+                .events_of(voice.id())
+                .map(|e| e.bar().get())
+                .min()
+                .unwrap();
+            let line = source[voice.span().start()..voice.span().end()].to_owned();
+            let mut events: Vec<_> = score
+                .events_of(voice.id())
+                .filter(|e| e.bar().get() == first_bar)
+                .collect();
+            events.sort_by_key(|e| super::key(e));
+            let values = events
+                .iter()
+                .map(|e| {
+                    let stray = strays[&super::key(e)];
+                    (stray.late.to_bits(), stray.soft.to_bits())
+                })
+                .collect();
+            out.insert(line, values);
+        }
+        out
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+
+        /// I1 for the stray: the same poem and palette render the same bytes, humanised or not.
+        #[test]
+        fn humanised_rendering_is_reproducible(
+            lines in proptest::collection::vec("(te|bA|rot|sAn|do|ni) (bAn|dot|rAs|tes)", 1..5),
+            amount in 0_u8..=100,
+        ) {
+            let source = lines.join("\n") + "\n";
+            let style = humanised(&format!("{}", f64::from(amount) / 100.0));
+            let score = score_of(&source);
+            let (Ok(a), Ok(b)) = (Strudel::new().render(&score, &style), Strudel::new().render(&score_of(&source), &style)) else {
+                return Ok(());
+            };
+            proptest::prop_assert_eq!(a, b);
+        }
+
+        /// I2 for the stray: editing the first stanza leaves every line of the second straying
+        /// exactly as before, bit for bit.
+        #[test]
+        fn an_edit_in_one_stanza_does_not_move_anothers_strays(
+            first in proptest::collection::vec("(te|bA|rot|sAn) (bAn|dot|rAs)", 1..4),
+            edited in proptest::collection::vec("(do|ni|bo|A) (tes|nAn|sot)", 1..4),
+            second in proptest::collection::vec("(bAd|ro|tAn) (sAt|bon|der)", 1..4),
+        ) {
+            let before = format!("{}\n\n{}\n", first.join("\n"), second.join("\n"));
+            let after = format!("{}\n\n{}\n", edited.join("\n"), second.join("\n"));
+            let (was, now) = (strays_by_line(&before), strays_by_line(&after));
+            for line in &second {
+                proptest::prop_assert!(was.contains_key(line.as_str()), "{} not in {:?}", line, was);
+                // A line of the second stanza that the first also contains is one voice with it,
+                // and its seed is still its own text — so it compares equal either way.
+                proptest::prop_assert_eq!(was.get(line.as_str()), now.get(line.as_str()), "{}", line);
+            }
+        }
+    }
+
+    /// A poem lowered with the harmony's `variant` chosen.
+    fn harmonised(source: &str, variant: prosody_core::Variant) -> Score {
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let rhyme = rhyme::analyse(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let sound = sound::analyse(&poem, &Spelled);
+        let surprisal = surprisal::analyse(&poem, &Spelled, &ByLength);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings = prosody_core::Mappings::all()
+            .with(prosody_core::Mapping::Harmony.choose(variant).unwrap());
+        lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme,
+                repetition: &repetition,
+                sound: &sound,
+                surprisal: &surprisal,
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap()
+    }
+
+    /// ABAB of stressed one-syllable words: A (AA) is degree 0, B (OW) degree 1. One foundation
+    /// stanza, so the piece is four bars stated and the outro's four again.
+    const ABAB: &str = "dA bA\nro bo\nsA tA\nno do\n";
+
+    /// The chord lane's line of the pattern.
+    fn chord_line(text: &str) -> &str {
+        text.lines()
+            .find(|line| line.contains("// the chords"))
+            .unwrap_or_else(|| panic!("no chord lane in:\n{text}"))
+    }
+
+    #[test]
+    fn without_the_harmony_there_is_no_chord_lane_and_no_chord_keys() {
+        let text = render(ABAB, &Style::default());
+        assert!(!text.contains("the chords"), "{text}");
+        assert!(
+            !text.contains("chord_sound") && !text.contains("chord_gain"),
+            "{text}"
+        );
+        assert!(!text.contains("chords"), "{text}");
+    }
+
+    #[test]
+    fn rhyme_plays_abab_as_alternating_triads() {
+        // Default palette: C minor, the melody at octave 4 (MIDI 60), so chords from 48. `note`
+        // voicing stacks a triad: degree 0 is C Eb G (48 51 55), degree 1 is D F Ab (50 53 56).
+        let text = Strudel::new()
+            .render(
+                &harmonised(ABAB, prosody_core::Variant::Rhyme),
+                &Style::default(),
+            )
+            .unwrap();
+        let line = chord_line(&text);
+        let one = "[48,51,55] [50,53,56]";
+        assert!(
+            line.starts_with(&format!(
+                "  note(\"<{one} {one} {one} {one}>\").sound(\"gm_pad_warm\")"
+            )),
+            "{line}"
+        );
+        // Every slot has a chord at the bar's own level; the lane's level 0.40 is shared by the
+        // three tones: 0.4 / √3.
+        assert!(
+            line.contains(".gain(\"<1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000>\")"),
+            "{line}"
+        );
+        assert!(line.contains(".postgain(0.231)"), "{line}");
+        assert!(text.contains("//   chord_sound = gm_pad_warm\n"), "{text}");
+        assert!(text.contains("//   chord_gain = 0.40\n"), "{text}");
+        assert!(
+            text.contains("//   chords by line: 1:I/0 2:I/1 3:I/0 4:I/1\n"),
+            "{text}"
+        );
+        assert!(text.contains("as triads in minor"), "{text}");
+    }
+
+    #[test]
+    fn cadence_voiced_as_sevenths_folds_its_roots_into_one_octave() {
+        // Cadence on ABAB: V/4, V/5, I/0, and the turnaround V/8 — degree 8 is degree 1 folded
+        // into the octave. Sevenths in C minor from 48: degree 4 is G Bb D F (55 58 62 65),
+        // 5 is Ab C Eb G (56 60 63 67), 0 is C Eb G Bb (48 51 55 58), 1 is D F Ab C (50 53 56 60).
+        let style = Style::parse("+++\nvoicing = \"seventh\"\n+++").unwrap();
+        let text = Strudel::new()
+            .render(&harmonised(ABAB, prosody_core::Variant::Cadence), &style)
+            .unwrap();
+        let line = chord_line(&text);
+        let one = "[55,58,62,65] [56,60,63,67] [48,51,55,58] [50,53,56,60]";
+        assert!(
+            line.starts_with(&format!("  note(\"<{one} {one}>\")")),
+            "{line}"
+        );
+        // Four tones share the level: 0.4 / 2.
+        assert!(line.contains(".postgain(0.200)"), "{line}");
+        assert!(
+            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/0 4:V/8\n"),
+            "{text}"
+        );
+        assert!(text.contains("as seventh chords in minor"), "{text}");
+    }
+
+    #[test]
+    fn a_bar_without_a_chord_rests_in_the_chord_lane() {
+        // `ro bAn` rhymes with nothing: under rhyme its bar rests, and the header says `-`.
+        let text = Strudel::new()
+            .render(
+                &harmonised("dA bA\nro bAn\nsA tA\n", prosody_core::Variant::Rhyme),
+                &Style::default(),
+            )
+            .unwrap();
+        let line = chord_line(&text);
+        assert!(
+            line.starts_with("  note(\"<[48,51,55] ~ [48,51,55] [48,51,55] ~ [48,51,55]>\")"),
+            "{line}"
+        );
+        assert!(
+            line.contains(".gain(\"<1.000 ~ 1.000 1.000 ~ 1.000>\")"),
+            "{line}"
+        );
+        assert!(
+            text.contains("//   chords by line: 1:I/0 2:- 3:I/0\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_chord_lane_follows_the_palette_and_never_its_structure() {
+        // I3: another palette changes the chord lane's sound, register and level, and not which
+        // slots have a chord.
+        let score = harmonised(ABAB, prosody_core::Variant::Both);
+        let plain = Strudel::new().render(&score, &Style::default()).unwrap();
+        let other = Style::parse(
+            "+++\npreset = \"jazz\"\nchord_sound = \"gm_vibraphone\"\nchord_gain = 1.2\n\
+             melody_octave = 5\nroot = \"E\"\n+++",
+        )
+        .unwrap();
+        let coloured = Strudel::new().render(&score, &other).unwrap();
+        let rests = |text: &str| -> Vec<bool> {
+            argument(chord_line(text), "note")
+                .trim_matches(['<', '>'])
+                .split(' ')
+                .map(|step| step == "~")
+                .collect()
+        };
+        assert_eq!(rests(&plain), rests(&coloured));
+        assert_ne!(
+            argument(chord_line(&plain), "note"),
+            argument(chord_line(&coloured), "note")
+        );
+        assert!(chord_line(&coloured).contains(".sound(\"gm_vibraphone\")"));
+    }
+
+    #[test]
+    fn swing_slices_the_bar_so_it_comes_before_the_tempo() {
+        // `.cpm` is `_fast(cpm / 60)`: after it a cycle is the scheduler's second, not a bar, so
+        // a `.swingBy` chained after it sliced the wrong span and moved, dropped and doubled
+        // onsets. The swing must be applied to the stack itself, and the tempo last.
+        let score = harmonised(ABAB, prosody_core::Variant::Both);
+        let swung = Style::parse(
+            "+++
+swing = 0.33
++++",
+        )
+        .unwrap();
+        let text = Strudel::new().render(&score, &swung).unwrap();
+        let tail: Vec<&str> = text.lines().rev().take(3).collect();
+        assert_eq!(tail[2], ")", "{text}");
+        assert!(tail[1].starts_with("  .swingBy(0.330, "), "{text}");
+        assert!(tail[0].starts_with("  .cpm("), "{text}");
+    }
+
+    #[test]
+    fn outside_a_seven_note_scale_the_header_says_the_numerals_are_not_functions() {
+        let score = harmonised(ABAB, prosody_core::Variant::Cadence);
+        let seven = Strudel::new().render(&score, &Style::default()).unwrap();
+        assert!(seven.contains(" as triads in "), "{seven}");
+        assert!(!seven.contains("not functions"), "{seven}");
+        let five = Style::parse("+++\nscale = \"pentatonic_minor\"\n+++").unwrap();
+        let text = Strudel::new().render(&score, &five).unwrap();
+        assert!(!text.contains(" as triads in "), "{text}");
+        assert!(
+            text.contains(" as three-tone chords on every other degree in pentatonic_minor "),
+            "{text}"
+        );
+        assert!(
+            text.contains("pentatonic_minor has 5 notes, not 7, so the numerals below count steps"),
+            "{text}"
+        );
+    }
+
+    /// A score under the chosen bass and harmony variants.
+    fn bassed(source: &str, bass: prosody_core::Variant, harmony: prosody_core::Variant) -> Score {
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings = prosody_core::Mappings::all()
+            .with(prosody_core::Mapping::Bass.choose(bass).unwrap())
+            .with(prosody_core::Mapping::Harmony.choose(harmony).unwrap());
+        lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &ByLength),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap()
+    }
+
+    /// The bass layer's line of a pattern.
+    fn bass_line(text: &str) -> &str {
+        text.lines()
+            .find(|line| line.contains("// the bass"))
+            .unwrap_or_else(|| panic!("no bass in:\n{text}"))
+    }
+
+    /// The `index`-th bar of a `note("<…>")` pattern, without its brackets.
+    fn bar_of(line: &str, index: usize) -> String {
+        let pattern = argument(line, "note");
+        let inner = pattern.trim_start_matches('<').trim_end_matches('>');
+        // Bars are top-level elements: split at depth zero.
+        let mut bars = Vec::new();
+        let (mut depth, mut current) = (0_i32, String::new());
+        for character in inner.chars() {
+            match character {
+                '[' => depth += 1,
+                ']' => depth -= 1,
+                ' ' if depth == 0 => {
+                    bars.push(std::mem::take(&mut current));
+                    continue;
+                }
+                _ => {}
+            }
+            current.push(character);
+        }
+        bars.push(current);
+        bars[index].clone()
+    }
+
+    #[test]
+    fn the_syllables_walk_sounds_its_passing_and_approach_tones() {
+        // W1 in C minor (0 2 3 5 7 8 10) from the bass octave, MIDI 36. `bo de de bA`: OW is mid,
+        // the third — step 2, Eb, 39. The passing tone steps down towards AA's root: step 1, D,
+        // 38. The approach is a semitone below the root: 35, the B below — a chromatic note C
+        // minor does not have. Then AA, the root, 36. One note per syllable, in the drum's grid.
+        let source = "bo de de bA\nso te te sA\n";
+        let text = Strudel::new()
+            .render(
+                &bassed(
+                    source,
+                    prosody_core::Variant::Syllables,
+                    prosody_core::Variant::Off,
+                ),
+                &Style::default(),
+            )
+            .unwrap();
+        let bass = bass_line(&text);
+        let first: Vec<String> = bar_of(bass, 0)
+            .replace(['[', ']'], " ")
+            .split_whitespace()
+            .map(ToOwned::to_owned)
+            .collect();
+        assert_eq!(first, vec!["39", "38", "35", "36"], "{bass}");
+        assert!(bass.contains("(mapping bass = syllables)"), "{bass}");
+        assert!(
+            text.contains("//   walking bass (mapping bass = syllables): a note on every"),
+            "{text}"
+        );
+        // The rhyme word sounds both: its melody note and its bass note.
+        let melody = text.lines().find(|l| l.contains("the melody")).unwrap();
+        assert!(melody.contains("60"), "{melody}");
+        // The height bass, the default, says nothing new in the header.
+        let plain = render(source, &Style::default());
+        assert!(!plain.contains("walking bass"), "{plain}");
+        assert!(
+            bass_line(&plain)
+                .ends_with("the bass — every stressed foundation vowel, by its height"),
+            "{plain}"
+        );
+    }
+
+    /// Four iambs a line, ABAB: `bA` lines (A, degree 0) and `bo` lines (O, degree 1).
+    const WALK: &str = "de bA de bo de bo de bA\n\
+                        de bo de bA de bA de bo\n\
+                        se sA se so se so se sA\n\
+                        se so se sA se sA se so\n";
+
+    #[test]
+    fn the_feet_walk_holds_each_beat_without_harmony() {
+        // W2, harmony off, C minor from 36. Bar 0's stressed vowels: AA OW OW AA. The root (36),
+        // the third (step 2, 39), OW again — the next foot's AA is lower, so a step down (step 1,
+        // 38) — then AA's root (36). Each note fills its beat: no subdivision, so `[36 39 38 36]`.
+        // Bar 1: OW AA AA OW — 39, 36, AA again with OW higher next, so up (38), then 39.
+        let score = bassed(
+            WALK,
+            prosody_core::Variant::Feet,
+            prosody_core::Variant::Off,
+        );
+        let text = Strudel::new().render(&score, &Style::default()).unwrap();
+        let bass = bass_line(&text);
+        assert_eq!(bar_of(bass, 0), "[36 39 38 36]", "{bass}");
+        assert_eq!(bar_of(bass, 1), "[39 36 38 39]", "{bass}");
+        // Every note is struck with its foot's stressed syllable's accent, full force — not the
+        // unstressed `de` it rides on.
+        let gains = argument(bass, "gain");
+        assert!(gains.starts_with("<[1.000 1.000 1.000 1.000]"), "{gains}");
+        assert!(
+            text.contains("root, third, fifth of the scale: no harmony"),
+            "{text}"
+        );
+        assert!(bass.contains("(mapping bass = feet)"), "{bass}");
+    }
+
+    #[test]
+    fn one_walk_a_bar_a_held_line_keeps_its_drums_but_not_its_walk() {
+        // ABAB, so the A line is held under the B line in slot 1 (`prosody_core::arrange`). Under
+        // the height bass the held line's stressed `bA` sounds in a second bass lane, as it always
+        // has — a chord tone under a chord tone. A walk under a walk clashed by a semitone on the
+        // page, so a walking bass sounds only the bar's foundation line (`Score::sounds_bass`).
+        let source = "de bA de bA\nde bo de bo\nse sA se sA\nse so se so\n";
+        let off = prosody_core::Variant::Off;
+        let height = Strudel::new()
+            .render(
+                &bassed(source, prosody_core::Variant::Height, off),
+                &Style::default(),
+            )
+            .unwrap();
+        assert!(height.contains("by its height (lane 2)"), "{height}");
+
+        let text = Strudel::new()
+            .render(
+                &bassed(source, prosody_core::Variant::Feet, off),
+                &Style::default(),
+            )
+            .unwrap();
+        assert!(
+            !text
+                .lines()
+                .any(|l| l.contains("(mapping bass = feet) (lane 2)")),
+            "one walk a bar:\n{text}"
+        );
+        // The held line still sounds its drums under the B line.
+        assert!(text.contains("(lane 2)"), "{text}");
+        // C minor from 36. Slot 1 is the B line alone: `de bo` OW mid, the third (39); `de bo`
+        // again would repeat it and no foot follows, so a step down (38). Slot 0, the A line: AA's
+        // root (36), then the step below the root, Bb (34).
+        assert!(
+            text.contains("one walk a bar, the bar's foundation line's\n"),
+            "the header says so:\n{text}"
+        );
+        let bass = bass_line(&text);
+        assert_eq!(bar_of(bass, 0), "[36 34]", "{bass}");
+        assert_eq!(bar_of(bass, 1), "[39 38]", "{bass}");
+    }
+
+    #[test]
+    fn the_feet_walk_follows_the_chord_under_harmony_rhyme() {
+        // H1: bar 0 is I on degree 0, bar 1 I on degree 1 (D). Bar 0 walks as without harmony.
+        // Bar 1 walks the same steps as above, 2 0 1 2, from degree 1: degrees 3 1 2 3 of C
+        // minor, F D Eb F — 41 38 39 41. The walk moves with the chord.
+        let score = bassed(
+            WALK,
+            prosody_core::Variant::Feet,
+            prosody_core::Variant::Rhyme,
+        );
+        let text = Strudel::new().render(&score, &Style::default()).unwrap();
+        let bass = bass_line(&text);
+        assert_eq!(bar_of(bass, 0), "[36 39 38 36]", "{bass}");
+        assert_eq!(bar_of(bass, 1), "[41 38 39 41]", "{bass}");
+        assert!(text.contains("of the bar's chord"), "{text}");
     }
 }

@@ -243,6 +243,25 @@ fn every_corpus_pattern_is_valid_javascript() {
     }
 }
 
+/// The villanelle under the jazz palette — its two rhyme classes, §4.5's "two-note obsession", as
+/// two seventh chords over the ride. Beside `pattern-villanelle` this is the palette's whole effect
+/// on one poem: the same steps, chords where there were notes, other sounds, swing.
+#[test]
+fn the_jazz_palette_compiles_to_a_committed_pattern() {
+    let source = CORPUS
+        .iter()
+        .find(|(name, _)| *name == "villanelle")
+        .map(|(_, source)| *source)
+        .unwrap();
+    assert!(
+        !source.starts_with("+++"),
+        "the fixture has no header of its own"
+    );
+    let (pattern, _) = compile(&format!("+++\npreset = \"jazz\"\n+++\n{source}"));
+    assert!(pattern.contains(".swingBy(0.330,"), "{pattern}");
+    insta::assert_snapshot!("pattern-villanelle-jazz", pattern);
+}
+
 #[test]
 fn compiling_the_corpus_is_reproducible() {
     // Invariant I1, over every shape of poem the corpus covers.

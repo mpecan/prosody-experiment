@@ -11,19 +11,21 @@ passes
   rhyme       §4.5
   phoneme     §7.2
   seed        I2
+  arrange     §4.1
 
 stanza 0
 
   the sea is a wide and hungry mouth
   ──────────────────────────────────
   bar 0  foundation (onlycandidate)  voice 0  seed f1e06888
-    token          beat       gain    pitch   modulation sharp   bank   from
-    the            0.0.0/2    0.33    —       —         0.12    AH     meter,surprisal
-    sea            0.0.1/2    1.00    —       —         0.44    —      meter,surprisal
-    is             0.1.0/2    1.00    —       —         0.31    —      meter,surprisal
-    a              0.1.1/2    0.33    —       —         0.00    AH     meter,surprisal
-    wide           0.2.0/2    1.00    —       —         0.50    —      meter,surprisal
-    and            0.2.1/2    0.33    —       —         0.12    AH     meter,surprisal
-    hungry         0.3.0/2    1.00    —       —         0.81    AH     meter,surprisal
-                   0.3.1/2    0.33                                     meter
-    mouth          0.4.0/1    1.00    —       —         0.62    —      meter,surprisal
+  sounds stated 0 · repeating 1
+    token          beat       gain    pitch     modulation sharp   bank   from
+    the            0.0.0/2    0.33    —         —         0.12    AH     meter,surprisal
+    sea            0.0.1/2    1.00    bass 4 IY —         0.44    —      meter,role,surprisal
+    is             0.1.0/2    1.00    bass 4 IH —         0.31    —      meter,role,surprisal
+    a              0.1.1/2    0.33    —         —         0.00    AH     meter,surprisal
+    wide           0.2.0/2    1.00    bass 0 AY —         0.50    —      meter,role,surprisal
+    and            0.2.1/2    0.33    —         —         0.12    AH     meter,surprisal
+    hungry         0.3.0/2    1.00    bass 2 AH —         0.81    AH     meter,role,surprisal
+                   0.3.1/2    0.33                                       meter
+    mouth          0.4.0/1    1.00    bass 0 AW —         0.62    —      meter,role,surprisal

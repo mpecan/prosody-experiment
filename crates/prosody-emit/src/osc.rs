@@ -60,8 +60,9 @@ pub enum OscError {
 /// A time in beats from the start of the piece, exact.
 ///
 /// A rational rather than a float because onsets are compared and sorted, and `CLAUDE.md` §4 keeps
-/// floats out of both. The denominator is the subdivision of the beat the event falls in, so it is
-/// small and exact — a triplet is a third, not 0.333.
+/// floats out of both. Kept in lowest terms; the denominator is at most the subdivision of the beat
+/// times the line's beat count (when a looped line is fitted under a host of another length), so it
+/// stays small and exact — a triplet is a third, not 0.333.
 #[derive(Debug, Clone, Copy)]
 pub struct Onset {
     numerator: u64,
@@ -80,18 +81,6 @@ impl Onset {
     #[must_use]
     pub const fn parts(self) -> (u64, u64) {
         (self.numerator, self.denominator)
-    }
-
-    /// This onset pulled onto the beat it falls in.
-    ///
-    /// `SPEC.md` §4.3's "downbeat-anchored": an anaphora's words land on the pulse rather than
-    /// wherever their syllable happened to sit inside the foot.
-    #[must_use]
-    const fn on_the_beat(self) -> Self {
-        Self {
-            numerator: self.numerator / self.denominator,
-            denominator: 1,
-        }
     }
 }
 
@@ -228,6 +217,27 @@ pub const TEMPO: &str = "/prosody/tempo";
 pub struct Schedule {
     messages: Vec<Message>,
     beats_per_minute: u16,
+    unapplied: Vec<(&'static str, String)>,
+    unsent_chords: usize,
+    unsent_bass: usize,
+}
+
+/// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
+/// that it does not apply: every pitch is sent from MIDI 36 with no melody/bass split, and every
+/// velocity unscaled by density. A header that sets one of them is told so in
+/// [`Schedule::to_text`] and on `--send`, rather than having it vanish (`CLAUDE.md` §6: a fallback
+/// must be visible). Sample choices (`bank`, `kit`, `ride_fallback`, ...) are not listed: the
+/// schedule names no sound at all, so a receiver is choosing those anyway.
+const UNAPPLIED: &[&str] = &["bass_octave", "melody_octave", "density_level"];
+
+/// The [`UNAPPLIED`] keys this style sets away from their default, with the values it sets.
+fn unapplied(style: &Style) -> Vec<(&'static str, String)> {
+    let defaults = Style::default().describe();
+    style
+        .describe()
+        .into_iter()
+        .filter(|(key, value)| UNAPPLIED.contains(key) && defaults.get(key) != Some(value))
+        .collect()
 }
 
 impl Schedule {
@@ -244,6 +254,30 @@ impl Schedule {
     #[must_use]
     pub const fn beats_per_minute(&self) -> u16 {
         self.beats_per_minute
+    }
+
+    /// The palette keys the header set that this schedule does not apply, with their values, in
+    /// key order. Empty unless a header moves `bass_octave`, `melody_octave` or `density_level`.
+    #[must_use]
+    pub fn unapplied(&self) -> &[(&'static str, String)] {
+        &self.unapplied
+    }
+
+    /// How many chords of the harmony layer (`SPEC.md` §4.6) the arrangement plays that this
+    /// schedule does not send: it has no chord message yet, and says so rather than dropping them
+    /// silently (`CLAUDE.md` §6). Zero unless the harmony mapping is chosen.
+    #[must_use]
+    pub const fn unsent_chords(&self) -> usize {
+        self.unsent_chords
+    }
+
+    /// How many bass notes the arrangement plays that this schedule does not send: a message has
+    /// one pitch, and where a walking bass (`SPEC.md` §4.6, `bass = syllables` or `feet`) puts a
+    /// bass note under a rhyme word, the message carries the melody's. Zero under the height bass,
+    /// which never sounds on a rhyme word.
+    #[must_use]
+    pub const fn unsent_bass(&self) -> usize {
+        self.unsent_bass
     }
 
     /// How long the piece lasts, in beats.
@@ -280,6 +314,33 @@ impl Schedule {
             self.beats_per_minute,
             self.messages.len()
         );
+        if !self.unapplied.is_empty() {
+            let keys: Vec<String> = self
+                .unapplied
+                .iter()
+                .map(|(key, value)| format!("{key} = {value}"))
+                .collect();
+            let _ = writeln!(
+                out,
+                "# not applied here: {} (pitch is sent from MIDI 36, velocity unscaled)",
+                keys.join(", ")
+            );
+        }
+        if self.unsent_chords > 0 {
+            let _ = writeln!(
+                out,
+                "# not scheduled here: {} chords of the harmony layer (there is no chord message)",
+                self.unsent_chords
+            );
+        }
+        if self.unsent_bass > 0 {
+            let _ = writeln!(
+                out,
+                "# not scheduled here: {} bass notes under rhyme words (a message has one pitch, \
+                 and those carry the melody's)",
+                self.unsent_bass
+            );
+        }
         for message in &self.messages {
             let args: Vec<String> = message
                 .args
@@ -315,21 +376,38 @@ impl Backend for Osc {
             return Err(OscError::Silent);
         }
 
-        // Where each bar starts, in beats. Bars differ in length — `SPEC.md` §4.2 insists on it —
-        // so they are accumulated rather than multiplied, which is the whole reason this backend
-        // can honour an odd metre where a fixed-length cycle cannot.
-        let mut bar_starts = Vec::with_capacity(score.bars());
-        let mut running = 0_u64;
-        for bar in 0..score.bars() {
-            bar_starts.push(running);
-            running += u64::try_from(score.beats_in(bar)).unwrap_or(0);
+        // Walk the arrangement, not the bars: a stanza may sound many times, looping under others
+        // or transforming into a rival (`prosody_core::arrange`). Slots differ in length —
+        // `SPEC.md` §4.2 insists on it — so their starts are accumulated rather than multiplied,
+        // which is the whole reason this backend can honour an odd metre where a fixed-length
+        // cycle cannot.
+        let mut messages: Vec<Message> = Vec::new();
+        let mut unsent_bass = 0;
+        let mut slot_start = 0_u64;
+        for slot in score.arrangement().slots() {
+            let slot_beats = u64::try_from(slot.beats()).unwrap_or(1).max(1);
+            for placement in slot.placements() {
+                // A whole line, or a call lifted out of one: either way, its own beats.
+                let placed = score.placed(*placement);
+                let extent = Extent {
+                    first: u64::try_from(placed.first_beat()).unwrap_or(0),
+                    beats: u64::try_from(placed.beats()).unwrap_or(1).max(1),
+                };
+                let room = u64::try_from(slot.room_for(placed.beats())).unwrap_or(1);
+                // Under a walking bass, one walk a bar: the bar's foundation line's
+                // (`Score::sounds_bass`), as the Strudel backend plays it.
+                let bass_sounds = score.sounds_bass(slot, placement);
+                for event in placed.events() {
+                    let at = fitted(event, slot_start, room, extent);
+                    let bass = event.bass().filter(|_| bass_sounds);
+                    if event.pitch().is_some() && bass.is_some() {
+                        unsent_bass += 1;
+                    }
+                    messages.push(message(event, bass, score, style, at));
+                }
+            }
+            slot_start += slot_beats;
         }
-
-        let mut messages: Vec<Message> = score
-            .events()
-            .iter()
-            .map(|event| message(event, score, style, &bar_starts))
-            .collect();
         // One total order before anything is sent (`CLAUDE.md` §4). Ties break by span, so two
         // events at the same instant always leave in the same order.
         messages.sort_by(|a, b| a.at.cmp(&b.at).then(a.span.start().cmp(&b.span.start())));
@@ -340,30 +418,90 @@ impl Backend for Osc {
                 .tempo_range()
                 .at_density(score.events().len(), score.bars())
                 .get(),
+            unapplied: unapplied(style),
+            unsent_chords: score
+                .arrangement()
+                .slots()
+                .iter()
+                .filter(|slot| score.chord_in(slot).is_some())
+                .count(),
+            unsent_bass,
         })
     }
 }
 
-/// One event, scheduled.
-fn message(event: &Event, score: &Score, style: &Style, bar_starts: &[u64]) -> Message {
-    let bar_start = bar_starts.get(event.bar().get()).copied().unwrap_or(0);
+/// Which beats of its line a placement covers: from `first`, for `beats`.
+#[derive(Debug, Clone, Copy)]
+struct Extent {
+    first: u64,
+    beats: u64,
+}
+
+/// When an event sounds: its place within its own line — or within its call, counted from the
+/// call's first beat — fitted to the slot it plays in.
+///
+/// Bar-locked (`prosody_core::arrange`): a line is fitted into its `room` in the slot
+/// ([`Slot::room_for`](prosody_core::Slot::room_for)) — its own beats when it fits, so it keeps
+/// one beat per foot and rests for the rest of the bar, and the whole bar when it is longer.
+fn fitted(event: &Event, slot_start: u64, room: u64, extent: Extent) -> Onset {
     let of = u64::try_from(event.subdivision().of()).unwrap_or(1).max(1);
     let within = u64::try_from(event.subdivision().index()).unwrap_or(0);
-    let beat = u64::try_from(event.beat().get()).unwrap_or(0);
+    let beat = u64::try_from(event.beat().get())
+        .unwrap_or(0)
+        .saturating_sub(extent.first);
+    let line_beats = extent.beats;
 
-    let at = Onset {
-        numerator: (bar_start + beat) * of + within,
-        denominator: of,
-    };
-    // §4.3's anaphora row: a line-initial repetition is pulled onto the pulse. This is the mapping
-    // the text backend could not express, because there a step's position in the cycle already
-    // fixes its time and there is nowhere to move it to.
-    let at = if event.anchor() == Some(Anchor::Downbeat) {
-        at.on_the_beat()
+    // §4.3's anaphora row: a line-initial repetition is pulled onto the pulse — its own line's
+    // pulse, before fitting, so the pull is the same wherever the line sounds. This is the
+    // mapping the text backend could not express, because there a step's position in the cycle
+    // already fixes its time and there is nowhere to move it to.
+    let (numerator, denominator) = if event.anchor() == Some(Anchor::Downbeat) {
+        (beat, 1)
     } else {
-        at
+        (beat * of + within, of)
     };
+    reduced(
+        slot_start * denominator * line_beats + numerator * room,
+        denominator * line_beats,
+    )
+}
 
+const fn reduced(numerator: u64, denominator: u64) -> Onset {
+    let divisor = gcd(numerator, denominator);
+    let divisor = if divisor == 0 { 1 } else { divisor };
+    Onset {
+        numerator: numerator / divisor,
+        denominator: denominator / divisor,
+    }
+}
+
+const fn gcd(mut a: u64, mut b: u64) -> u64 {
+    while b != 0 {
+        let rest = a % b;
+        a = b;
+        b = rest;
+    }
+    a
+}
+
+/// One event, scheduled at `at`, with its bass note where the bass sounds it.
+fn message(
+    event: &Event,
+    bass: Option<prosody_core::BassNote>,
+    score: &Score,
+    style: &Style,
+    at: Onset,
+) -> Message {
+    // One message is both the syllable's drum hit and its pitched note, so it carries two
+    // accents. The drum is struck at its own syllable's stress (`SPEC.md` §4.2) — always: an
+    // unstressed iambic onset must stay a light hit. The note is struck as the note is: a bass
+    // note (no melody note on the event) at the bass note's own accent — under W2 its foot's
+    // stressed syllable's, not the syllable it rides on — as the Strudel backend strikes it.
+    let velocity = event.velocity();
+    let note_velocity = match (event.pitch(), bass) {
+        (None, Some(note)) => note.velocity(),
+        _ => event.velocity(),
+    };
     // §4.3's epistrophe row: a cadence rings on where its neighbours are clipped.
     let sustain = if event.anchor() == Some(Anchor::Cadence) {
         2.0
@@ -387,13 +525,19 @@ fn message(event: &Event, score: &Score, style: &Style, bar_starts: &[u64]) -> M
             Layer::Flourish => "flourish".to_owned(),
         }),
         Arg::Int(i32::try_from(event.voice().get()).unwrap_or(0)),
-        Arg::Float(event.velocity().as_f64() as f32),
+        Arg::Float(velocity.as_f64() as f32),
         // §4.5: a degree through the style's scale, from its root. Absent for an unpitched event,
         // which is most of them — sent as -1 rather than omitted, so every message has the same
         // shape and a receiver needs no dispatch on argument count.
-        Arg::Int(event.pitch().map_or(-1, |pitch| {
-            36 + i32::from(style.root().semitones()) + style.scale().degree(pitch.degree().get())
-        })),
+        // The bass (§4.6) where there is no melody note: its step through the scale, its chord's
+        // root folded as the Strudel backend folds it, a semitone lower for an approach tone.
+        Arg::Int(event.pitch().map_or_else(
+            || bass.map_or(-1, |note| bass_pitch(note, style)),
+            |pitch| {
+                36 + i32::from(style.root().semitones())
+                    + style.scale().degree(pitch.degree().get())
+            },
+        )),
         Arg::Float(
             event
                 .pitch()
@@ -406,6 +550,9 @@ fn message(event: &Event, score: &Score, style: &Style, bar_starts: &[u64]) -> M
             f64::from(u32::try_from(family.depth().get()).unwrap_or(0)) / 8.0
         }) as f32),
         Arg::Float(sustain),
+        // The pitched note's accent, apart from the drum's `gain` above (see `note_velocity`).
+        // Last, so every earlier argument keeps its position.
+        Arg::Float(note_velocity.as_f64() as f32),
     ];
 
     Message {
@@ -414,6 +561,18 @@ fn message(event: &Event, score: &Score, style: &Style, bar_starts: &[u64]) -> M
         args,
         span: event.span(),
     }
+}
+
+/// A bass note's MIDI number from 36, as every pitch here is (see [`UNAPPLIED`]).
+fn bass_pitch(note: prosody_core::BassNote, style: &Style) -> i32 {
+    let scale = style.scale();
+    let root = note.root().get() % scale.len().max(1);
+    let step = i64::try_from(root).unwrap_or(0) + i64::from(note.step().get());
+    let below = match note.chromatic() {
+        prosody_core::Chromatic::Diatonic => 0,
+        prosody_core::Chromatic::SemitoneBelow => 1,
+    };
+    36 + i32::from(style.root().semitones()) + scale.step(step) - below
 }
 
 #[cfg(test)]
@@ -501,7 +660,9 @@ mod tests {
         // differ in length, so the second bar of a poem whose first line has three feet starts at
         // beat 3 — not at some fixed cycle boundary. This is what the text backend cannot do:
         // there every cycle is the same span, so the *foot* stretches instead.
-        let source = "bo bA bAn teA rot\nteA\n";
+        // Two stanzas, so the bars have different periods (§4.6). The outro repeats the last
+        // stanza, one beat, so the piece ends two beats after the boundary.
+        let source = "bo bA bAn teA rot\n\nteA\n";
         let score = score_of(source);
         let first = score.beats_in(0);
         assert!(
@@ -542,7 +703,13 @@ mod tests {
             .iter()
             .map(|m| m.at().parts())
             .collect();
-        assert_eq!(onsets, vec![(0, 2), (1, 2)], "two syllables, one foot");
+        // Fractions are kept in lowest terms, so the downbeat is 0/1, not 0/2. The outro plays the
+        // one-bar poem again from beat 1.
+        assert_eq!(
+            onsets,
+            vec![(0, 1), (1, 2), (1, 1), (3, 2)],
+            "two syllables, one foot, twice"
+        );
     }
 
     #[test]
@@ -577,6 +744,48 @@ mod tests {
     }
 
     #[test]
+    fn chords_the_schedule_cannot_send_are_named_not_dropped() {
+        // ABAB, one foundation stanza: four bars stated and four in the outro, every one with a
+        // chord under harmony = rhyme. None is sent, and the text says how many.
+        let source = "dA bA\nro bo\nsA tA\nno do\n";
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings = prosody_core::Mappings::all().with(
+            prosody_core::Mapping::Harmony
+                .choose(prosody_core::Variant::Rhyme)
+                .unwrap(),
+        );
+        let score = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &Flat),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap();
+        let with = Osc::new().render(&score, &Style::default()).unwrap();
+        assert_eq!(with.unsent_chords(), 8);
+        assert!(
+            with.to_text()
+                .contains("# not scheduled here: 8 chords of the harmony layer"),
+            "{}",
+            with.to_text()
+        );
+        // The messages are the ones the piece without the harmony sends.
+        let without = schedule(source);
+        assert_eq!(without.unsent_chords(), 0);
+        assert_eq!(with.messages(), without.messages());
+        assert!(!without.to_text().contains("not scheduled"));
+    }
+
+    #[test]
     fn a_cadence_rings_on() {
         // §4.3: "line-final n-gram repeats → cadence figure / turnaround". Duration is the
         // cheapest honest rendering of a gesture of ending.
@@ -592,7 +801,7 @@ mod tests {
         let sustains: Vec<f32> = schedule(source)
             .messages()
             .iter()
-            .filter_map(|m| match m.args().last() {
+            .filter_map(|m| match m.args().get(8) {
                 Some(Arg::Float(value)) => Some(*value),
                 _ => None,
             })
@@ -753,9 +962,44 @@ mod tests {
                 })
                 .collect()
         };
-        assert_eq!(notes(&c), vec![36, 36]);
-        assert_eq!(notes(&d), vec![38, 38], "the root moves every note");
+        // Per line: `teA`'s stressed AA is the bass's open vowel, degree 0; `bAn` is the rhyme,
+        // class degree 0. Both sit on the root — two lines, then both again in the outro.
+        assert_eq!(notes(&c), vec![36; 8]);
+        assert_eq!(notes(&d), vec![38; 8], "the root moves every note");
         assert_eq!(c.messages().len(), d.messages().len(), "and nothing else");
+    }
+
+    #[test]
+    fn the_keys_it_does_not_apply_are_named_not_dropped() {
+        let score = score_of("teA bAn\nteA bAn\n");
+        let backend = Osc::new();
+        let plain = backend.render(&score, &Style::default()).unwrap();
+        assert!(plain.unapplied().is_empty());
+        assert!(!plain.to_text().contains("not applied"));
+
+        let set =
+            Style::parse("+++\nbass_octave = 1\ndensity_level = 1\nride_fallback = \"crash\"\n+++")
+                .unwrap();
+        let moved = backend.render(&score, &set).unwrap();
+        // Key order, and only the two that shape a number this schedule sends.
+        assert_eq!(
+            moved.unapplied(),
+            &[
+                ("bass_octave", "1".to_owned()),
+                ("density_level", "1.00".to_owned())
+            ]
+        );
+        let text = moved.to_text();
+        assert_eq!(
+            text.lines().nth(1),
+            Some(
+                "# not applied here: bass_octave = 1, density_level = 1.00 \
+                 (pitch is sent from MIDI 36, velocity unscaled)"
+            ),
+            "{text}"
+        );
+        // ...and nothing it sends changes: the disclosure is the whole of the difference.
+        assert_eq!(moved.messages(), plain.messages());
     }
 
     #[test]
@@ -769,5 +1013,238 @@ mod tests {
     #[test]
     fn scheduling_is_reproducible() {
         assert_eq!(schedule("bo bAn\nteA rot\n"), schedule("bo bAn\nteA rot\n"));
+    }
+
+    #[test]
+    fn a_looped_line_is_fitted_into_its_hosts_bar() {
+        // As in the Strudel test: stanza 2 is stated with stanza 1 looping under it, so slot 2
+        // hosts `tA nA` with `bA` under it, and slot 3 hosts `rA sA` with the six-syllable line
+        // under it. Bar-locked: a looped line starts with its host, and all of it fits inside the
+        // host's bar however many beats it has of its own.
+        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
+        let score = score_of(source);
+        let schedule = schedule(source);
+        let onsets_of = |start: usize| -> Vec<f64> {
+            schedule
+                .messages()
+                .iter()
+                .filter(|m| m.span().start() == start)
+                .map(|m| m.at().as_beats())
+                .collect()
+        };
+        // `bA` at byte 0 sounds three times: at the start, with `tA` (byte 22), and with `tA`
+        // again in the outro, where stanza 1 keeps looping under stanza 2's last pass.
+        let host = onsets_of(22);
+        assert_eq!(onsets_of(0), vec![0.0, host[0], host[1]]);
+
+        // The six-syllable line's words start at bytes 3, 6, … 18; under `rA` (byte 28) every
+        // one of them falls inside slot 3.
+        let slot_start = onsets_of(28)[0];
+        let slot_end =
+            slot_start + f64::from(u32::try_from(score.arrangement().slots()[3].beats()).unwrap());
+        for word in [3, 6, 9, 12, 15, 18] {
+            // Its second sounding: the first is its own statement, the third the outro.
+            let looped = onsets_of(word)[1];
+            assert!(
+                (slot_start..slot_end).contains(&looped),
+                "word at {word} sounds at {looped}, outside {slot_start}..{slot_end}"
+            );
+        }
+        assert!(
+            (onsets_of(3)[1] - slot_start).abs() < 1e-9,
+            "it starts with its host"
+        );
+    }
+
+    #[test]
+    fn a_call_is_fitted_like_any_loop() {
+        // `de dA, se sA`: the call is `de dA`, one iamb. Bar 0 plays the line from beat 0; bar 1
+        // (`ne nA ne nA`, two beats, from beat 2) has the call under it. One beat fits in two, so
+        // it keeps its pace and rests for the second (`Slot::room_for`): `de` on 2, `dA` on 2½.
+        let schedule = schedule("de dA, se sA\nne nA ne nA\n");
+        let onsets_of = |start: usize| -> Vec<f64> {
+            schedule
+                .messages()
+                .iter()
+                .filter(|m| m.span().start() == start)
+                .map(|m| m.at().as_beats())
+                .collect()
+        };
+        // Then the outro repeats both bars from beat 4: the whole line at 4 — its call silent
+        // under it — and the call alone under bar 1 at 6.
+        assert_eq!(onsets_of(0), vec![0.0, 2.0, 4.0, 6.0]);
+        assert_eq!(onsets_of(3), vec![0.5, 2.5, 4.5, 6.5]);
+        assert_eq!(
+            onsets_of(7),
+            vec![1.0, 5.0],
+            "`se` is past the caesura and is not in the call: only its line's two passes"
+        );
+    }
+
+    #[test]
+    fn a_walking_bass_is_sent_where_it_can_be_and_counted_where_it_cannot() {
+        // W1 over `bo de de bA` / `so te te sA` in C minor, every pitch from MIDI 36: `bo` (OW,
+        // the third) 39; the passing tone a step towards the root, 38; the approach a semitone
+        // below the root, 35. `bA` is a rhyme word, so its message carries the melody's note (the
+        // first class's degree, 36) and its bass note goes unsent — as does `sA`'s, on each of the
+        // two passes (stated, and the outro): four.
+        let source = "bo de de bA\nso te te sA\n";
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings = prosody_core::Mappings::all().with(
+            prosody_core::Mapping::Bass
+                .choose(prosody_core::Variant::Syllables)
+                .unwrap(),
+        );
+        let score = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &Flat),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap();
+        let walked = Osc::new().render(&score, &Style::default()).unwrap();
+        let pitches: Vec<i32> = walked
+            .messages()
+            .iter()
+            .take(4)
+            .map(|message| match message.args()[4] {
+                Arg::Int(pitch) => pitch,
+                _ => unreachable!("the pitch is an int"),
+            })
+            .collect();
+        assert_eq!(pitches, vec![39, 38, 35, 36]);
+        assert_eq!(walked.unsent_bass(), 4);
+        assert!(
+            walked
+                .to_text()
+                .contains("# not scheduled here: 4 bass notes under rhyme words"),
+            "{}",
+            walked.to_text()
+        );
+        // The height bass never sounds on a rhyme word, so nothing goes unsent.
+        let plain = schedule(source);
+        assert_eq!(plain.unsent_bass(), 0);
+        assert!(!plain.to_text().contains("bass notes"));
+    }
+
+    #[test]
+    fn a_foot_walk_is_struck_as_its_foot_and_only_in_its_own_bar() {
+        // W2 over ABAB, every pitch from MIDI 36 in C minor. The A line `de bA de bA`: its first
+        // foot's note rides on the unstressed `de` but is the foot's — AA's root, 36, struck with
+        // `bA`'s primary accent (1.0), as the Strudel backend strikes it, not `de`'s 0.333.
+        let source = "de bA de bA\nde bo de bo\nse sA se sA\nse so se so\n";
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings = prosody_core::Mappings::all().with(
+            prosody_core::Mapping::Bass
+                .choose(prosody_core::Variant::Feet)
+                .unwrap(),
+        );
+        let score = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &Flat),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap();
+        let walked = Osc::new().render(&score, &Style::default()).unwrap();
+        // Every message of the A line's first `de` (byte 0): stated at 0, held under the B line
+        // at 2 (two-beat slots), and the outro's pass at 8, as (onset, drum gain, pitch, note
+        // gain). The drum is always `de`'s own unstressed 0.333 (§4.2); the note, where there is
+        // one, the foot's 1.0.
+        let first: Vec<(f64, f32, i32, f32)> = walked
+            .messages()
+            .iter()
+            .filter(|m| m.span().start() == 0)
+            .map(|m| match (&m.args()[3], &m.args()[4], &m.args()[9]) {
+                (Arg::Float(gain), Arg::Int(pitch), Arg::Float(note_gain)) => {
+                    (m.at().as_beats(), *gain, *pitch, *note_gain)
+                }
+                _ => unreachable!("gains are floats and the pitch an int"),
+            })
+            .collect();
+        // Held, the line keeps its drum hit — at its own syllable's accent, with no note: one walk
+        // a bar, the B line's (`Score::sounds_bass`).
+        let third = 1.0 / 3.0;
+        assert_eq!(
+            first,
+            vec![
+                (0.0, third, 36, 1.0),
+                (2.0, third, -1, third),
+                (8.0, third, 36, 1.0)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_drums_keep_their_syllables_accents_whatever_the_bass_walks() {
+        // The review's reproduction: a walk once moved its foot's accent onto the drum of the
+        // foot's unstressed onset. One message is drum and note at once, so its `gain` (argument
+        // 3) is the drum's and must not depend on the bass at all — every message's (onset, span,
+        // gain) the same under every bass variant. Iambic `de bA` / `se sA`: the drums go
+        // 0.333, 1.0 throughout.
+        let source = "de bA de bA\nde bo de bo\nse sA se sA\nse so se so\n";
+        let drums = |variant| -> Vec<(f64, usize, f32)> {
+            let poem = Poem::parse(source.to_owned()).unwrap();
+            let meter = meter::scan(&poem, &Spelled);
+            let repetition = repetition::analyse(&poem);
+            let roles = role::assign(&meter, &repetition).unwrap();
+            let mappings = prosody_core::Mappings::all()
+                .with(prosody_core::Mapping::Bass.choose(variant).unwrap());
+            let score = lower::run_with(
+                Analyses {
+                    poem: &poem,
+                    meter: &meter,
+                    rhyme: &rhyme::analyse(&poem, &Spelled),
+                    repetition: &repetition,
+                    sound: &sound::analyse(&poem, &Spelled),
+                    surprisal: &surprisal::analyse(&poem, &Spelled, &Flat),
+                    roles: &roles,
+                },
+                &mappings,
+            )
+            .unwrap();
+            Osc::new()
+                .render(&score, &Style::default())
+                .unwrap()
+                .messages()
+                .iter()
+                .map(|m| match m.args()[3] {
+                    Arg::Float(gain) => (m.at().as_beats(), m.span().start(), gain),
+                    _ => unreachable!("the gain is a float"),
+                })
+                .collect()
+        };
+        let off = drums(prosody_core::Variant::Off);
+        // Hand-worked: the first line's four syllables strike 1/3, 1, 1/3, 1.
+        let third = 1.0 / 3.0;
+        assert_eq!(
+            off.iter().take(4).map(|d| d.2).collect::<Vec<_>>(),
+            vec![third, 1.0, third, 1.0]
+        );
+        for variant in [
+            prosody_core::Variant::Height,
+            prosody_core::Variant::Syllables,
+            prosody_core::Variant::Feet,
+        ] {
+            assert_eq!(drums(variant), off, "{variant:?}");
+        }
     }
 }

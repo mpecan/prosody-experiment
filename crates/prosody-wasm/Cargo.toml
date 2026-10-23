@@ -1,0 +1,16 @@
+[package]
+name = "prosody-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# A cdylib for the browser (`scripts/build-site.sh`), and an rlib so its tests run natively.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+prosody-web.workspace = true
+wasm-bindgen.workspace = true
+
+[lints]
+workspace = true

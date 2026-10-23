@@ -21,6 +21,13 @@
 //! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
 //! - [`voice`] — the IR of §3: sounding events, with nothing a style could supply.
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
+//! - [`mapping`] — which variant of each candidate mapping applies, so each can be heard against
+//!   the others and against its absence.
+//! - [`bass`] — §4.6's bass: by vowel height, or walking on every syllable or every foot.
+//! - [`harmony`] — §4.6's harmony layer, a candidate: a chord per foundation bar, from the rhyme
+//!   scheme or from rhyme closure.
+//! - [`arrange`] — laying that IR out in time: stanzas loop until a competing stanza transforms
+//!   them or a refrain stanza overrules them.
 //! - [`annotate`] — §8's debug view: the poem, with what each token became written under it.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
@@ -33,7 +40,11 @@
 )]
 
 pub mod annotate;
+pub mod arrange;
+pub mod bass;
+pub mod harmony;
 pub mod lower;
+pub mod mapping;
 pub mod meter;
 pub mod parse;
 pub mod phoneme;
@@ -47,6 +58,10 @@ pub mod surprisal;
 pub mod voice;
 
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
+pub use arrange::{Arrangement, Cause, Fit, Lane, Part, Placement, Slot};
+pub use bass::{BassNote, BassReason, Chromatic, Direction, Height, ScaleStep};
+pub use harmony::{Chord, Function, Harmony, Reason, Rest, Silence};
+pub use mapping::{Choice, Mapping, Mappings, Variant};
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
 };
@@ -66,5 +81,6 @@ pub use sound::{Distance, SoundFigure, SoundFigureKind, SoundRepetition, WordFor
 pub use span::Span;
 pub use surprisal::{Lexicon, PoemSurprisal, Rarity, Surprisal, WordSurprisal};
 pub use voice::{
-    Bar, BeatIndex, Detune, Event, Family, Pitch, ScaleDegree, Score, Subdivision, Velocity, Voice,
+    Bar, BeatIndex, Detune, Event, Family, Pitch, PitchSource, Placed, ScaleDegree, Score,
+    Subdivision, Velocity, Voice,
 };

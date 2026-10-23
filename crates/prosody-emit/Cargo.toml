@@ -6,6 +6,9 @@ rust-version.workspace = true
 
 [dependencies]
 prosody-core.workspace = true
+# `Seed::rng` hands back a `ChaCha8Rng`; drawing from it needs the trait. Already in the tree via
+# `prosody-core`, so this adds no crate — only the edge humanisation needs (`style::Mix::humanise`).
+rand_core.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 

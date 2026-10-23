@@ -144,6 +144,32 @@ fn explain_renders_the_poem_with_each_token_annotated() {
 }
 
 #[test]
+fn the_explain_views_palette_values_share_one_column() {
+    // The longest palette keys are 13 characters (density_level, melody_octave, ride_fallback);
+    // after the two-space indent every value starts at byte 16.
+    let poem = format!("+++\ndensity_level = 1\nride_fallback = \"crash\"\n+++\n{COUPLET}");
+    let (out, err, code) = run(&["--explain"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    let style: Vec<&str> = out
+        .lines()
+        .skip_while(|l| *l != "style")
+        .skip(1)
+        .take_while(|l| l.starts_with("  "))
+        .collect();
+    assert!(style.len() > 10, "{out}");
+    for line in style {
+        let (key, value) = line.split_at(16);
+        assert!(
+            key.ends_with(' ') && !value.starts_with(' ') && !value.is_empty(),
+            "{line:?} is off the column"
+        );
+    }
+    assert!(out.contains("  density_level 1.00\n"), "{out}");
+    assert!(out.contains("  ride_fallback crash\n"), "{out}");
+    assert!(out.contains("  bass_octave   2\n"), "{out}");
+}
+
+#[test]
 fn a_broken_pipe_is_not_a_crash() {
     // `prosody poem.txt | head -1` is the most ordinary thing anyone does with this program, and
     // Rust panics on EPIPE unless you handle it.
@@ -226,6 +252,22 @@ fn the_same_poem_always_compiles_to_the_same_bytes() {
 }
 
 #[test]
+fn the_osc_schedule_names_the_header_keys_it_does_not_apply() {
+    let poem = format!("+++\nmelody_octave = 5\n+++\n{COUPLET}");
+    let (out, err, code) = run(&["--osc"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(
+        out.lines().nth(1),
+        Some(
+            "# not applied here: melody_octave = 5 (pitch is sent from MIDI 36, velocity unscaled)"
+        ),
+        "{out}"
+    );
+    let (plain, _, _) = run(&["--osc"], COUPLET);
+    assert!(!plain.contains("not applied"), "{plain}");
+}
+
+#[test]
 fn the_osc_backend_emits_a_schedule() {
     // `SPEC.md` §7.8's second backend. The onsets are in beats and the tempo is separate, so a
     // reader can see both.
@@ -291,29 +333,89 @@ fn watch_without_a_file_is_refused() {
     assert!(err.contains("needs a file"), "{err}");
 }
 
+/// A running watcher whose output is collected as it arrives.
+///
+/// The watcher tests used to sleep a fixed 400 ms and assume the first compile had finished. It
+/// had alone, but not while the whole workspace's suites ran beside it, so they failed in most
+/// full runs. Waiting for the output itself, under a generous deadline, tests the same thing
+/// without guessing how fast the machine is.
+struct Watcher {
+    child: std::process::Child,
+    out: std::sync::Arc<std::sync::Mutex<String>>,
+    complaint: std::sync::Arc<std::sync::Mutex<String>>,
+}
+
+impl Watcher {
+    fn start(arguments: &[&str], poem: &std::path::Path) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
+            .args(arguments)
+            .arg(poem)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the binary should start");
+        let out = Self::collect(child.stdout.take().unwrap());
+        let complaint = Self::collect(child.stderr.take().unwrap());
+        Self {
+            child,
+            out,
+            complaint,
+        }
+    }
+
+    fn collect(
+        mut stream: impl std::io::Read + Send + 'static,
+    ) -> std::sync::Arc<std::sync::Mutex<String>> {
+        let text = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let filling = std::sync::Arc::clone(&text);
+        std::thread::spawn(move || {
+            let mut chunk = [0_u8; 4096];
+            while let Ok(read) = stream.read(&mut chunk) {
+                if read == 0 {
+                    break;
+                }
+                filling
+                    .lock()
+                    .unwrap()
+                    .push_str(&String::from_utf8_lossy(&chunk[..read]));
+            }
+        });
+        text
+    }
+
+    /// Waits until `done(stdout, stderr)` holds, or gives up after a deadline and lets the
+    /// assertions that follow say what was missing.
+    fn wait_for(&self, done: impl Fn(&str, &str) -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < deadline {
+            if done(&self.out.lock().unwrap(), &self.complaint.lock().unwrap()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// Stops the watcher and hands back what it wrote to stdout and stderr.
+    fn stop(mut self) -> (String, String) {
+        self.child.kill().expect("stopping the watcher");
+        self.child.wait().expect("collecting the watcher");
+        let out = self.out.lock().unwrap().clone();
+        let complaint = self.complaint.lock().unwrap().clone();
+        (out, complaint)
+    }
+}
+
 #[test]
 fn the_watcher_recompiles_when_the_poem_changes() {
     // `SPEC.md` §7.8's live reload, and what invariant I2 was written for.
     let poem = std::env::temp_dir().join("prosody-watch.poem");
     std::fs::write(&poem, COUPLET).expect("writing the poem");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
-        .args(["--watch", "--osc"])
-        .arg(&poem)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary should start");
-
-    // Give it time for the first compile, then edit the poem and wait for the second.
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    let watcher = Watcher::start(&["--watch", "--osc"], &poem);
+    watcher.wait_for(|out, complaint| complaint.contains("watching") && out.contains("# "));
     std::fs::write(&poem, format!("{COUPLET}and the wind will rise\n")).expect("editing");
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    child.kill().expect("stopping the watcher");
-
-    let finished = child.wait_with_output().expect("collecting output");
-    let out = String::from_utf8_lossy(&finished.stdout);
-    let complaint = String::from_utf8_lossy(&finished.stderr);
+    watcher.wait_for(|out, _| out.matches("# ").count() >= 2);
+    let (out, complaint) = watcher.stop();
     let _ = std::fs::remove_file(&poem);
 
     assert!(complaint.contains("watching"), "{complaint}");
@@ -331,24 +433,13 @@ fn the_watcher_survives_a_poem_that_will_not_compile() {
     let poem = std::env::temp_dir().join("prosody-watch-broken.poem");
     std::fs::write(&poem, COUPLET).expect("writing the poem");
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_prosody"))
-        .args(["--watch"])
-        .arg(&poem)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("the binary should start");
-
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    let watcher = Watcher::start(&["--watch"], &poem);
+    watcher.wait_for(|out, _| out.contains("stack("));
     std::fs::write(&poem, "+++\nscale = \"klingon\"\n+++\nthe fire burns\n").expect("breaking it");
-    std::thread::sleep(std::time::Duration::from_millis(400));
+    watcher.wait_for(|_, complaint| complaint.contains("unknown scale"));
     std::fs::write(&poem, COUPLET).expect("fixing it");
-    std::thread::sleep(std::time::Duration::from_millis(400));
-    child.kill().expect("stopping the watcher");
-
-    let finished = child.wait_with_output().expect("collecting output");
-    let out = String::from_utf8_lossy(&finished.stdout);
-    let complaint = String::from_utf8_lossy(&finished.stderr);
+    watcher.wait_for(|out, _| out.matches("stack(").count() >= 2);
+    let (out, complaint) = watcher.stop();
     let _ = std::fs::remove_file(&poem);
 
     assert!(
@@ -459,4 +550,212 @@ fn the_examples_exercise_the_cases_they_claim_to() {
             "{name} must exercise the letter-to-sound fallback, and say so"
         );
     }
+}
+
+#[test]
+fn the_machine_profile_adds_pulse_and_steadiness() {
+    let (out, err, code) = run(&["--score", "--profile", "machine"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let keys: Vec<&str> = out
+        .lines()
+        .skip(1)
+        .take(7)
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "layering",
+            "recurrence",
+            "pitched",
+            "pitch_entropy",
+            "syncopation",
+            "pulse",
+            "steadiness",
+        ]
+    );
+    // The machine bands, not the interest ones: layering is judged from three voices up.
+    assert!(out.contains("3.000..5.000"), "{out}");
+
+    let (_, err, code) = run(&["--score", "--profile", "polka"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(err.contains("unknown profile `polka`"), "{err}");
+}
+
+#[test]
+fn the_jazz_profile_judges_the_same_piece_against_its_own_bands() {
+    let (jazz, err, code) = run(&["--score", "--profile", "jazz"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let (machine, _, _) = run(&["--score", "--profile", "machine"], COUPLET);
+    // The jazz bands, from `prosody-score`: recurrence 0.65..0.85, syncopation 0.45..0.9.
+    assert!(jazz.contains("0.650..0.850"), "{jazz}");
+    assert!(jazz.contains("0.450..0.900"), "{jazz}");
+    // Same piece, so the same values: only the bands and the fits differ.
+    let value = |out: &str, name: &str| {
+        out.lines()
+            .find(|line| line.starts_with(name))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .map(str::to_owned)
+    };
+    for name in [
+        "layering",
+        "recurrence",
+        "syncopation",
+        "pulse",
+        "steadiness",
+    ] {
+        assert_eq!(value(&jazz, name), value(&machine, name), "{name}");
+    }
+}
+
+#[test]
+fn a_mapping_can_be_left_out() {
+    // `COUPLET`'s two stanzas are one regular foundation, so with every mapping its stressed
+    // vowels carry a bass note, and the outro plays the last stanza again.
+    let (full, err, code) = run(&[], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let (bare, err, code) = run(&["--without", "bass,outro"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_ne!(full, bare);
+    // Two stanzas in one layer: two bars stated, two passes of two transforming, two of outro —
+    // eight bars, and six without the outro.
+    assert!(full.contains("// 8 bars from 4 lines"), "{full}");
+    assert!(bare.contains("// 6 bars from 4 lines"), "{bare}");
+
+    let (_, err, code) = run(&["--without", "bass,polka"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(err.contains("unknown mapping `polka`"), "{err}");
+}
+
+#[test]
+fn set_chooses_variants_and_without_is_its_shorthand() {
+    // `--set bass=off,outro=off` is the same piece as `--without bass,outro`: six bars.
+    let (bare, err, code) = run(&["--without", "bass,outro"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let (set, err, code) = run(&["--set", "bass=off,outro=off"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(bare, set);
+    // Setting a default changes nothing; the reading is not in the pattern, so it changes
+    // nothing here either.
+    let (full, _, _) = run(&[], COUPLET);
+    let (same, err, code) = run(&["--set", "outro=on,reading=stanza"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(full, same);
+    // The explain view lists each choice that is not a default, and only those.
+    let (explained, err, code) = run(
+        &["--explain", "--set", "reading=stanza,bass=height"],
+        COUPLET,
+    );
+    assert_eq!(code, Some(0), "{err}");
+    // `bass=height` is the default, so the block is the one line; then the summary's blank line.
+    assert!(
+        explained.contains("mappings\n  reading       stanza\n\n"),
+        "{explained}"
+    );
+    let (plain, _, _) = run(&["--explain"], COUPLET);
+    assert!(!plain.contains("mappings\n"), "{plain}");
+
+    for (given, expected) in [
+        ("polka=on", "unknown mapping `polka`"),
+        (
+            "bass=stanza",
+            "unknown variant `stanza` of mapping `bass` (it has off, height, syllables, feet)",
+        ),
+        (
+            "reading=on",
+            "unknown variant `on` of mapping `reading` (it has off, arrives, stanza)",
+        ),
+        ("reading", "--set wants name=variant, not `reading`"),
+    ] {
+        let (_, err, code) = run(&["--set", given], COUPLET);
+        assert_ne!(code, Some(0), "{given}");
+        assert!(err.contains(expected), "{given}: {err}");
+    }
+    let (_, err, code) = run(&["--set"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(err.contains("--set needs a list"), "{err}");
+}
+
+#[test]
+fn score_reports_every_metric_and_an_edit_per_word() {
+    // The scorer's output is read by scripts, so its keys are the contract: every metric, the
+    // edit test, and the totals, each as `name value`.
+    let (out, err, code) = run(&["--score"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    let keys: Vec<&str> = out
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "layering",
+            "recurrence",
+            "pitched",
+            "pitch_entropy",
+            "syncopation",
+            "interest",
+            "audible",
+            "local",
+            "explained",
+            "legibility",
+            "overall",
+        ]
+    );
+    // The couplet has no punctuation, so its words are its whitespace-separated tokens, and the
+    // edit test swaps each of them once.
+    let words = COUPLET.split_whitespace().count();
+    assert!(out.contains(&format!("of {words} edits")), "{out}");
+}
+
+#[test]
+fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
+    // The couplet's stanzas are night/light and sea/me: A on degree 0, B on degree 1, each pair
+    // in one stanza. rhyme: each line's class's degree. cadence: the first line of each pair
+    // opens (V of its degree), and the second — the stanza's last bar — turns round onto the
+    // first chord (V of that root). both: the same, since every line opens or turns round.
+    for (variant, expected) in [
+        ("rhyme", "1:I/0 2:I/0 3:I/1 4:I/1"),
+        ("cadence", "1:V/4 2:V/8 3:V/5 4:V/9"),
+        ("both", "1:V/4 2:V/8 3:V/5 4:V/9"),
+    ] {
+        let set = format!("harmony={variant}");
+        let (out, err, code) = run(&["--set", &set], COUPLET);
+        assert_eq!(code, Some(0), "{err}");
+        assert!(
+            out.contains(&format!("//   chords by line: {expected}\n")),
+            "{variant}:\n{out}"
+        );
+        assert!(out.contains("// the chords"), "{out}");
+        if let Some(node) = node() {
+            let file = std::env::temp_dir().join(format!("prosody-harmony-{variant}.js"));
+            std::fs::write(&file, &out).expect("writing the pattern");
+            let checked = Command::new(&node)
+                .arg("--check")
+                .arg(&file)
+                .output()
+                .expect("node should run");
+            let _ = std::fs::remove_file(&file);
+            assert!(
+                checked.status.success(),
+                "node rejected {variant}:\n{}",
+                String::from_utf8_lossy(&checked.stderr)
+            );
+        }
+        let (explained, err, code) = run(&["--explain", "--set", &set], COUPLET);
+        assert_eq!(code, Some(0), "{err}");
+        assert!(
+            explained.contains(&format!("  harmony       {variant}\n")),
+            "{explained}"
+        );
+        assert!(explained.contains("  harmony V deg 4 (V of deg 0)") || variant == "rhyme");
+    }
+    // Off — the default — nothing about chords at all.
+    let (out, _, _) = run(&[], COUPLET);
+    assert!(!out.contains("chord"), "{out}");
+    // The OSC schedule cannot send a chord, and says how many it leaves out.
+    let (osc, err, code) = run(&["--osc", "--set", "harmony=rhyme"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(osc.contains("# not scheduled here: "), "{osc}");
 }

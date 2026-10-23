@@ -40,6 +40,7 @@
 //! | repetition | §4.3 | [`Voice::id`] — which lines are the same instrument |
 //! | meter | §4.2 | [`Event::bar`], [`Event::beat`], [`Event::subdivision`], [`Event::velocity`] |
 //! | rhyme | §4.5 | [`Event::pitch`], on the rhyming word only |
+//! | bass | §4.6 | [`Event::bass`], on a foundation line's syllables or feet ([`crate::bass`]) |
 //! | surprisal | §4.4 | [`Event::sharpness`] |
 //! | word families | §4.3 | [`Event::family`] — modulation depth within an instrument |
 //!
@@ -70,6 +71,10 @@
 //! its class's degree would be a monotone, and would attribute a pitch to syllables that earned
 //! none — which invariant I4 forbids more strongly than it forbids silence.
 
+use crate::arrange::{Arrangement, Lane, Part, Placement, Slot};
+use crate::bass::BassNote;
+use crate::harmony::{Chord, Harmony};
+use crate::mapping::Variant;
 use crate::meter::FootKind;
 use crate::phoneme::{Phoneme, Provenance};
 use crate::repetition::VoiceId;
@@ -281,7 +286,18 @@ impl Detune {
 pub struct Pitch {
     degree: ScaleDegree,
     detune: Detune,
-    class: RhymeClassId,
+    source: PitchSource,
+}
+
+/// Where a note came from, for tracing it back (invariant I4).
+///
+/// Only a rhyme gives an event a [`Pitch`] — the melody. The bass was a second source here until
+/// its walking variants needed a note under a rhyme word too; it is now [`Event::bass`], so one
+/// event can carry both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PitchSource {
+    /// The word a rhyme rests on: its class's degree (`SPEC.md` §4.5).
+    Rhyme(RhymeClassId),
 }
 
 impl Pitch {
@@ -297,10 +313,18 @@ impl Pitch {
         self.detune
     }
 
-    /// The rhyme class this came from, for tracing it back (invariant I4).
+    /// The rhyme class this came from, if a rhyme gave it.
     #[must_use]
-    pub const fn class(self) -> RhymeClassId {
-        self.class
+    pub const fn class(self) -> Option<RhymeClassId> {
+        match self.source {
+            PitchSource::Rhyme(class) => Some(class),
+        }
+    }
+
+    /// What gave it.
+    #[must_use]
+    pub const fn source(self) -> PitchSource {
+        self.source
     }
 }
 
@@ -399,6 +423,7 @@ pub struct Event {
     velocity: Velocity,
     provenance: Provenance,
     pitch: Option<Pitch>,
+    bass: Option<BassNote>,
     sharpness: Surprisal,
     family: Option<Family>,
     anchor: Option<Anchor>,
@@ -460,6 +485,15 @@ impl Event {
         self.pitch
     }
 
+    /// Its bass note, if the bass mapping gave it one (`SPEC.md` §4.6, [`crate::bass`]): a
+    /// stressed foundation syllable under the height bass, any foundation syllable under W1, a
+    /// foot's first syllable under W2. Independent of [`Event::pitch`]: under the walking variants
+    /// a rhyme word carries both.
+    #[must_use]
+    pub const fn bass(self) -> Option<BassNote> {
+        self.bass
+    }
+
     /// How distinctive its word is (`SPEC.md` §4.4), driving sharpness and brightness.
     #[must_use]
     pub const fn sharpness(self) -> Surprisal {
@@ -513,6 +547,9 @@ pub struct Score {
     events: Vec<Event>,
     bars: usize,
     silent: Vec<Span>,
+    arrangement: Arrangement,
+    harmony: Vec<Harmony>,
+    bass: Variant,
 }
 
 impl Score {
@@ -528,7 +565,109 @@ impl Score {
             events,
             bars,
             silent,
+            arrangement: Arrangement::default(),
+            harmony: Vec::new(),
+            bass: Variant::Off,
         }
+    }
+
+    /// The same score, recording which variant of the bass made its bass notes.
+    pub(crate) const fn with_bass(mut self, variant: Variant) -> Self {
+        self.bass = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Bass`](crate::mapping::Mapping::Bass) made the bass notes
+    /// ([`Event::bass`]), so a backend and the debug view can say what they are.
+    #[must_use]
+    pub const fn bass(&self) -> Variant {
+        self.bass
+    }
+
+    /// The same score, with each line's harmony ([`crate::harmony`]).
+    pub(crate) fn with_harmony(mut self, harmony: Vec<Harmony>) -> Self {
+        self.harmony = harmony;
+        self
+    }
+
+    /// What the harmony layer made of each line, in bar order: a chord, or a rest and why — or
+    /// nothing at all when [`Mapping::Harmony`](crate::mapping::Mapping::Harmony) is off.
+    #[must_use]
+    pub fn harmony(&self) -> &[Harmony] {
+        &self.harmony
+    }
+
+    /// Every chord, in bar order.
+    pub fn chords(&self) -> impl Iterator<Item = Chord> + '_ {
+        self.harmony.iter().filter_map(|harmony| harmony.chord())
+    }
+
+    /// The harmony of one line, by its bar.
+    #[must_use]
+    pub fn harmony_of(&self, bar: usize) -> Option<Harmony> {
+        self.harmony
+            .iter()
+            .find(|harmony| harmony.bar().get() == bar)
+            .copied()
+    }
+
+    /// The chord a slot of the arrangement plays: the chord of the whole line sounding in the
+    /// foundation layer there — its host, or the foundation's loop under a flourish host — if
+    /// that line has one. Never a line in the call, held or refrain lane: one chord a bar.
+    ///
+    /// The one place this is decided, so every backend and the scorer agree on it.
+    #[must_use]
+    pub fn chord_in(&self, slot: &Slot) -> Option<Chord> {
+        let foundation = slot.placements().iter().find(|placement| {
+            placement.lane() == Lane::Layer(crate::role::Layer::Foundation)
+                && placement.part() == Part::Line
+        })?;
+        self.harmony_of(foundation.bar().get())?.chord()
+    }
+
+    /// Whether `placement`'s bass notes sound in `slot`.
+    ///
+    /// Under the height bass, yes, wherever the line sounds — as it always did: its notes are the
+    /// root, third and fifth of one scale, so two lines' notes at one instant are a chord, never a
+    /// clash, and the default piece stays the piece it was.
+    ///
+    /// Under a walking bass (W1, W2), only the slot's foundation-layer line — the one
+    /// [`Score::chord_in`] takes the bar's chord from. A walk is *one* line moving by step and by
+    /// semitone; a held, refrain or call line walking in its own lane under it put two or three
+    /// walks in one bar, and their passing and approach tones landed a semitone apart (on Blake's
+    /// Tyger under W1, 59 of 257 bass onsets). One walk a bar, as one chord a bar (`SPEC.md` §4.6).
+    /// The line under it still sounds everything else it sounds — its drums, its melody.
+    ///
+    /// The one place this is decided, so every backend and the scorer agree on it.
+    #[must_use]
+    pub fn sounds_bass(&self, slot: &Slot, placement: &Placement) -> bool {
+        match self.bass {
+            Variant::Syllables | Variant::Feet => slot
+                .placements()
+                .iter()
+                .find(|candidate| {
+                    candidate.lane() == Lane::Layer(crate::role::Layer::Foundation)
+                        && candidate.part() == Part::Line
+                })
+                .is_some_and(|walking| walking == placement),
+            _ => true,
+        }
+    }
+
+    /// The same score, laid out in time by [`crate::arrange`].
+    pub(crate) fn with_arrangement(mut self, arrangement: Arrangement) -> Self {
+        self.arrangement = arrangement;
+        self
+    }
+
+    /// Which lines sound in which bar of the piece, and why ([`crate::arrange`]).
+    ///
+    /// The events above are each line's material, placed within *its own* bar; this says where
+    /// those bars sound — a stanza stated, looping under another, or transforming into the next.
+    /// A backend plays the piece by walking these slots, not the bars.
+    #[must_use]
+    pub const fn arrangement(&self) -> &Arrangement {
+        &self.arrangement
     }
 
     /// Every instrument, ordered by [`VoiceId`].
@@ -554,7 +693,10 @@ impl Score {
         self.events.iter().filter(move |event| event.voice == id)
     }
 
-    /// How many bars long the piece is — one per line (`SPEC.md` §4.2).
+    /// How many lines the score has material for — one bar each (`SPEC.md` §4.2).
+    ///
+    /// The piece's length is [`Score::arrangement`]'s slot count, which is longer once stanzas
+    /// loop.
     ///
     /// Counted while lowering, not inferred from the last event: a final line whose words the
     /// phonemiser cannot pronounce produces no events, and a piece that ends in silence is still
@@ -579,6 +721,42 @@ impl Score {
             .unwrap_or(0)
     }
 
+    /// What a placement sounds: its line's events — or, for a call, only those inside the call —
+    /// and the beats they span.
+    ///
+    /// Every consumer of the arrangement goes through this, so a backend never has to know a call
+    /// from a line: it renders [`Placed::events`] with each beat counted from
+    /// [`Placed::first_beat`], across [`Placed::beats`] beats, fitted to the slot.
+    #[must_use]
+    pub fn placed(&self, placement: Placement) -> Placed<'_> {
+        let bar = placement.bar().get();
+        let events: Vec<&Event> = self
+            .events
+            .iter()
+            .filter(|event| event.bar.0 == bar && placement.part().covers(event.span))
+            .collect();
+        let (first_beat, beats) = match placement.part() {
+            Part::Line => (0, self.beats_in(bar)),
+            Part::Call(_) => {
+                let first = events.iter().map(|e| e.beat.0).min().unwrap_or(0);
+                let last = events.iter().map(|e| e.beat.0).max().unwrap_or(0);
+                (
+                    first,
+                    if events.is_empty() {
+                        0
+                    } else {
+                        last - first + 1
+                    },
+                )
+            }
+        };
+        Placed {
+            events,
+            first_beat,
+            beats,
+        }
+    }
+
     /// The words that make no sound, because no pronunciation could be found for them.
     ///
     /// `SPEC.md` §9's out-of-vocabulary case, kept visible at the IR rather than only in the
@@ -587,6 +765,35 @@ impl Score {
     #[must_use]
     pub fn silent(&self) -> &[Span] {
         &self.silent
+    }
+}
+
+/// What one [`Placement`] sounds — see [`Score::placed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Placed<'a> {
+    events: Vec<&'a Event>,
+    first_beat: usize,
+    beats: usize,
+}
+
+impl<'a> Placed<'a> {
+    /// The events, in playing order.
+    #[must_use]
+    pub fn events(&self) -> &[&'a Event] {
+        &self.events
+    }
+
+    /// The line beat the placement starts on: 0 for a whole line, later for a call that does not
+    /// open its line.
+    #[must_use]
+    pub const fn first_beat(&self) -> usize {
+        self.first_beat
+    }
+
+    /// How many beats it spans, counted from [`Placed::first_beat`]. Zero if it makes no sound.
+    #[must_use]
+    pub const fn beats(&self) -> usize {
+        self.beats
     }
 }
 
@@ -649,7 +856,7 @@ impl Pitch {
         Self {
             degree: ScaleDegree::new(degree),
             detune,
-            class,
+            source: PitchSource::Rhyme(class),
         }
     }
 }
@@ -694,6 +901,7 @@ impl Event {
             velocity,
             provenance,
             pitch: None,
+            bass: None,
             sharpness: Surprisal::NONE,
             family: None,
             anchor: None,
@@ -713,6 +921,11 @@ impl Event {
 
     pub(crate) const fn with_pitch(mut self, pitch: Pitch) -> Self {
         self.pitch = Some(pitch);
+        self
+    }
+
+    pub(crate) const fn with_bass(mut self, bass: BassNote) -> Self {
+        self.bass = Some(bass);
         self
     }
 

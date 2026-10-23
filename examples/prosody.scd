@@ -14,11 +14,15 @@
 // syllable:
 //
 //     /prosody/tempo  bpm
-//     /prosody/note   beats layer voice gain note detune sharpness family sustain
+//     /prosody/note   beats layer voice gain note detune sharpness family sustain noteGain
 //
 // `beats` is when it sounds, counted from the start of the piece — the poem decides it and the
 // tempo decides how long a beat is. `note` is -1 for an unpitched event, which is most of them:
 // `SPEC.md` §4.5 gives a pitch to the word a line's rhyme rests on and to nothing else.
+//
+// `gain` is the drum's accent — the syllable's own stress (§4.2) — and `noteGain` the pitched
+// note's. They differ under a foot-walking bass (§4.6, `bass = feet`), whose note rides on a
+// foot's first syllable but is struck at the foot's stressed one: one message, two accents.
 
 s.waitForBoot({
     var tempo = 120, start;
@@ -70,8 +74,8 @@ s.waitForBoot({
     }, '/prosody/tempo');
 
     OSCdef(\prosodyNote, { |msg|
-        var beats, layer, gain, note, detune, sharpness, family, sustain, when, seconds;
-        # beats, layer, _voice, gain, note, detune, sharpness, family, sustain = msg[1..];
+        var beats, layer, gain, note, detune, sharpness, family, sustain, noteGain, when, seconds;
+        # beats, layer, _voice, gain, note, detune, sharpness, family, sustain, noteGain = msg[1..];
 
         seconds = 60 / tempo;
         // The whole schedule arrives at once and is *scheduled*, not played on arrival. The onset
@@ -85,7 +89,7 @@ s.waitForBoot({
                 // §4.5: a scale degree became a MIDI note, and a slant rhyme sits off it.
                 Synth(\prosodyPitch, [
                     \freq, (note + detune).midicps,
-                    \amp, 0.25 * gain,
+                    \amp, 0.25 * noteGain,
                     \cutoff, 400 + (sharpness * 4000),
                     \attackTime, 0.04 * (1 - sharpness),
                     \sustainTime, 0.4 * sustain,
