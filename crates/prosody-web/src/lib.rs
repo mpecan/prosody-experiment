@@ -844,6 +844,10 @@ mod tests {
             html.contains("[\"elastic\",\"steady\"],\"steady\"]"),
             "the pulse selector"
         );
+        assert!(
+            html.contains("[\"crossing\",\"straight\"],\"crossing\"]"),
+            "the stack selector"
+        );
         // B starts at each mapping's first variant — what preceded it — not at `off`, which the
         // pulse does not have: so B is elastic and A steady until the writer chooses.
         assert!(html.contains("B: defaults((m) => m[2][0])"), "B's defaults");
@@ -1438,5 +1442,74 @@ mod tests {
         );
         assert!(explain.body.contains("pulse=elastic"), "{}", explain.body);
         assert!(explain.body.contains("pulse elastic ·"), "{}", explain.body);
+    }
+
+    #[test]
+    fn the_straight_stack_reaches_the_pattern_the_trace_and_the_score() {
+        // Wilde's Theocritus, whose bars are of three and four beats, so a `@2` inside a bar is
+        // only ever a fitted long syllable. Asked for with `set=stack:straight`, the music's drum
+        // sequences and the trace's lanes carry the same fitted beats — the trace is the music's
+        // walk — and the jazz score counts no crossed beat.
+        let wilde = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "wilde-theocritus")
+            .map(|(_, _, text)| body_of(text))
+            .unwrap();
+        // How many syllables hold two parts, in every `call("<…>")` sequence of `text`.
+        let held = |text: &str, call: &str| -> usize {
+            // In the trace's JSON a quote is escaped and `<` written `\u003c`.
+            let needle = format!("{call}(\\\"\\u003c");
+            let plain = format!("{call}(\"<");
+            text.split(&needle)
+                .skip(1)
+                .chain(text.split(&plain).skip(1))
+                .map(|rest| {
+                    let end = rest.find('>').unwrap_or(rest.len());
+                    rest[..end].matches("@2 ").count() + rest[..end].matches("@2]").count()
+                })
+                .sum()
+        };
+        let straight = &[("set", "stack:straight")];
+        let pattern = super::compile(&request(straight, wilde), &Output::Pattern);
+        let trace = super::compile(&request(straight, wilde), &Output::Trace);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(trace.status, 200, "{}", trace.body);
+        assert!(
+            pattern.body.contains("//   stack = straight"),
+            "{}",
+            pattern.body
+        );
+        let fitted = held(&pattern.body, "s");
+        assert!(fitted >= 38, "{fitted}");
+        assert_eq!(held(&trace.body, "n"), fitted);
+        // Under the default, nothing is held two parts and nothing is named.
+        let crossing = super::compile(&request(&[], wilde), &Output::Pattern);
+        assert_eq!(held(&crossing.body, "s"), 0);
+        assert!(!crossing.body.contains("stack ="));
+        let crossing_trace = super::compile(&request(&[], wilde), &Output::Trace);
+        assert_eq!(held(&crossing_trace.body, "n"), 0);
+        // The score reads the same onsets.
+        let score = super::compile(
+            &request(&[("set", "stack:straight"), ("profile", "jazz")], wilde),
+            &Output::Score,
+        );
+        assert!(score.body.contains("cross_rhythm"), "{}", score.body);
+        let row = score
+            .body
+            .lines()
+            .find(|line| line.contains("cross_rhythm"))
+            .unwrap();
+        assert!(row.contains("0.000"), "{row}");
+        let explain = super::compile(&request(straight, wilde), &Output::Explain);
+        assert!(
+            explain.body.contains("stack straight ·"),
+            "{}",
+            explain.body
+        );
+        assert!(
+            explain.body.contains("  straight 3 into 2 at"),
+            "{}",
+            explain.body
+        );
     }
 }

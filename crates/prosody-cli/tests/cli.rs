@@ -819,3 +819,63 @@ fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
     assert_eq!(code, Some(0), "{err}");
     assert!(osc.contains("# not scheduled here: "), "{osc}");
 }
+
+#[test]
+fn the_stack_crosses_unless_set_straight_and_has_no_off() {
+    // Wilde's Theocritus stacks dactylic line-ends against iambs: the default pattern keeps them
+    // crossing and says nothing new; `stack=straight` names itself and fits 38 beats — the 38
+    // `cross_rhythm` counts (`PLAN.md`, the off-rhythm trace) — and the scorer then counts none.
+    let poem = std::fs::read_to_string(examples().join("wilde-theocritus.poem")).unwrap();
+    let (crossing, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!crossing.contains("stack ="), "{crossing}");
+    let (straight, err, code) = run(&["--set", "stack=straight"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        straight.contains("//   stack = straight: a line stacked under a bar's line is fitted to that line's subdivision wherever the two would cross, in 38 beat(s)"),
+        "{straight}"
+    );
+    assert!(straight.contains("@2 "), "{straight}");
+    let (without, _, _) = run(&["--without", "stack"], &poem);
+    assert_eq!(without, crossing);
+    let (_, err, code) = run(&["--set", "stack=off"], &poem);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `stack` (it has crossing, straight)"),
+        "{err}"
+    );
+    let cross_rhythm = |arguments: &[&str]| {
+        let (report, err, code) = run(arguments, &poem);
+        assert_eq!(code, Some(0), "{err}");
+        report
+            .lines()
+            .find(|line| line.starts_with("cross_rhythm"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(cross_rhythm(&["--score", "--profile", "jazz"]), "0.302");
+    assert_eq!(
+        cross_rhythm(&["--score", "--profile", "jazz", "--set", "stack=straight"]),
+        "0.000"
+    );
+    // The schedule applies it too, and says so.
+    let (schedule, err, code) = run(&["--osc", "--set", "stack=straight"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(schedule.contains("# stack = straight: a stacked line fitted to its bar's line's subdivision in 38 beat(s)"), "{schedule}");
+    // And the pattern is JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-stack-straight.js");
+        std::fs::write(&file, &straight).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}

@@ -42,7 +42,7 @@ use crate::phoneme::{Phoneme, Provenance};
 use crate::role::{Layer, LineBasis, StanzaBasis};
 use crate::seed::Seed;
 use crate::span::Span;
-use crate::voice::{Event, Family, Pitch, Score, Velocity};
+use crate::voice::{Event, Family, Pitch, Score, Straightened, Velocity};
 
 /// Which analysis pass decided a value, and where `SPEC.md` says so.
 ///
@@ -258,6 +258,7 @@ pub struct AnnotatedLine {
     walks: Vec<(usize, Cause)>,
     harmony: Option<Harmony>,
     bass: Vec<(Syllable, BassNote)>,
+    straightened: Vec<(usize, Straightened)>,
     tokens: Vec<Annotation>,
 }
 
@@ -326,6 +327,13 @@ impl AnnotatedLine {
         &self.bass
     }
 
+    /// Every beat the straight stack fitted to the host of the slot it sounds in, with that
+    /// slot's index, in playing order (`crate::stack`) — empty under the default, crossing.
+    #[must_use]
+    pub fn straightened(&self) -> &[(usize, Straightened)] {
+        &self.straightened
+    }
+
     /// Its tokens, in source order.
     #[must_use]
     pub fn tokens(&self) -> &[Annotation] {
@@ -340,6 +348,10 @@ pub struct Annotated {
     basis: Vec<StanzaBasis>,
     bass: Variant,
     pulse: Variant,
+    stack: Variant,
+    /// [`Score::straightened_beats`]: each fitted beat of a slot once, as the pattern header and
+    /// the OSC schedule count it — not once per line fitted there.
+    straightened_beats: usize,
     lengths: Vec<usize>,
 }
 
@@ -354,6 +366,19 @@ impl Annotated {
     #[must_use]
     pub const fn pulse(&self) -> Variant {
         self.pulse
+    }
+
+    /// Which variant of the stack lays out its stacked lines (`SPEC.md` §4.2, §4.6).
+    #[must_use]
+    pub const fn stack(&self) -> Variant {
+        self.stack
+    }
+
+    /// How many beats of the piece the straight stack fitted, each `(slot, beat)` once
+    /// ([`Score::straightened_beats`]).
+    #[must_use]
+    pub const fn straightened_beats(&self) -> usize {
+        self.straightened_beats
     }
 
     /// Every bar length of the piece, in beats, smallest first, once each: what the pulse
@@ -481,6 +506,7 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                             .filter(|event| event.bar().get() == index)
                             .filter_map(|event| Some((syllable(event), event.bass()?)))
                             .collect(),
+                        straightened: straightened_of(score, index),
                         tokens,
                     }
                 })
@@ -497,6 +523,8 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
             .collect(),
         bass: score.bass(),
         pulse: score.pulse(),
+        stack: score.stack(),
+        straightened_beats: score.straightened_beats(),
         lengths: {
             let mut lengths: Vec<usize> = score
                 .arrangement()
@@ -604,6 +632,16 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
         },
         lengths.join(", ")
     );
+    // The straight stack (§4.2, §4.6), named only when chosen: under the default each line keeps
+    // its own feet wherever it sounds, which every row below already shows.
+    if annotated.stack() == Variant::Straight {
+        let fitted = annotated.straightened_beats();
+        let _ = writeln!(
+            out,
+            "stack straight · a line stacked under a bar's line is fitted to its subdivision \
+             where the two would cross: {fitted} beat(s) (§4.2, §4.6)"
+        );
+    }
     let _ = writeln!(out);
 
     for (index, stanza) in annotated.stanzas().iter().enumerate() {
@@ -641,6 +679,13 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             }
             if let Some(harmony) = line.harmony() {
                 let _ = writeln!(out, "  harmony {}", describe_harmony(harmony));
+            }
+            if !line.straightened().is_empty() {
+                let _ = writeln!(
+                    out,
+                    "  straight {}",
+                    describe_straightened(line.straightened())
+                );
             }
             if walking && !line.bass().is_empty() {
                 render_bass(&mut out, source, annotated.bass(), harmonised, line);
@@ -872,6 +917,48 @@ fn sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
                 .map(move |placement| (index, placement.cause()))
         })
         .collect()
+}
+
+/// Every beat of a source bar the straight stack fitted to a host, by slot ([`Score::placed_in`]).
+fn straightened_of(score: &Score, bar: usize) -> Vec<(usize, Straightened)> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .enumerate()
+        .flat_map(|(index, slot)| {
+            slot.placements()
+                .iter()
+                .filter(move |placement| placement.bar().get() == bar)
+                .flat_map(move |placement| {
+                    score
+                        .placed_in(slot, *placement)
+                        .straightened()
+                        .iter()
+                        .map(move |fitted| (index, *fitted))
+                        .collect::<Vec<_>>()
+                })
+        })
+        .collect()
+}
+
+/// `3 into 2 at 1.0 6.0 · 2 into 3 at 4.1`: each fitting, with the slot and beat it happened in.
+fn describe_straightened(straightened: &[(usize, Straightened)]) -> String {
+    let mut by_kind: BTreeMap<(usize, usize), Vec<String>> = BTreeMap::new();
+    for (slot, fitted) in straightened {
+        by_kind
+            .entry((fitted.own(), fitted.host()))
+            .or_default()
+            .push(format!("{slot}.{}", fitted.beat()));
+    }
+    let kinds: Vec<String> = by_kind
+        .into_iter()
+        .map(|((own, host), at)| format!("{own} into {host} at {}", at.join(" ")))
+        .collect();
+    format!(
+        "{} — fitted to the bar's line (slot.beat)",
+        kinds.join(" · ")
+    )
 }
 
 /// Every slot a source bar sounds in where its bass sounds too ([`Score::sounds_bass`]).

@@ -189,7 +189,9 @@ impl Reading {
             | Variant::Syllables
             | Variant::Feet
             | Variant::Steady
-            | Variant::Elastic => "each line spoken in the bar it is first heard",
+            | Variant::Elastic
+            | Variant::Crossing
+            | Variant::Straight => "each line spoken in the bar it is first heard",
         };
         let mut out = format!(
             "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
@@ -292,7 +294,9 @@ pub fn plan(
         | Variant::Syllables
         | Variant::Feet
         | Variant::Steady
-        | Variant::Elastic => arrivals,
+        | Variant::Elastic
+        | Variant::Crossing
+        | Variant::Straight => arrivals,
     };
 
     let mut cues = Vec::new();

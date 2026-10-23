@@ -75,7 +75,7 @@ use std::fmt::Write as _;
 
 use prosody_core::mapping::Variant;
 use prosody_core::role::Layer;
-use prosody_core::voice::{Event, Score, Voice};
+use prosody_core::voice::{Event, Score, Subdivision, Voice};
 use prosody_core::{BassNote, Chord, Chromatic, Harmony, Silence, VoiceId};
 use rand_core::Rng as _;
 
@@ -587,6 +587,27 @@ fn pulse_header(out: &mut String, score: &Score, style: &Style) {
     }
 }
 
+/// The header's line for the straight stack, which names its variant and how many beats it
+/// fitted. Crossing — each line by its own feet — is the piece as it shipped, and says nothing new.
+fn stack_header(out: &mut String, score: &Score) {
+    if score.stack() != Variant::Straight {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   stack = straight: a line stacked under a bar's line is fitted to that line's \
+         subdivision wherever the two would cross, in {} beat(s) — three syllables over two are \
+         [a@2 b c], two over three [a@2 b] (SPEC.md §4.2, §4.6, candidate)",
+        straightened(score)
+    );
+}
+
+/// How many beats of the piece the straight stack fitted: [`Score::straightened_beats`], the
+/// count the explain view prints too.
+pub(crate) fn straightened(score: &Score) -> usize {
+    score.straightened_beats()
+}
+
 /// How many events the piece plays: every line's syllables, once for each slot it sounds in.
 ///
 /// Not `score.events().len()`, which counts each line's material once — a looping stanza plays its
@@ -738,6 +759,7 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     }
     bass_header(out, score, has_chords);
     pulse_header(out, score, style);
+    stack_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
         let _ = writeln!(
@@ -1093,16 +1115,19 @@ pub(crate) fn grid_by_slot(
                 // A whole line, or a call lifted out of one: its own events, its beats counted
                 // from where it starts. A line's width comes from the score, not from the events
                 // in *this* pattern, so the melody and the rhythm divide it the same way and a
-                // note lands on its own syllable.
-                let placed = score.placed(*placement);
-                let present: BTreeMap<usize, Vec<&Event>> = by_bar
+                // note lands on its own syllable. Each event's place in its beat is the one it
+                // has *in this slot* — under the straight stack, fitted to the host where the two
+                // would cross (`Score::placed_in`, which the OSC schedule and the scorer read too).
+                let placed = score.placed_in(slot, *placement);
+                let present: BTreeMap<usize, Vec<(&Event, Subdivision)>> = by_bar
                     .get(&placement.bar().get())?
                     .iter()
                     .filter_map(|(beat, syllables)| {
-                        let covered: Vec<&Event> = syllables
+                        let covered: Vec<(&Event, Subdivision)> = syllables
                             .iter()
                             .copied()
                             .filter(|event| placement.part().covers(event.span()))
+                            .map(|event| (event, placed.subdivision(event)))
                             .collect();
                         (!covered.is_empty())
                             .then(|| (beat.saturating_sub(placed.first_beat()), covered))
@@ -1135,7 +1160,7 @@ pub(crate) fn grid_by_slot(
 /// One line's events in this pattern, as the steps of one cycle: a step per beat, subdivided by
 /// its syllables.
 fn line(
-    present: &BTreeMap<usize, Vec<&Event>>,
+    present: &BTreeMap<usize, Vec<(&Event, Subdivision)>>,
     beats: usize,
     value: &dyn Fn(&Event) -> String,
     absent: &str,
@@ -1149,7 +1174,7 @@ fn line(
             Some(syllables) if whole_beats => steps.push(
                 syllables
                     .first()
-                    .map_or_else(|| absent.to_owned(), |e| value(e)),
+                    .map_or_else(|| absent.to_owned(), |(e, _)| value(e)),
             ),
             // A foot divided into one part is the whole beat. More than one, and the beat is
             // subdivided — *even when this pattern has only one value for it*, which is the
@@ -1157,30 +1182,15 @@ fn line(
             // so its note belongs in the second half of the beat, not across the whole of it.
             Some(syllables)
                 if syllables.len() == 1
-                    && syllables.first().is_some_and(|e| e.subdivision().of() == 1) =>
+                    && syllables.first().is_some_and(|(_, at)| at.of() == 1) =>
             {
                 steps.push(
                     syllables
                         .first()
-                        .map_or_else(|| absent.to_owned(), |e| value(e)),
+                        .map_or_else(|| absent.to_owned(), |(e, _)| value(e)),
                 );
             }
-            Some(syllables) => {
-                // A foot's syllables subdivide its beat. Where this pattern has no value for
-                // one of them — an unpitched syllable in the melody — it rests, so the ones
-                // that do sound keep their place inside the foot.
-                let width = syllables
-                    .first()
-                    .map_or(syllables.len(), |e| e.subdivision().of())
-                    .max(syllables.len());
-                let mut inner = vec![absent.to_owned(); width];
-                for event in syllables {
-                    if let Some(slot) = inner.get_mut(event.subdivision().index()) {
-                        *slot = value(event);
-                    }
-                }
-                steps.push(format!("[{}]", inner.join(" ")));
-            }
+            Some(syllables) => steps.push(subdivided(syllables, value, absent)),
         }
     }
     if steps.is_empty() {
@@ -1188,6 +1198,44 @@ fn line(
     } else {
         steps.join(" ")
     }
+}
+
+/// One beat subdivided by its syllables: `[a b]`, `[a b c]`.
+///
+/// A foot's syllables subdivide its beat. Where this pattern has no value for one of them — an
+/// unpitched syllable in the melody — it rests, so the ones that do sound keep their place inside
+/// the foot. A syllable lasting more than one part — only a stacked line the straight stack fitted
+/// to its host (`prosody_core::stack`) — is weighted with mini-notation's `@`: three syllables
+/// over a host's pair are `[a@2 b c]`, onsets at 0, ½ and ¾. A rest under a long syllable this
+/// pattern does not sound stays a run of `~`, which lasts the same.
+fn subdivided(
+    syllables: &[(&Event, Subdivision)],
+    value: &dyn Fn(&Event) -> String,
+    absent: &str,
+) -> String {
+    let width = syllables
+        .first()
+        .map_or(syllables.len(), |(_, at)| at.of())
+        .max(syllables.len());
+    // `None` is a part covered by a long syllable before it, written as that syllable's weight.
+    let mut inner: Vec<Option<String>> = vec![Some(absent.to_owned()); width];
+    for (event, at) in syllables {
+        let parts = at.parts().max(1);
+        if let Some(slot) = inner.get_mut(at.index()) {
+            *slot = Some(if parts > 1 {
+                format!("{}@{parts}", value(event))
+            } else {
+                value(event)
+            });
+        }
+        for covered in at.index() + 1..at.index() + parts {
+            if let Some(slot) = inner.get_mut(covered) {
+                *slot = None;
+            }
+        }
+    }
+    let written: Vec<String> = inner.into_iter().flatten().collect();
+    format!("[{}]", written.join(" "))
 }
 
 /// `SPEC.md` §4.2: stress becomes accent — times the bar's level under `density_level`, which is 1
@@ -3508,6 +3556,214 @@ swing = 0.33
                 assert_eq!(rates, vec!["1.176", "1.176", "1.569", "1.569"]);
             }
         }
+    }
+
+    /// ABAB, the first A line opening on an anapaest — `dee-e-A deA`, `u u S | u S` — and the
+    /// others two iambs, so the held A line sounds three against two under the B line in slot 1.
+    const HELD_ANAPAEST: &str = "deeA deA\nbeo beo\nteA teA\nreo reo\n";
+
+    /// `source` lowered with the stack set to `stack`, every other mapping at its default.
+    fn stacked(source: &str, stack: prosody_core::Variant) -> Score {
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings =
+            prosody_core::Mappings::all().with(prosody_core::Mapping::Stack.choose(stack).unwrap());
+        lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &ByLength),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap()
+    }
+
+    /// The `index`-th bar of a `<…>` sequence, its `@` weight removed, with every value replaced
+    /// by `x` — the rhythm alone, so the music and the trace can be compared.
+    fn shape_of(sequence: &str, index: usize) -> String {
+        let inner = sequence.trim_start_matches('<').trim_end_matches('>');
+        let mut bars = Vec::new();
+        let (mut depth, mut current) = (0_i32, String::new());
+        for character in inner.chars() {
+            match character {
+                '[' => depth += 1,
+                ']' => depth -= 1,
+                ' ' if depth == 0 => {
+                    bars.push(std::mem::take(&mut current));
+                    continue;
+                }
+                _ => {}
+            }
+            current.push(character);
+        }
+        bars.push(current);
+        let bar = bars[index].clone();
+        let bar = match bar.rfind('@') {
+            Some(at) if !bar[at..].contains(']') => bar[..at].to_owned(),
+            _ => bar,
+        };
+        // Each step's value becomes `x`, its weight kept: `[bd@2 bd bd]` → `[x@2 x x]`.
+        let mut out = String::new();
+        let mut in_value = false;
+        let mut in_weight = false;
+        for character in bar.chars() {
+            match character {
+                '[' | ']' | ' ' => {
+                    in_value = false;
+                    in_weight = false;
+                    out.push(character);
+                }
+                '@' => {
+                    in_weight = true;
+                    out.push('@');
+                }
+                '~' if !in_value => out.push('~'),
+                _ if in_weight => out.push(character),
+                _ if !in_value => {
+                    in_value = true;
+                    out.push('x');
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The `index`-th sequence written as `call("…")` in a rendered pattern or trace, in order.
+    fn nth_call(text: &str, call: &str, index: usize) -> String {
+        let needle = format!("{call}(\"");
+        let lines: Vec<&str> = text.lines().filter(|l| l.contains(&needle)).collect();
+        let line = lines
+            .get(index)
+            .unwrap_or_else(|| panic!("no {call} {index} in:\n{text}"));
+        let start = line.find(&needle).unwrap() + needle.len();
+        let rest = &line[start..];
+        rest[..rest.find('"').unwrap()].to_owned()
+    }
+
+    #[test]
+    fn straight_fits_a_held_triplet_to_its_host_in_the_pattern_and_the_trace() {
+        let crossing = stacked(HELD_ANAPAEST, prosody_core::Variant::Crossing);
+        let straight = stacked(HELD_ANAPAEST, prosody_core::Variant::Straight);
+        let style = at_120();
+        let (cross_text, straight_text) = (
+            Strudel::new().render(&crossing, &style).unwrap(),
+            Strudel::new().render(&straight, &style).unwrap(),
+        );
+        // Every line is its own voice, so the A line's drums are the first `s(…)`. Slot 1: the B
+        // line hosts, `[x x] [x x]`, and the A line is held under it. Crossing, its anapaest
+        // divides beat 0 in three. Straight, by hand: the first syllable takes the host's first
+        // half (`@2` of four parts), the other two share the second — onsets 0, ½, ¾.
+        assert_eq!(
+            shape_of(&nth_call(&cross_text, "s", 0), 1),
+            "[[x x x] [x x]]"
+        );
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 0), 1),
+            "[[x@2 x x] [x x]]"
+        );
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 1), 1),
+            "[[x x] [x x]]"
+        );
+        // Where the A line hosts — slot 0, and slot 4 in the outro — nothing is under it, and
+        // it keeps its triplet.
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 0), 0),
+            "[[x x x] [x x]]"
+        );
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 0), 4),
+            "[[x x x] [x x]]"
+        );
+        // Every parameter of the lane is written on the same grid, so each meets one event.
+        let lane = straight_text.lines().find(|l| l.contains("s(\"")).unwrap();
+        for parameter in lane.split(").").skip(1) {
+            if let Some(inner) = parameter.split('"').nth(1).filter(|p| p.starts_with('<')) {
+                assert_eq!(shape_of(inner, 1), "[[x@2 x x] [x x]]", "{parameter}");
+            }
+        }
+        // Only the straight header names the stack, and counts the one beat it fitted.
+        assert!(!cross_text.contains("stack ="), "{cross_text}");
+        assert!(
+            straight_text.contains("//   stack = straight: a line stacked under a bar's line is fitted to that line's subdivision wherever the two would cross, in 1 beat(s)"),
+            "{straight_text}"
+        );
+        // The trace is the music's walk: each of its lanes has the music's rhythm, slot by slot.
+        let trace = crate::trace::plan(&straight, &style);
+        for voice in 0..4 {
+            let traced = nth_call(trace.pattern(), "n", voice);
+            let music = nth_call(&straight_text, "s", voice);
+            for slot in 0..straight.arrangement().slots().len() {
+                assert_eq!(
+                    shape_of(&traced, slot),
+                    shape_of(&music, slot),
+                    "{voice} {slot}"
+                );
+            }
+        }
+        // Nothing else changed: besides the header, the A line's drums and the bass's second
+        // lane — the held line's bass note on its stressed third syllable, now at ¾ of the beat
+        // (`[~ ~ ~ 36]`, the long first syllable's rest written as its two parts).
+        let differing: Vec<&str> = cross_text
+            .lines()
+            .zip(straight_text.lines().filter(|l| !l.contains("stack =")))
+            .filter(|(a, b)| a != b)
+            .map(|(_, b)| b)
+            .collect();
+        assert_eq!(differing.len(), 2, "{differing:?}");
+        assert!(differing[0].starts_with("  s(\"<[[bd bd bd] [bd bd]]@2 [[bd@2 bd bd]"));
+        assert!(
+            differing[1].starts_with("  note(\"<~@2 [[~ ~ ~ 36] ~]@2"),
+            "{}",
+            differing[1]
+        );
+    }
+
+    #[test]
+    fn the_osc_schedule_sounds_the_fitted_onsets() {
+        // Every slot lasts two beats; slot 1 starts on beat 2. The held A line's first beat there
+        // is 2, 2⅓, 2⅔ crossing and 2, 2½, 2¾ straight; its second beat 3 and 3½ either way.
+        let onsets = |stack| {
+            let schedule = crate::Backend::render(
+                &crate::Osc::new(),
+                &stacked(HELD_ANAPAEST, stack),
+                &at_120(),
+            )
+            .unwrap();
+            let mut at: Vec<String> = schedule
+                .messages()
+                .iter()
+                .map(|m| fmt_param(m.at().as_beats()))
+                .filter(|at| at.starts_with("2.") || at.starts_with("3."))
+                .collect();
+            at.dedup();
+            (at, schedule)
+        };
+        let (crossing, crossing_schedule) = onsets(prosody_core::Variant::Crossing);
+        let (straight, straight_schedule) = onsets(prosody_core::Variant::Straight);
+        // The host's iambs sound at 2, 2½, 3, 3½ under both.
+        assert_eq!(
+            crossing,
+            vec!["2.000", "2.333", "2.500", "2.667", "3.000", "3.500"]
+        );
+        assert_eq!(straight, vec!["2.000", "2.500", "2.750", "3.000", "3.500"]);
+        assert_eq!(crossing_schedule.straightened(), None);
+        assert_eq!(straight_schedule.straightened(), Some(1));
+        assert!(straight_schedule.to_text().contains(
+            "# stack = straight: a stacked line fitted to its bar's line's subdivision in 1 beat(s)"
+        ));
+        assert_eq!(
+            crossing_schedule.messages().len(),
+            straight_schedule.messages().len()
+        );
     }
 
     #[test]

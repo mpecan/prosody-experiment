@@ -406,6 +406,92 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Straightening stacked lines — a variant, crossing kept
+
+The user decided: where a line stacked under the bar's host divides a beat incompatibly with it
+(three against two — the cross-rhythm traced in *the off-rhythm feel* below), today's crossing stays
+the default, and a **straight** variant fits the stacked line to the host. A new selector,
+`Mapping::Stack` (`stack`): **`crossing`** (default, first — what preceded it; no `off`) and
+**`straight`**.
+
+- **The rule** (`prosody_core::stack`). Per beat, a line's grid is the lcm of its onsets' reduced
+  denominators — exactly what `cross_rhythm` reads — and two grids cross when neither divides the
+  other. Where a stacked, on-grid line crosses the host in a beat, its *n* syllables are fitted to
+  the host's *h* parts, "the first takes the long": *n* > *h* — the first *h* − 1 take a part each
+  and the rest share the last part (three over two: `[a@2 b c]`, onsets 0, ½, ¾); *n* < *h* — the
+  first holds the parts the line lacks (two over three: `[a@2 b]`, 0 and ⅔). Every syllable stays
+  its own event, in the same beat, traced to the same word. Left alone: the host; beats where the
+  host is silent; placements off the slot's grid (a squeezed or stretched loop); two stacked lines
+  crossing each other but not the host. `fit` is tested over every *n* ≤ 9, *h* ≤ 7: distinct
+  ordered onsets filling the beat, never crossing *h*.
+- **Where it lives: the core, not an emitter.** `Score::placed_in(slot, placement)` is
+  `Score::placed` with each event's place in its beat *in that slot* (`Placed::subdivision`,
+  `Placed::onsets`, `Placed::straightened`); the Strudel walk (`grid_by_slot`, so the page's trace
+  too), the OSC schedule and the scorer's timeline all read it, so the four agree by construction
+  and the scorer measures what is played. An emitter-side fit would have left the scorer counting
+  crossings no one hears. `Score::events` is unchanged; the variant is recorded (`Score::stack`).
+  `Subdivision` gained `parts` (1 everywhere but a fitted long syllable), written in the pattern
+  with `@` inside the beat.
+- **Checked against the real packages.** With `@strudel/core` and `@strudel/mini` 1.2.6 (the
+  versions `@strudel/web` 1.3.0 pins) in node, `[[bd@2 bd bd] [bd bd]]@2` as slot 1 sounds at 2,
+  2.5, 2.75, 3, 3.5 cycles. Wilde's whole pattern, evaluated the same way, sounds 331 distinct
+  onset instants in one pass under `crossing` and 293 under `straight` — in both cases exactly the
+  OSC schedule's instants (38 fewer: each 3-into-2 beat trades ⅓ and ⅔ for ¾).
+- **Visible.** The pattern header's `stack = straight: … in 38 beat(s) — three syllables over two
+  are [a@2 b c], two over three [a@2 b]`; the OSC schedule's `# stack = straight: …`; the explain
+  view's `stack straight · … 38 beat(s)` line and, under each fitted line, `straight 2 into 3 at
+  4.0 · 3 into 2 at 3.1 3.2 4.1 … (slot.beat)`; the CLI help; the page's mapping table, which
+  lists it unchanged from `Mapping::ALL` (B starts at `crossing`, its first variant). Under the
+  default nothing new is printed — the precedent of the height bass — so **no snapshot changed**.
+- **Tests (hand-worked).** Core (`tests/stack.rs`, toy `a`/`A`/`o`/`O`): ABAB with an opening
+  anapaest — slot 1's held A line is `(0/3 1/3 2/3)` crossing and `(0/4 ×2, 2/4, 3/4)` straight in
+  beat 0, beat 1 untouched, the host and every other slot identical, `Score::events` and the
+  arrangement identical; a three-foot A line fitted with the stanza period (bar of 3) and left alone
+  without it (squeezed into 2); the explain view's two new lines and nothing else; and a property
+  over generated poems of two- and three-syllable feet, rhymes, refrains and commas under any
+  mappings — events/voices/arrangement/harmony unchanged, same events per placement, host never
+  moved, unfitted beats as crossing, distinct instants, and no on-grid stacked line crossing its
+  host (mutation-checked: it fails with the fit disabled, and with two syllables sharing an onset).
+  Emit: the pattern's `[[x x x] [x x]]` → `[[x@2 x x] [x x]]` in the held line's slot, every
+  parameter on that grid, only that line and the bass's second lane changed, the trace's lanes the
+  music's rhythm slot by slot; OSC 2, 2⅓, 2½, 2⅔, 3, 3½ → 2, 2½, 2¾, 3, 3½. Scorer: the fixture's
+  `cross_rhythm` 1/16 → 0, pulse/steadiness/layering/pitched/recurrence equal. CLI: Wilde's header
+  and OSC count 38, `cross_rhythm` 0.302 → 0.000, `--without stack` is the default, `stack=off`
+  refused, the pattern passes `node --check`. Web: the selector, `/pattern` and `/trace` carry the
+  same 38 fitted long syllables, `/score` under jazz reads 0.000, `/explain` names it.
+  `check-wasm.sh` gained two settings with `stack:straight`.
+- **Measured** (`./scripts/cycle.sh`, mean overall). Default: machine 0.743, jazz 0.737 — both
+  unchanged, every row identical. `stack=straight`: machine 0.743 (`cross_rhythm` is not in it, and
+  no other column moved at three places), jazz **0.705**: cross-rhythm falls to 0.000 on every
+  example but Poe (0.005: three slots where a six-beat line is squeezed into a five-beat bar, which
+  straight leaves alone), so it drops below the jazz band's 0.1 floor everywhere and interest falls
+  (Wilde 0.903 → 0.840, Hopkins 0.845 → 0.786, Jabberwocky 0.900 → 0.838). Beats fitted: Wilde 38,
+  Hopkins 24, Jabberwocky 23, Poe 19, Whitman 19, Tyger 11, Sonnet 3, Dickinson 2, Prešeren 0. The
+  jazz profile rewards some cross-rhythm, so this is the number moving the way the profile says,
+  not a verdict; whether the ear prefers it is the user's call.
+- **Disclosed against I2** (`SPEC.md` §4.2): under `straight` a stacked line's onsets within a beat
+  depend on its host's feet, which can be another stanza's. Events, beats, voices, seeds, accents
+  are untouched, and every I2 property compares those.
+- **Review fixes.** (1) The one-word edit test (`prosody_score::sensitivity`) built each line from
+  `Score::events` alone, so under `straight` it compared timing nobody plays: an edit to a host that
+  re-fitted another stanza's stacked line still counted as local. Each slot a line sounds in now
+  carries its onsets from `Score::placed_in`, and a slot hosted by the edited stanza may change them
+  as it may change its length. Under `crossing` those onsets are each event's own, so every number
+  is as it was. Under `straight` *local* falls — Wilde 29 → 18 of 61, Jabberwocky 46 → 28 of 69, Poe
+  83 → 51 of 116, Tyger 68 → 50 of 143 — and *explained* does not move anywhere (the re-fitted line
+  sounds under the edited one), so the `legib` column is unchanged. Hand-worked in
+  `prosody-score/tests/pipeline.rs`: one edit (`so` → `sasa`) turns stanza 2's host beat into a
+  triplet, so stanza 1's looped triplet is no longer fitted — 9 local under crossing, 8 under
+  straight, 9 explained in both (mutation-checked: it fails with the scorer reading the events' own
+  subdivisions). (2) The explain view summed fitted beats per line while the pattern and OSC header
+  counted each `(slot, beat)` once; both now print `Score::straightened_beats`. ABCABC fixture in
+  `tests/stack.rs`: slot 2 fits two held lines in beat 0 and slot 3 one — 2 beats, not 3.
+- **Raised, not done.** Two stacked lines crossing each other where neither crosses the host are
+  left crossing (fitting them to each other would need a choice of which one leads); a squeezed or
+  stretched loop is not fitted (its beats are not the host's); the "first takes the long" rule
+  ignores stress — an anapaest's stressed third syllable lands on ¾, off the host's onset, where
+  a stress-led rule would put it on ½.
+
 ### A steady beat — the pulse, decided
 
 The user decided the Strudel pattern's bar lasts as long as its beats, so the beat is one speed

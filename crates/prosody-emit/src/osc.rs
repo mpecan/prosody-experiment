@@ -227,6 +227,7 @@ pub struct Schedule {
     unsent_chords: usize,
     unsent_bass: usize,
     elastic_unapplied: bool,
+    straightened: Option<usize>,
 }
 
 /// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
@@ -295,6 +296,13 @@ impl Schedule {
         self.elastic_unapplied
     }
 
+    /// Under the straight stack (`Mapping::Stack`), how many beats it fitted a stacked line to its
+    /// host in — applied here as in the Strudel pattern; `None` under crossing, the default.
+    #[must_use]
+    pub const fn straightened(&self) -> Option<usize> {
+        self.straightened
+    }
+
     /// How long the piece lasts, in beats.
     #[must_use]
     pub fn beats(&self) -> f64 {
@@ -346,6 +354,13 @@ impl Schedule {
                 out,
                 "# not applied here: pulse = elastic (onsets are in beats, so every bar lasts \
                  its beats: the pulse is steady)"
+            );
+        }
+        if let Some(beats) = self.straightened {
+            let _ = writeln!(
+                out,
+                "# stack = straight: a stacked line fitted to its bar's line's subdivision in \
+                 {beats} beat(s)"
             );
         }
         if self.unsent_chords > 0 {
@@ -410,7 +425,10 @@ impl Backend for Osc {
             let slot_beats = u64::try_from(slot.beats()).unwrap_or(1).max(1);
             for placement in slot.placements() {
                 // A whole line, or a call lifted out of one: either way, its own beats.
-                let placed = score.placed(*placement);
+                // Each event where it sounds in this slot: under the straight stack, a stacked
+                // line fitted to its host where they would cross (`Score::placed_in`), as the
+                // Strudel pattern and the scorer place it.
+                let placed = score.placed_in(slot, *placement);
                 let extent = Extent {
                     first: u64::try_from(placed.first_beat()).unwrap_or(0),
                     beats: u64::try_from(placed.beats()).unwrap_or(1).max(1),
@@ -419,8 +437,8 @@ impl Backend for Osc {
                 // Under a walking bass, one walk a bar: the bar's foundation line's
                 // (`Score::sounds_bass`), as the Strudel backend plays it.
                 let bass_sounds = score.sounds_bass(slot, placement);
-                for event in placed.events() {
-                    let at = fitted(event, slot_start, room, extent);
+                for (event, subdivision) in placed.onsets() {
+                    let at = fitted(event, subdivision, slot_start, room, extent);
                     let bass = event.bass().filter(|_| bass_sounds);
                     if event.pitch().is_some() && bass.is_some() {
                         unsent_bass += 1;
@@ -449,6 +467,8 @@ impl Backend for Osc {
                 .count(),
             unsent_bass,
             elastic_unapplied: score.pulse() == prosody_core::Variant::Elastic,
+            straightened: (score.stack() == prosody_core::Variant::Straight)
+                .then(|| crate::strudel::straightened(score)),
         })
     }
 }
@@ -466,9 +486,18 @@ struct Extent {
 /// Bar-locked (`prosody_core::arrange`): a line is fitted into its `room` in the slot
 /// ([`Slot::room_for`](prosody_core::Slot::room_for)) — its own beats when it fits, so it keeps
 /// one beat per foot and rests for the rest of the bar, and the whole bar when it is longer.
-fn fitted(event: &Event, slot_start: u64, room: u64, extent: Extent) -> Onset {
-    let of = u64::try_from(event.subdivision().of()).unwrap_or(1).max(1);
-    let within = u64::try_from(event.subdivision().index()).unwrap_or(0);
+///
+/// `subdivision` is the event's place in its beat in this slot ([`Score::placed_in`]), which the
+/// straight stack may have fitted to the host.
+fn fitted(
+    event: &Event,
+    subdivision: prosody_core::Subdivision,
+    slot_start: u64,
+    room: u64,
+    extent: Extent,
+) -> Onset {
+    let of = u64::try_from(subdivision.of()).unwrap_or(1).max(1);
+    let within = u64::try_from(subdivision.index()).unwrap_or(0);
     let beat = u64::try_from(event.beat().get())
         .unwrap_or(0)
         .saturating_sub(extent.first);

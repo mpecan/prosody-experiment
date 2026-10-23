@@ -28,6 +28,8 @@
 //!   scheme or from rhyme closure.
 //! - [`arrange`] — laying that IR out in time: stanzas loop until a competing stanza transforms
 //!   them or a refrain stanza overrules them.
+//! - [`stack`] — the straight stack, a candidate: a line stacked under a bar's host fitted to the
+//!   host's subdivision of each beat where the two would cross.
 //! - [`annotate`] — §8's debug view: the poem, with what each token became written under it.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
@@ -54,6 +56,7 @@ pub mod role;
 pub mod seed;
 pub mod sound;
 pub mod span;
+pub mod stack;
 pub mod surprisal;
 pub mod voice;
 
@@ -82,5 +85,5 @@ pub use span::Span;
 pub use surprisal::{Lexicon, PoemSurprisal, Rarity, Surprisal, WordSurprisal};
 pub use voice::{
     Bar, BeatIndex, Detune, Event, Family, Pitch, PitchSource, Placed, ScaleDegree, Score,
-    Subdivision, Velocity, Voice,
+    Straightened, Subdivision, Velocity, Voice,
 };

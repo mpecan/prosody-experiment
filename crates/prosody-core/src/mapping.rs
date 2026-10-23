@@ -4,8 +4,9 @@
 //! `SPEC.md`, they change what a poem becomes, and whether they belong is judged by listening. Each
 //! is a *selector*: a [`Mapping`] has a fixed, ordered list of [`Variant`]s — always including
 //! a first variant that is what preceded the mapping ([`Variant::Off`] for every mapping but the
-//! pulse, which cannot be left out and goes back to [`Variant::Elastic`]) — and one of them is its
-//! default. A [`Mappings`] value picks one variant per
+//! pulse, which cannot be left out and goes back to [`Variant::Elastic`], and the stack, whose
+//! lines always sound somehow and which goes back to [`Variant::Crossing`]) — and one of them is
+//! its default. A [`Mappings`] value picks one variant per
 //! mapping, so the same poem can be heard under each choice, side by side.
 //!
 //! This is structure, not palette, so it is deliberately **not** part of the style (`SPEC.md` §6,
@@ -51,6 +52,15 @@ pub enum Mapping {
     /// When events fall is structure, not palette (I3). The lowering records it on the score and
     /// lays out nothing by it: the backends read it (`prosody_emit::strudel`).
     Pulse,
+    /// §4.2 and §4.6: how a line stacked under the bar's host — held, refrain, call, a loop
+    /// yielding or carrying on — divides a beat. [`Variant::Crossing`] (the default): by its own
+    /// feet, so a triplet can sound against the host's pair. [`Variant::Straight`]: fitted to the
+    /// host's subdivision of that beat wherever the two would cross (`crate::stack`). When events
+    /// fall is structure, not palette (I3); the score records it and [`Score::placed_in`]
+    /// applies it, so every backend and the scorer read the same onsets.
+    ///
+    /// [`Score::placed_in`]: crate::voice::Score::placed_in
+    Stack,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -88,6 +98,12 @@ pub enum Variant {
     /// The pulse as it was: every bar lasts the same time, so the beat stretches in a short bar
     /// and hurries in a long one.
     Elastic,
+    /// The stack as it was, and its default: a stacked line divides each beat by its own foot,
+    /// whatever the host does — three against two where their feet differ.
+    Crossing,
+    /// The stack straightened: where a stacked line's beat would cross its host's, its syllables
+    /// are fitted to the host's subdivision of that beat, each still its own event.
+    Straight,
 }
 
 impl Variant {
@@ -107,6 +123,8 @@ impl Variant {
             Self::Feet => "feet",
             Self::Steady => "steady",
             Self::Elastic => "elastic",
+            Self::Crossing => "crossing",
+            Self::Straight => "straight",
         }
     }
 }
@@ -139,9 +157,13 @@ const BASS: &[Variant] = &[
 /// be without a pulse, so the pulse has no [`Variant::Off`] — then steady.
 const PULSE: &[Variant] = &[Variant::Elastic, Variant::Steady];
 
+/// The stack's variants: crossing first, because it is what preceded the mapping — a stacked line
+/// always divides its beats somehow, so the stack has no [`Variant::Off`] — then straight.
+const STACK: &[Variant] = &[Variant::Crossing, Variant::Straight];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -150,6 +172,7 @@ impl Mapping {
         Self::Harmony,
         Self::Reading,
         Self::Pulse,
+        Self::Stack,
     ];
 
     /// Its name on a command line or in a query string.
@@ -164,6 +187,7 @@ impl Mapping {
             Self::Harmony => "harmony",
             Self::Reading => "reading",
             Self::Pulse => "pulse",
+            Self::Stack => "stack",
         }
     }
 
@@ -197,11 +221,17 @@ impl Mapping {
                 "how long a bar lasts: as long as its beats, one beat speed throughout (steady), \
                  or every bar the same, so a longer bar hurries its beats (elastic)"
             }
+            Self::Stack => {
+                "a line stacked under the bar's line: its own subdivision of each beat, three \
+                 against two where the feet differ (crossing), or fitted to the bar's line's \
+                 subdivision wherever they would cross (straight)"
+            }
         }
     }
 
     /// Its variants, in a fixed order that starts with what preceded the mapping:
-    /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`].
+    /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`], and the
+    /// stack, which starts with [`Variant::Crossing`].
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
@@ -210,6 +240,7 @@ impl Mapping {
             Self::Reading => READING,
             Self::Harmony => HARMONY,
             Self::Pulse => PULSE,
+            Self::Stack => STACK,
         }
     }
 
@@ -230,6 +261,10 @@ impl Mapping {
             // the beat is one speed throughout — SPEC.md §4.2's "foot → beat" taken at its word.
             // Elastic stays as a variant to compare against.
             Self::Pulse => Variant::Steady,
+            // The user decided (PLAN.md, "straightening stacked lines"): today's crossing stays
+            // the piece, and straight is a variant to hear against it. SPEC.md §4.2's "syllable →
+            // subdivision within the foot" is what crosses; straight bends it only under a host.
+            Self::Stack => Variant::Crossing,
         }
     }
 
@@ -253,7 +288,7 @@ impl Mapping {
 
     /// This mapping left out: its first variant, what preceded it — [`Variant::Off`] for every
     /// mapping but the pulse, which a piece cannot be without, and which goes back to
-    /// [`Variant::Elastic`].
+    /// [`Variant::Elastic`], and the stack, which goes back to [`Variant::Crossing`].
     #[must_use]
     pub const fn off(self) -> Choice {
         let variant = match self.variants() {
@@ -332,7 +367,7 @@ impl Mappings {
     }
 
     /// Whether `mapping` applies at all: any variant but [`Variant::Off`]. Always true of the
-    /// pulse, which has no off.
+    /// pulse and the stack, which have no off.
     #[must_use]
     pub fn has(&self, mapping: Mapping) -> bool {
         self.get(mapping) != Variant::Off
@@ -382,11 +417,12 @@ mod tests {
     #[test]
     fn every_mapping_can_be_left_out_and_defaults_to_a_variant_it_has() {
         for mapping in Mapping::ALL {
-            // What preceded it: off, or for the pulse — which no piece can be without — elastic.
-            let preceded = if mapping == Mapping::Pulse {
-                Variant::Elastic
-            } else {
-                Variant::Off
+            // What preceded it: off, or for the pulse — which no piece can be without — elastic,
+            // and for the stack — whose lines always divide their beats somehow — crossing.
+            let preceded = match mapping {
+                Mapping::Pulse => Variant::Elastic,
+                Mapping::Stack => Variant::Crossing,
+                _ => Variant::Off,
             };
             assert_eq!(mapping.variants().first(), Some(&preceded), "{mapping:?}");
             assert_eq!(mapping.off().variant(), preceded, "{mapping:?}");
@@ -415,6 +451,24 @@ mod tests {
     }
 
     #[test]
+    fn the_stack_crosses_unless_straight_is_chosen() {
+        assert_eq!(
+            Mapping::Stack.variants(),
+            &[Variant::Crossing, Variant::Straight]
+        );
+        assert_eq!(Mapping::named("stack"), Some(Mapping::Stack));
+        assert_eq!(Mappings::all().get(Mapping::Stack), Variant::Crossing);
+        assert!(Mapping::Stack.choose(Variant::Off).is_none());
+        assert!(Mapping::Stack.choose_named("off").is_none());
+        let straight = Mappings::all().with(Mapping::Stack.choose_named("straight").unwrap());
+        assert_eq!(straight.get(Mapping::Stack), Variant::Straight);
+        assert_eq!(straight.changed().count(), 1);
+        // Left out, it is what preceded it: crossing, the default, so nothing is stored.
+        assert_eq!(straight.without(Mapping::Stack), Mappings::all());
+        assert!(Mappings::all().has(Mapping::Stack));
+    }
+
+    #[test]
     fn the_defaults_are_todays_piece() {
         // The four machine-cycle switches are on, the bass is by vowel height, the reading reads
         // each line where it arrives, and the harmony — a candidate not yet in the piece — is off.
@@ -426,6 +480,7 @@ mod tests {
         assert_eq!(all.get(Mapping::Bass), Variant::Height);
         assert_eq!(all.get(Mapping::Reading), Variant::Arrives);
         assert_eq!(all.get(Mapping::Harmony), Variant::Off);
+        assert_eq!(all.get(Mapping::Stack), Variant::Crossing);
         assert_eq!(all.changed().count(), 0);
     }
 
@@ -492,10 +547,10 @@ mod tests {
 
     #[test]
     fn every_combination_is_listed_once() {
-        // Four on/off switches, a four-way bass, a four-way harmony, a three-way reading and a
-        // two-way pulse: 2^4 × 4 × 4 × 3 × 2 = 1536.
+        // Four on/off switches, a four-way bass, a four-way harmony, a three-way reading, a
+        // two-way pulse and a two-way stack: 2^4 × 4 × 4 × 3 × 2 × 2 = 3072.
         let every = Mappings::every();
-        assert_eq!(every.len(), 1536);
+        assert_eq!(every.len(), 3072);
         for (index, one) in every.iter().enumerate() {
             assert!(!every[index + 1..].contains(one), "{one:?} twice");
         }

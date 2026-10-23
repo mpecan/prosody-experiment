@@ -135,7 +135,10 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
         .with_harmony(harmony)
         .with_bass(walk)
         // Recorded, never read here: how long a bar lasts is the backends' to lay out (§4.2).
-        .with_pulse(mappings.get(Mapping::Pulse));
+        .with_pulse(mappings.get(Mapping::Pulse))
+        // Recorded, never read here: a stacked line is fitted to its host slot by slot, where the
+        // arrangement has put the two together (`Score::placed_in`, §4.2 and §4.6).
+        .with_stack(mappings.get(Mapping::Stack));
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,

@@ -237,6 +237,10 @@ fn compile_with(source: &str, bass: &str, harmony: &str) -> Score {
                 .choose_named(harmony)
                 .unwrap(),
         );
+    compile_under(source, &mappings)
+}
+
+fn compile_under(source: &str, mappings: &prosody_core::Mappings) -> Score {
     let poem = Poem::parse(source.to_owned()).unwrap();
     let meter = meter::scan(&poem, &Toy);
     let repetition = repetition::analyse(&poem);
@@ -251,7 +255,7 @@ fn compile_with(source: &str, bass: &str, harmony: &str) -> Score {
             surprisal: &surprisal::analyse(&poem, &Toy, &Flat),
             roles: &roles,
         },
-        &mappings,
+        mappings,
     )
     .unwrap()
 }
@@ -343,4 +347,83 @@ fn an_anapaest_held_under_an_iamb_crosses_its_beat() {
                 .all(|metric| metric.name() != "cross_rhythm")
         );
     }
+}
+
+#[test]
+fn straightened_the_held_anapaest_no_longer_crosses() {
+    // The fixture above under `stack = straight`: slot 1's held anapaest is fitted to its host's
+    // pair (onsets 0, ½, ¾ — a grid of 4, which 2 divides), so no beat of the 16 crosses. Nothing
+    // else is measured differently: the onsets moved, the events, beats and accents did not.
+    let source = "da da dA da dO\nma mA ma mE\nta tA ta tO\nsa sA sa sE\n";
+    let straight = compile_under(
+        source,
+        &prosody_core::Mappings::all().with(
+            prosody_core::Mapping::Stack
+                .choose_named("straight")
+                .unwrap(),
+        ),
+    );
+    let crossing = compile(source).unwrap();
+    let of = |score: &Score, name: &str| {
+        measure_as(score, Profile::Jazz)
+            .into_iter()
+            .find(|metric| metric.name() == name)
+            .unwrap()
+            .value()
+    };
+    assert!((of(&crossing, "cross_rhythm") - 1.0 / 16.0).abs() < 1e-12);
+    assert!(of(&straight, "cross_rhythm").abs() < 1e-12);
+    for name in ["pulse", "steadiness", "layering", "pitched", "recurrence"] {
+        assert!(
+            (of(&crossing, name) - of(&straight, name)).abs() < 1e-12,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn straightened_a_loop_is_re_timed_by_an_edit_to_its_host_in_another_stanza() {
+    // Stanza 1, `da da dA da dA`, opens on an anapaest; stanza 2, `so mO so mO`, is two iambs.
+    // Stanza 1 is the foundation and loops under stanza 2 (as in
+    // `silencing_a_word_reaches_only_what_sounds_under_it`), both two beats long, so in that slot
+    // the loop's beat 0 — three syllables — would cross its host's pair. Under `stack = straight`
+    // it is fitted: onsets 0, ½, ¾ instead of 0, ⅓, ⅔.
+    //
+    // Every probe but one is a homophone of its word (`daq` sounds as `da`), so eight edits change
+    // nothing. The sixth word, stanza 2's first `so`, becomes `sasa`: two unstressed syllables, so
+    // the host opens on an anapaest too, still two beats. Under crossing that edit is heard in
+    // stanza 2 alone — stanza 1's loop plays its own triplet either way: 9 local. Under straight
+    // the host's beat 0 now divides in three, nothing crosses, and the loop is no longer fitted:
+    // stanza 1 is re-timed as played, outside the edited stanza — 8 local. It sounds under the
+    // edited line, so it is explained either way.
+    let source = "da da dA da dA\n\nso mO so mO\n";
+    let probes = [
+        "daq", "daq", "dAq", "daq", "dAq", "sasa", "mOq", "soq", "mOq",
+    ];
+    let straight = prosody_core::Mappings::all().with(
+        prosody_core::Mapping::Stack
+            .choose_named("straight")
+            .unwrap(),
+    );
+    // The premise, checked: in the original, stanza 1's loop under stanza 2 is fitted somewhere.
+    let score = compile_under(source, &straight);
+    let fitted = score.arrangement().slots().iter().any(|slot| {
+        slot.host().is_some_and(|host| host.bar().get() == 1)
+            && slot.placements().iter().any(|placement| {
+                placement.bar().get() == 0
+                    && !score.placed_in(slot, *placement).straightened().is_empty()
+            })
+    });
+    assert!(fitted, "the loop is fitted to its host");
+
+    let crossing = sensitivity::measure(source, &probes, compile).unwrap();
+    let straightened =
+        sensitivity::measure(source, &probes, |text| Some(compile_under(text, &straight))).unwrap();
+    for result in [crossing, straightened] {
+        assert_eq!(result.edits(), 9);
+        assert_eq!(result.audible(), 1);
+        assert_eq!(result.explained(), 9);
+    }
+    assert_eq!(crossing.local(), 9);
+    assert_eq!(straightened.local(), 8);
 }

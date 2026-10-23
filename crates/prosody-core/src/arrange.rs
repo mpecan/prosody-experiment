@@ -253,6 +253,15 @@ impl Slot {
             Fit::Stretched => self.beats.max(1),
         }
     }
+
+    /// Whether a placement of `beats` beats keeps one beat per foot from the slot's first beat,
+    /// so that its beat *k* is the slot's beat *k*: it fits its room exactly. A loop squeezed into
+    /// a shorter bar, or stretched across a longer one, is not — its beats fall between the
+    /// slot's, and no subdivision of one beat can be compared with another line's.
+    #[must_use]
+    pub fn on_grid(&self, beats: usize) -> bool {
+        self.room_for(beats) == beats
+    }
 }
 
 /// The whole piece, slot by slot.

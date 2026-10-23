@@ -29,6 +29,8 @@ const settings = [
   'set=harmony:cadence&off=outro,period&profile=jazz',
   'off=held,refrain,bass&profile=interest',
   'set=pulse:elastic&swing=0.33&profile=jazz',
+  'set=stack:straight&profile=jazz',
+  'set=stack:straight,bass:feet,harmony:cadence,pulse:elastic&swing=0.33&voicing=seventh',
 ];
 const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
 

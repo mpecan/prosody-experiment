@@ -112,17 +112,19 @@ impl Timeline {
             bar_starts.push(running);
             let slot_beats = to_u64(slot.beats()).max(1);
             for placement in slot.placements() {
-                let placed = score.placed(*placement);
+                // Where each event sounds in this slot — under the straight stack, fitted to the
+                // host where they would cross (`Score::placed_in`), as both backends play it.
+                let placed = score.placed_in(slot, *placement);
                 // Under a walking bass, one walk a bar (`Score::sounds_bass`), as it is played.
                 let bass_sounds = score.sounds_bass(slot, placement);
                 let first = placed.first_beat();
                 let line_beats = to_u64(placed.beats()).max(1);
                 let room = to_u64(slot.room_for(placed.beats()));
-                for event in placed.events() {
-                    let of = to_u64(event.subdivision().of()).max(1);
+                for (event, subdivision) in placed.onsets() {
+                    let of = to_u64(subdivision.of()).max(1);
                     // Counted from the placement's first beat: a call need not open its line.
                     let position = to_u64(event.beat().get().saturating_sub(first)) * of
-                        + to_u64(event.subdivision().index());
+                        + to_u64(subdivision.index());
                     // `position / (of · line_beats)` of the line's room in the slot.
                     let scaled = position * room;
                     let denominator = of * line_beats;

@@ -129,13 +129,16 @@ impl BeatIndex {
 /// [`Event::bar`], [`Event::beat`] and then the index, which is what the lowering does.
 ///
 /// The convention a backend needs: a beat divided into `of` parts sounds this event at
-/// `index / of` of the way through, each part lasting `1 / of` of the beat. There is no held
-/// note, tie or rest — a syllable is one part, which is what `SPEC.md` §4.2's "syllable →
-/// subdivision within the foot" describes and no more.
+/// `index / of` of the way through, lasting [`Subdivision::parts`] of those parts. In the score
+/// a syllable is always one part — there is no held note, tie or rest, which is what `SPEC.md`
+/// §4.2's "syllable → subdivision within the foot" describes and no more. Only a stacked line
+/// fitted to its host ([`Score::placed_in`] under the straight stack, `crate::stack`) can last
+/// longer: the long syllable of a long-short.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Subdivision {
     index: usize,
     of: usize,
+    parts: usize,
 }
 
 impl Subdivision {
@@ -149,6 +152,13 @@ impl Subdivision {
     #[must_use]
     pub const fn of(self) -> usize {
         self.of
+    }
+
+    /// How many of the beat's [`Subdivision::of`] parts it lasts: one, except where the straight
+    /// stack fits a stacked line to its host and a syllable takes the long half of a long-short.
+    #[must_use]
+    pub const fn parts(self) -> usize {
+        self.parts
     }
 }
 
@@ -551,6 +561,7 @@ pub struct Score {
     harmony: Vec<Harmony>,
     bass: Variant,
     pulse: Variant,
+    stack: Variant,
 }
 
 impl Score {
@@ -570,6 +581,7 @@ impl Score {
             harmony: Vec::new(),
             bass: Variant::Off,
             pulse: Variant::Steady,
+            stack: Variant::Crossing,
         }
     }
 
@@ -600,6 +612,22 @@ impl Score {
     #[must_use]
     pub const fn pulse(&self) -> Variant {
         self.pulse
+    }
+
+    /// The same score, recording which variant of the stack fits its stacked lines.
+    pub(crate) const fn with_stack(mut self, variant: Variant) -> Self {
+        self.stack = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Stack`](crate::mapping::Mapping::Stack) the piece's stacked
+    /// lines are laid out by: [`Variant::Crossing`], each by its own feet, or
+    /// [`Variant::Straight`], fitted to its host where they would cross. Nothing in
+    /// [`Score::events`] changes with it — a line's own material is the same under both; it is
+    /// applied slot by slot, by [`Score::placed_in`].
+    #[must_use]
+    pub const fn stack(&self) -> Variant {
+        self.stack
     }
 
     /// The same score, with each line's harmony ([`crate::harmony`]).
@@ -768,11 +796,58 @@ impl Score {
                 )
             }
         };
+        let subdivisions = events.iter().map(|event| event.subdivision).collect();
         Placed {
             events,
+            subdivisions,
             first_beat,
             beats,
+            straightened: Vec::new(),
         }
+    }
+
+    /// What a placement sounds *in this slot*: [`Score::placed`], with each event's position in
+    /// its beat as it is heard here — under the straight stack, a stacked line's beat that would
+    /// cross the host's is fitted to the host's subdivision ([`crate::stack`]).
+    ///
+    /// Every consumer that times an event — the Strudel pattern and the page's trace, the OSC
+    /// schedule, the scorer's timeline — reads [`Placed::subdivision`] from this, so they agree on
+    /// where every syllable falls under either variant. Under [`Variant::Crossing`] it is exactly
+    /// [`Score::placed`].
+    #[must_use]
+    pub fn placed_in(&self, slot: &Slot, placement: Placement) -> Placed<'_> {
+        let mut placed = self.placed(placement);
+        if self.stack == Variant::Straight {
+            crate::stack::straighten(self, slot, placement, &mut placed);
+        }
+        placed
+    }
+
+    /// How many beats of the piece the straight stack fitted: each `(slot, beat)` in which any
+    /// stacked line was fitted to its host ([`Score::placed_in`]) counts once, however many lines
+    /// were fitted there. Zero under [`Variant::Crossing`].
+    ///
+    /// The one count the pattern header, the OSC schedule and the explain view all print, so the
+    /// debug surfaces cannot disagree about it.
+    #[must_use]
+    pub fn straightened_beats(&self) -> usize {
+        self.arrangement
+            .slots()
+            .iter()
+            .map(|slot| {
+                slot.placements()
+                    .iter()
+                    .flat_map(|placement| {
+                        self.placed_in(slot, *placement)
+                            .straightened()
+                            .iter()
+                            .map(|fitted| fitted.beat())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<std::collections::BTreeSet<usize>>()
+                    .len()
+            })
+            .sum()
     }
 
     /// The words that make no sound, because no pronunciation could be found for them.
@@ -790,8 +865,46 @@ impl Score {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placed<'a> {
     events: Vec<&'a Event>,
+    /// Each event's position in its beat as it sounds here, parallel to `events`.
+    subdivisions: Vec<Subdivision>,
     first_beat: usize,
     beats: usize,
+    straightened: Vec<Straightened>,
+}
+
+/// One beat of a stacked line fitted to its host's subdivision by the straight stack
+/// ([`crate::stack`]): which beat, and the two grids that would have crossed there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Straightened {
+    beat: usize,
+    own: usize,
+    host: usize,
+}
+
+impl Straightened {
+    pub(crate) const fn new(beat: usize, own: usize, host: usize) -> Self {
+        Self { beat, own, host }
+    }
+
+    /// The beat of the slot, counted from the placement's first beat — which is also the slot's
+    /// beat, since only a placement on the slot's own grid is fitted.
+    #[must_use]
+    pub const fn beat(self) -> usize {
+        self.beat
+    }
+
+    /// The line's own subdivision of the beat: the least common multiple of its onsets'
+    /// denominators there (3 for a triplet).
+    #[must_use]
+    pub const fn own(self) -> usize {
+        self.own
+    }
+
+    /// The host's subdivision of the same beat, which the line was fitted to (2 for a pair).
+    #[must_use]
+    pub const fn host(self) -> usize {
+        self.host
+    }
 }
 
 impl<'a> Placed<'a> {
@@ -813,6 +926,49 @@ impl<'a> Placed<'a> {
     pub const fn beats(&self) -> usize {
         self.beats
     }
+
+    /// Where `event` sounds in its beat here: its own [`Event::subdivision`], or — under the
+    /// straight stack, in a beat that would have crossed the host's — the fitted one. An event
+    /// this placement does not sound keeps its own.
+    #[must_use]
+    pub fn subdivision(&self, event: &Event) -> Subdivision {
+        self.events
+            .iter()
+            .zip(&self.subdivisions)
+            .find(|(own, _)| {
+                own.bar == event.bar
+                    && own.beat == event.beat
+                    && own.subdivision == event.subdivision
+                    && own.span == event.span
+            })
+            .map_or(event.subdivision, |(_, fitted)| *fitted)
+    }
+
+    /// Every event with its position here, in playing order.
+    pub fn onsets(&self) -> impl Iterator<Item = (&'a Event, Subdivision)> + '_ {
+        self.events
+            .iter()
+            .copied()
+            .zip(self.subdivisions.iter().copied())
+    }
+
+    /// The beats the straight stack fitted to the host, in order — empty under crossing, for the
+    /// host itself, and wherever nothing would have crossed.
+    #[must_use]
+    pub fn straightened(&self) -> &[Straightened] {
+        &self.straightened
+    }
+
+    /// Fits the events of one beat: each `(position, subdivision)` replaces the subdivision of
+    /// the event at that position of [`Placed::events`].
+    pub(crate) fn fit(&mut self, fitted: &[(usize, Subdivision)], record: Straightened) {
+        for (position, subdivision) in fitted {
+            if let Some(slot) = self.subdivisions.get_mut(*position) {
+                *slot = *subdivision;
+            }
+        }
+        self.straightened.push(record);
+    }
 }
 
 // Constructors used by the lowering passes. Kept crate-internal so that the only route to an
@@ -832,7 +988,16 @@ impl BeatIndex {
 
 impl Subdivision {
     pub(crate) const fn new(index: usize, of: usize) -> Self {
-        Self { index, of }
+        Self {
+            index,
+            of,
+            parts: 1,
+        }
+    }
+
+    /// A position lasting `parts` parts — only ever made by `crate::stack`.
+    pub(crate) const fn lasting(index: usize, of: usize, parts: usize) -> Self {
+        Self { index, of, parts }
     }
 }
 

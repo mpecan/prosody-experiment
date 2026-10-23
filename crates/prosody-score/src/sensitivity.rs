@@ -236,16 +236,19 @@ fn judge(
 
 /// Whether a line's only change is the length of some of `slots`: the same material, in the same
 /// slots, for the same reasons.
+///
+/// A slot's length and its onsets go together: when the edited stanza hosts the slot, both may
+/// have moved for the same reason — the bar is longer, or under the straight stack the host's feet
+/// that a stacked line is fitted to changed.
 fn only_retimed(before: &Line, after: &Line, slots: &BTreeSet<usize>) -> bool {
     before.heard == after.heard
         && before.sounds.len() == after.sounds.len()
-        && before.sounds.iter().zip(&after.sounds).all(
-            |(&(slot, cause, beats), &(other_slot, other_cause, other_beats))| {
-                slot == other_slot
-                    && cause == other_cause
-                    && (beats == other_beats || slots.contains(&slot))
-            },
-        )
+        && before.sounds.iter().zip(&after.sounds).all(|(was, now)| {
+            was.slot == now.slot
+                && was.cause == now.cause
+                && ((was.beats == now.beats && was.onsets == now.onsets)
+                    || slots.contains(&was.slot))
+        })
 }
 
 /// Every slot whose host is one of `bars`.
@@ -336,8 +339,23 @@ fn pick<'a>(probes: &[&'a str], index: usize, word: &str) -> &'a str {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Line {
     heard: Vec<Heard>,
-    /// Every slot it sounds in, why, and how long that slot lasts — the arrangement's part.
-    sounds: Vec<(usize, Cause, usize)>,
+    /// Every slot it sounds in — the arrangement's part.
+    sounds: Vec<Sounding>,
+}
+
+/// One slot a line sounds in, and how it sounds there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Sounding {
+    slot: usize,
+    cause: Cause,
+    /// How long the slot lasts.
+    beats: usize,
+    /// Where each of its events falls in its beat *in this slot* (`Score::placed_in`). Under the
+    /// crossing stack that is each event's own subdivision, already in [`Line::heard`]; under the
+    /// straight stack a stacked line is fitted to its host (`SPEC.md` §4.2), and the host can be
+    /// in another stanza — so an edit there re-times this line as played, and must count as a
+    /// change here, as the Strudel pattern, the trace and the OSC schedule all play it.
+    onsets: Vec<(BeatIndex, Subdivision)>,
 }
 
 /// Every line, by its bar in the score. Lines with no events are present and empty.
@@ -364,7 +382,16 @@ fn by_bar(score: &Score) -> Vec<Line> {
     for (index, slot) in score.arrangement().slots().iter().enumerate() {
         for placement in slot.placements() {
             if let Some(line) = lines.get_mut(placement.bar().get()) {
-                line.sounds.push((index, placement.cause(), slot.beats()));
+                line.sounds.push(Sounding {
+                    slot: index,
+                    cause: placement.cause(),
+                    beats: slot.beats(),
+                    onsets: score
+                        .placed_in(slot, *placement)
+                        .onsets()
+                        .map(|(event, subdivision)| (event.beat(), subdivision))
+                        .collect(),
+                });
             }
         }
     }
@@ -471,12 +498,20 @@ mod tests {
 
     use prosody_core::Cause;
 
-    use super::{Line, only_retimed, pick};
+    use super::{Line, Sounding, only_retimed, pick};
 
     fn sounding(sounds: &[(usize, Cause, usize)]) -> Line {
         Line {
             heard: Vec::new(),
-            sounds: sounds.to_vec(),
+            sounds: sounds
+                .iter()
+                .map(|&(slot, cause, beats)| Sounding {
+                    slot,
+                    cause,
+                    beats,
+                    onsets: Vec::new(),
+                })
+                .collect(),
         }
     }
 

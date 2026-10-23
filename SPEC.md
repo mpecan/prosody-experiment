@@ -111,6 +111,49 @@ seconds depended on the whole poem's mean bar length, so an edit to stanza *n* t
 re-timed stanza *m*; under `steady` a bar's length depends only on its own beats (and the tempo,
 which `tempo_range` already fits to the poem's density, as before).
 
+**Stacked lines** (*decided 2026-10-23 by the user: crossing stays the default, straightening is a
+variant to compare*). Where §4.6 stacks a line under the bar's host — held, refrain, call, a loop
+yielding or carrying on under the other layer — "syllable → subdivision within the foot" lets the
+two divide one beat differently, three against two. It is structure, so a selector,
+`Mapping::Stack`, with no `off` (a stacked line always divides its beats somehow; its first
+variant is what preceded it):
+
+- **`crossing`** (the default) — every line keeps its own feet wherever it sounds; the cross-rhythm
+  above.
+- **`straight`** — in each beat where a stacked line's grid and the host's would cross (neither
+  subdivision divides the other, measured as `prosody-score`'s `cross_rhythm` measures them: the
+  least common multiple of the onsets' reduced denominators), the stacked line's syllables are
+  fitted to the host's subdivision of that beat, each still its own event, traced to its own word
+  (I4). *The rule, "the first takes the long":* with more syllables than the host has parts, the
+  first take a part each and the rest share the last part equally — three over two is `[a@2 b c]`,
+  onsets 0, ½, ¾; with fewer, the first holds the parts the line has no syllable for — two over
+  three is `[a@2 b]`, onsets 0 and ⅔, a swung pair. The syllable opening the beat keeps the host's
+  downbeat whatever its stress (stress stays the gain), and the crowding falls at the end of the
+  beat, where the next onset already marks time. The result lies on the host's grid or a
+  subdivision of it, so it never crosses the host. Left alone: the host itself; a beat in which the
+  host is silent (nothing to fit to); a placement off the slot's grid — a loop squeezed into a
+  shorter bar or stretched across a longer one, whose beats fall between the host's; and two
+  stacked lines with each other where neither crosses the host.
+
+The fit is decided in the core, slot by slot (`prosody_core::stack`, through `Score::placed_in`),
+not in an emitter: the Strudel pattern and the page's trace (one walk), the OSC schedule and the
+scorer all read each event's place in its beat from it, so the scorer measures what is played. A
+syllable can now last more than one part of its beat (`Subdivision::parts`), which the Strudel
+pattern writes with mini-notation's `@` inside the beat (checked against `@strudel/mini` 1.2.6:
+`[bd@2 bd bd]` sounds at 0, ½ and ¾ of its beat). The score's events are unchanged — only where a
+line sounds under another does that line's beat shape its timing. **Disclosed against I2:** under
+`straight` a stacked line's onsets within a beat depend on its host's feet, and the host can be in
+another stanza (a refrain or call from stanza *m* under stanza *n*'s line), so an edit to stanza
+*n* that changes a host's feet re-times stanza *m*'s line *within the beat* where it sounds under
+that host. Its events, beats, voice, seed and accents are untouched, and every I2 property is about
+those; under `crossing` nothing crosses a line's boundary. The one-word edit test
+(`prosody-score`'s sensitivity) reads each line's fitted onsets slot by slot, so it counts that
+re-timing as a change outside the edited stanza: *local* falls under `straight` (Theocritus 29 → 18
+of 61 edits), while *explained* — and so legibility — does not, because the re-timed line sounds
+under the edited one. The pattern's header names `straight` and counts the beats it fitted; the
+explain view prints the same count (each fitted beat of a slot once, however many lines were fitted
+in it, `Score::straightened_beats`) and lists each line's fitted beats.
+
 ### 4.3 Repetition → structure (highest-value pass)
 
 Repetition is not one thing. Distinguish:
@@ -276,13 +319,15 @@ is unchanged. The OSC schedule has no chord message, and says how many chords it
 
 **Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
 lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list
-of named variants, always including `off` (the pulse excepted, below), and a default. A `Mappings` value chooses one variant
+of named variants, always including `off` (the pulse and the stack excepted, below), and a default. A `Mappings` value chooses one variant
 per mapping, and only a variant the mapping lists can be chosen. Today the held and refrain
 lanes, the stanza period and the outro are `off`/`on`, default `on`; the bass is
 `off`/`height`/`syllables`/`feet`, default `height`; the harmony is `off`/`rhyme`/`cadence`/`both`,
 default `off`; the reading is `off`/`arrives`/`stanza`, default `arrives`; the pulse (§4.2) is
-`elastic`/`steady`, default `steady` — the one mapping without `off`, because a piece cannot be
-without a pulse: its first variant is what preceded it, `elastic`, and leaving it out means that.
+`elastic`/`steady`, default `steady` — a mapping without `off`, because a piece cannot be
+without a pulse: its first variant is what preceded it, `elastic`, and leaving it out means that;
+the stack (§4.2) is `crossing`/`straight`, default `crossing`, likewise without `off` — leaving it
+out means `crossing`.
 They are
 chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
 `set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
