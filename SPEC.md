@@ -324,8 +324,9 @@ doubles a voice already sounding in the bar. A refrain stanza stops both lanes w
 
 **The harmony layer** (*sound and voice step 5, candidate approved for comparison, off by
 default*). Every bar of a **foundation** stanza gets one chord, held for the bar, in a chord lane of
-its own. Its span is the rhyme word of the line the bar hosts — the line's last pronounceable word
-(I4). The lowering decides which bars have a chord, on which degree, with which function; the
+its own — the one exception being the turnaround's bar under `cadence` and `both`, below, which
+holds two, one after the other. Its span is the rhyme word of the line the bar hosts — the line's
+last pronounceable word (I4). The lowering decides which bars have a chord, on which degree, with which function; the
 emitter voices it (palette, §5). A chord is a fact about its line, and sounds wherever the
 arrangement plays that line in the foundation layer — stated, arriving, yielding, looping under a
 flourish host, repeating in the outro — and never in the call, held or refrain lanes, so a bar has
@@ -339,11 +340,34 @@ at most one chord. Three variants of `Mapping::Harmony`, from `PLAN.md`'s propos
   in its stanza (the held lane's test) is open: V of its degree (*d*+4). Its answer closes: I on the
   degree. A line that is both — the middle A of AAA — is open, since its class is still unresolved.
   A line with no rhyme within its stanza is IV of the stanza's key (*k*+3), the key being the degree
-  of the stanza's first in-stanza rhyme, or 0. The stanza's last bar (of two or more) is the
-  **turnaround**: V of the stanza's own first chord, replacing whatever that bar had. The I it
-  resolves to is the loop's first bar, played next on every pass.
+  of the stanza's first in-stanza rhyme, or 0. The stanza's last bar (of two or more) is **split**
+  (the user's decision, `PLAN.md` "the cadence's ending"): for its first half, the chord those
+  rules give it — I when the line closes a rhyme, so ABAB, AABB and ABBA land on I, and IV when it
+  has no rhyme in its stanza (decided: the user's rule is "its own chord first", and IV–V into the
+  loop's first chord is a cadence too, so an unanswered last line keeps its IV rather than a whole
+  bar of V); from the bar's half, the **turnaround**: V of the stanza's own first chord. The chord
+  it resolves to is the loop's first bar, played next on every pass. The half is the bar's, in
+  time: two beats into a four-beat bar, one and a half into a three-beat one. A one-line stanza has
+  no turnaround (its last bar is its first), nor does a last line with no pronounceable word, nor a
+  stanza none of whose earlier lines has a chord to lead back to. **The turnaround's span is the
+  last line's rhyme word**, the line whose bar it shares: every chord of a bar traces to the line
+  that bar plays, and the first line, which gives the turnaround its root, is named in its reason
+  (`Reason::Turnaround { onto }`) rather than in its span.
 - **`both`** — H2 where it applies (open and closing lines, the turnaround), H1 in every other bar;
-  so a line rhymed only across stanzas takes I on its degree, and an unrhymed line no chord.
+  so a line rhymed only across stanzas takes I on its degree, and an unrhymed line no chord — a
+  stanza's last line that rhymes with nothing rests for the first half of its bar, then turns
+  round.
+
+Under the walking bass's W2 (a note a foot on the chord's tones), a foot of the split bar walks on
+the chord the lane is sounding where it begins: the bar's own chord before the **bar's** half
+(`2 · beat < beats`, `beats` the bar's), the turnaround from it. The bar is the one the line is
+stated in — under the stanza period its stanza's longest line, so a last line a foot shorter than
+the rest still turns round where the lane does, not at its own half; without the period the line's
+own length, and a line stretched under another host keeps its half where that bar's is. A walk is
+decided once per line, so one case is left: under the period, a stanza's last line looping under
+a flourish stanza whose period is not its own's can turn round a foot away from the lane. None of
+the shipped poems reaches it: under cadence and both every W2 foot of a split bar walks on the
+lane's chord, 57 of them under another host. Fixing it means a walk per slot, not per line.
 
 A flourish stanza carries no harmony. Degrees are counted like a rhyme class's and may run past
 the scale's length (V of degree 5 is degree 9); the emitter folds a root into one octave. The
@@ -354,8 +378,10 @@ degree numbering (as the melody's note does), and on the rhyme analysis, whose c
 poem-wide — an edit elsewhere can give a line a partner in another stanza (H1 then gives it a
 chord) or merge two of a stanza's classes through a third word. The I2 property for the harmony is
 scoped to exactly that: when a stanza's rhyme pattern and layer are unchanged by an edit to another
-stanza, its harmony — which bars have chords, which function by which rule, which rests and why —
-is unchanged. The OSC schedule has no chord message, and says how many chords it leaves out.
+stanza, its harmony — which bars have chords, which function by which rule, which rests and why,
+and which bar is split — is unchanged. The split adds no dependency: the turnaround still reads
+only its own stanza. The OSC schedule has no chord message, and says how many chords it leaves out
+and how many of those are turnarounds.
 
 **Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
 lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list

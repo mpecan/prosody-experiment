@@ -18,7 +18,8 @@ use prosody_core::phoneme::{
 use prosody_core::surprisal::{Lexicon, Rarity};
 use prosody_core::voice::Score;
 use prosody_core::{
-    Harmony, Layer, Poem, Reason, Silence, meter, repetition, rhyme, role, sound, surprisal,
+    Chord, Harmony, Layer, Onset, Poem, Reason, Silence, meter, repetition, rhyme, role, sound,
+    surprisal,
 };
 
 struct Toy;
@@ -81,27 +82,51 @@ fn compile(source: &str, harmony: Variant) -> Score {
     .unwrap()
 }
 
-/// Each line's harmony, as `"<root> <numeral> <why>"` or `"rest <why>"`, in bar order.
+/// Each line's harmony, as `"<root> <numeral> <why>"` or `"rest <why>"`, in bar order — and a
+/// stanza's split last bar as its own chord (or `rest`), `then`, its turnaround.
 fn progression(score: &Score) -> Vec<String> {
+    let chord = |chord: Chord| {
+        let why = match chord.reason() {
+            Reason::Class(class) => format!("class {}", class.letter()),
+            Reason::Opens(class) => format!("opens {}", class.letter()),
+            Reason::Closes(class) => format!("closes {}", class.letter()),
+            Reason::Unanswered { key } => format!("unanswered in {}", key.get()),
+            Reason::Turnaround { onto } => format!("turnaround onto {}", onto.get()),
+        };
+        format!(
+            "{} {} {why}",
+            chord.root().get(),
+            chord.function().numeral()
+        )
+    };
     score
         .harmony()
         .iter()
-        .map(|harmony| match harmony {
-            Harmony::Chord(chord) => {
-                let why = match chord.reason() {
-                    Reason::Class(class) => format!("class {}", class.letter()),
-                    Reason::Opens(class) => format!("opens {}", class.letter()),
-                    Reason::Closes(class) => format!("closes {}", class.letter()),
-                    Reason::Unanswered { key } => format!("unanswered in {}", key.get()),
-                    Reason::Turnaround { onto } => format!("turnaround onto {}", onto.get()),
-                };
-                format!(
-                    "{} {} {why}",
-                    chord.root().get(),
-                    chord.function().numeral()
-                )
-            }
+        .map(|harmony| match *harmony {
+            Harmony::Chord(one) => chord(one),
+            Harmony::Turning { own, turn } => format!(
+                "{} then {}",
+                own.map_or_else(|| "rest".to_owned(), chord),
+                chord(turn)
+            ),
             Harmony::Rest(rest) => format!("rest {:?}", rest.why()).to_lowercase(),
+        })
+        .collect()
+}
+
+/// Each slot's chords, as (bar, root, onset) in the order they sound.
+fn slot_chords(score: &Score) -> Vec<Vec<(usize, usize, Onset)>> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| {
+            score
+                .harmony_in(slot)
+                .into_iter()
+                .flat_map(Harmony::chords)
+                .map(|chord| (chord.bar().get(), chord.root().get(), chord.onset()))
+                .collect()
         })
         .collect()
 }
@@ -149,17 +174,78 @@ fn rhyme_makes_abab_alternate_i_and_ii() {
 
 #[test]
 fn cadence_makes_open_rhymes_dominant_and_their_answers_tonic() {
-    // H2 on ABAB: A opens (V of 0 is 4), B opens (V of 1 is 5), A closes (I on 0), and the last
-    // bar, which would close B, is the turnaround: V of the stanza's first chord's root, 4 + 4.
+    // H2 on ABAB: A opens (V of 0 is 4), B opens (V of 1 is 5), A closes (I on 0). The last bar
+    // closes B, so it lands on I on 1 — and from its half turns round: V of the stanza's first
+    // chord's root, 4 + 4.
     assert_eq!(
         progression(&compile(ABAB, Variant::Cadence)),
         vec![
             "4 V opens A",
             "5 V opens B",
             "0 I closes A",
-            "8 V turnaround onto 4",
+            "1 I closes B then 8 V turnaround onto 4",
         ]
     );
+}
+
+#[test]
+fn cadence_lands_aabb_and_abba_on_i_before_turning_round() {
+    // AABB: A (AA) is degree 0, B (OW) degree 1. A opens (V/4), A closes (I/0), B opens (V/5),
+    // B closes (I/1), then the turnaround onto the first chord, 4: V/8.
+    assert_eq!(
+        progression(&compile("da dA\nta tA\nma mO\nsa sO\n", Variant::Cadence)),
+        vec![
+            "4 V opens A",
+            "0 I closes A",
+            "5 V opens B",
+            "1 I closes B then 8 V turnaround onto 4",
+        ]
+    );
+    // ABBA: A opens (V/4), B opens (V/5), B closes (I/1), and A closes on the stanza's own home,
+    // I/0, before the turnaround onto 4.
+    assert_eq!(
+        progression(&compile("da dA\nda dO\nta tO\nta tA\n", Variant::Cadence)),
+        vec![
+            "4 V opens A",
+            "5 V opens B",
+            "1 I closes B",
+            "0 I closes A then 8 V turnaround onto 4",
+        ]
+    );
+}
+
+#[test]
+fn an_unanswered_last_line_keeps_its_iv_before_the_turnaround() {
+    // ABAC: O and U rhyme with nothing, so only A sounds (degree 0) and the key is 0. A opens
+    // (V/4), O is unanswered (IV of 0, 3), A closes (I/0). The last line is unanswered too: the
+    // bar is split all the same — what H2 gives it, IV/3, then V of the first chord, 8. Decided
+    // (`SPEC.md` §4.6): the user's rule is "its own chord first", and IV–V–(the loop's first
+    // chord) is a cadence of its own, so the open line keeps its colour rather than a whole bar
+    // of V.
+    assert_eq!(
+        progression(&compile("da dA\nda dO\nta tA\nta tU\n", Variant::Cadence)),
+        vec![
+            "4 V opens A",
+            "3 IV unanswered in 0",
+            "0 I closes A",
+            "3 IV unanswered in 0 then 8 V turnaround onto 4",
+        ]
+    );
+}
+
+#[test]
+fn the_turnaround_sounds_from_the_bars_half_and_the_rest_from_its_start() {
+    // ABAB stated, then the outro's pass: the last bar's two chords in slots 3 and 7, its own at
+    // the start and the turnaround at the half; every other slot one chord from its start.
+    let start = |bar, root| (bar, root, Onset::Start);
+    let chords = slot_chords(&compile(ABAB, Variant::Cadence));
+    let pass = vec![
+        vec![start(0, 4)],
+        vec![start(1, 5)],
+        vec![start(2, 0)],
+        vec![start(3, 1), (3, 8, Onset::Half)],
+    ];
+    assert_eq!(chords, [pass.clone(), pass].concat());
 }
 
 #[test]
@@ -174,9 +260,9 @@ fn cadence_on_the_mixed_fixture() {
             "4 IV unanswered in 1",
             "5 V opens B",
             "1 I closes B",
-            "8 V turnaround onto 4",
+            "4 IV unanswered in 1 then 8 V turnaround onto 4",
             "3 IV unanswered in 0",
-            "7 V turnaround onto 3",
+            "3 IV unanswered in 0 then 7 V turnaround onto 3",
         ]
     );
 }
@@ -201,17 +287,18 @@ fn rhyme_on_the_mixed_fixture_rests_where_a_line_rhymes_with_nothing() {
 #[test]
 fn both_lets_cadence_decide_where_it_applies_and_rhyme_fill_the_rest() {
     // Bar 0: no rhyme in its stanza, so H2 does not apply → H1's O on 0. Bars 1–2: the A pair, H2.
-    // Bar 3: H2's turnaround, onto the first chord — now H1's 0 — so 4. Bar 4: H1's O on 0. Bar 5:
-    // the turnaround onto 0. Neither unrhymed line rests: each is a stanza's last bar.
+    // Bar 3: E rhymes with nothing, so neither H2 nor H1 gives its first half a chord — it rests —
+    // and from its half H2's turnaround onto the first chord, now H1's 0: V/4. Bar 4: H1's O on 0.
+    // Bar 5: U rests, then the turnaround onto 0.
     assert_eq!(
         progression(&compile(MIXED, Variant::Both)),
         vec![
             "0 I class A",
             "5 V opens B",
             "1 I closes B",
-            "4 V turnaround onto 0",
+            "rest then 4 V turnaround onto 0",
             "0 I class A",
-            "4 V turnaround onto 0",
+            "rest then 4 V turnaround onto 0",
         ]
     );
 }
@@ -219,25 +306,31 @@ fn both_lets_cadence_decide_where_it_applies_and_rhyme_fill_the_rest() {
 #[test]
 fn a_line_that_answers_and_is_answered_again_stays_open() {
     // AAAO: bar 1 closes bar 0 but is answered by bar 2, so it is still a suspension (V); bar 2
-    // closes (I on 0); bar 3 is the turnaround onto 4.
+    // closes (I on 0); bar 3's O rhymes with nothing — IV of the key, 0 + 3 — then the turnaround
+    // onto 4.
     assert_eq!(
         progression(&compile("da dA\nta tA\nma mA\nsa sO\n", Variant::Cadence)),
         vec![
             "4 V opens A",
             "4 V opens A",
             "0 I closes A",
-            "8 V turnaround onto 4",
+            "3 IV unanswered in 0 then 8 V turnaround onto 4",
         ]
     );
 }
 
 #[test]
 fn a_one_line_stanza_has_no_turnaround() {
-    // Its last bar is its first: there is nothing to turn round onto. A line alone rhymes with
-    // nothing, so H2 gives it IV of degree 0.
+    // Its last bar is its first: there is nothing to turn round onto, so the bar is not split. A
+    // line alone rhymes with nothing, so H2 gives it IV of degree 0 for the whole bar — under
+    // `both` H1 gives it nothing either, so it rests.
+    let score = compile("da dA\n", Variant::Cadence);
+    assert_eq!(progression(&score), vec!["3 IV unanswered in 0"]);
+    assert!(score.harmony()[0].turnaround().is_none());
+    assert_eq!(slot_chords(&score)[0], vec![(0, 3, Onset::Start)]);
     assert_eq!(
-        progression(&compile("da dA\n", Variant::Cadence)),
-        vec!["3 IV unanswered in 0"]
+        progression(&compile("da dA\n", Variant::Both)),
+        vec!["rest unrhymed"]
     );
 }
 
@@ -251,6 +344,14 @@ fn every_chord_traces_to_its_lines_rhyme_word() {
         .map(|chord| chord.span().text(poem.source()).unwrap())
         .collect();
     assert_eq!(words, vec!["dO", "dA", "tA", "mE", "sO", "nU"]);
+    // Under cadence the last bar has two chords, and both trace to its own rhyme word — the
+    // turnaround's root comes from the first line, its span from the line whose bar it shares.
+    let poem = Poem::parse(ABAB.to_owned()).unwrap();
+    let words: Vec<&str> = compile(ABAB, Variant::Cadence)
+        .chords()
+        .map(|chord| chord.span().text(poem.source()).unwrap())
+        .collect();
+    assert_eq!(words, vec!["dA", "dO", "tA", "tO", "tO"]);
 }
 
 #[test]
@@ -272,25 +373,13 @@ fn a_slot_plays_the_chord_of_its_foundation_line_and_nothing_held_under_it() {
     // ABAB stated, then the outro's pass: eight slots, the A line held under the B line in slot
     // 1 — but a slot's chord is its foundation host's, so it is still i–ii–i–ii, twice.
     let score = compile(ABAB, Variant::Rhyme);
-    let roots: Vec<Option<usize>> = score
-        .arrangement()
-        .slots()
-        .iter()
-        .map(|slot| score.chord_in(slot).map(|chord| chord.root().get()))
-        .collect();
-    assert_eq!(
-        roots,
-        vec![
-            Some(0),
-            Some(1),
-            Some(0),
-            Some(1),
-            Some(0),
-            Some(1),
-            Some(0),
-            Some(1)
-        ]
-    );
+    let pass = vec![
+        vec![(0, 0, Onset::Start)],
+        vec![(1, 1, Onset::Start)],
+        vec![(2, 0, Onset::Start)],
+        vec![(3, 1, Onset::Start)],
+    ];
+    assert_eq!(slot_chords(&score), [pass.clone(), pass].concat());
 }
 
 #[test]
@@ -300,19 +389,11 @@ fn a_foundation_loop_keeps_its_chords_under_a_flourish() {
     // them — with their chords.
     let source = "da dA\nta tA\n\nmA\nma ma ma ma ma mO\n";
     let score = compile(source, Variant::Cadence);
-    let chords: Vec<Option<(usize, usize)>> = score
-        .arrangement()
-        .slots()
-        .iter()
-        .map(|slot| {
-            score
-                .chord_in(slot)
-                .map(|chord| (chord.bar().get(), chord.root().get()))
-        })
-        .collect();
-    // Cadence on AA: bar 0 opens (V of 0 = 4); bar 1 is the last bar, the turnaround onto 4 (8).
-    assert_eq!(
-        chords[..4],
-        [Some((0, 4)), Some((1, 8)), Some((0, 4)), Some((1, 8))]
-    );
+    // Cadence on AA: bar 0 opens (V of 0 = 4); bar 1, the last bar, closes (I on 0) and turns round
+    // onto 4 from its half (8) — under the flourish as where it is stated.
+    let loop_ = vec![
+        vec![(0, 4, Onset::Start)],
+        vec![(1, 0, Onset::Start), (1, 8, Onset::Half)],
+    ];
+    assert_eq!(slot_chords(&score)[..4], [loop_.clone(), loop_].concat());
 }

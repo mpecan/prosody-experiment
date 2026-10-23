@@ -146,12 +146,24 @@ impl Timeline {
             }
             // The harmony layer (§4.6): one chord a slot, on the bar's first beat, held for the
             // bar. A timeline is onsets, so it is one hit — the held chord is not counted again in
-            // the bar's later beats.
-            if let Some(chord) = score.chord_in(slot) {
+            // the bar's later beats. A stanza's last bar under H2 is split: its own chord (if any)
+            // from the start, the turnaround from the bar's half — `slot_beats / 2` beats in, as
+            // the Strudel lane's `[a b]` places it.
+            let harmony = score.harmony_in(slot);
+            let chords = [
+                harmony
+                    .and_then(prosody_core::Harmony::chord)
+                    .map(|chord| (chord, 0)),
+                harmony
+                    .and_then(prosody_core::Harmony::turnaround)
+                    .map(|chord| (chord, slot_beats)),
+            ];
+            // `half` is in half-beats: the onset `half / 2` beats after the bar's start.
+            for (chord, half) in chords.into_iter().flatten() {
                 hits.push(Hit {
-                    slot: running,
+                    slot: running + half / 2,
                     bar: index,
-                    within: (0, 1),
+                    within: reduce(half % 2, 2),
                     voice: 0,
                     accent: false,
                     degree: Some(Tone::degree(chord.root().get())),

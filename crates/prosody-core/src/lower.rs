@@ -123,12 +123,15 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
     let degrees = degrees(analyses.rhyme);
     melody(&mut events, analyses, &degrees);
     // The harmony layer reads the rhyme and the roles and nothing the arrangement decides: a chord
-    // is a fact about its line, and `Score::chord_in` finds it wherever the line sounds. It comes
+    // is a fact about its line, and `Score::harmony_in` finds it wherever the line sounds. It comes
     // before the bass because W2's walk lands on the bar's chord tones.
     let harmony = crate::harmony::run(analyses.rhyme, analyses.roles, &degrees, mappings);
     // After the melody: the height bass leaves a rhyme word to §4.5's note, as it always has.
+    // W2 turns round where the chord lane does, at the half of the bar the line is stated in: so
+    // it learns that bar's length here, by the arrangement's own rule (`crate::arrange`).
     let walk = mappings.get(Mapping::Bass);
-    crate::bass::run(&mut events, &nuclei, analyses, &harmony, walk);
+    let own_bars = own_bars(analyses, &events, mappings.has(Mapping::StanzaPeriod));
+    crate::bass::run(&mut events, &nuclei, analyses, &harmony, &own_bars, walk);
     colour(&mut events, analyses);
     figures(&mut events, analyses);
     let voices = voices(analyses, &by_line, &events);
@@ -226,6 +229,32 @@ fn lines_by_voice(analyses: Analyses<'_>) -> BTreeMap<Span, VoiceId> {
         .flat_map(crate::repetition::StanzaRepetition::lines)
         .map(|line| (line.line(), line.voice()))
         .collect()
+}
+
+/// How many beats each line's bar lasts where the line is stated, its own host: its stanza's
+/// period under [`Mapping::StanzaPeriod`], else the line's own beats — what
+/// [`crate::arrange::Slot::beats`] gives that slot, computed by the same rule
+/// ([`crate::arrange::periods_by`]) before there is a score to arrange.
+fn own_bars(analyses: Analyses<'_>, events: &[Event], period: bool) -> BTreeMap<usize, usize> {
+    let beats_in = |bar: usize| {
+        events
+            .iter()
+            .filter(|event| event.bar().get() == bar)
+            .map(|event| event.beat().get() + 1)
+            .max()
+            .unwrap_or(0)
+    };
+    if period {
+        crate::arrange::periods_by(analyses.poem, beats_in)
+    } else {
+        let bars = analyses
+            .poem
+            .stanzas()
+            .iter()
+            .map(|s| s.lines().len())
+            .sum();
+        (0..bars).map(|bar| (bar, beats_in(bar))).collect()
+    }
 }
 
 /// Places every syllable in time (`SPEC.md` §4.2).

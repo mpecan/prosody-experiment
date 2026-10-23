@@ -433,16 +433,19 @@ fn calls(poem: &Poem, score: &Score) -> BTreeMap<usize, Span> {
 
 /// Every line's stanza period: the most beats any line of its stanza takes.
 fn periods(poem: &Poem, score: &Score) -> BTreeMap<usize, usize> {
+    periods_by(poem, |bar| score.beats_in(bar))
+}
+
+/// Every line's stanza period, from each bar's own beats: the most beats any line of its stanza
+/// takes. The one rule for it, so the bass pass — which runs before there is a [`Score`] to
+/// arrange — learns the same bar lengths the arrangement gives (`crate::bass`'s W2 turnaround).
+pub(crate) fn periods_by(poem: &Poem, beats_in: impl Fn(usize) -> usize) -> BTreeMap<usize, usize> {
     let mut periods = BTreeMap::new();
     let mut first_bar = 0;
     for stanza in poem.stanzas() {
         let bars = first_bar..first_bar + stanza.lines().len();
         first_bar = bars.end;
-        let period = bars
-            .clone()
-            .map(|bar| score.beats_in(bar))
-            .max()
-            .unwrap_or(0);
+        let period = bars.clone().map(&beats_in).max().unwrap_or(0);
         periods.extend(bars.map(|bar| (bar, period)));
     }
     periods

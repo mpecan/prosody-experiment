@@ -681,9 +681,10 @@ impl Score {
         &self.harmony
     }
 
-    /// Every chord, in bar order.
+    /// Every chord, in the order they sound: bar by bar, and within a turning bar its own chord
+    /// before its turnaround.
     pub fn chords(&self) -> impl Iterator<Item = Chord> + '_ {
-        self.harmony.iter().filter_map(|harmony| harmony.chord())
+        self.harmony.iter().flat_map(|harmony| harmony.chords())
     }
 
     /// The harmony of one line, by its bar.
@@ -695,18 +696,19 @@ impl Score {
             .copied()
     }
 
-    /// The chord a slot of the arrangement plays: the chord of the whole line sounding in the
-    /// foundation layer there — its host, or the foundation's loop under a flourish host — if
-    /// that line has one. Never a line in the call, held or refrain lane: one chord a bar.
+    /// The harmony a slot of the arrangement plays: that of the whole line sounding in the
+    /// foundation layer there — its host, or the foundation's loop under a flourish host. Never a
+    /// line in the call, held or refrain lane: one harmony a bar — one chord, or a stanza's last
+    /// bar's two, one after the other ([`Harmony::Turning`]).
     ///
     /// The one place this is decided, so every backend and the scorer agree on it.
     #[must_use]
-    pub fn chord_in(&self, slot: &Slot) -> Option<Chord> {
+    pub fn harmony_in(&self, slot: &Slot) -> Option<Harmony> {
         let foundation = slot.placements().iter().find(|placement| {
             placement.lane() == Lane::Layer(crate::role::Layer::Foundation)
                 && placement.part() == Part::Line
         })?;
-        self.harmony_of(foundation.bar().get())?.chord()
+        self.harmony_of(foundation.bar().get())
     }
 
     /// Whether `placement`'s bass notes sound in `slot`.
@@ -716,7 +718,7 @@ impl Score {
     /// clash, and the default piece stays the piece it was.
     ///
     /// Under a walking bass (W1, W2), only the slot's foundation-layer line — the one
-    /// [`Score::chord_in`] takes the bar's chord from. A walk is *one* line moving by step and by
+    /// [`Score::harmony_in`] takes the bar's chords from. A walk is *one* line moving by step and by
     /// semitone; a held, refrain or call line walking in its own lane under it put two or three
     /// walks in one bar, and their passing and approach tones landed a semitone apart (on Blake's
     /// Tyger under W1, 59 of 257 bass onsets). One walk a bar, as one chord a bar (`SPEC.md` §4.6).

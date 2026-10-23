@@ -406,6 +406,147 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The cadence's ending — the last bar split, its own chord then the turnaround
+
+The user decided: under `harmony = cadence` (and `both`) a stanza's last bar had always been a
+whole bar of V turning round onto the stanza's first chord, even when its line closes a rhyme, so
+ABAB, AABB and ABBA never landed on I. Now that bar is **split**: its own chord first — I when the
+line closes a rhyme, whatever H2 would otherwise give it — then, from the bar's half, V of the
+stanza's own first chord (still I2-safe: it reads only its own stanza). No new variant; `rhyme`
+and every line that is not last in its stanza are unchanged.
+
+- **Core** (`prosody_core::harmony`). `Harmony::Turning { own: Option<Chord>, turn: Chord }` beside
+  `Chord` and `Rest`; `Harmony::chord()` (from the bar's start), `turnaround()`, `chords()`,
+  `chord_at(beat, beats)`; `Chord::onset()` (`Onset::Start`/`Half`, the turnaround's being `Half`).
+  `Score::chord_in` became `Score::harmony_in(slot)`, the one place a slot's harmony is chosen, so
+  every consumer has to handle the second chord; `Score::chords()` yields both.
+- **Decided and documented** (`SPEC.md` §4.6): the turnaround's **span is the last line's rhyme
+  word** — the line whose bar it shares; the first line, which gives it its root, is in its reason
+  (`Turnaround { onto }`). **An unanswered last line keeps its IV** and turns round from the half
+  (IV–V into the loop's first chord), rather than a whole bar of V — the user's rule is "its own
+  chord first". Under `both` a last line that rhymes with nothing **rests for the first half**
+  (`own: None`), then turns round. No turnaround, as before, for a one-line stanza, a last line with
+  no word, or a stanza whose earlier lines have no chord. The half is the bar's, in time: beat 2 of
+  4, beat 1½ of 3 (swing then moves it like any offbeat — palette).
+- **W2's walk follows the split, at the bar's half.** A foot from the half of the bar its line is
+  stated in (`2·beat ≥ beats`, `beats` the bar's) walks on the turnaround, the ones before on the
+  bar's own chord; a repeat is now judged by (root, step), so the same step over another root is no
+  repeat. The bar's length comes from the arrangement's own rule (`arrange::periods_by`, shared with
+  the slots; `lower::own_bars`), since the bass runs before there is a score to arrange. A first
+  draft turned round at the *line's* half; review found that under the stanza period (the default)
+  a last line shorter than its stanza's longest walked on the turnaround while the lane still held
+  the bar's own chord (an F against C minor). Over the shipped poems that was 9 feet (Annabel Lee 7,
+  the Slovenian corpus poem 2) under cadence; now none: every W2 foot of a split bar, 57 of them
+  under another host (under cadence), walks on the lane's chord. Tests: in `tests/bass.rs`, ABBA
+  with a four-foot last line in five-beat bars (roots 0 0 0 8, steps 0 2 3 4) and its period-off
+  twin (0 0 8 8, steps 0 2 2 4); in `tests/invariants.rs`, the property that W2 walks on the chord
+  the lane is sounding, over rhymed ragged stanzas (it fails on the first draft). Left, and disclosed in §4.6:
+  a walk is one per line, so under the period a stanza's last line looping under a flourish stanza
+  of another period can turn a foot away from the lane — no shipped poem reaches it.
+- **Every surface.** Strudel: a turning slot's element is `[own turn]` (or `[~ turn]`), gains
+  likewise; the header gains `//   chords: a stanza's last bar is split — …` and writes the bar as
+  `4:I/1+V/8` (`-+V/8` for a resting first half). Explain view: a second row, `harmony then, from the
+  bar's half, V deg 8 (V of deg 4) · cadence: the stanza's last bar, …`. OSC: `# not scheduled here:
+  110 chords of the harmony layer, 22 of them turnarounds from a bar's half` (Tyger), the same count
+  on `--send`'s stderr; `Schedule::unsent_turnarounds`. Scorer: a second chord hit `slot_beats / 2`
+  beats into the bar. The trace lights syllables only, never chords — checked, unchanged; the
+  reading is unchanged.
+- **Found and fixed on the way: the chord lane was off the clock under the steady pulse.** It wrote
+  its own `<a b c>` (one element a *cycle*), so since the steady pulse every chord lasted one beat
+  and the lane drifted through the piece, contrary to that entry's claim that the chord lane agreed
+  bar for bar. It now goes through `strudel::sequence` with every other pattern (`<a@4 b@3 …>`), so a
+  chord lasts its bar; a test checks the lane's weights equal `strudel::weights`. This changes the
+  chord lane under `rhyme` too (weights only; under `elastic` `rhyme` is byte-identical apart from
+  the lane's comment).
+- **Tests (hand-worked).** Core: ABAB → `1 I closes B then 8 V turnaround onto 4`; AABB → `I/1 then
+  V/8`; ABBA → `I/0 then V/8`; ABAC (unanswered last line) → `IV/3 then V/8`; the mixed fixture under
+  cadence and both (resting first halves); AAAO; a one-line stanza (no split, `IV/3` whole bar; `both`
+  rests); spans (`dA dO tA tO tO`); slot onsets (`Start`/`Half`) stated, in the outro and looping
+  under a flourish. W2 on ABAB: roots `1 1 8 8` in the last bar, steps `0 2 2 1`. Explain rows, incl.
+  the resting half. Strudel: ABBA four-beat `[[48,51,55] [50,53,56]]@4`, weights `4 ×8`, elastic
+  `[[…] […]]`, rhyme unsplit; `[~ [50,53,56]]@1` for the resting half; the existing chord tests now
+  carry `@1`. OSC: ABAB cadence 10 chords, 2 turnarounds. CLI: the couplet `2:I/0+V/8 4:I/1+V/9`, the
+  explain row, OSC `12 chords …, 4 of them turnarounds`. Scorer: AABB pitched 24/40 (rhyme) and 26/42
+  (cadence). Properties: the I2 harmony shape now includes the split; the W2 I4 property checks each
+  note's root against `chord_at`.
+- **Snapshots: none changed** — no corpus snapshot has the harmony on. Every example's pattern,
+  OSC and explain under `harmony=off` is byte-identical to before.
+- **Measured** (`./scripts/cycle.sh <profile> harmony=<variant>`). Off: machine 0.743, jazz 0.737,
+  every row identical. Before → after: machine cadence 0.775 → **0.778**, both 0.763 → 0.763; jazz
+  cadence 0.730 → 0.730, both 0.733 → 0.733. The extra onset raises layering and pitched slightly
+  (Tyger cadence layering 3.837 → 3.900); legibility cannot move (a chord is no event).
+
+`machine`, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000      - |  0.932  0.811  0.756
+carroll-jabberwocky     2.915  0.911  0.559  1.651  0.600  0.887  1.000      - |  0.826  0.957  0.790
+dickinson-because       2.761  0.907  0.701  1.573  0.362  0.887  1.000      - |  0.936  0.831  0.777
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933      - |  0.955  0.946  0.904
+poe-annabel-lee         3.950  0.911  0.514  1.847  0.154  0.841  0.811      - |  0.876  0.914  0.801
+preseren-zdravljica     2.417  0.791  0.735  1.542  0.214  0.643  1.000      - |  0.561  1.000  0.561
+shakespeare-sonnet-18   2.345  0.818  0.766  1.854  0.364  0.993  1.000      - |  0.821  1.000  0.821
+whitman-song-of-myself  2.797  0.879  0.339  1.546  0.150  0.894  1.000      - |  0.948  0.837  0.794
+wilde-theocritus        3.059  0.913  0.738  2.099  0.341  0.944  0.844      - |  0.971  0.820  0.796
+mean overall 0.778 over 9 poems
+```
+`machine`, harmony=both:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000      - |  0.932  0.811  0.756
+carroll-jabberwocky     2.761  0.903  0.540  1.651  0.600  0.887  1.000      - |  0.809  0.957  0.774
+dickinson-because       2.458  0.879  0.670  1.573  0.362  0.887  1.000      - |  0.903  0.831  0.750
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933      - |  0.955  0.946  0.904
+poe-annabel-lee         3.906  0.908  0.511  1.847  0.154  0.841  0.811      - |  0.876  0.914  0.801
+preseren-zdravljica     2.139  0.743  0.705  1.542  0.214  0.643  1.000      - |  0.521  1.000  0.521
+shakespeare-sonnet-18   2.288  0.800  0.761  1.854  0.364  0.993  1.000      - |  0.793  1.000  0.793
+whitman-song-of-myself  2.706  0.869  0.324  1.546  0.150  0.894  1.000      - |  0.926  0.837  0.775
+wilde-theocritus        3.042  0.911  0.737  2.099  0.341  0.944  0.844      - |  0.972  0.820  0.797
+mean overall 0.763 over 9 poems
+```
+`jazz`, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000  0.031 |  0.726  0.811  0.589
+carroll-jabberwocky     2.915  0.911  0.559  1.651  0.600  0.887  1.000  0.144 |  0.881  0.957  0.843
+dickinson-because       2.761  0.907  0.701  1.573  0.362  0.887  1.000  0.013 |  0.785  0.831  0.652
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933  0.279 |  0.845  0.946  0.800
+poe-annabel-lee         3.950  0.911  0.514  1.847  0.154  0.841  0.811  0.093 |  0.797  0.914  0.729
+preseren-zdravljica     2.417  0.791  0.735  1.542  0.214  0.643  1.000  0.000 |  0.710  1.000  0.710
+shakespeare-sonnet-18   2.345  0.818  0.766  1.854  0.364  0.993  1.000  0.021 |  0.880  1.000  0.880
+whitman-song-of-myself  2.797  0.879  0.339  1.546  0.150  0.894  1.000  0.119 |  0.765  0.837  0.640
+wilde-theocritus        3.059  0.913  0.738  2.099  0.341  0.944  0.844  0.302 |  0.885  0.820  0.725
+mean overall 0.730 over 9 poems
+```
+`jazz`, harmony=both:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000  0.031 |  0.726  0.811  0.589
+carroll-jabberwocky     2.761  0.903  0.540  1.651  0.600  0.887  1.000  0.144 |  0.889  0.957  0.850
+dickinson-because       2.458  0.879  0.670  1.573  0.362  0.887  1.000  0.013 |  0.808  0.831  0.671
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933  0.279 |  0.845  0.946  0.800
+poe-annabel-lee         3.906  0.908  0.511  1.847  0.154  0.841  0.811  0.093 |  0.800  0.914  0.731
+preseren-zdravljica     2.139  0.743  0.705  1.542  0.214  0.643  1.000  0.000 |  0.710  1.000  0.710
+shakespeare-sonnet-18   2.288  0.800  0.761  1.854  0.364  0.993  1.000  0.021 |  0.880  1.000  0.880
+whitman-song-of-myself  2.706  0.869  0.324  1.546  0.150  0.894  1.000  0.119 |  0.768  0.837  0.643
+wilde-theocritus        3.042  0.911  0.737  2.099  0.341  0.944  0.844  0.302 |  0.886  0.820  0.726
+mean overall 0.733 over 9 poems
+```
+
+- **In the browser** (Chromium, port 4914, the page's Tyger preset, B harmony=cadence): with B's
+  default `pulse=elastic` the scheduler's chord lane struck bar 3's IV/3 at 4.219 s and V/8 at
+  4.941 s (the half, 4.922 s, swung by `swingBy(0.08, 3)`); with B `pulse=steady`, IV/3 at 5.156 s and
+  V/8 at 6.094 s, exactly half of the 1.875 s bar, chords lasting 1.875, 1.406 and 0.938 s (a 4-beat
+  bar, a 3-beat bar, a half); a drum onset at each of the first 8 bar starts; 86 trace onsets in 8
+  bars, every one a music onset; the roll showed the split bar's two chords and the poem lit as it
+  played. No console errors or warnings. Nobody has heard it.
+- **Raised, not done.** A stanza that opens on an open rhyme starts on V of its degree *d*, so its
+  turnaround is V of V, *d*+8, which folds onto *d*+1 in a seven-note scale: whenever the last line
+  closes the class one degree above the first's, the bar re-strikes the same triad at its half
+  (ABAB ending I/1: `4:I/1+V/8`; in The Tyger `8:I/4+V/11`, `16:I/7+V/14`, `20:I/9+V/16`). ABBA,
+  ending I/0, does turn. Whether the turnaround should lead onto the stanza's first
+  *tonic*, or on a beat rather than the exact half in odd bars, is the user's call.
+
 ### Softening function words — a variant, full kept
 
 The user decided: `CMUdict` gives one-syllable function words primary stress, so §4.2's "stress →

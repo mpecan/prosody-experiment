@@ -297,6 +297,20 @@ fn a_walking_bass_is_pitched_but_its_chords_root_adds_no_entropy() {
 }
 
 #[test]
+fn a_split_last_bar_counts_two_chords() {
+    // The AABB above, under the height bass: eight slots (the stanza stated, then the outro's
+    // pass), nothing held, four syllables a slot of which two are pitched (the stressed `xA` and
+    // the rhyme word) — 16 of 32. H1 adds one chord a slot, pitched: 24 of 40. H2 splits each
+    // pass's last bar into its own chord and the turnaround (§4.6), two more onsets: 26 of 42.
+    let source = "da dA da dO\nma mA ma mO\nta tA ta tE\nsa sA sa sE\n";
+    let rhymed = compile_with(source, "height", "rhyme");
+    let cadence = compile_with(source, "height", "cadence");
+    assert_eq!(rhymed.arrangement().slots().len(), 8);
+    assert!((metric(&rhymed, "pitched") - 24.0 / 40.0).abs() < 1e-12);
+    assert!((metric(&cadence, "pitched") - 26.0 / 42.0).abs() < 1e-12);
+}
+
+#[test]
 fn a_line_held_under_another_keeps_its_melody_but_not_its_walk() {
     // ABAB of two-iamb lines, ending O, E, O, E. The arrangement, by hand: the stanza is stated in
     // slots 0-3, the A line held under slot 1 (its answer comes in slot 2) and the B line under

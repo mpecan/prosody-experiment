@@ -53,7 +53,7 @@
 //! | which sample, which instrument, tempo, swing | [`Style`] | §5 |
 //! | `.room` floor, `.roomsize`, `.delay`, `.shape`, `.compressor`, `.postgain` | [`Style::mix`] | §5, §9 "tuning the ranges" |
 //! | `.nudge`, `.velocity` — the human stray | each line's own seed, scaled by [`Style::mix`] | §6 I2 |
-//! | the chord lane: which bar has a chord, on which degree | `Score::chord_in` — the harmony mapping | §4.6, candidate |
+//! | the chord lane: which bar has a chord, on which degree | `Score::harmony_in` — the harmony mapping; a stanza's last bar under cadence split, its own chord then the turnaround from the half | §4.6, candidate |
 //! | the chord lane's sound, tones, register, level | [`Style::chord_sound`], [`Voicing`], the melody's octave less one, `chord_gain` | §5 |
 //!
 //! # Three pitched and percussive roles
@@ -1603,23 +1603,18 @@ fn chord_instrument(style: &Style) -> &'static str {
     strudel_instrument(style.chord_sound(), Pitched::Melody)
 }
 
-/// One pattern element per slot of the arrangement, as [`grid_by_slot`] writes them.
-fn per_slot(elements: Vec<String>) -> String {
-    match elements.len() {
-        0 => "~".to_owned(),
-        1 => elements
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| "~".to_owned()),
-        _ => format!("<{}>", elements.join(" ")),
-    }
-}
-
 /// The chord lane: one chord a slot, held for the bar, wherever the arrangement plays a foundation
-/// line the harmony mapping gave a chord (`SPEC.md` §4.6, [`Score::chord_in`]); a rest elsewhere.
+/// line the harmony mapping gave a chord (`SPEC.md` §4.6, [`Score::harmony_in`]); a rest
+/// elsewhere. A stanza's last bar under H2 is two halves (`Harmony::Turning`): its own chord, or a
+/// rest, then the turnaround — `[a b]` in the slot's element, so the change lands exactly on the
+/// bar's half under either pulse.
 ///
 /// `None` when the score has no chord — the mapping is off, or nothing in the poem earned one — so
 /// a piece without the harmony is byte for byte what it was.
+///
+/// The slots are laid end to end by [`sequence`], as every other pattern's bars are: under the
+/// steady pulse a chord lasts its bar's beats, not one cycle — one beat — as it did when this lane
+/// wrote its own `<…>`.
 ///
 /// Which slots have a chord, and on which degree, is the score's. Everything here is palette: the
 /// instrument (`chord_sound`), how many tones ([`chord_tones`], from the [`Voicing`]), the
@@ -1627,32 +1622,46 @@ fn per_slot(elements: Vec<String>) -> String {
 /// shared between the tones like the melody's, times the bar's density level) and a soft
 /// envelope, so a held chord swells in under the syllables rather than striking with them.
 fn chord_layer(score: &Score, style: &Style, density: &[f64]) -> Option<(String, String)> {
-    let chords: Vec<Option<Chord>> = score
+    let harmonies: Vec<Option<Harmony>> = score
         .arrangement()
         .slots()
         .iter()
-        .map(|slot| score.chord_in(slot))
+        .map(|slot| score.harmony_in(slot))
         .collect();
-    if chords.iter().all(Option::is_none) {
+    if harmonies
+        .iter()
+        .all(|harmony| harmony.is_none_or(|harmony| harmony.chords().next().is_none()))
+    {
         return None;
     }
-    let notes = per_slot(
-        chords
+    // One element per slot: `~`, one chord, or a turning bar's two halves.
+    let element = |harmony: &Option<Harmony>, value: &dyn Fn(Chord) -> String| -> String {
+        let one = |chord: Option<Chord>| chord.map_or_else(|| "~".to_owned(), value);
+        match harmony {
+            Some(harmony @ Harmony::Turning { turn, .. }) => {
+                format!("{} {}", one(harmony.chord()), value(*turn))
+            }
+            Some(harmony) => one(harmony.chord()),
+            None => "~".to_owned(),
+        }
+    };
+    let notes = sequence(
+        score,
+        &harmonies
             .iter()
-            .map(|chord| chord.map_or_else(|| "~".to_owned(), |chord| chord_note(chord, style)))
-            .collect(),
+            .map(|harmony| element(harmony, &|chord| chord_note(chord, style)))
+            .collect::<Vec<_>>(),
     );
-    let gains = per_slot(
-        chords
+    let gains = sequence(
+        score,
+        &harmonies
             .iter()
             .enumerate()
-            .map(|(slot, chord)| {
-                chord.map_or_else(
-                    || "~".to_owned(),
-                    |_| fmt_param(density.get(slot).copied().unwrap_or(1.0)),
-                )
+            .map(|(slot, harmony)| {
+                let level = fmt_param(density.get(slot).copied().unwrap_or(1.0));
+                element(harmony, &|_| level.clone())
             })
-            .collect(),
+            .collect::<Vec<_>>(),
     );
     let mix = style.mix();
     let mut layer = format!(
@@ -1674,7 +1683,9 @@ fn chord_layer(score: &Score, style: &Style, density: &[f64]) -> Option<(String,
     layer.push_str(&colour(Colour::Chords));
     Some((
         layer,
-        "the chords — one a bar of a foundation stanza, from the harmony mapping".to_owned(),
+        "the chords — one a bar of a foundation stanza (a stanza's last bar under cadence: its \
+         own, then the turnaround), from the harmony mapping"
+            .to_owned(),
     ))
 }
 
@@ -1708,22 +1719,36 @@ fn chords_header(out: &mut String, score: &Score, style: &Style) {
             scale.len()
         );
     }
-    // Line by line, counting from 1 as a reader does: `V/4` is V on degree 4, `-` a rest. Flourish
-    // lines carry no harmony and are left out.
+    // Line by line, counting from 1 as a reader does: `V/4` is V on degree 4, `-` a rest, and
+    // `I/0+V/8` a stanza's last bar split — its own chord, then the turnaround from its half.
+    // Flourish lines carry no harmony and are left out.
+    let name = |chord: Chord| format!("{}/{}", chord.function().numeral(), chord.root().get());
     let lines: Vec<String> = score
         .harmony()
         .iter()
         .filter_map(|harmony| match harmony {
-            Harmony::Chord(chord) => Some(format!(
-                "{}:{}/{}",
-                chord.bar().get() + 1,
-                chord.function().numeral(),
-                chord.root().get()
+            Harmony::Chord(chord) => Some(format!("{}:{}", chord.bar().get() + 1, name(*chord))),
+            Harmony::Turning { own, turn } => Some(format!(
+                "{}:{}+{}",
+                turn.bar().get() + 1,
+                own.map_or_else(|| "-".to_owned(), name),
+                name(*turn)
             )),
             Harmony::Rest(rest) if rest.why() == Silence::Flourish => None,
             Harmony::Rest(rest) => Some(format!("{}:-", rest.bar().get() + 1)),
         })
         .collect();
+    if score
+        .harmony()
+        .iter()
+        .any(|harmony| harmony.turnaround().is_some())
+    {
+        let _ = writeln!(
+            out,
+            "//   chords: a stanza's last bar is split — its own chord, then from the bar's half V \
+             of the stanza's first chord, turning round onto it (a+b below)"
+        );
+    }
     let _ = writeln!(out, "//   chords by line: {}", lines.join(" "));
 }
 
@@ -2957,6 +2982,11 @@ mod tests {
 
     /// A poem lowered with the harmony's `variant` chosen.
     fn harmonised(source: &str, variant: prosody_core::Variant) -> Score {
+        harmonised_with(source, variant, false)
+    }
+
+    /// [`harmonised`], under the elastic pulse when `elastic`.
+    fn harmonised_with(source: &str, variant: prosody_core::Variant, elastic: bool) -> Score {
         let poem = Poem::parse(source.to_owned()).unwrap();
         let meter = meter::scan(&poem, &Spelled);
         let rhyme = rhyme::analyse(&poem, &Spelled);
@@ -2964,8 +2994,15 @@ mod tests {
         let sound = sound::analyse(&poem, &Spelled);
         let surprisal = surprisal::analyse(&poem, &Spelled, &ByLength);
         let roles = role::assign(&meter, &repetition).unwrap();
-        let mappings = prosody_core::Mappings::all()
+        let mut mappings = prosody_core::Mappings::all()
             .with(prosody_core::Mapping::Harmony.choose(variant).unwrap());
+        if elastic {
+            mappings = mappings.with(
+                prosody_core::Mapping::Pulse
+                    .choose(prosody_core::Variant::Elastic)
+                    .unwrap(),
+            );
+        }
         lower::run_with(
             Analyses {
                 poem: &poem,
@@ -3014,7 +3051,8 @@ mod tests {
             )
             .unwrap();
         let line = chord_line(&text);
-        let one = "[48,51,55] [50,53,56]";
+        // Each line is one beat (a spondee), so under the steady pulse each chord lasts `@1`.
+        let one = "[48,51,55]@1 [50,53,56]@1";
         assert!(
             line.starts_with(&format!(
                 "  note(\"<{one} {one} {one} {one}>\").sound(\"gm_pad_warm\")"
@@ -3024,7 +3062,9 @@ mod tests {
         // Every slot has a chord at the bar's own level; the lane's level 0.40 is shared by the
         // three tones: 0.4 / √3.
         assert!(
-            line.contains(".gain(\"<1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000>\")"),
+            line.contains(
+                ".gain(\"<1.000@1 1.000@1 1.000@1 1.000@1 1.000@1 1.000@1 1.000@1 1.000@1>\")"
+            ),
             "{line}"
         );
         assert!(line.contains(".postgain(0.231)"), "{line}");
@@ -3039,15 +3079,17 @@ mod tests {
 
     #[test]
     fn cadence_voiced_as_sevenths_folds_its_roots_into_one_octave() {
-        // Cadence on ABAB: V/4, V/5, I/0, and the turnaround V/8 — degree 8 is degree 1 folded
-        // into the octave. Sevenths in C minor from 48: degree 4 is G Bb D F (55 58 62 65),
-        // 5 is Ab C Eb G (56 60 63 67), 0 is C Eb G Bb (48 51 55 58), 1 is D F Ab C (50 53 56 60).
+        // Cadence on ABAB: V/4, V/5, I/0, and the last bar I/1 then the turnaround V/8 — degree 8
+        // is degree 1 folded into the octave, so here the turnaround restrikes the bar's own
+        // chord. Sevenths in C minor from 48: degree 4 is G Bb D F (55 58 62 65), 5 is Ab C Eb G
+        // (56 60 63 67), 0 is C Eb G Bb (48 51 55 58), 1 is D F Ab C (50 53 56 60).
         let style = Style::parse("+++\nvoicing = \"seventh\"\n+++").unwrap();
         let text = Strudel::new()
             .render(&harmonised(ABAB, prosody_core::Variant::Cadence), &style)
             .unwrap();
         let line = chord_line(&text);
-        let one = "[55,58,62,65] [56,60,63,67] [48,51,55,58] [50,53,56,60]";
+        let one = "[55,58,62,65]@1 [56,60,63,67]@1 [48,51,55,58]@1 \
+                   [[50,53,56,60] [50,53,56,60]]@1";
         assert!(
             line.starts_with(&format!("  note(\"<{one} {one}>\")")),
             "{line}"
@@ -3055,7 +3097,7 @@ mod tests {
         // Four tones share the level: 0.4 / 2.
         assert!(line.contains(".postgain(0.200)"), "{line}");
         assert!(
-            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/0 4:V/8\n"),
+            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/0 4:I/1+V/8\n"),
             "{text}"
         );
         assert!(text.contains("as seventh chords in minor"), "{text}");
@@ -3072,15 +3114,115 @@ mod tests {
             .unwrap();
         let line = chord_line(&text);
         assert!(
-            line.starts_with("  note(\"<[48,51,55] ~ [48,51,55] [48,51,55] ~ [48,51,55]>\")"),
+            line.starts_with(
+                "  note(\"<[48,51,55]@1 ~@1 [48,51,55]@1 [48,51,55]@1 ~@1 [48,51,55]@1>\")"
+            ),
             "{line}"
         );
         assert!(
-            line.contains(".gain(\"<1.000 ~ 1.000 1.000 ~ 1.000>\")"),
+            line.contains(".gain(\"<1.000@1 ~@1 1.000@1 1.000@1 ~@1 1.000@1>\")"),
             "{line}"
         );
         assert!(
             text.contains("//   chords by line: 1:I/0 2:- 3:I/0\n"),
+            "{text}"
+        );
+    }
+
+    /// ABBA in four-iamb lines: A (AA) is degree 0, B (OW) degree 1.
+    const ABBA: &str = "de dA de bA de sA de tA\nde do de bo de so de to\n\
+                        de bA de sA de dA de no\nde bo de so de to de bA\n";
+
+    #[test]
+    fn the_last_bar_plays_its_own_chord_then_the_turnaround_from_its_half() {
+        // Cadence on ABBA: A opens (V/4: G Bb D, 55 58 62), B opens (V/5: Ab C Eb, 56 60 63), B
+        // closes (I/1: D F Ab, 50 53 56), and A closes the stanza on I/0 (C Eb G, 48 51 55) — then
+        // from the bar's half V of the first chord's root, 4 + 4 = 8, which folds to degree 1
+        // (50 53 56). Four beats a bar: under the steady pulse `@4`, the split `[a b]` inside it,
+        // so the turnaround begins two beats in. Stated, then the outro's pass.
+        let score = harmonised(ABBA, prosody_core::Variant::Cadence);
+        let text = Strudel::new().render(&score, &Style::default()).unwrap();
+        let line = chord_line(&text);
+        let pass = "[55,58,62]@4 [56,60,63]@4 [50,53,56]@4 [[48,51,55] [50,53,56]]@4";
+        assert!(
+            line.starts_with(&format!("  note(\"<{pass} {pass}>\")")),
+            "{line}"
+        );
+        // On the music's clock: the lane's bar weights are the slots' beats, as every other
+        // pattern's (`weights`, the one walk's), so a chord lasts its bar and not one beat.
+        let lane_weights: Vec<u64> = argument(line, "note")
+            .split('@')
+            .skip(1)
+            .map(|rest| {
+                rest.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(lane_weights, super::weights(&score));
+        assert_eq!(lane_weights, vec![4; 8]);
+        // The levels split with the chords: both halves of a turning bar carry the bar's level.
+        let gains = argument(line, "gain");
+        let steps: Vec<&str> = gains.trim_matches(['<', '>', '"']).split("@4").collect();
+        assert!(steps[3].trim().starts_with('[') && steps[3].matches(' ').count() == 2);
+        assert!(
+            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/1 4:I/0+V/8\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("//   chords: a stanza's last bar is split — its own chord, then"),
+            "{text}"
+        );
+        // Under the elastic pulse a bar is one cycle, and the turnaround still begins at its
+        // half.
+        let elastic = Strudel::new()
+            .render(
+                &harmonised_with(ABBA, prosody_core::Variant::Cadence, true),
+                &Style::default(),
+            )
+            .unwrap();
+        let pass = "[55,58,62] [56,60,63] [50,53,56] [[48,51,55] [50,53,56]]";
+        assert!(
+            chord_line(&elastic).starts_with(&format!("  note(\"<{pass} {pass}>\")")),
+            "{}",
+            chord_line(&elastic)
+        );
+        // Rhyme (H1) has no turnaround, so no split and no split line in the header.
+        let rhyme = Strudel::new()
+            .render(
+                &harmonised(ABBA, prosody_core::Variant::Rhyme),
+                &Style::default(),
+            )
+            .unwrap();
+        assert!(!rhyme.contains("is split"), "{rhyme}");
+        assert!(!chord_line(&rhyme).contains("[["), "{rhyme}");
+    }
+
+    #[test]
+    fn a_turning_bar_with_no_chord_of_its_own_rests_then_turns_round() {
+        // Under `both`, `ro bAn` (AA N) rhymes with nothing, so its first half has no chord; from
+        // its half it turns round onto the stanza's first chord: A opens on degree 0, V/4, so V/8,
+        // degree 1 folded (50 53 56).
+        let text = Strudel::new()
+            .render(
+                &harmonised("dA bA\nsA tA\nro bAn\n", prosody_core::Variant::Both),
+                &Style::default(),
+            )
+            .unwrap();
+        let line = chord_line(&text);
+        let pass = "[55,58,62]@1 [48,51,55]@1 [~ [50,53,56]]@1";
+        assert!(
+            line.starts_with(&format!("  note(\"<{pass} {pass}>\")")),
+            "{line}"
+        );
+        assert!(
+            line.contains(".gain(\"<1.000@1 1.000@1 [~ 1.000]@1"),
+            "{line}"
+        );
+        assert!(
+            text.contains("//   chords by line: 1:V/4 2:I/0 3:-+V/8\n"),
             "{text}"
         );
     }
@@ -3101,7 +3243,7 @@ mod tests {
             argument(chord_line(text), "note")
                 .trim_matches(['<', '>'])
                 .split(' ')
-                .map(|step| step == "~")
+                .map(|step| step.split('@').next() == Some("~"))
                 .collect()
         };
         assert_eq!(rests(&plain), rests(&coloured));

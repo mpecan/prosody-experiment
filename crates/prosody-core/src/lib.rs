@@ -66,7 +66,7 @@ pub mod voice;
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
 pub use arrange::{Arrangement, Cause, Fit, Lane, Part, Placement, Slot};
 pub use bass::{BassNote, BassReason, Chromatic, Direction, Height, ScaleStep};
-pub use harmony::{Chord, Function, Harmony, Reason, Rest, Silence};
+pub use harmony::{Chord, Function, Harmony, Onset, Reason, Rest, Silence};
 pub use mapping::{Choice, Mapping, Mappings, Variant};
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,

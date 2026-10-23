@@ -225,6 +225,7 @@ pub struct Schedule {
     beats_per_minute: u16,
     unapplied: Vec<(&'static str, String)>,
     unsent_chords: usize,
+    unsent_turnarounds: usize,
     unsent_bass: usize,
     elastic_unapplied: bool,
     straightened: Option<usize>,
@@ -278,6 +279,14 @@ impl Schedule {
     #[must_use]
     pub const fn unsent_chords(&self) -> usize {
         self.unsent_chords
+    }
+
+    /// How many of [`Schedule::unsent_chords`] are turnarounds: the second chord of a stanza's
+    /// last bar under `cadence` or `both`, from the bar's half (`SPEC.md` §4.6). Each split bar
+    /// counts two chords, its own and this one.
+    #[must_use]
+    pub const fn unsent_turnarounds(&self) -> usize {
+        self.unsent_turnarounds
     }
 
     /// How many bass notes the arrangement plays that this schedule does not send: a message has
@@ -380,9 +389,18 @@ impl Schedule {
             );
         }
         if self.unsent_chords > 0 {
+            let turnarounds = if self.unsent_turnarounds > 0 {
+                format!(
+                    ", {} of them turnarounds from a bar's half",
+                    self.unsent_turnarounds
+                )
+            } else {
+                String::new()
+            };
             let _ = writeln!(
                 out,
-                "# not scheduled here: {} chords of the harmony layer (there is no chord message)",
+                "# not scheduled here: {} chords of the harmony layer{turnarounds} (there is no \
+                 chord message)",
                 self.unsent_chords
             );
         }
@@ -466,6 +484,12 @@ impl Backend for Osc {
         }
         // One total order before anything is sent (`CLAUDE.md` §4). Ties break by span, so two
         // events at the same instant always leave in the same order.
+        let played: Vec<prosody_core::Harmony> = score
+            .arrangement()
+            .slots()
+            .iter()
+            .filter_map(|slot| score.harmony_in(slot))
+            .collect();
         messages.sort_by(|a, b| a.at.cmp(&b.at).then(a.span.start().cmp(&b.span.start())));
 
         Ok(Schedule {
@@ -475,11 +499,10 @@ impl Backend for Osc {
                 .at_density(score.events().len(), score.bars())
                 .get(),
             unapplied: unapplied(style),
-            unsent_chords: score
-                .arrangement()
-                .slots()
+            unsent_chords: played.iter().map(|harmony| harmony.chords().count()).sum(),
+            unsent_turnarounds: played
                 .iter()
-                .filter(|slot| score.chord_in(slot).is_some())
+                .filter(|harmony| harmony.turnaround().is_some())
                 .count(),
             unsent_bass,
             elastic_unapplied: score.pulse() == prosody_core::Variant::Elastic,
@@ -852,6 +875,38 @@ mod tests {
                 .contains("# not scheduled here: 8 chords of the harmony layer"),
             "{}",
             with.to_text()
+        );
+        assert_eq!(with.unsent_turnarounds(), 0);
+        // Under cadence the stanza's last bar is split (`SPEC.md` §4.6): its own chord, then the
+        // turnaround. It is played twice — stated and in the outro — so ten chords, two of them
+        // turnarounds, and none sent.
+        let cadence = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &Flat),
+                roles: &roles,
+            },
+            &prosody_core::Mappings::all().with(
+                prosody_core::Mapping::Harmony
+                    .choose(prosody_core::Variant::Cadence)
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+        let turning = Osc::new().render(&cadence, &Style::default()).unwrap();
+        assert_eq!(turning.unsent_chords(), 10);
+        assert_eq!(turning.unsent_turnarounds(), 2);
+        assert!(
+            turning.to_text().contains(
+                "# not scheduled here: 10 chords of the harmony layer, 2 of them turnarounds \
+                 from a bar's half (there is no chord message)\n"
+            ),
+            "{}",
+            turning.to_text()
         );
         // The messages are the ones the piece without the harmony sends.
         let without = schedule(source);

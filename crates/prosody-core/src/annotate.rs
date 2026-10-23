@@ -714,7 +714,9 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
                 let _ = writeln!(out, "  sounds {}", describe_sounds(line.sounds()));
             }
             if let Some(harmony) = line.harmony() {
-                let _ = writeln!(out, "  harmony {}", describe_harmony(harmony));
+                for row in describe_harmony(harmony) {
+                    let _ = writeln!(out, "  harmony {row}");
+                }
             }
             if !line.straightened().is_empty() {
                 let _ = writeln!(
@@ -893,49 +895,62 @@ fn describe_bass(note: BassNote, harmonised: bool) -> String {
 }
 
 /// `V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza`: which chord, on which
-/// degree, and the rule that chose it — or `no chord · ` and why not.
-fn describe_harmony(harmony: Harmony) -> String {
-    match harmony {
-        Harmony::Chord(chord) => {
-            let numeral = chord.function().numeral();
-            let root = chord.root().get();
-            let of = chord.of().get();
-            let chord_text = if of == root {
-                format!("{numeral} deg {root}")
-            } else {
-                format!("{numeral} deg {root} ({numeral} of deg {of})")
-            };
-            let why = match chord.reason() {
-                Reason::Class(class) => {
-                    format!("rhyme: class {}, on its degree", class.letter())
-                }
-                Reason::Opens(class) => format!(
-                    "cadence: {} opens, answered later in its stanza",
-                    class.letter()
-                ),
-                Reason::Closes(class) => format!(
-                    "cadence: {} closes, answering an earlier line of its stanza",
-                    class.letter()
-                ),
-                Reason::Unanswered { key } => format!(
-                    "cadence: no rhyme in its stanza, so IV of the stanza's key, deg {}",
-                    key.get()
-                ),
-                Reason::Turnaround { onto } => format!(
-                    "cadence: the stanza's last bar, turning round onto its first chord, deg {}",
-                    onto.get()
-                ),
-            };
-            format!("{chord_text} · {why}")
+/// degree, and the rule that chose it.
+fn describe_chord(chord: Chord) -> String {
+    let numeral = chord.function().numeral();
+    let root = chord.root().get();
+    let of = chord.of().get();
+    let chord_text = if of == root {
+        format!("{numeral} deg {root}")
+    } else {
+        format!("{numeral} deg {root} ({numeral} of deg {of})")
+    };
+    let why = match chord.reason() {
+        Reason::Class(class) => {
+            format!("rhyme: class {}, on its degree", class.letter())
         }
-        Harmony::Rest(rest) => format!(
-            "no chord · {}",
-            match rest.why() {
-                Silence::Unrhymed => "rhyme: the line rhymes with nothing, so it has no degree",
-                Silence::Wordless => "no pronounceable word to carry a chord (I4)",
-                Silence::Flourish => "a flourish stanza carries no harmony",
-            }
+        Reason::Opens(class) => format!(
+            "cadence: {} opens, answered later in its stanza",
+            class.letter()
         ),
+        Reason::Closes(class) => format!(
+            "cadence: {} closes, answering an earlier line of its stanza",
+            class.letter()
+        ),
+        Reason::Unanswered { key } => format!(
+            "cadence: no rhyme in its stanza, so IV of the stanza's key, deg {}",
+            key.get()
+        ),
+        Reason::Turnaround { onto } => format!(
+            "cadence: the stanza's last bar, turning round onto its first chord, deg {}",
+            onto.get()
+        ),
+    };
+    format!("{chord_text} · {why}")
+}
+
+/// Why a bar has no chord.
+const fn silence_words(why: Silence) -> &'static str {
+    match why {
+        Silence::Unrhymed => "rhyme: the line rhymes with nothing, so it has no degree",
+        Silence::Wordless => "no pronounceable word to carry a chord (I4)",
+        Silence::Flourish => "a flourish stanza carries no harmony",
+    }
+}
+
+/// One row per chord of the bar: its chord, or `no chord · ` and why not — and, in a stanza's last
+/// bar under H2, a second row for the turnaround from the bar's half (§4.6).
+fn describe_harmony(harmony: Harmony) -> Vec<String> {
+    match harmony {
+        Harmony::Chord(chord) => vec![describe_chord(chord)],
+        Harmony::Rest(rest) => vec![format!("no chord · {}", silence_words(rest.why()))],
+        Harmony::Turning { own, turn } => vec![
+            own.map_or_else(
+                || format!("no chord · {}", silence_words(Silence::Unrhymed)),
+                describe_chord,
+            ),
+            format!("then, from the bar's half, {}", describe_chord(turn)),
+        ],
     }
 }
 
@@ -1615,7 +1630,8 @@ mod tests {
     fn the_view_says_which_chord_each_bar_has_and_why() {
         // ABAB of one-syllable stressed words, every line two of them: a foundation stanza. A is
         // degree 0 and B degree 1. Under cadence: A opens (V of 0 = deg 4), B opens (V of 1 =
-        // deg 5), A closes (I on 0), and the last bar turns round onto the first chord (V of 4).
+        // deg 5), A closes (I on 0), and the last bar closes B (I on 1) and, from its half, turns
+        // round onto the first chord (V of 4) — two rows for the one line.
         let source = "dA bA\nro bo\nsA tA\nno do\n";
         let (text, annotated) = view_with(source, &harmony(crate::mapping::Variant::Cadence));
         let rows: Vec<&str> = text
@@ -1629,14 +1645,32 @@ mod tests {
                 "V deg 4 (V of deg 0) · cadence: A opens, answered later in its stanza",
                 "V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza",
                 "I deg 0 · cadence: A closes, answering an earlier line of its stanza",
-                "V deg 8 (V of deg 4) · cadence: the stanza's last bar, turning round onto \
-                 its first chord, deg 4",
+                "I deg 1 · cadence: B closes, answering an earlier line of its stanza",
+                "then, from the bar's half, V deg 8 (V of deg 4) · cadence: the stanza's last \
+                 bar, turning round onto its first chord, deg 4",
             ]
         );
         assert!(text.contains("  harmony     §4.6"), "{text}");
         assert_eq!(
             annotated.lines().filter(|l| l.harmony().is_some()).count(),
             4
+        );
+    }
+
+    #[test]
+    fn the_view_says_a_turning_bar_rests_before_its_turnaround() {
+        // Under `both`, `ro bAn` (AA N) rhymes with nothing: neither H2 nor H1 gives it a chord. As
+        // the stanza's last bar, it rests for its first half and from its half turns round onto
+        // the stanza's first chord — `dA bA` opens A, so H2's V of 0, deg 4 — with V of 4, deg 8.
+        let source = "dA bA\nsA tA\nro bAn\n";
+        let (text, _) = view_with(source, &harmony(crate::mapping::Variant::Both));
+        assert!(
+            text.contains(
+                "  harmony no chord · rhyme: the line rhymes with nothing, so it has no degree\n  \
+                 harmony then, from the bar's half, V deg 8 (V of deg 4) · cadence: the stanza's \
+                 last bar, turning round onto its first chord, deg 4\n"
+            ),
+            "{text}"
         );
     }
 

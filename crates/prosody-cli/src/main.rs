@@ -393,8 +393,13 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
         );
     }
     if schedule.unsent_chords() > 0 {
+        let turnarounds = match schedule.unsent_turnarounds() {
+            0 => String::new(),
+            n => format!(" ({n} of them turnarounds from a bar's half)"),
+        };
         eprintln!(
-            "prosody: {} chords of the harmony layer are not sent: OSC has no chord message",
+            "prosody: {} chords of the harmony layer{turnarounds} are not sent: OSC has no chord \
+             message",
             schedule.unsent_chords()
         );
     }

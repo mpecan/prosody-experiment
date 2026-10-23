@@ -773,12 +773,13 @@ fn score_reports_every_metric_and_an_edit_per_word() {
 fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
     // The couplet's stanzas are night/light and sea/me: A on degree 0, B on degree 1, each pair
     // in one stanza. rhyme: each line's class's degree. cadence: the first line of each pair
-    // opens (V of its degree), and the second — the stanza's last bar — turns round onto the
-    // first chord (V of that root). both: the same, since every line opens or turns round.
+    // opens (V of its degree), and the second — the stanza's last bar — closes it (I on the
+    // degree) and from the bar's half turns round onto the first chord (V of that root). both:
+    // the same, since every line opens or closes.
     for (variant, expected) in [
         ("rhyme", "1:I/0 2:I/0 3:I/1 4:I/1"),
-        ("cadence", "1:V/4 2:V/8 3:V/5 4:V/9"),
-        ("both", "1:V/4 2:V/8 3:V/5 4:V/9"),
+        ("cadence", "1:V/4 2:I/0+V/8 3:V/5 4:I/1+V/9"),
+        ("both", "1:V/4 2:I/0+V/8 3:V/5 4:I/1+V/9"),
     ] {
         let set = format!("harmony={variant}");
         let (out, err, code) = run(&["--set", &set], COUPLET);
@@ -810,6 +811,15 @@ fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
             "{explained}"
         );
         assert!(explained.contains("  harmony V deg 4 (V of deg 0)") || variant == "rhyme");
+        // The split last bar is its own row: the turnaround onto the first chord, V of 4.
+        assert_eq!(
+            explained.contains(
+                "  harmony then, from the bar's half, V deg 8 (V of deg 4) · cadence: the \
+                 stanza's last bar, turning round onto its first chord, deg 4\n"
+            ),
+            variant != "rhyme",
+            "{explained}"
+        );
     }
     // Off — the default — nothing about chords at all.
     let (out, _, _) = run(&[], COUPLET);
@@ -818,6 +828,18 @@ fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
     let (osc, err, code) = run(&["--osc", "--set", "harmony=rhyme"], COUPLET);
     assert_eq!(code, Some(0), "{err}");
     assert!(osc.contains("# not scheduled here: "), "{osc}");
+    // Under cadence each stanza's last bar holds two chords. Two stanzas of two lines, stated and
+    // then repeated by the outro: eight slots with one chord each, and the four last bars' four
+    // turnarounds on top — twelve.
+    let (osc, err, code) = run(&["--osc", "--set", "harmony=cadence"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        osc.contains(
+            "# not scheduled here: 12 chords of the harmony layer, 4 of them turnarounds from a \
+             bar's half (there is no chord message)\n"
+        ),
+        "{osc}"
+    );
 }
 
 #[test]

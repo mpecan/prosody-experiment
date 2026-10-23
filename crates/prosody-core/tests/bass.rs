@@ -65,6 +65,10 @@ fn compile(source: &str, bass: Variant, harmony: Variant) -> Score {
     let mappings = Mappings::all()
         .with(Mapping::Bass.choose(bass).unwrap())
         .with(Mapping::Harmony.choose(harmony).unwrap());
+    compile_with(source, &mappings)
+}
+
+fn compile_with(source: &str, mappings: &Mappings) -> Score {
     let poem = Poem::parse(source.to_owned()).unwrap();
     let meter = meter::scan(&poem, &Toy);
     let repetition = repetition::analyse(&poem);
@@ -79,7 +83,7 @@ fn compile(source: &str, bass: Variant, harmony: Variant) -> Score {
             surprisal: &surprisal::analyse(&poem, &Toy, &Flat),
             roles: &roles,
         },
-        &mappings,
+        mappings,
     )
     .unwrap()
 }
@@ -333,7 +337,8 @@ fn feet_walk_on_the_bars_chord_under_harmony_rhyme() {
 #[test]
 fn feet_walk_on_the_cadence() {
     // H2 over ABAB: bar 0 opens U (V of 0, root 4), bar 1 opens E (V of 1, root 5), bar 2 closes
-    // U (I, root 0), bar 3 is the turnaround (V of the stanza's first chord, 4 + 4 = 8).
+    // U (I, root 0), bar 3 closes E (I, root 1) — and from its half turns round (V of the
+    // stanza's first chord, 4 + 4 = 8). Each bar's first bass note is on its first chord.
     let score = compile(ABAB, Variant::Feet, Variant::Cadence);
     let roots: Vec<usize> = (0..4)
         .map(|bar| {
@@ -348,7 +353,78 @@ fn feet_walk_on_the_cadence() {
                 .get()
         })
         .collect();
-    assert_eq!(roots, vec![4, 5, 0, 8]);
+    assert_eq!(roots, vec![4, 5, 0, 1]);
+    // Bar 3's four feet: the first two (beats 0, 1 — before the half of four) walk on I of 1, the
+    // last two (beats 2, 3) on the turnaround's 8.
+    let bar3: Vec<usize> = score
+        .events()
+        .iter()
+        .filter(|e| e.bar().get() == 3)
+        .filter_map(|e| e.bass())
+        .map(|note| note.root().get())
+        .collect();
+    assert_eq!(bar3, vec![1, 1, 8, 8]);
+    // The steps: AA open, 0; OW mid, 2; OW mid again — but on the turnaround's root, so another
+    // note, and no step: 2; EH mid repeats that, and with no next foot steps down: 1.
+    assert_eq!(
+        walk(&score, 3),
+        vec!["0", "·", "2", "·", "2", "·", "1", "·"]
+    );
+}
+
+/// ABBA with a short last line: three lines of five feet, then four. Under the stanza period every
+/// bar lasts five beats, so the last line ends a beat early in its bar.
+const SHORT_LAST: &str = "da dA da dO da dO da dO da dU\n\
+                          ma mA ma mO ma mO ma mO ma mE\n\
+                          ta tA ta tO ta tO ta tO ta tE\n\
+                          sa sA sa sO sa sO sa sU\n";
+
+/// The roots of bar `bar`'s walk, foot by foot.
+fn roots(score: &Score, bar: usize) -> Vec<usize> {
+    score
+        .events()
+        .iter()
+        .filter(|e| e.bar().get() == bar)
+        .filter_map(|e| e.bass())
+        .map(|note| note.root().get())
+        .collect()
+}
+
+#[test]
+fn feet_turn_round_at_the_bars_half_not_the_lines() {
+    // H2 over ABBA: A opens (V of 0, root 4), B opens (V of 1, root 5), B closes (I, root 1), A
+    // closes (I, root 0) and turns round onto the stanza's first chord, V of 4 = 8.
+    let score = compile(SHORT_LAST, Variant::Feet, Variant::Cadence);
+    assert_foundation(&score);
+    let last = &score.arrangement().slots()[3];
+    assert_eq!(last.beats(), 5, "the stanza's period: its longest line");
+    // The chord lane changes at the bar's half, 2.5 beats in; the line's half would be 2. Feet on
+    // beats 0, 1, 2 begin before 2.5, so they walk on I of 0; only beat 3's walks on the 8.
+    assert_eq!(roots(&score, 3), vec![0, 0, 0, 8]);
+    // The steps: AA open, 0; OW mid, 2; OW again on the same root repeats it, and the next foot's
+    // UW is higher, so it steps up, 3; UW close on the turnaround's root, 4.
+    assert_eq!(
+        walk(&score, 3),
+        vec!["0", "·", "2", "·", "3", "·", "4", "·"]
+    );
+}
+
+#[test]
+fn without_the_period_a_bar_is_its_line_and_its_half_is_the_lines() {
+    // Without the stanza period the last bar is the line's own four beats (stretched to it), so
+    // its half is two beats in: beats 2 and 3 walk on the turnaround. OW on root 8 is no repeat of
+    // OW on root 0, so no step: 0 2 2 4.
+    let mappings = Mappings::all()
+        .with(Mapping::Bass.choose(Variant::Feet).unwrap())
+        .with(Mapping::Harmony.choose(Variant::Cadence).unwrap())
+        .with(Mapping::StanzaPeriod.choose(Variant::Off).unwrap());
+    let score = compile_with(SHORT_LAST, &mappings);
+    assert_eq!(score.arrangement().slots()[3].beats(), 4);
+    assert_eq!(roots(&score, 3), vec![0, 0, 8, 8]);
+    assert_eq!(
+        walk(&score, 3),
+        vec!["0", "·", "2", "·", "2", "·", "4", "·"]
+    );
 }
 
 #[test]

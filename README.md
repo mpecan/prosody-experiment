@@ -344,6 +344,9 @@ line, by the vowel's height. The two walks:
 - **`feet`** — one note on every beat (foot), held for the beat. The foot's stressed vowel chooses
   root, third or fifth — of the bar's chord when the harmony is on, of the scale otherwise — and
   where that would repeat the last note it steps instead, up if the next foot's vowel is higher.
+  In a stanza's split last bar under `harmony = cadence` (or `both`) a foot from the bar's half
+  walks on the turnaround — the bar's half, as the chord lane changes there, even when the line
+  ends early in a bar its stanza's longest line sets.
 
 Under a walk a rhyme word plays its melody note *and* its bass note, and only one walk sounds a
 bar: a line held, refrained or called under another keeps its drums and melody but not its walk,
@@ -424,20 +427,24 @@ word); `--explain` marks each light row `function-words`.
 ### The harmony layer
 
 *A candidate, off by default* (`SPEC.md` §4.6, `--set harmony=…`, or the `harmony` menu on the
-page). Every bar of a foundation stanza gets one chord, held for the bar, in a lane of its own; its
-span is the rhyme word of the line the bar hosts, and it plays wherever that line sounds in the
-foundation layer — stated, looping under a flourish, in the outro — never in the call, held or
-refrain lanes.
+page). Every bar of a foundation stanza gets one chord, held for the bar, in a lane of its own —
+except a stanza's last bar under `cadence` and `both`, which is split in two (below); its span is
+the rhyme word of the line the bar hosts, and it plays wherever that line sounds in the foundation
+layer — stated, looping under a flourish, in the outro — never in the call, held or refrain
+lanes. Each chord lasts its bar's beats, like every other lane's bar.
 
 | variant | the chord of a line's bar |
 |---|---|
 | `rhyme` (H1) | I on its rhyme class's degree: ABAB → i–ii–i–ii, AABB → i–i–ii–ii; a line that rhymes with nothing has no chord |
-| `cadence` (H2) | a rhyme answered later in its stanza → V of its degree; its answer → I on the degree; a line with no rhyme in its stanza → IV of the stanza's key (its first in-stanza rhyme's degree, or 0); the stanza's last bar → V of the stanza's *own* first chord, a turnaround the loop resolves |
-| `both` | H2 for open and closing lines and the turnaround, H1 for every other bar |
+| `cadence` (H2) | a rhyme answered later in its stanza → V of its degree; its answer → I on the degree; a line with no rhyme in its stanza → IV of the stanza's key (its first in-stanza rhyme's degree, or 0); the stanza's last bar (of two or more lines) is **split**: its own chord by those rules for the first half — so ABAB, AABB and ABBA land on I — then, from the bar's half, V of the stanza's *own* first chord, a turnaround the loop resolves |
+| `both` | H2 for open and closing lines and the turnaround, H1 for every other bar — a last line that rhymes with nothing rests for the first half, then turns round |
 
 The pattern's header lists `chord_sound` and `chord_gain` and every line's chord (`chords by line:
-1:V/4 2:I/0 …`, `-` a rest) when there is one; `--explain` shows each line's chord, its degree and
-the rule that chose it, or why the bar has none.
+1:V/4 2:V/5 3:I/0 4:I/1+V/8`, `-` a rest, `a+b` a split bar's own chord and its turnaround) when
+there is one; `--explain` shows each line's chord, its degree and the rule that chose it, or why
+the bar has none, and a split bar's turnaround on a second row (`then, from the bar's half, V deg 8
+(V of deg 4) · …`). The OSC schedule sends no chord and says how many it leaves out, and how many
+of those are turnarounds.
 
 The numerals are counted in seven steps, so in a scale of another size (`pentatonic_minor`,
 `whole_tone`, `chromatic`) V is not a dominant, and the header says so. `--score` counts a chord as
@@ -518,7 +525,7 @@ The rest of the header, every key optional:
 | A refrain line | loops in its own lane until the next refrain line takes over | §4.6 |
 | A stressed vowel in a foundation line | a bass note by vowel height: open → root, mid → third, close → fifth | §4.6 |
 | A foundation line's syllables or feet (candidate, `bass=syllables` / `bass=feet`) | a walking bass: passing and approach tones between the stressed notes, or a chord tone on every beat | §4.6 |
-| A foundation line's rhyme (candidate, `harmony`, off by default) | its bar's chord: the class's degree, or V/I/IV by whether the rhyme is open, answered or alone in its stanza, with a turnaround in the last bar | §4.6 |
+| A foundation line's rhyme (candidate, `harmony`, off by default) | its bar's chord: the class's degree, or V/I/IV by whether the rhyme is open, answered or alone in its stanza, with a turnaround in the second half of the stanza's last bar | §4.6 |
 | Foot → beat, syllable → subdivision, line → bar | rhythm | §4.2 |
 | A line stacked under another (candidate, `stack=straight`) | fitted to the host's subdivision where their feet would cross (`[a@2 b c]`) | §4.2, §4.6 |
 | Stress | accent / velocity | §4.2 |
