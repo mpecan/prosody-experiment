@@ -339,6 +339,8 @@ pub struct Annotated {
     stanzas: Vec<Vec<AnnotatedLine>>,
     basis: Vec<StanzaBasis>,
     bass: Variant,
+    pulse: Variant,
+    lengths: Vec<usize>,
 }
 
 impl Annotated {
@@ -346,6 +348,19 @@ impl Annotated {
     #[must_use]
     pub fn stanzas(&self) -> &[Vec<AnnotatedLine>] {
         &self.stanzas
+    }
+
+    /// Which variant of the pulse the piece is played at (`SPEC.md` §4.2).
+    #[must_use]
+    pub const fn pulse(&self) -> Variant {
+        self.pulse
+    }
+
+    /// Every bar length of the piece, in beats, smallest first, once each: what the pulse
+    /// decides the duration of.
+    #[must_use]
+    pub fn bar_lengths(&self) -> &[usize] {
+        &self.lengths
     }
 
     /// Which variant of the bass made the bass notes.
@@ -481,6 +496,18 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
             .map(crate::role::StanzaRole::basis)
             .collect(),
         bass: score.bass(),
+        pulse: score.pulse(),
+        lengths: {
+            let mut lengths: Vec<usize> = score
+                .arrangement()
+                .slots()
+                .iter()
+                .map(|slot| slot.beats().max(1))
+                .collect();
+            lengths.sort_unstable();
+            lengths.dedup();
+            lengths
+        },
     }
 }
 
@@ -560,6 +587,23 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
         }
         let _ = writeln!(out, "  {:<11} {}", pass.name(), pass.section());
     }
+    // §4.2's pulse: how long the bars below last, which no token decides alone.
+    let lengths: Vec<String> = annotated
+        .bar_lengths()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let _ = writeln!(
+        out,
+        "\npulse {} · bars of {} beats (§4.2)",
+        match annotated.pulse() {
+            Variant::Elastic => {
+                "elastic · every bar the same span, so a bar of more beats hurries them"
+            }
+            _ => "steady · every bar lasts its beats, so the beat keeps one speed",
+        },
+        lengths.join(", ")
+    );
     let _ = writeln!(out);
 
     for (index, stanza) in annotated.stanzas().iter().enumerate() {
@@ -1212,6 +1256,7 @@ mod tests {
             ("§7.2 guessed", "phoneme(guessed)"),
             ("§7.2 unpronounceable", "no pronunciation"),
             ("I2 seed", "seed "),
+            ("§4.2 pulse", "pulse steady · every bar lasts its beats"),
         ] {
             assert!(
                 text.contains(needle),

@@ -40,15 +40,17 @@ You get something like:
 //   root = c
 //   scale = minor
 stack(
-  s("<[[bd bd] [bd bd] [bd bd] [bd bd]] ~ ~ ~ …>").gain("<[[0.333 1.000] …>")…,
-  note("<~ ~ [~ 36] ~ …>").sound("triangle")…
+  s("<[[bd bd] [bd bd] [bd bd] [bd bd]]@4 ~@4 ~@4 ~@4 …>").gain("<[[0.333 1.000] …]@4 …>")…,
+  note("<~@4 ~@4 [~ 36 …]@4 ~@4 …>").sound("triangle")…
 )
-  .cpm(40.333)
+  .cpm(121.000)
 ```
 
 Each `stack` layer is one voice; each `<…>` element is one **bar of the piece** — a line, or a loop of
-earlier lines under it; each step inside
-it is one **foot**; each bracketed group inside that is the **syllables** of that foot.
+earlier lines under it — and its `@4` says it lasts four beats; each step inside
+it is one **foot**; each bracketed group inside that is the **syllables** of that foot. A cycle is
+one beat, so `.cpm` is the tempo in beats a minute and a bar of three beats is shorter than a bar
+of four (see [the pulse](#the-pulse)).
 
 ---
 
@@ -118,12 +120,15 @@ header asks for (the defaults when it has none).
 
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
 review (the held and refrain lanes, the bass, the stanza period, the outro, the harmony, the
-reading), each a selector of named variants — always including `off` — with one menu per setting,
+reading, the pulse), each a selector of named variants — always including `off`, except the pulse,
+which no piece can be without — with one menu per setting,
 A and B. The held and refrain lanes, the stanza period and the outro are `off`/`on`; the bass is
 `off`, `height` (its default), `syllables` or `feet` (see [the walking bass](#the-walking-bass));
 the harmony is `off` (its default), `rhyme`, `cadence` or `both` (see
-[the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives` or `stanza`.
-A starts with every mapping at its default (marked "(default)" in the menu), B with every one off; a menu not at its default
+[the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives` or `stanza`; the pulse
+is `elastic` or `steady` (its default; see [the pulse](#the-pulse)).
+A starts with every mapping at its default (marked "(default)" in the menu), B with every one at its
+first variant — `off`, and for the pulse `elastic`, the way the page played before; a menu not at its default
 has a bold border. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
 adds. The **Score A vs B** tab measures both settings side by side (see [Measuring it](#measuring-it))
@@ -308,9 +313,11 @@ machine profile's.
 `--set name=variant,…` chooses a candidate mapping's variant — `held`, `refrain`, `period` and
 `outro` take `off` or `on` (default `on`), `bass` takes `off`, `height`, `syllables` or `feet`
 (default `height`), `harmony` takes `off`, `rhyme`, `cadence` or `both` (default `off`), `reading`
-takes `off`, `arrives` or `stanza` (default `arrives`) — for the pattern and for `--score` alike;
+takes `off`, `arrives` or `stanza` (default `arrives`), `pulse` takes `elastic` or `steady`
+(default `steady`) — for the pattern and for `--score` alike;
 an unknown name or variant
-is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`.
+is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`
+(`--without pulse` is `pulse=elastic`: the pulse has no `off`).
 `--explain` lists every choice that is not a default. The reading is not in the CLI's pattern, so
 `reading=…` changes only that list. `./scripts/cycle.sh machine bass` scores every example without
 the bass, and `./scripts/cycle.sh machine bass=off,period=off` passes its list to `--set` (any list
@@ -339,6 +346,27 @@ foundation line saying why each note is what it is (`step down: AH is mid, so th
 the ones it is silent in, and shows each syllable's own bass note in the pitch column. The OSC
 schedule sends a bass note where there is no melody note, at the bass note's accent, and counts
 the ones it cannot send.
+
+### The pulse
+
+*Decided: `steady` is the default* (`SPEC.md` §4.2, `--set pulse=…`, or the `pulse` menu on the
+page). How long a bar of the Strudel pattern lasts.
+
+- **`steady`** — a bar lasts as many beats as it holds, so the beat is the same speed all the way
+  through. A cycle is a beat: the bars are weighted with mini-notation's `@` (`<[…]@3 […]@4>`, a
+  bar of weight *w* lasting *w* cycles), and `.cpm` is the tempo itself. Swing is
+  `.swingBy(x, 1)`, so it swings every beat whatever the length of its bar.
+- **`elastic`** — every bar lasts the same time, one cycle, at the tempo over the piece's integer
+  mean bar length: the pattern as it was until now. A bar of four beats among bars of three plays
+  its beats a third faster — Wilde's Theocritus at 161 bpm against its 121.
+
+The pattern's header says which, and what tempo each bar length is heard at (`pulse = elastic: …
+3 beats at 121.000 bpm, 4 beats at 161.333 bpm`); `--explain` names it at the top. The page's roll
+draws its bar lines where the trace says the bars begin, so under `steady` they are unevenly
+spaced where bar lengths change; the lit poem and the reading's cues are on the same weighted bars,
+and each spoken line's rate is fitted to the bar it is spoken in. The OSC schedule is in beats and
+was always steady; asked for `elastic` it says it does not apply it. Only Hopkins, Poe and Wilde
+mix bar lengths, so only they sound different; every other example plays exactly as before.
 
 ### The harmony layer
 

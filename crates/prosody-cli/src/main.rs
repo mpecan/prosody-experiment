@@ -83,8 +83,10 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20                held, refrain, period, outro = off|on (default on);\n\
      \x20                bass = off|height|syllables|feet (default height);\n\
      \x20                harmony = off|rhyme|cadence|both (default off);\n\
-     \x20                reading = off|arrives|stanza (default arrives)\n\
+     \x20                reading = off|arrives|stanza (default arrives);\n\
+     \x20                pulse = elastic|steady (default steady)\n\
      \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
+     \x20                (the pulse has no off: --without pulse is pulse=elastic)\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
@@ -379,6 +381,12 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
     // A header key the schedule does not apply is said out loud, not dropped (`CLAUDE.md` §6).
     for (key, value) in schedule.unapplied() {
         eprintln!("prosody: {key} = {value} is not applied to an OSC schedule");
+    }
+    if schedule.elastic_unapplied() {
+        eprintln!(
+            "prosody: pulse = elastic is not applied to an OSC schedule: it is in beats, and \
+             every bar lasts its beats"
+        );
     }
     if schedule.unsent_chords() > 0 {
         eprintln!(

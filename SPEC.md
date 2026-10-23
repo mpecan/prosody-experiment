@@ -84,11 +84,32 @@ beat in three, one of two in two, so when lines with different feet sound in one
 refrain and call lanes stack them) the beat carries 3 against 2 — Theocritus's dactylic line-ends
 ("Sicily", "Persephone") against its iambic tetrameter in 30% of its beats, The Tyger's "In the
 forests" against "Tyger Tyger," in 3%. `prosody-score`'s jazz profile measures it (`cross_rhythm`).
-**The elastic beat is still in the Strudel backend:** a cycle is a slot at one `.cpm` for the
-piece (tempo ÷ the integer mean bar length), so a bar of four beats among bars of three plays its
-beats a third faster — Theocritus's four-beat bars run at 161 bpm against its stated 121. The OSC
-backend and the scorer keep the beat constant; the page plays the Strudel text. Fixing it is a
-backend question raised in `PLAN.md`'s log, not decided here.
+**The elastic beat was in the Strudel backend:** a cycle was a slot at one `.cpm` for the
+piece (tempo ÷ the integer mean bar length), so a bar of four beats among bars of three played its
+beats a third faster — Theocritus's four-beat bars ran at 161 bpm against its stated 121. The OSC
+backend and the scorer kept the beat constant; the page plays the Strudel text.
+
+**The pulse** (*decided 2026-10-23 by the user: a steady beat*). Each bar lasts as long as its
+beats, so the beat is the same speed throughout — "foot → beat" with every beat one length. It is
+structure (when events fall), so it is a selector, `Mapping::Pulse`, not palette:
+
+- **`steady`** (the default). In the Strudel pattern a cycle is a beat: the arrangement is one
+  `<…>` whose bars carry mini-notation weights (`<[…]@3 […]@4>` — in `@strudel/mini` 1.2.6 a
+  `polymeter_slowcat` of a `timeCat`, slowed by the weights' sum, so a bar of weight *w* lasts
+  exactly *w* cycles), and `.cpm` is the tempo. Integers throughout; no rounded tempo.
+- **`elastic`** — the pattern as it was, kept to compare against: a cycle is a bar.
+
+Swing (§5) slices a cycle, so under `steady` it is `.swingBy(x, 1)` — every beat swung, in a bar of
+three or of four alike; under `elastic` it keeps the mean bar length as before. The page's trace
+and the reading's cue pattern are built on the same weighted bars and the same `.cpm`, a spoken
+line's rate is fitted to the bar it is spoken in, and the trace hands the page each bar's start so
+the roll's bar lines fall where the bars change. The OSC schedule is in beats and has always been
+steady; it does not apply `elastic`, and says so in its header and on `--send`. The scorer reads the
+score, which the pulse does not change, so it measures both variants alike — it already modelled a
+steady beat. Against I2 the steady pulse is an improvement: under `elastic` a bar's length in
+seconds depended on the whole poem's mean bar length, so an edit to stanza *n* that changed it
+re-timed stanza *m*; under `steady` a bar's length depends only on its own beats (and the tempo,
+which `tempo_range` already fits to the poem's density, as before).
 
 ### 4.3 Repetition → structure (highest-value pass)
 
@@ -255,11 +276,14 @@ is unchanged. The OSC schedule has no chord message, and says how many chords it
 
 **Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
 lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list
-of named variants, always including `off`, and a default. A `Mappings` value chooses one variant
+of named variants, always including `off` (the pulse excepted, below), and a default. A `Mappings` value chooses one variant
 per mapping, and only a variant the mapping lists can be chosen. Today the held and refrain
 lanes, the stanza period and the outro are `off`/`on`, default `on`; the bass is
 `off`/`height`/`syllables`/`feet`, default `height`; the harmony is `off`/`rhyme`/`cadence`/`both`,
-default `off`; the reading is `off`/`arrives`/`stanza`, default `arrives`. They are
+default `off`; the reading is `off`/`arrives`/`stanza`, default `arrives`; the pulse (§4.2) is
+`elastic`/`steady`, default `steady` — the one mapping without `off`, because a piece cannot be
+without a pulse: its first variant is what preceded it, `elastic`, and leaving it out means that.
+They are
 chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
 `set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
 page's A/B table, so the piece can be heard and measured under each choice. This is a separate
@@ -449,6 +473,9 @@ into `n`; `.cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6), after which a cyc
 scheduler's second, not a bar. The pattern chained `.cpm(c).swingBy(x, n)`, so swing sliced the
 second — onsets moved to irregular times, and a held chord could be skipped or struck twice. It is
 now `.swingBy(x, n).cpm(c)`: the bar's beats are swung, then the bar is set to the tempo.
+*Since the steady pulse (§4.2) a cycle is a beat, so `n` is 1 and every beat is swung whatever its
+bar's length; under `elastic` `n` is still the mean bar length, which slices a bar of another
+length across its beats.*
 
 ---
 

@@ -133,7 +133,9 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
     events.sort_by_key(Event::order);
     let score = Score::new(voices, events, bars, silent(analyses))
         .with_harmony(harmony)
-        .with_bass(walk);
+        .with_bass(walk)
+        // Recorded, never read here: how long a bar lasts is the backends' to lay out (§4.2).
+        .with_pulse(mappings.get(Mapping::Pulse));
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,

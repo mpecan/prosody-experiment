@@ -406,6 +406,67 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### A steady beat — the pulse, decided
+
+The user decided the Strudel pattern's bar lasts as long as its beats, so the beat is one speed
+throughout; the old behaviour stays as a variant to A/B. A new selector, `Mapping::Pulse`
+(`pulse`): **`steady`** (default) and **`elastic`** (as it was). It is structure, recorded on the
+score (`Score::pulse`) and laid out by the backends; the lowering places nothing by it.
+
+- **Strudel.** Under `steady` a cycle is a beat: one `<…>` per pattern whose bars carry `@` weights
+  equal to the slot's beats, and `.cpm(tempo)`. Checked against the `@strudel/mini` 1.2.6 source:
+  `<…>` is a `polymeter_slowcat`, its sequence a `timeCat` of the weighted children slowed by the
+  weights' sum, so a bar of weight *w* lasts *w* cycles (`@n` adds `n − 1` to a default weight of
+  1). One function, `strudel::sequence`, writes every pattern's bars, so the drums, every parameter,
+  the pitched layers, the chord lane and the trace agree bar for bar; `strudel::weights`/`starts`
+  are the bars' lengths and starts for everything else. Under `elastic` every byte is as before.
+- **Swing.** `swingBy(x, n)` is `inside(n, late(seq(0, x/2)))` (`@strudel/core` 1.2.6): it slices a
+  cycle. A cycle being a beat, `steady` writes `.swingBy(x, 1)` — every beat swung in bars of three
+  and four alike. Measured with the real 1.2.6 packages in node on Theocritus at swing 0.33: every
+  half-beat onset lands at 0.665 of its beat and every second triplet at 0.832, 331 onsets as
+  without swing. Under `elastic` (`swingBy(0.33, 3)`) the four-beat bars land at 0.125, 0.25, 0.375,
+  0.54, 0.79, 0.915 of a beat, and Strudel sounds 338 onsets — seven doubled across slice edges.
+- **On one clock.** The trace carries the music's bar starts and `.cpm` (`Trace::bars`,
+  `Trace::cycles_per_minute`, and `"bars"`/`"cpm"` in `/trace`'s JSON); the page's roll draws its
+  bar lines at those starts, repeated each loop, and sizes its window from the mean bar. The
+  reading's cue pattern is weighted like the music's bars, and each line's rate is fitted to the
+  bar it is spoken in (under `elastic` an eight-syllable line in a four-beat bar is hurried to
+  1.569; under `steady` it reads at 1.176 like the rest). The OSC schedule was always steady; asked
+  for `elastic` it says `# not applied here: pulse = elastic …` (and so does `--send`).
+- **The pulse has no `off`.** A piece cannot be without one, so its first variant is what preceded
+  it, `elastic`; `Mapping::off` now returns a mapping's first variant (`off` for every other one),
+  `--without pulse` / `off=pulse` mean `elastic`, and the page's B side starts each mapping at its
+  first variant — so A is steady and B elastic by default.
+- **Visible.** The pattern header's `pulse = steady: a cycle is a beat at 121 bpm, … (bars of 3, 4
+  beats)` or `pulse = elastic: … 3 beats at 121.000 bpm, 4 beats at 161.333 bpm`; the explain view's
+  `pulse …` line under the passes; the CLI help; the page's mapping table.
+- **Tests (hand-worked).** A two-stanza fixture of three-iamb then four-iamb lines: slot weights
+  3 3 4 3 4 4 4 4 and starts 0 3 6 10 13 17 21 25 (29) under `steady`, at `.cpm(120.000)`; all ones
+  at `.cpm(40.000)` under `elastic`, the same bar strings otherwise; swing slices 1 and 3; the
+  trace's bars, clock and lane weights are the music's, the cues' `<0@3 1@3 2@4 ~@3 ~@4 3@4 ~@4 ~@4>`
+  and rates (1.176 ×4 steady; 1.176, 1.176, 1.569, 1.569 elastic); OSC onsets on beats 0 3 6 10 13
+  17 21 25 under either. The web trace JSON for Theocritus (126 beats in bars of 3 and 4 against 0
+  to 33), the CLI's `--set`/`--without pulse`, and the selector's variants.
+- **Snapshots.** All 15 `prosody-emit` corpus snapshots changed, and only mechanically: every
+  pattern gained the `pulse = steady` header line, `@n` weights on each bar, and `.cpm` became the
+  tempo (16 → 128, 30.25 → 121, 25 → 125, 25.2 → 126) with the villanelle-jazz `.swingBy(0.330, 5)`
+  → `(0.330, 1)`; every view gained the one `pulse steady …` line. No corpus poem mixes bar
+  lengths, so in every snapshot each bar lasts exactly what it did (checked: with weights, the
+  header line and the clock lines stripped, every snapshot is byte-identical to before). Of the
+  examples only Hopkins (bars of 5 and 6), Poe (5, 6) and Wilde (3, 4) change in time; with
+  `pulse=elastic` every example's pattern is byte-identical to before apart from the header line,
+  and every OSC schedule is unchanged.
+- **Measured.** `./scripts/cycle.sh machine` 0.743 and `jazz` 0.737, unchanged, and the same under
+  `pulse=elastic`: the scorer reads the score, which already kept a steady beat, so it cannot tell
+  the two apart (raised below). `check-wasm.sh` gained a `pulse:elastic` setting: 315 answers.
+- **In the browser** (Chromium, Wilde, A steady / B elastic): over 60 samples on each side the
+  trace's active syllables equalled the music's, every bar start carried a drum onset at the
+  trace's bar time (33 of 33 on A, 30 of 30 on B), cues fired at 0, 1.488, 2.975, 4.463, 11.405 s
+  — the steady bar starts — and the roll's bar lines followed the 3- and 4-beat bars. No console
+  errors or warnings.
+- **Raised, not done.** The scorer could model the elastic pulse (a slot as the mean bar) so the
+  A/B score shows a difference; the roll's "bars shown" is a mean bar under `steady`.
+
 ### Watching it play — the roll and the lit poem
 
 A **Watch** tab, the page's new default, shows the piece while it plays. No mapping changed and no

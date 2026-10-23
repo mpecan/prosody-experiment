@@ -27,6 +27,12 @@
 //! a palette value ([`Style::tempo_range`](crate::Style::tempo_range)), so turning beats into
 //! seconds is the last thing that happens and it happens in one place — which also keeps
 //! invariant I3 true here: change the tempo and every onset in beats is identical.
+//!
+//! So every bar lasts its beats and every beat the same time: the **steady** pulse, always
+//! (`SPEC.md` §4.2, `Mapping::Pulse`). The Strudel backend's **elastic** variant, where every bar
+//! lasts one cycle and a longer bar hurries its beats, is not applied here — a schedule in beats
+//! has no bar to stretch — and a schedule of a score chosen elastic says so
+//! ([`Schedule::elastic_unapplied`]) rather than playing something its Strudel text does not.
 
 use std::fmt::Write as _;
 
@@ -220,6 +226,7 @@ pub struct Schedule {
     unapplied: Vec<(&'static str, String)>,
     unsent_chords: usize,
     unsent_bass: usize,
+    elastic_unapplied: bool,
 }
 
 /// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
@@ -280,6 +287,14 @@ impl Schedule {
         self.unsent_bass
     }
 
+    /// Whether the score was chosen the elastic pulse (`Mapping::Pulse`), which this schedule
+    /// does not apply: its onsets are in beats, and every bar lasts its beats — the steady pulse.
+    /// Said in [`Schedule::to_text`] and on `--send` (`CLAUDE.md` §6: a fallback must be visible).
+    #[must_use]
+    pub const fn elastic_unapplied(&self) -> bool {
+        self.elastic_unapplied
+    }
+
     /// How long the piece lasts, in beats.
     #[must_use]
     pub fn beats(&self) -> f64 {
@@ -324,6 +339,13 @@ impl Schedule {
                 out,
                 "# not applied here: {} (pitch is sent from MIDI 36, velocity unscaled)",
                 keys.join(", ")
+            );
+        }
+        if self.elastic_unapplied {
+            let _ = writeln!(
+                out,
+                "# not applied here: pulse = elastic (onsets are in beats, so every bar lasts \
+                 its beats: the pulse is steady)"
             );
         }
         if self.unsent_chords > 0 {
@@ -378,9 +400,9 @@ impl Backend for Osc {
 
         // Walk the arrangement, not the bars: a stanza may sound many times, looping under others
         // or transforming into a rival (`prosody_core::arrange`). Slots differ in length —
-        // `SPEC.md` §4.2 insists on it — so their starts are accumulated rather than multiplied,
-        // which is the whole reason this backend can honour an odd metre where a fixed-length
-        // cycle cannot.
+        // `SPEC.md` §4.2 insists on it — so their starts are accumulated rather than multiplied:
+        // the steady pulse, which the Strudel backend now plays too (`strudel::weights` counts
+        // the same beats).
         let mut messages: Vec<Message> = Vec::new();
         let mut unsent_bass = 0;
         let mut slot_start = 0_u64;
@@ -426,6 +448,7 @@ impl Backend for Osc {
                 .filter(|slot| score.chord_in(slot).is_some())
                 .count(),
             unsent_bass,
+            elastic_unapplied: score.pulse() == prosody_core::Variant::Elastic,
         })
     }
 }

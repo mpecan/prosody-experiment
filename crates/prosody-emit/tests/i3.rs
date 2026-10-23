@@ -372,6 +372,9 @@ fn i3_the_notes_move_but_the_degrees_do_not() {
             .unwrap_or_default()
             .replace(['<', '>', '[', ']'], " ")
             .split_whitespace()
+            // A bar's `@` weight is how long it lasts, not a value.
+            .map(|t| t.split('@').next().unwrap_or(t))
+            .filter(|t| !t.is_empty())
             .find(|token| *token != "~")
             .unwrap_or_default()
             .to_owned()
@@ -596,6 +599,9 @@ proptest::proptest! {
                             after[..end]
                                 .replace(['<', '>', '[', ']'], " ")
                                 .split_whitespace()
+                // A bar's `@` weight is how long it lasts, not a value.
+                .map(|t| t.split('@').next().unwrap_or(t))
+                .filter(|t| !t.is_empty())
                                 .filter(|t| *t != "~")
                                 .map(|t| t.parse::<f64>().unwrap()),
                         );
@@ -662,6 +668,8 @@ fn chords_are_one_event(
     // Steps, in order: rests and notes, brackets and alternation stripped.
     let steps = |text: &str| -> Vec<String> {
         text.split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+            // A bar's `@` weight is how long it lasts, the same under either voicing: not a step.
+            .map(|t| t.split('@').next().unwrap_or(t))
             .map(|t| t.trim_start_matches('[').trim_end_matches(']').to_owned())
             .filter(|t| !t.is_empty())
             .collect()

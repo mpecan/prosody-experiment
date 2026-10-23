@@ -687,6 +687,56 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
 }
 
 #[test]
+fn the_pulse_is_steady_unless_set_elastic_and_has_no_off() {
+    // The default is steady: a cycle is a beat. `--without pulse` is its first variant, elastic,
+    // the pattern as it was — the pulse has no `off`.
+    let (steady, err, code) = run(&[], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        steady.contains("//   pulse = steady: a cycle is a beat"),
+        "{steady}"
+    );
+    let (elastic, err, code) = run(&["--set", "pulse=elastic"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        elastic.contains("//   pulse = elastic: every bar one cycle"),
+        "{elastic}"
+    );
+    assert!(!elastic.contains('@'), "{elastic}");
+    let (without, _, _) = run(&["--without", "pulse"], COUPLET);
+    assert_eq!(without, elastic);
+    let (_, err, code) = run(&["--set", "pulse=off"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `pulse` (it has elastic, steady)"),
+        "{err}"
+    );
+    // The OSC schedule is in beats, so always steady, and says so when elastic was asked for.
+    let (schedule, err, code) = run(&["--osc", "--set", "pulse=elastic"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        schedule.contains("# not applied here: pulse = elastic"),
+        "{schedule}"
+    );
+    let (osc_steady, _, _) = run(&["--osc"], COUPLET);
+    assert!(!osc_steady.contains("pulse"), "{osc_steady}");
+    // Both are JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        for (name, text) in [("steady", &steady), ("elastic", &elastic)] {
+            let file = std::env::temp_dir().join(format!("prosody-pulse-{name}.js"));
+            std::fs::write(&file, text).expect("writing the pattern");
+            let checked = Command::new(&node)
+                .arg("--check")
+                .arg(&file)
+                .output()
+                .expect("node should run");
+            let _ = std::fs::remove_file(&file);
+            assert!(checked.status.success(), "{name}: {text}");
+        }
+    }
+}
+
+#[test]
 fn score_reports_every_metric_and_an_edit_per_word() {
     // The scorer's output is read by scripts, so its keys are the contract: every metric, the
     // edit test, and the totals, each as `name value`.

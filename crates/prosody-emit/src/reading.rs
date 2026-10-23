@@ -49,7 +49,7 @@ use prosody_core::voice::Score;
 use prosody_core::{Cause, Lane};
 
 use crate::fmt_param;
-use crate::strudel::cycles_per_minute;
+use crate::strudel::{cycles_per_minute, weights};
 use crate::style::Style;
 
 /// How many syllables a speech synthesiser says a second at rate 1.
@@ -152,6 +152,10 @@ pub struct Reading {
     slots: usize,
     cpm: f64,
     variant: Variant,
+    /// How many cycles each slot lasts — the music's own ([`weights`]) — or `None` under the
+    /// elastic pulse, where every slot is one cycle and the cue pattern is written as it always
+    /// was.
+    weights: Option<Vec<u64>>,
 }
 
 impl Reading {
@@ -162,8 +166,9 @@ impl Reading {
     }
 
     /// The cue pattern, as Strudel text: one element per slot, the spoken line's index where a
-    /// line is first heard and a rest elsewhere, at the pattern's own cycles per minute so each
-    /// cue falls on the first beat of its bar.
+    /// line is first heard and a rest elsewhere — weighted as the music's bars are under the
+    /// steady pulse (`<0@3 ~@4>`), one a cycle under the elastic — at the pattern's own cycles per
+    /// minute, so each cue falls on the first beat of its bar.
     ///
     /// The page evaluates this, attaches its speaking callback with `.onTrigger(…, true)` — the
     /// `true` keeps Strudel's default output from trying to sound the cue — and stacks it with the
@@ -182,7 +187,9 @@ impl Reading {
             | Variant::Both
             | Variant::Height
             | Variant::Syllables
-            | Variant::Feet => "each line spoken in the bar it is first heard",
+            | Variant::Feet
+            | Variant::Steady
+            | Variant::Elastic => "each line spoken in the bar it is first heard",
         };
         let mut out = format!(
             "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
@@ -215,6 +222,14 @@ impl Reading {
         for cue in &self.cues {
             if let Some(step) = steps.get_mut(cue.slot) {
                 *step = cue.line.to_string();
+            }
+        }
+        // The music's bars, as long as the music's: under the steady pulse a slot lasts its
+        // beats in cycles, and a cue is weighted exactly as the music's bar is
+        // (`strudel::sequence`), so it fires on that bar's first beat.
+        if let Some(weights) = &self.weights {
+            for (step, weight) in steps.iter_mut().zip(weights) {
+                let _ = write!(step, "@{weight}");
             }
         }
         let _ = writeln!(
@@ -251,7 +266,15 @@ pub fn plan(
         });
     }
     let cpm = cycles_per_minute(score, style);
-    let bar_seconds = 60.0 / cpm / SCHEDULER_CPS;
+    // How long each slot sounds, on the scheduler: its cycles over the cycles a second. Under the
+    // steady pulse a slot of four beats lasts a third longer than one of three, and a line is
+    // fitted to the bar it is spoken in, not to an average one.
+    let all_weights = weights(score);
+    let bar_seconds = |slot: usize| {
+        let cycles = all_weights.get(slot).copied().unwrap_or(1);
+        let cycles = f64::from(u32::try_from(cycles).unwrap_or(u32::MAX));
+        cycles * 60.0 / cpm / SCHEDULER_CPS
+    };
     let slots = score.arrangement().slots().len();
     let variant = mappings.get(Mapping::Reading);
 
@@ -267,7 +290,9 @@ pub fn plan(
         | Variant::Both
         | Variant::Height
         | Variant::Syllables
-        | Variant::Feet => arrivals,
+        | Variant::Feet
+        | Variant::Steady
+        | Variant::Elastic => arrivals,
     };
 
     let mut cues = Vec::new();
@@ -296,7 +321,7 @@ pub fn plan(
             span: line.span(),
             text: text.to_owned(),
             syllables,
-            rate: fitted(syllables, bar_seconds),
+            rate: fitted(syllables, bar_seconds(slot)),
         });
     }
     Ok(Reading {
@@ -304,6 +329,7 @@ pub fn plan(
         slots,
         cpm,
         variant,
+        weights: (score.pulse() != Variant::Elastic).then_some(all_weights),
     })
 }
 
@@ -535,7 +561,8 @@ mod tests {
         assert!(
             reading
                 .pattern()
-                .ends_with("n(\"<0 1 2 ~ ~ 3 ~ ~>\").cpm(60.000)\n"),
+                // Every line of two beats, so every bar two cycles — a cycle is a beat at 120.
+                .ends_with("n(\"<0@2 1@2 2@2 ~@2 ~@2 3@2 ~@2 ~@2>\").cpm(120.000)\n"),
             "{}",
             reading.pattern()
         );
@@ -571,7 +598,7 @@ mod tests {
         );
         let pattern = reading.pattern();
         assert!(
-            pattern.ends_with("n(\"<0 1 2 3 ~ ~ ~ ~>\").cpm(60.000)\n"),
+            pattern.ends_with("n(\"<0@2 1@2 2@2 3@2 ~@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"),
             "{pattern}"
         );
         assert!(
@@ -601,7 +628,7 @@ mod tests {
         assert!(
             reading
                 .pattern()
-                .ends_with("n(\"<~ ~ ~ ~ ~ ~ ~ ~>\").cpm(60.000)\n"),
+                .ends_with("n(\"<~@2 ~@2 ~@2 ~@2 ~@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"),
             "{}",
             reading.pattern()
         );

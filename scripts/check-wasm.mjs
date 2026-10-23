@@ -28,6 +28,7 @@ const settings = [
   'set=harmony:rhyme,bass:syllables&voicing=seventh',
   'set=harmony:cadence&off=outro,period&profile=jazz',
   'off=held,refrain,bass&profile=interest',
+  'set=pulse:elastic&swing=0.33&profile=jazz',
 ];
 const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
 

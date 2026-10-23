@@ -611,9 +611,15 @@ fn trace_json(trace: &prosody_emit::Trace, source: &str, typed: &str) -> String 
             )
         })
         .collect();
+    // Where each bar begins, in the pattern's cycles, and the piece's length last; with the
+    // cycles a minute, the page draws the roll's bar lines where the music's bars change — under
+    // the steady pulse they are not evenly spaced.
+    let bars: Vec<String> = trace.bars().iter().map(ToString::to_string).collect();
     format!(
-        "{{\"pattern\":{},\"marks\":[{}]}}\n",
+        "{{\"pattern\":{},\"bars\":[{}],\"cpm\":{},\"marks\":[{}]}}\n",
         json_string(trace.pattern()),
+        bars.join(","),
+        prosody_emit::fmt_param(trace.cycles_per_minute()),
         marks.join(",")
     )
 }
@@ -834,6 +840,13 @@ mod tests {
             html.contains("[\"off\",\"arrives\",\"stanza\"],\"arrives\"]"),
             "the reading selector"
         );
+        assert!(
+            html.contains("[\"elastic\",\"steady\"],\"steady\"]"),
+            "the pulse selector"
+        );
+        // B starts at each mapping's first variant — what preceded it — not at `off`, which the
+        // pulse does not have: so B is elastic and A steady until the writer chooses.
+        assert!(html.contains("B: defaults((m) => m[2][0])"), "B's defaults");
         assert!(!html.contains("__MAPPINGS__"));
     }
 
@@ -1368,5 +1381,62 @@ mod tests {
         )
         .expect("the seed poem");
         assert!(rendered.contains("stack("), "{rendered}");
+    }
+
+    #[test]
+    fn the_trace_says_where_the_bars_fall_under_either_pulse() {
+        // Wilde's Theocritus: 126 beats over 33 slots, bars of three and four (PLAN.md, the
+        // off-rhythm trace). Under the steady pulse a cycle is a beat, so the trace's bar starts
+        // run from 0 to 126 in steps of 3 and 4, at the tempo itself; under the elastic pulse a
+        // cycle is a bar, so they count 0 to 33 at 126 / 33's integer mean, 3, below it.
+        let wilde = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "wilde-theocritus")
+            .map(|(_, _, text)| body_of(text))
+            .unwrap();
+        let bars_and_cpm = |query: &[(&str, &str)]| -> (Vec<u64>, f64) {
+            let response = super::compile(&request(query, wilde), &Output::Trace);
+            assert_eq!(response.status, 200, "{}", response.body);
+            let bars = response.body.split("\"bars\":[").nth(1).unwrap();
+            let bars: Vec<u64> = bars[..bars.find(']').unwrap()]
+                .split(',')
+                .map(|n| n.parse().unwrap())
+                .collect();
+            let cpm = response.body.split("\"cpm\":").nth(1).unwrap();
+            let cpm: f64 = cpm[..cpm.find(',').unwrap()].parse().unwrap();
+            (bars, cpm)
+        };
+        let (steady, steady_cpm) = bars_and_cpm(&[]);
+        assert_eq!(steady.len(), 34);
+        assert_eq!(steady.last(), Some(&126));
+        let lengths: std::collections::BTreeSet<u64> =
+            steady.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        assert_eq!(lengths, [3, 4].into_iter().collect());
+        let (elastic, elastic_cpm) = bars_and_cpm(&[("set", "pulse:elastic")]);
+        assert_eq!(elastic, (0..=33).collect::<Vec<u64>>());
+        // The elastic cycle is three steady beats: 3 × 40.333 is the tempo, 121, to rounding.
+        assert!((steady_cpm - 121.0).abs() < 1e-9, "{steady_cpm}");
+        assert!(
+            (elastic_cpm * 3.0 - steady_cpm).abs() < 0.01,
+            "{elastic_cpm}"
+        );
+        // `off=pulse` is the pulse's first variant, elastic: the pulse has no off.
+        assert_eq!(bars_and_cpm(&[("off", "pulse")]).0, elastic);
+        // ...and the pattern and the explain view say which it is.
+        let pattern = super::compile(
+            &request(&[("set", "pulse:elastic")], wilde),
+            &Output::Pattern,
+        );
+        assert!(
+            pattern.body.contains("//   pulse = elastic"),
+            "{}",
+            pattern.body
+        );
+        let explain = super::compile(
+            &request(&[("set", "pulse:elastic")], wilde),
+            &Output::Explain,
+        );
+        assert!(explain.body.contains("pulse=elastic"), "{}", explain.body);
+        assert!(explain.body.contains("pulse elastic ·"), "{}", explain.body);
     }
 }

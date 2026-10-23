@@ -550,6 +550,7 @@ pub struct Score {
     arrangement: Arrangement,
     harmony: Vec<Harmony>,
     bass: Variant,
+    pulse: Variant,
 }
 
 impl Score {
@@ -568,6 +569,7 @@ impl Score {
             arrangement: Arrangement::default(),
             harmony: Vec::new(),
             bass: Variant::Off,
+            pulse: Variant::Steady,
         }
     }
 
@@ -582,6 +584,22 @@ impl Score {
     #[must_use]
     pub const fn bass(&self) -> Variant {
         self.bass
+    }
+
+    /// The same score, recording which variant of the pulse its backends play it at.
+    pub(crate) const fn with_pulse(mut self, variant: Variant) -> Self {
+        self.pulse = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Pulse`](crate::mapping::Mapping::Pulse) the piece is played at:
+    /// [`Variant::Steady`], every bar as long as its beats, or [`Variant::Elastic`], every bar the
+    /// same span. Nothing in the score is laid out by it — every event's bar, beat and subdivision
+    /// is the same under both — so it is carried for the backends, which decide when a bar
+    /// sounds, and for the debug view.
+    #[must_use]
+    pub const fn pulse(&self) -> Variant {
+        self.pulse
     }
 
     /// The same score, with each line's harmony ([`crate::harmony`]).

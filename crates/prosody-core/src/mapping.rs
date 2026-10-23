@@ -3,7 +3,9 @@
 //! Some mappings are still candidates: added by a design iteration and marked *pending review* in
 //! `SPEC.md`, they change what a poem becomes, and whether they belong is judged by listening. Each
 //! is a *selector*: a [`Mapping`] has a fixed, ordered list of [`Variant`]s — always including
-//! [`Variant::Off`] — and one of them is its default. A [`Mappings`] value picks one variant per
+//! a first variant that is what preceded the mapping ([`Variant::Off`] for every mapping but the
+//! pulse, which cannot be left out and goes back to [`Variant::Elastic`]) — and one of them is its
+//! default. A [`Mappings`] value picks one variant per
 //! mapping, so the same poem can be heard under each choice, side by side.
 //!
 //! This is structure, not palette, so it is deliberately **not** part of the style (`SPEC.md` §6,
@@ -43,6 +45,12 @@ pub enum Mapping {
     /// §4.7's reading: when each line of the poem is spoken over the music. Decided in the
     /// emitter (`prosody_emit::reading`), not in the lowering, which never reads it.
     Reading,
+    /// §4.2's pulse: how long a bar of the Strudel pattern lasts. [`Variant::Steady`] (the
+    /// default): as long as its beats, so the beat is one speed throughout. [`Variant::Elastic`]:
+    /// every bar the same span, so a bar of more beats plays them faster — the pattern as it was.
+    /// When events fall is structure, not palette (I3). The lowering records it on the score and
+    /// lays out nothing by it: the backends read it (`prosody_emit::strudel`).
+    Pulse,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -74,6 +82,12 @@ pub enum Variant {
     /// The bass's W2: a note a foot, on the beat — the foot's vowel height chooses the chord tone,
     /// and the next foot's the direction of a step where the tone would repeat.
     Feet,
+    /// The pulse's default: a bar lasts as many beats as it holds, so every beat of the piece
+    /// lasts the same time.
+    Steady,
+    /// The pulse as it was: every bar lasts the same time, so the beat stretches in a short bar
+    /// and hurries in a long one.
+    Elastic,
 }
 
 impl Variant {
@@ -91,6 +105,8 @@ impl Variant {
             Self::Height => "height",
             Self::Syllables => "syllables",
             Self::Feet => "feet",
+            Self::Steady => "steady",
+            Self::Elastic => "elastic",
         }
     }
 }
@@ -119,9 +135,13 @@ const BASS: &[Variant] = &[
     Variant::Feet,
 ];
 
+/// The pulse's variants: elastic first, because it is what preceded the mapping — a piece cannot
+/// be without a pulse, so the pulse has no [`Variant::Off`] — then steady.
+const PULSE: &[Variant] = &[Variant::Elastic, Variant::Steady];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -129,6 +149,7 @@ impl Mapping {
         Self::Outro,
         Self::Harmony,
         Self::Reading,
+        Self::Pulse,
     ];
 
     /// Its name on a command line or in a query string.
@@ -142,6 +163,7 @@ impl Mapping {
             Self::Outro => "outro",
             Self::Harmony => "harmony",
             Self::Reading => "reading",
+            Self::Pulse => "pulse",
         }
     }
 
@@ -171,10 +193,15 @@ impl Mapping {
             Self::Reading => {
                 "the poem read aloud: each line where it arrives, or a stanza a bar at a time"
             }
+            Self::Pulse => {
+                "how long a bar lasts: as long as its beats, one beat speed throughout (steady), \
+                 or every bar the same, so a longer bar hurries its beats (elastic)"
+            }
         }
     }
 
-    /// Its variants, in a fixed order that always starts with [`Variant::Off`].
+    /// Its variants, in a fixed order that starts with what preceded the mapping:
+    /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`].
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
@@ -182,6 +209,7 @@ impl Mapping {
             Self::Bass => BASS,
             Self::Reading => READING,
             Self::Harmony => HARMONY,
+            Self::Pulse => PULSE,
         }
     }
 
@@ -198,6 +226,10 @@ impl Mapping {
             // A candidate the user approved for comparison, not yet the piece as specified: off
             // keeps every existing pattern and score as it was (`PLAN.md`, the harmony proposal).
             Self::Harmony => Variant::Off,
+            // The user decided (PLAN.md, "a steady beat"): a bar lasts as long as its beats, so
+            // the beat is one speed throughout — SPEC.md §4.2's "foot → beat" taken at its word.
+            // Elastic stays as a variant to compare against.
+            Self::Pulse => Variant::Steady,
         }
     }
 
@@ -219,12 +251,18 @@ impl Mapping {
             .and_then(|variant| self.choose(*variant))
     }
 
-    /// This mapping switched off. Every mapping has [`Variant::Off`].
+    /// This mapping left out: its first variant, what preceded it — [`Variant::Off`] for every
+    /// mapping but the pulse, which a piece cannot be without, and which goes back to
+    /// [`Variant::Elastic`].
     #[must_use]
     pub const fn off(self) -> Choice {
+        let variant = match self.variants() {
+            [first, ..] => *first,
+            [] => Variant::Off,
+        };
         Choice {
             mapping: self,
-            variant: Variant::Off,
+            variant,
         }
     }
 }
@@ -293,7 +331,8 @@ impl Mappings {
             .unwrap_or_else(|| mapping.default_variant())
     }
 
-    /// Whether `mapping` applies at all: any variant but [`Variant::Off`].
+    /// Whether `mapping` applies at all: any variant but [`Variant::Off`]. Always true of the
+    /// pulse, which has no off.
     #[must_use]
     pub fn has(&self, mapping: Mapping) -> bool {
         self.get(mapping) != Variant::Off
@@ -341,15 +380,38 @@ mod tests {
     }
 
     #[test]
-    fn every_mapping_can_be_switched_off_and_defaults_to_a_variant_it_has() {
+    fn every_mapping_can_be_left_out_and_defaults_to_a_variant_it_has() {
         for mapping in Mapping::ALL {
-            assert_eq!(
-                mapping.variants().first(),
-                Some(&Variant::Off),
-                "{mapping:?}"
-            );
+            // What preceded it: off, or for the pulse — which no piece can be without — elastic.
+            let preceded = if mapping == Mapping::Pulse {
+                Variant::Elastic
+            } else {
+                Variant::Off
+            };
+            assert_eq!(mapping.variants().first(), Some(&preceded), "{mapping:?}");
+            assert_eq!(mapping.off().variant(), preceded, "{mapping:?}");
             assert!(mapping.variants().contains(&mapping.default_variant()));
         }
+    }
+
+    #[test]
+    fn the_pulse_is_steady_unless_elastic_is_chosen() {
+        assert_eq!(
+            Mapping::Pulse.variants(),
+            &[Variant::Elastic, Variant::Steady]
+        );
+        assert_eq!(Mappings::all().get(Mapping::Pulse), Variant::Steady);
+        assert!(Mapping::Pulse.choose(Variant::Off).is_none());
+        assert!(Mapping::Pulse.choose_named("off").is_none());
+        assert_eq!(Mapping::named("pulse"), Some(Mapping::Pulse));
+        let elastic = Mappings::all().without(Mapping::Pulse);
+        assert_eq!(elastic.get(Mapping::Pulse), Variant::Elastic);
+        assert_eq!(
+            elastic,
+            Mappings::all().with(Mapping::Pulse.choose_named("elastic").unwrap())
+        );
+        // Neither variant is "off": the pulse always applies.
+        assert!(elastic.has(Mapping::Pulse));
     }
 
     #[test]
@@ -360,6 +422,7 @@ mod tests {
         for mapping in Mapping::ALL {
             assert_eq!(all.has(mapping), mapping != Mapping::Harmony, "{mapping:?}");
         }
+        assert_eq!(all.get(Mapping::Pulse), Variant::Steady);
         assert_eq!(all.get(Mapping::Bass), Variant::Height);
         assert_eq!(all.get(Mapping::Reading), Variant::Arrives);
         assert_eq!(all.get(Mapping::Harmony), Variant::Off);
@@ -429,10 +492,10 @@ mod tests {
 
     #[test]
     fn every_combination_is_listed_once() {
-        // Four on/off switches, a four-way bass, a four-way harmony and a three-way reading:
-        // 2^4 × 4 × 4 × 3 = 768.
+        // Four on/off switches, a four-way bass, a four-way harmony, a three-way reading and a
+        // two-way pulse: 2^4 × 4 × 4 × 3 × 2 = 1536.
         let every = Mappings::every();
-        assert_eq!(every.len(), 768);
+        assert_eq!(every.len(), 1536);
         for (index, one) in every.iter().enumerate() {
             assert!(!every[index + 1..].contains(one), "{one:?} twice");
         }

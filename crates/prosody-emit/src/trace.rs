@@ -33,7 +33,7 @@ use prosody_core::role::Layer;
 use prosody_core::voice::{Event, Score};
 
 use crate::Style;
-use crate::strudel::{Colour, Lane, clock, grid_by_slot};
+use crate::strudel::{Colour, Lane, clock, cycles_per_minute, grid_by_slot, starts};
 
 /// One syllable as the page lights it: its span, its colour, and whether it is new here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -78,11 +78,14 @@ impl Mark {
     }
 }
 
-/// The trace of one piece: a pattern whose values are indices into [`Trace::marks`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The trace of one piece: a pattern whose values are indices into [`Trace::marks`], and where
+/// its bars fall.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Trace {
     pattern: String,
     marks: Vec<Mark>,
+    bars: Vec<u64>,
+    cpm: f64,
 }
 
 impl Trace {
@@ -96,6 +99,23 @@ impl Trace {
     #[must_use]
     pub fn marks(&self) -> &[Mark] {
         &self.marks
+    }
+
+    /// The cycle of the pattern each bar of the piece begins on, from 0, and last the piece's
+    /// length, where it loops round — the music's own bars (`strudel::starts`). Under the steady
+    /// pulse a cycle is a beat, so bars of different length are unevenly spaced; under the
+    /// elastic pulse a cycle is a bar, and these count 0, 1, 2, ….
+    #[must_use]
+    pub fn bars(&self) -> &[u64] {
+        &self.bars
+    }
+
+    /// The pattern's cycles a minute — the music's `.cpm` — so a cycle lasts `60 / cpm` seconds
+    /// on a scheduler at one cycle a second. A value only; print it through
+    /// [`fmt_param`](crate::fmt_param), as the pattern does.
+    #[must_use]
+    pub const fn cycles_per_minute(&self) -> f64 {
+        self.cpm
     }
 }
 
@@ -148,6 +168,9 @@ pub fn plan(score: &Score, style: &Style) -> Trace {
     Trace {
         pattern,
         marks: marks.into_inner(),
+        // The page draws the roll's bar lines from these: they can no longer be assumed equal.
+        bars: starts(score),
+        cpm: cycles_per_minute(score, style),
     }
 }
 
