@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>prosody</title>
 <link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400&display=swap">
 <style>
   :root {
     color-scheme: dark;
@@ -34,26 +37,49 @@
   #status { color: var(--dim); font-size: .85rem; margin-left: auto; }
   #status.bad { color: var(--warn); }
 
-  main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); min-height: 0; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-auto-rows: minmax(60vh, auto); } }
   section { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   section + section { border-left: 1px solid var(--line); }
+  section.panels { overflow-y: auto; background: var(--panel); }
 
-  #poem {
-    flex: 1; resize: none; border: 0; outline: 0; padding: 1rem 1.2rem;
-    background: transparent; color: var(--ink);
-    font-family: var(--mono); font-size: 14px; line-height: 1.7;
+  /* The editor: a transparent text box over the lit verse. Both layers must lay text out
+     identically — same font, size, padding, wrapping and scrollbar gutter — or the caret drifts off
+     the letters it is in. */
+  #editor { position: relative; flex: 1; min-height: 0; }
+  #lit, #poem {
+    position: absolute; inset: 0; margin: 0; border: 0; padding: 1.6rem 2rem 4rem;
+    font-family: Spectral, Georgia, "Times New Roman", serif; font-size: 1.32rem; line-height: 1.75;
+    font-weight: 400; letter-spacing: 0; white-space: pre-wrap; overflow-wrap: break-word;
+    tab-size: 4; scrollbar-gutter: stable;
   }
+  #lit { overflow: hidden; color: var(--ink); pointer-events: none; }
+  #poem {
+    overflow-y: auto; resize: none; outline: 0; background: transparent;
+    color: transparent; caret-color: var(--ink);
+  }
+  #poem::selection { background: rgba(201, 166, 255, .3); color: transparent; }
+  #poem::placeholder { color: var(--dim); }
+  #editor:focus-within { box-shadow: inset 2px 0 0 var(--accent); }
 
   .palette {
-    border-top: 1px solid var(--line); background: var(--panel);
-    padding: .8rem 1.2rem; display: grid; gap: .55rem .9rem;
+    padding: .2rem 1.2rem 1rem; display: grid; gap: .55rem .9rem;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
-  .palette h2 {
-    grid-column: 1 / -1; margin: 0; font-size: .72rem; letter-spacing: .12em;
-    text-transform: uppercase; color: var(--dim); font-weight: 600;
+  .palette h2 { grid-column: 1 / -1; margin: .4rem 0 0; font-size: .82rem; color: var(--dim); font-weight: 600; }
+
+  /* Every panel can be folded away; the page remembers which. */
+  .panel { border-bottom: 1px solid var(--line); }
+  .panel > summary {
+    cursor: pointer; padding: .7rem 1.2rem; font-weight: 600; font-size: .92rem; list-style: none;
+    display: flex; align-items: baseline; gap: .6rem;
   }
+  .panel > summary::-webkit-details-marker { display: none; }
+  .panel > summary::before { content: "▸"; color: var(--dim); transition: transform .15s; }
+  .panel[open] > summary::before { transform: rotate(90deg); }
+  .panel > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .panel .aside { color: var(--dim); font-weight: 400; font-size: .82rem; }
+  #panelViews pre { max-height: 60vh; }
   .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .78rem; }
   label { display: flex; flex-direction: column; gap: .2rem; font-size: .74rem; color: var(--dim); }
   header select { width: auto; }
@@ -93,7 +119,34 @@
   .reading .check span { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .82rem; }
   .reading input[type=checkbox] { width: auto; }
 
-  #score { flex: 1; overflow: auto; padding: 1rem 1.2rem; }
+  /* Watch: the poem as it sounds. The verse is the one bold thing on the page; the roll above it
+     and the key below the roll stay quiet. The five layer colours are the emitter's `.color()`
+     values (prosody_emit::strudel::Colour), so a lit syllable and its note on the roll match. */
+  #roll { width: 100%; height: 220px; display: block; background: #18171f;
+    border-top: 1px solid var(--line); }
+  .rollbar { display: flex; align-items: end; gap: 1.2rem; padding: 0 1.2rem .6rem; flex-wrap: wrap; }
+  .rollbar label { flex-direction: row; align-items: center; gap: .5rem; }
+  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .78rem; color: var(--dim); }
+  .key span { display: inline-flex; align-items: center; gap: .4rem; }
+  .key i { width: .6rem; height: .6rem; border-radius: 50%; background: var(--c); }
+  .key .echo i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dim); }
+  /* While it plays, the unlit verse steps back so the lit syllables carry the page. */
+  #editor.playing #lit { color: #8a86a0; }
+  #lit span { transition: color .45s ease-out, text-decoration-color .45s ease-out;
+    text-decoration: underline 2px transparent; text-underline-offset: .28em; }
+  #lit span.on { color: var(--c); transition: none; text-decoration-color: var(--u, transparent); }
+  #lit span.echo { color: color-mix(in srgb, var(--c) 60%, #8a86a0); transition: none;
+    text-decoration-color: color-mix(in srgb, var(--u, transparent) 55%, transparent); }
+  /* The reading has the background, the music the letters: the music colours each syllable and
+     underlines a note, the voice lays a pale wash behind the line it is reading and a brighter one
+     behind the word it is saying. One channel each, so both stay legible when they meet. */
+  #lit span.reading { background: rgba(244, 238, 222, .08); box-decoration-break: clone;
+    -webkit-box-decoration-break: clone; }
+  #lit span.spoken { background: rgba(244, 238, 222, .26); }
+  .key .voice i { border-radius: 2px; width: 1.1rem; background: rgba(244, 238, 222, .26); }
+  @media (prefers-reduced-motion: reduce) { #lit span, .panel > summary::before { transition: none; } }
+
+  #score { overflow: auto; padding: 1rem 1.2rem; }
   #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
   #score table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
   #score th { color: var(--dim); font-weight: 600; text-align: right; padding: .2rem .7rem; }
@@ -124,158 +177,201 @@
 </header>
 
 <main>
-  <section>
-    <textarea id="poem" spellcheck="false" autofocus></textarea>
-    <div class="palette">
-      <h2>Palette — changes how it sounds, never what happens</h2>
-      <label>Scale
-        <select id="scale"></select>
-      </label>
-      <label>Root
-        <select id="root"></select>
-      </label>
-      <label>Bank
-        <select id="bank"></select>
-      </label>
-      <label>Sound
-        <select id="palette" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are — except jazz, which also sets its scale, swing and bank."></select>
-      </label>
-      <label>Bass
-        <select id="bass"></select>
-      </label>
-      <label>Melody
-        <select id="melody"></select>
-      </label>
-      <label>Chords
-        <select id="chord_sound" title="The instrument of the chord lane, which plays only when a side's harmony mapping is not off"></select>
-      </label>
-      <label>Kit
-        <select id="kit" title="Which drum carries each layer: kick and hat, or ride and snare"></select>
-      </label>
-      <label>Voicing
-        <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree"></select>
-      </label>
-      <label>Ride stand-in
-        <select id="ride_fallback" title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash"></select>
-      </label>
-      <label>Bass octave <span id="bass_octaveOut"></span>
-        <input id="bass_octave" type="range" min="1" max="3" step="1" title="The octave the bass plays in: 2 is MIDI 36">
-      </label>
-      <label>Melody octave <span id="melody_octaveOut"></span>
-        <input id="melody_octave" type="range" min="3" max="5" step="1" title="The octave the rhyme melody plays in: 4 is MIDI 60, middle C">
-      </label>
-      <label>Tempo range (bpm)
-        <span class="row">
-          <input id="low" type="number" min="1" max="400" value="110">
-          <input id="high" type="number" min="1" max="400" value="130">
-        </span>
-      </label>
-      <label>Swing <span id="swingOut"></span>
-        <input id="swing" type="range" min="0" max="1" step="0.01">
-      </label>
-      <h2>Mix</h2>
-      <label>Reverb <span id="reverbOut"></span>
-        <input id="reverb" type="range" min="0" max="1" step="0.01">
-      </label>
-      <label>Room size (s) <span id="room_sizeOut"></span>
-        <input id="room_size" type="range" min="0.1" max="10" step="0.1">
-      </label>
-      <label>Echo on melody <span id="delayOut"></span>
-        <input id="delay" type="range" min="0" max="1" step="0.01">
-      </label>
-      <label>High cut (Hz) <span id="high_cutOut"></span>
-        <input id="high_cut" type="range" min="1000" max="20000" step="100">
-      </label>
-      <label>Drive <span id="driveOut"></span>
-        <input id="drive" type="range" min="0" max="1" step="0.01">
-      </label>
-      <label>Compress <span id="compressOut"></span>
-        <input id="compress" type="range" min="0" max="1" step="0.01">
-      </label>
-      <label>Humanise <span id="humaniseOut"></span>
-        <input id="humanise" type="range" min="0" max="1" step="0.01">
-      </label>
-      <label>Drums level <span id="drums_gainOut"></span>
-        <input id="drums_gain" type="range" min="0.1" max="2" step="0.01">
-      </label>
-      <label>Bass level <span id="bass_gainOut"></span>
-        <input id="bass_gain" type="range" min="0.1" max="2" step="0.01">
-      </label>
-      <label>Melody level <span id="melody_gainOut"></span>
-        <input id="melody_gain" type="range" min="0.1" max="2" step="0.01">
-      </label>
-      <label>Chords level <span id="chord_gainOut"></span>
-        <input id="chord_gain" type="range" min="0.1" max="2" step="0.01" title="The chord lane's level, shared between a chord's tones; heard only with the harmony mapping on">
-      </label>
-      <label>Levels follow density <span id="density_levelOut"></span>
-        <input id="density_level" type="range" min="0" max="1" step="0.01" title="Each bar's gains divided by n to this power, n = the lines sounding in it: 0 fixed levels, 0.5 by √n, 1 by n">
-      </label>
-      <p>
-        The poem decides where in the tempo range it sits, from how densely its syllables pack
-        into bars. Everything else here is colour. Humanise strays each syllable a little late and
-        soft, drawn from its own line, so the same poem always strays the same way.
-      </p>
-    </div>
-    <div class="palette mappings">
-      <h2>Mappings — changes what happens</h2>
-      <table>
-        <thead><tr><th></th><th>A</th><th>B</th></tr></thead>
-        <tbody id="mappings"></tbody>
-      </table>
-      <p>
-        Candidate mappings still under review. Each is a selector: choose a variant — or
-        <code>off</code> — for each setting, then switch between A and B while it plays; the Score
-        tab measures both. A bold border marks a choice that is not the default.
-      </p>
-    </div>
-    <div class="palette reading">
-      <h2>Reading — the poem spoken over the music</h2>
-      <label>Voice
-        <select id="voice"><option value="">browser default</option></select>
-      </label>
-      <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
-      <p>
-        Whether and when lines are read is the <code>reading</code> mapping above:
-        <code>arrives</code> speaks each line once, in the bar where it is first heard;
-        <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
-        stanza that transforms a loop is read through rather than a line every few bars;
-        <code>off</code> reads nothing. Each line is fitted to its bar at the piece's tempo; loops,
-        lanes and the outro are never read. Strudel's clock fires each line; your browser's voice
-        speaks it.
-      </p>
+  <section class="writing">
+    <!-- The poem you write is the poem you watch: the text box lies exactly over the verse that
+         lights up, its own letters transparent, so typing, the caret and selecting work as in any
+         text box while the colour underneath shows what is sounding. -->
+    <div id="editor">
+      <div id="lit" aria-hidden="true"></div>
+      <textarea id="poem" spellcheck="false" autofocus aria-label="The poem"
+        placeholder="Write a poem, or pick one of the examples."></textarea>
     </div>
   </section>
 
-  <section>
-    <nav>
-      <button id="tabPattern" aria-selected="true">Pattern</button>
-      <button id="tabExplain" aria-selected="false">What each word became</button>
-      <button id="tabScore" aria-selected="false">Score A vs B</button>
-    </nav>
-    <pre id="pattern" class="wrapped"></pre>
-    <pre id="explain" class="hidden"></pre>
-    <div id="score" class="hidden">
-      <div class="bar">
-        <label>Judged against
-          <select id="profile">
-            <option value="machine">machine — Kraftwerk, Daft Punk, psytrance</option>
-            <option value="jazz">jazz — a piano trio, a modal quartet</option>
-            <option value="interest">interest — generic</option>
+  <section class="panels">
+    <details class="panel" id="panelRoll" open>
+      <summary>Roll <span class="aside">the notes as they play, a bar per poem line</span></summary>
+      <div class="rollbar">
+        <label>Bars shown
+          <select id="rollBars">
+            <option value="2">2</option>
+            <option value="4" selected>4</option>
+            <option value="8">8</option>
+            <option value="16">16</option>
           </select>
         </label>
+        <div class="key" aria-hidden="true">
+          <span style="--c:#c9a6ff"><i></i>pulse</span>
+          <span style="--c:#6fd6c5"><i></i>ornament</span>
+          <span style="--c:#ffb86b"><i></i>bass</span>
+          <span style="--c:#ff7aa8"><i></i>rhyme note</span>
+          <span style="--c:#8fb3ff"><i></i>chords</span>
+          <span class="echo"><i></i>dimmer in the poem: a line looping, not new</span>
+          <span class="voice"><i></i>behind the words: the line being read aloud</span>
+        </div>
       </div>
-      <table>
-        <thead><tr><th>metric</th><th>band</th><th>A</th><th>B</th><th>B − A</th></tr></thead>
-        <tbody id="scoreRows"></tbody>
-      </table>
-      <p>
-        A value outside its band is marked; its fit falls with the distance. Interest is the
-        geometric mean of the fits; legibility comes from recompiling the poem with each word
-        swapped, and asks whether every change is heard where the word is. Overall is the two
-        multiplied. The bands are reasoned guesses, not measurements of records — trust your ears
-        over them.
-      </p>
-    </div>
+      <canvas id="roll" aria-label="The notes playing now, scrolling past a playhead: each row one sound, coloured by its layer; faint lines mark the bars"></canvas>
+    </details>
+
+    <details class="panel" id="panelPalette" open>
+      <summary>Palette <span class="aside">how it sounds, never what happens</span></summary>
+      <div class="palette">
+        <label>Scale
+          <select id="scale"></select>
+        </label>
+        <label>Root
+          <select id="root"></select>
+        </label>
+        <label>Bank
+          <select id="bank"></select>
+        </label>
+        <label>Sound
+          <select id="palette" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are — except jazz, which also sets its scale, swing and bank."></select>
+        </label>
+        <label>Bass
+          <select id="bass"></select>
+        </label>
+        <label>Melody
+          <select id="melody"></select>
+        </label>
+        <label>Chords
+          <select id="chord_sound" title="The instrument of the chord lane, which plays only when a side's harmony mapping is not off"></select>
+        </label>
+        <label>Kit
+          <select id="kit" title="Which drum carries each layer: kick and hat, or ride and snare"></select>
+        </label>
+        <label>Voicing
+          <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree"></select>
+        </label>
+        <label>Ride stand-in
+          <select id="ride_fallback" title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash"></select>
+        </label>
+        <label>Bass octave <span id="bass_octaveOut"></span>
+          <input id="bass_octave" type="range" min="1" max="3" step="1" title="The octave the bass plays in: 2 is MIDI 36">
+        </label>
+        <label>Melody octave <span id="melody_octaveOut"></span>
+          <input id="melody_octave" type="range" min="3" max="5" step="1" title="The octave the rhyme melody plays in: 4 is MIDI 60, middle C">
+        </label>
+        <label>Tempo range (bpm)
+          <span class="row">
+            <input id="low" type="number" min="1" max="400" value="110">
+            <input id="high" type="number" min="1" max="400" value="130">
+          </span>
+        </label>
+        <label>Swing <span id="swingOut"></span>
+          <input id="swing" type="range" min="0" max="1" step="0.01">
+        </label>
+        <h2>Mix</h2>
+        <label>Reverb <span id="reverbOut"></span>
+          <input id="reverb" type="range" min="0" max="1" step="0.01">
+        </label>
+        <label>Room size (s) <span id="room_sizeOut"></span>
+          <input id="room_size" type="range" min="0.1" max="10" step="0.1">
+        </label>
+        <label>Echo on melody <span id="delayOut"></span>
+          <input id="delay" type="range" min="0" max="1" step="0.01">
+        </label>
+        <label>High cut (Hz) <span id="high_cutOut"></span>
+          <input id="high_cut" type="range" min="1000" max="20000" step="100">
+        </label>
+        <label>Drive <span id="driveOut"></span>
+          <input id="drive" type="range" min="0" max="1" step="0.01">
+        </label>
+        <label>Compress <span id="compressOut"></span>
+          <input id="compress" type="range" min="0" max="1" step="0.01">
+        </label>
+        <label>Humanise <span id="humaniseOut"></span>
+          <input id="humanise" type="range" min="0" max="1" step="0.01">
+        </label>
+        <label>Drums level <span id="drums_gainOut"></span>
+          <input id="drums_gain" type="range" min="0.1" max="2" step="0.01">
+        </label>
+        <label>Bass level <span id="bass_gainOut"></span>
+          <input id="bass_gain" type="range" min="0.1" max="2" step="0.01">
+        </label>
+        <label>Melody level <span id="melody_gainOut"></span>
+          <input id="melody_gain" type="range" min="0.1" max="2" step="0.01">
+        </label>
+        <label>Chords level <span id="chord_gainOut"></span>
+          <input id="chord_gain" type="range" min="0.1" max="2" step="0.01" title="The chord lane's level, shared between a chord's tones; heard only with the harmony mapping on">
+        </label>
+        <label>Levels follow density <span id="density_levelOut"></span>
+          <input id="density_level" type="range" min="0" max="1" step="0.01" title="Each bar's gains divided by n to this power, n = the lines sounding in it: 0 fixed levels, 0.5 by √n, 1 by n">
+        </label>
+        <p>
+          The poem decides where in the tempo range it sits, from how densely its syllables pack
+          into bars. Everything else here is colour. Humanise strays each syllable a little late and
+          soft, drawn from its own line, so the same poem always strays the same way.
+        </p>
+      </div>
+    </details>
+
+    <details class="panel" id="panelMappings">
+      <summary>Mappings <span class="aside">what happens: A and B, to compare</span></summary>
+      <div class="palette mappings">
+        <table>
+          <thead><tr><th></th><th>A</th><th>B</th></tr></thead>
+          <tbody id="mappings"></tbody>
+        </table>
+        <p>
+          Candidate mappings still under review. Each is a selector: choose a variant — or
+          <code>off</code> — for each setting, then switch between A and B while it plays; the Score
+          tab measures both. A bold border marks a choice that is not the default.
+        </p>
+      </div>
+    </details>
+
+    <details class="panel" id="panelReading">
+      <summary>Reading <span class="aside">the poem spoken over the music</span></summary>
+      <div class="palette reading">
+        <label>Voice
+          <select id="voice"><option value="">browser default</option></select>
+        </label>
+        <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
+        <p>
+          Whether and when lines are read is the <code>reading</code> mapping above:
+          <code>arrives</code> speaks each line once, in the bar where it is first heard;
+          <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
+          stanza that transforms a loop is read through rather than a line every few bars;
+          <code>off</code> reads nothing. Each line is fitted to its bar at the piece's tempo; loops,
+          lanes and the outro are never read. Strudel's clock fires each line; your browser's voice
+          speaks it.
+        </p>
+      </div>
+    </details>
+
+    <details class="panel" id="panelViews">
+      <summary>Pattern, annotation and score</summary>
+      <nav>
+        <button id="tabPattern" aria-selected="true">Pattern</button>
+        <button id="tabExplain" aria-selected="false">What each word became</button>
+        <button id="tabScore" aria-selected="false">Score A vs B</button>
+      </nav>
+      <pre id="pattern" class="wrapped"></pre>
+      <pre id="explain" class="hidden"></pre>
+      <div id="score" class="hidden">
+        <div class="bar">
+          <label>Judged against
+            <select id="profile">
+              <option value="machine">machine — Kraftwerk, Daft Punk, psytrance</option>
+              <option value="jazz">jazz — a piano trio, a modal quartet</option>
+              <option value="interest">interest — generic</option>
+            </select>
+          </label>
+        </div>
+        <table>
+          <thead><tr><th>metric</th><th>band</th><th>A</th><th>B</th><th>B − A</th></tr></thead>
+          <tbody id="scoreRows"></tbody>
+        </table>
+        <p>
+          A value outside its band is marked; its fit falls with the distance. Interest is the
+          geometric mean of the fits; legibility comes from recompiling the poem with each word
+          swapped, and asks whether every change is heard where the word is. Overall is the two
+          multiplied. The bands are reasoned guesses, not measurements of records — trust your ears
+          over them.
+        </p>
+      </div>
+    </details>
   </section>
 </main>
 
@@ -393,6 +489,13 @@ $('preset').addEventListener('input', () => {
 
 let strudelReady = false;
 let playing = false;
+// The trace of each setting (prosody_emit::trace): a silent pattern of syllable ids on the music's
+// clock, and what each id is. `lit` holds the poem as compiled, one element per piece of it a mark
+// can light.
+let traces = { A: null, B: null };
+let tracePattern = null;
+let lit = { trace: null, marks: [] };
+let drawer = null, drawRoll = null, strudelRepl = null, drawing = false;
 // Set when the next play() must restart Strudel's clock at cycle 0 rather than hand the running
 // scheduler a new pattern: after a preset or an A/B switch. Strudel keeps its cycle count across
 // `setPattern`, so without the restart the new piece (at its own `.cpm`) starts partway through
@@ -490,6 +593,7 @@ function hear(side) {
   $('hearA').setAttribute('aria-pressed', side === 'A');
   $('hearB').setAttribute('aria-pressed', side === 'B');
   showPattern();
+  buildLit();
   if (playing && latestPattern) { fromTheTop = true; play(); }
   else status(side + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', ''));
   ask('/explain', query(), $('poem').value)
@@ -555,16 +659,26 @@ async function compile() {
   }
   status('compiling…');
   try {
-    const [patternA, patternB, explain, readingA, readingB] = await Promise.all([
+    const [patternA, patternB, explain, readingA, readingB, traceA, traceB] = await Promise.all([
       ask('/pattern', query('A'), poem),
       ask('/pattern', query('B'), poem),
       ask('/explain', query(), poem),
       ask('/reading', query('A'), poem),
       ask('/reading', query('B'), poem),
+      ask('/trace', query('A'), poem),
+      ask('/trace', query('B'), poem),
     ]);
+    // Kept with the text they were compiled from: their positions are that text's, and the lit
+    // verse uses them only while the text box still says exactly that.
+    traces = {
+      A: traceA.ok ? await traceA.json() : null,
+      B: traceB.ok ? await traceB.json() : null,
+      poem,
+    };
     readings = {
       A: readingA.ok ? await readingA.json() : null,
       B: readingB.ok ? await readingB.json() : null,
+      poem,
     };
     const texts = { A: await patternA.text(), B: await patternB.text() };
     $('explain').textContent = await explain.text();
@@ -578,6 +692,7 @@ async function compile() {
     }
     patterns = texts;
     showPattern();
+    buildLit();
     measure(poem);
     const patternText = latestPattern;
     const summary = patternText.split('\n')[1] || '';
@@ -615,6 +730,8 @@ async function startStrudel() {
   // but this page evaluates with a plain `eval`, so it sets the scheduler instead — without this
   // every piece played at half its tempo. `reading::SCHEDULER_CPS` must say the same number.
   repl.setCps(1);
+  strudelRepl = repl;
+  await startDrawing();
   // `initStrudel` loads Strudel's effect worklets (crush, shape, …) on the *next* mousedown, but
   // it is called from inside the Play click, after that click's mousedown — so the first play ran
   // without them and every drum layer, which carries `.crush`, failed to build. Load them now.
@@ -763,9 +880,19 @@ function readLine(cue) {
   utterance.rate = cue.rate;
   const voice = voices.find((v) => v.name === $('voice').value);
   if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
-  utterance.onstart = () => readingDuck(true);
-  utterance.onend = () => readingDuck(false);
-  utterance.onerror = () => readingDuck(false);
+  // `cancel()` above ends the previous utterance asynchronously; its `end` must not clear the line
+  // that has started since, so each handler checks it is still the one speaking.
+  speaking = { utterance, cue };
+  utterance.onstart = () => { readingDuck(true); if (speaking?.utterance === utterance) showReading(); };
+  utterance.onboundary = (event) => {
+    if (speaking?.utterance === utterance && event.name !== 'sentence') showSpoken(event);
+  };
+  const done = () => {
+    readingDuck(false);
+    if (speaking?.utterance === utterance) { speaking = null; showReading(); }
+  };
+  utterance.onend = done;
+  utterance.onerror = done;
   speechSynthesis.speak(utterance);
 }
 
@@ -782,6 +909,8 @@ function quietReading() {
   pendingSpeech.clear();
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   readingDuck(false);
+  speaking = null;
+  showReading();
 }
 
 listVoices();
@@ -820,6 +949,11 @@ async function play() {
       }
     }
     const pattern = cues ? stack(music, cues) : music;
+    // The trace is evaluated but never played: the drawing queries it for which syllable sounds.
+    let nextTrace = null;
+    try { nextTrace = traces[hearing] ? (0, eval)(traces[hearing].pattern) : null; } catch (error) {
+      console.warn('[watch] trace pattern refused:', error);
+    }
     limitTheMaster();
     status('loading the instruments this pattern uses…');
     await warmUp(code);
@@ -830,6 +964,17 @@ async function play() {
     if (fromTheTop && playing && typeof hush === 'function') hush();   // restart at cycle 0
     fromTheTop = false;
     pattern.play();
+    tracePattern = nextTrace;
+    // `play()` hands the scheduler its pattern a moment later (@strudel/web's `initDone`), and the
+    // drawer reads the scheduler's pattern as it starts, so it starts — once — after that. On a
+    // later play it only looks ahead again, or the roll would show the old piece's notes to come.
+    if (drawer) setTimeout(() => {
+      if (!strudelRepl.scheduler.pattern) return;
+      if (drawing) drawer.invalidate(strudelRepl.scheduler);
+      else { drawer.start(strudelRepl.scheduler); drawing = true; }
+    }, 60);
+    $('editor').classList.add('playing');
+    fitRoll();
     playing = true;
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
@@ -843,6 +988,12 @@ function stop() {
   if (typeof hush === 'function') hush();
   readingGeneration = ++generations;   // nothing the stopped pattern cued is read
   quietReading();
+  drawer?.stop();
+  drawing = false;
+  tracePattern = null;
+  lightUp(null);
+  clearRoll();
+  $('editor').classList.remove('playing');
   playing = false;
   $('stop').disabled = true;
   $('play').textContent = '▶ Play';
@@ -872,6 +1023,215 @@ function showTab(which) {
     $(tab).classList.toggle('hidden', which !== tab);
     $('tab' + tab[0].toUpperCase() + tab.slice(1)).setAttribute('aria-selected', which === tab);
   }
+}
+
+// ---- Watch: the roll and the lit poem --------------------------------------------------------
+//
+// Strudel's own drawing (`@strudel/draw`, the version matching the page's Strudel) is loaded only
+// once Strudel has started: its imports of `@strudel/core` are answered from the playing Strudel
+// by the import map, like the soundfonts'. Its `Drawer` calls back every animation frame with the
+// notes near the playhead and the scheduler's time; the same time lights the poem, so the roll
+// and the verse cannot disagree about what is sounding.
+const DRAW = 'https://unpkg.com/@strudel/draw@1.2.6';
+
+async function startDrawing() {
+  try {
+    const [{ Drawer }, { drawPianoroll }] = await Promise.all([
+      import(`${DRAW}/draw.mjs`), import(`${DRAW}/pianoroll.mjs`),
+    ]);
+    drawRoll = drawPianoroll;
+    drawer = new Drawer((haps, time) => {
+      paintRoll(haps, time);
+      lightUp(time);
+    }, rollWindow());
+  } catch (error) {
+    // The music does not depend on the picture of it.
+    console.warn('[watch] Strudel\'s drawing could not be loaded:', error);
+  }
+}
+
+// How long one bar lasts on the scheduler's clock: a cycle of the pattern is a slot of the
+// arrangement, one poem line, and `.cpm` sets how many a minute — on a scheduler at one cycle a
+// second, `60 / cpm` of its cycles. Read from the pattern itself so it is the tempo being heard.
+function barLength() {
+  const cpm = [...(latestPattern || '').matchAll(/\.cpm\(([\d.]+)\)/g)].pop();
+  const perMinute = cpm ? Number(cpm[1]) : 30;
+  return perMinute > 0 ? 60 / perMinute : 2;
+}
+
+// The roll shows a whole number of bars — the setting — half behind the playhead and half ahead.
+function rollWindow() {
+  const half = (Number($('rollBars').value) || 4) * barLength() / 2;
+  return [-half, half];
+}
+
+function fitRoll() {
+  if (drawer) drawer.setDrawTime(rollWindow());
+}
+
+function rollContext() {
+  const canvas = $('roll');
+  const ratio = window.devicePixelRatio || 1;
+  const [w, h] = [Math.round(canvas.clientWidth * ratio), Math.round(canvas.clientHeight * ratio)];
+  if (canvas.width !== w || canvas.height !== h) [canvas.width, canvas.height] = [w, h];
+  return canvas.getContext('2d');
+}
+
+function paintRoll(haps, time) {
+  if (!drawRoll || !$('panelRoll').open) return;
+  const span = rollWindow();
+  const ctx = rollContext();
+  // Only the music: every layer of it carries a colour, and the reading's cues carry none.
+  drawRoll({
+    ctx, time, haps: haps.filter((hap) => hap.value?.color),
+    drawTime: span, fold: 1,
+    background: '#18171f', playheadColor: '#e6e3ef', inactive: '#4a4760', active: '#ffffff',
+    colorizeInactive: 1, fillActive: 1,
+  });
+  // Bar lines, where one poem line hands over to the next.
+  const [from, to] = [time + span[0], time + span[1]];
+  const bar = barLength();
+  ctx.save();
+  ctx.strokeStyle = 'rgba(230, 227, 239, 0.16)';
+  ctx.lineWidth = Math.max(1, (window.devicePixelRatio || 1));
+  for (let k = Math.ceil(from / bar); k * bar <= to; k++) {
+    const x = Math.round(((k * bar - from) / (to - from)) * ctx.canvas.width) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function clearRoll() {
+  const ctx = rollContext();
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+}
+
+// The verse under the text box, cut at every mark's edges so each mark lights a run of whole
+// pieces. Marks are used only while the text box says exactly what they were compiled from —
+// mid-keystroke the verse is plain text until the next compile catches up, rather than lighting
+// letters a few places off. Positions are UTF-16 units, as the server counts them.
+function buildLit() {
+  const box = $('lit');
+  const poem = $('poem').value;
+  const trace = traces.poem === poem ? traces[hearing] : null;
+  lightUp(null);
+  lit = { trace, marks: [] };
+  const cuts = new Set([0, poem.length]);
+  for (const mark of trace?.marks || []) {
+    if (mark.end > mark.start) { cuts.add(mark.start); cuts.add(mark.end); }
+  }
+  // The reading's lines too, so a line being read is a run of whole pieces.
+  if (readings.poem === poem) {
+    for (const cue of readings[hearing]?.cues || []) {
+      if (cue.to > cue.from) { cuts.add(cue.from); cuts.add(cue.to); }
+    }
+  }
+  const edges = [...cuts].filter((at) => at <= poem.length).sort((a, b) => a - b);
+  const pieces = [];
+  const fragment = document.createDocumentFragment();
+  for (let i = 0; i + 1 < edges.length; i++) {
+    const span = document.createElement('span');
+    span.textContent = poem.slice(edges[i], edges[i + 1]);
+    pieces.push({ start: edges[i], end: edges[i + 1], element: span });
+    fragment.append(span);
+  }
+  // A text box keeps the line after a final newline; a block of text does not. One space keeps
+  // the two the same height, so their scrolling stays in step.
+  fragment.append(' ');
+  box.replaceChildren(fragment);
+  box.scrollTop = $('poem').scrollTop;
+  lit.pieces = readings.poem === poem ? pieces : [];
+  showReading();
+  if (trace) {
+    lit.marks = trace.marks.map((mark) =>
+      pieces.filter((piece) => piece.start >= mark.start && piece.start < mark.end).map((p) => p.element));
+  }
+}
+
+// The reading, shown behind the words: the line being read, and the word being said when the
+// voice reports its words (`boundary` events; some voices send none, and then only the line shows).
+let speaking = null;       // { utterance, cue } while a line is being read
+function showReading() {
+  for (const piece of lit.pieces || []) {
+    const inLine = !!speaking && piece.start < speaking.cue.to && piece.end > speaking.cue.from;
+    piece.element.classList.toggle('reading', inLine);
+    if (!inLine) piece.element.classList.remove('spoken');
+  }
+}
+function showSpoken(event) {
+  const { cue } = speaking;
+  const text = cue.text;
+  const at = event.charIndex;
+  const length = event.charLength || (text.slice(at).match(/^\S+/) || [''])[0].length;
+  const [from, to] = [cue.from + at, cue.from + at + Math.max(1, length)];
+  for (const piece of lit.pieces || []) {
+    piece.element.classList.toggle('spoken', piece.start < to && piece.end > from);
+  }
+}
+
+let shining = new Map();   // element → the mark lighting it
+function lightUp(time) {
+  const next = new Map();
+  if (time !== null && tracePattern && lit.trace) {
+    for (const hap of tracePattern.queryArc(time, time + 1e-4)) {
+      if (!hap.whole) continue;
+      const [begin, end] = [hap.whole.begin.valueOf(), hap.whole.end.valueOf()];
+      if (time < begin || time >= end) continue;
+      const id = hap.value?.n;
+      const mark = lit.trace.marks[id];
+      for (const element of lit.marks[id] || []) {
+        const held = next.get(element);
+        if (!held || (mark.fresh && !held.fresh)) next.set(element, mark);
+      }
+    }
+  }
+  let follow = null;
+  for (const [element] of shining) if (!next.has(element)) element.classList.remove('on', 'echo');
+  for (const [element, mark] of next) {
+    if (shining.get(element) === mark) continue;
+    if (mark.fresh && !follow) follow = element;
+    element.classList.toggle('on', mark.fresh);
+    element.classList.toggle('echo', !mark.fresh);
+    element.style.setProperty('--c', mark.colour);
+    element.style.setProperty('--u', mark.melody ? '#ff7aa8' : mark.bass ? '#ffb86b' : 'transparent');
+  }
+  shining = next;
+  // A long poem scrolls to keep the line being heard anew in view; a loop never pulls it away.
+  if (follow) followInView(follow);
+}
+
+// Scrolls the text box — the verse follows it — so `element` sits in view, unless the writer has
+// the caret in the poem, when the page leaves their place alone.
+const stillPlease = window.matchMedia('(prefers-reduced-motion: reduce)');
+function followInView(element) {
+  const poem = $('poem');
+  if (document.activeElement === poem) return;
+  const box = $('lit').getBoundingClientRect(), at = element.getBoundingClientRect();
+  if (at.top >= box.top + 32 && at.bottom <= box.bottom - 32) return;
+  const target = poem.scrollTop + (at.top - box.top) - box.height / 2;
+  poem.scrollTo({ top: Math.max(0, target), behavior: stillPlease.matches ? 'auto' : 'smooth' });
+}
+
+$('poem').addEventListener('input', buildLit);
+$('poem').addEventListener('scroll', () => { $('lit').scrollTop = $('poem').scrollTop; });
+$('rollBars').addEventListener('input', () => {
+  fitRoll();
+  try { localStorage.setItem('prosody.rollBars', $('rollBars').value); } catch (e) {}
+});
+try {
+  const bars = localStorage.getItem('prosody.rollBars');
+  if (bars && [...$('rollBars').options].some((o) => o.value === bars)) $('rollBars').value = bars;
+} catch (e) {}
+
+// Which panels are folded away, remembered per browser.
+for (const panel of document.querySelectorAll('details.panel')) {
+  try {
+    const saved = localStorage.getItem('prosody.panel.' + panel.id);
+    if (saved !== null) panel.open = saved === 'open';
+  } catch (e) {}
+  panel.addEventListener('toggle', () => {
+    try { localStorage.setItem('prosody.panel.' + panel.id, panel.open ? 'open' : 'closed'); } catch (e) {}
+  });
 }
 
 compile();

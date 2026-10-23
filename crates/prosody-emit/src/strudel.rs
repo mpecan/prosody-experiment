@@ -145,31 +145,76 @@ impl Backend for Strudel {
         }
         out.push_str(")\n");
 
-        if style.swing().hundredths() > 0 {
-            // `swingBy(x, n)` slices the *cycle* into `n` and delays the back half of each
-            // slice. A cycle is a bar, so the slices must be its beats — with `n = 2` this was a
-            // rubato across half a line rather than a shuffle between syllables.
-            //
-            // It must come *before* `.cpm`. `cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6
-            // `pattern.mjs`, which `@strudel/web` 1.3.0 pins), so after it a cycle is the
-            // scheduler's one second, not a bar: `swingBy` then sliced the second into `n`, out
-            // of step with the bar's beats — onsets moved to irregular times, and a held chord's
-            // onset could fall in no slice's front half (never sounding) or be split across two
-            // (sounding twice). Swinging first slices the bar, and `cpm` then speeds the swung
-            // bar up as a whole.
-            let _ = writeln!(
-                out,
-                "  .swingBy({}, {})",
-                fmt_param(f64::from(style.swing().hundredths()) / 100.0),
-                mean_beats(score).max(1)
-            );
-        }
-        let _ = writeln!(
-            out,
-            "  .cpm({})",
-            fmt_param(cycles_per_minute(score, style))
-        );
+        out.push_str(&clock(score, style));
         Ok(out)
+    }
+}
+
+/// The calls after the stack that set its time: swing, then the tempo.
+///
+/// One function because two patterns must keep the same time: the music, and the page's trace
+/// ([`crate::trace`]), whose events must land where the music's do.
+pub(crate) fn clock(score: &Score, style: &Style) -> String {
+    let mut clock = String::new();
+    if style.swing().hundredths() > 0 {
+        // `swingBy(x, n)` slices the *cycle* into `n` and delays the back half of each
+        // slice. A cycle is a bar, so the slices must be its beats — with `n = 2` this was a
+        // rubato across half a line rather than a shuffle between syllables.
+        //
+        // It must come *before* `.cpm`. `cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6
+        // `pattern.mjs`, which `@strudel/web` 1.3.0 pins), so after it a cycle is the
+        // scheduler's one second, not a bar: `swingBy` then sliced the second into `n`, out
+        // of step with the bar's beats — onsets moved to irregular times, and a held chord's
+        // onset could fall in no slice's front half (never sounding) or be split across two
+        // (sounding twice). Swinging first slices the bar, and `cpm` then speeds the swung
+        // bar up as a whole.
+        let _ = writeln!(
+            clock,
+            "  .swingBy({}, {})",
+            fmt_param(f64::from(style.swing().hundredths()) / 100.0),
+            mean_beats(score).max(1)
+        );
+    }
+    let _ = writeln!(
+        clock,
+        "  .cpm({})",
+        fmt_param(cycles_per_minute(score, style))
+    );
+    clock
+}
+
+/// A layer's colour, for Strudel's drawing (`.color`): the page's piano roll, or `pianoroll()` on
+/// strudel.cc. Display only — `color` is read by Strudel's visualisations, never by its sound.
+fn colour(colour: Colour) -> String {
+    format!(".color(\"{}\")", colour.hex())
+}
+
+/// The colour each layer is drawn in, on the page's roll and in its lit poem alike, so a syllable
+/// lighting up and the note it plays read as one thing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Colour {
+    /// §4.1's pulse.
+    Foundation,
+    /// §4.1's ornament.
+    Flourish,
+    /// The vowel-height bass.
+    Bass,
+    /// The rhyme melody.
+    Melody,
+    /// The harmony layer's chords.
+    Chords,
+}
+
+impl Colour {
+    /// As CSS takes it.
+    pub(crate) const fn hex(self) -> &'static str {
+        match self {
+            Self::Foundation => "#c9a6ff",
+            Self::Flourish => "#6fd6c5",
+            Self::Bass => "#ffb86b",
+            Self::Melody => "#ff7aa8",
+            Self::Chords => "#8fb3ff",
+        }
     }
 }
 
@@ -655,6 +700,10 @@ fn rhythm_layer(
             );
         }
         layer.push_str(&bus(style, style.mix().drums_gain(), 1.0));
+        layer.push_str(&colour(match voice.layer() {
+            Layer::Foundation => Colour::Foundation,
+            Layer::Flourish => Colour::Flourish,
+        }));
         layers.push((layer, lane.label(&name)));
     }
     layers
@@ -776,7 +825,7 @@ fn bank_has(bank: &str, sample: &str) -> bool {
 /// bar, lane 1 the second where there is one, and so on, each a pattern with no `,` in it whose
 /// parameters therefore meet exactly one event each.
 #[derive(Clone, Copy)]
-struct Lane<'a> {
+pub(crate) struct Lane<'a> {
     score: &'a Score,
     events: &'a [&'a Event],
     index: usize,
@@ -792,7 +841,7 @@ struct Lane<'a> {
 impl<'a> Lane<'a> {
     /// Every lane a layer of these events needs: as many as the most lines it sounds in one bar.
     /// `is_bass` counts only the lines whose bass sounds there ([`Score::sounds_bass`]).
-    fn all(score: &'a Score, events: &'a [&'a Event], is_bass: bool) -> Vec<Self> {
+    pub(crate) fn all(score: &'a Score, events: &'a [&'a Event], is_bass: bool) -> Vec<Self> {
         let bars: std::collections::BTreeSet<usize> =
             events.iter().map(|event| event.bar().get()).collect();
         let deepest = score
@@ -858,7 +907,11 @@ fn grid(lane: Lane<'_>, value: &dyn Fn(&Event) -> String, absent: &str) -> Strin
 
 /// [`grid`], with each value also told which slot of the arrangement it sounds in — for the one
 /// parameter that differs between the passes of a line: its level under `density_level`.
-fn grid_by_slot(lane: Lane<'_>, value: &dyn Fn(&Event, usize) -> String, absent: &str) -> String {
+pub(crate) fn grid_by_slot(
+    lane: Lane<'_>,
+    value: &dyn Fn(&Event, usize) -> String,
+    absent: &str,
+) -> String {
     let (score, events) = (lane.score, lane.events);
     let mut by_bar: BTreeMap<usize, BTreeMap<usize, Vec<&Event>>> = BTreeMap::new();
     for event in events {
@@ -1231,6 +1284,10 @@ fn pitched_layer(
             },
             chord_share(voicing),
         ));
+        layer.push_str(&colour(match role {
+            Pitched::Melody => Colour::Melody,
+            Pitched::Bass => Colour::Bass,
+        }));
         layers.push((layer, lane.label(name)));
     }
     layers
@@ -1410,6 +1467,7 @@ fn chord_layer(score: &Score, style: &Style, density: &[f64]) -> Option<(String,
         mix.chord_gain(),
         1.0 / f64::from(tones.max(1)).sqrt(),
     ));
+    layer.push_str(&colour(Colour::Chords));
     Some((
         layer,
         "the chords — one a bar of a foundation stanza, from the harmony mapping".to_owned(),

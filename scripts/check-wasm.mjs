@@ -29,7 +29,7 @@ const settings = [
   'set=harmony:cadence&off=outro,period&profile=jazz',
   'off=held,refrain,bass&profile=interest',
 ];
-const views = ['/pattern', '/explain', '/reading', '/score'];
+const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
 
 let compared = 0;
 for (const file of readdirSync(examples).filter((name) => name.endsWith('.poem')).sort()) {
