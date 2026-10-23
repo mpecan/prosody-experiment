@@ -403,6 +403,11 @@ pub const MELODY_OCTAVES: std::ops::RangeInclusive<u8> = 3..=5;
 /// augmented stack, in `chromatic` a cluster of whole tones. That is still one event voiced from
 /// palette alone, so still palette; the pattern's header says which it is.
 ///
+/// Over a chord lane it voices the chord lane only. When the score has the harmony mapping on, the
+/// rhyme melody plays single notes on top of the chords whatever this says
+/// ([`crate::strudel::melody_voicing`], `SPEC.md` §4.6) — read from the score, so still no event
+/// moves.
+///
 /// What it does *not* do is harmonise the poem. A chord progression derived from the poem — which
 /// chord follows which, decided by stanza or rhyme scheme — would be a new mapping and therefore
 /// structure; it is a proposal in `PLAN.md`, not this.

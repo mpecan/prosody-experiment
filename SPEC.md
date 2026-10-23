@@ -383,6 +383,28 @@ and which bar is split — is unchanged. The split adds no dependency: the turna
 only its own stanza. The OSC schedule has no chord message, and says how many chords it leaves out
 and how many of those are turnarounds.
 
+**The melody over the harmony** (*the user's decision, 2026-10-23*). With any harmony variant on,
+each rhyme word's note (§4.5) sounds as a **single note** on top of the chord lane, whatever
+`voicing` (§5) says; the voicing then shapes only the chord lane. Under the jazz palette the melody
+and the chord lane had both played four-tone chords, which was thick. With the harmony off the
+voicing works as before. The single note is the lowest tone the chord had — the event's own degree
+— at the single note's level (the whole `melody_gain`, not a share of it). This is realisation, not
+a new mapping: the emitter reads it from the score (whether the harmony mapping ran, which the
+score records), never from the style, and no event is added, moved or removed (I3; a property
+checks that under the harmony `note` and `seventh` differ only in the chord lane). It asks whether
+the mapping is on, not whether any bar has a chord, because the second is a fact about the whole
+poem: an edit giving one stanza the poem's first chord would revoice every other stanza's melody,
+which I2 forbids. So a poem under the harmony with no chord anywhere (every bar resting) still has
+single notes. The pattern header (`melody on … as single notes over the chords`) and the explain
+view (`rhyme notes   single notes over the chords …`) say so.
+*Open (register):* "on top" is implemented as a layer — the single notes sound above the chord
+lane in the arrangement — not as a register. The chord lane stacks its tones from an octave below
+the melody's octave, so a seventh's upper tones reach into it (in C dorian the lane spans MIDI 48 to
+69 and the melody starts at 60): under the jazz palette, Wilde's melody often sounds inside the
+chord, sometimes in unison with a chord tone (melody 60 against `[53,57,60,63]`). Moving the chord
+lane down, or the melody up, under the harmony would be palette (register moves no event), but
+whether "on top" was meant as register is the user's to decide.
+
 **Auditioning the candidates.** Every mapping above marked *pending review*, the held and refrain
 lanes, and §4.7's reading are *selectors* (`prosody_core::mapping`): each has a fixed, ordered list
 of named variants, always including `off` (the pulse and the stack excepted, below), and a default. A `Mappings` value chooses one variant
@@ -521,7 +543,9 @@ never do, and any header key still overrides it. A bank without a ride (the TR-8
 samples have none) keeps time on its open hat under `kit = "ride"`, and the pattern's header says
 so: a missing sample would otherwise silence the whole foundation, which no palette may do. In a
 scale without seven notes, `seventh` still stacks every other degree — fourths in
-`pentatonic_minor` — and the header names it as that rather than as a seventh.
+`pentatonic_minor` — and the header names it as that rather than as a seventh. *Since
+2026-10-23, under any harmony variant the melody is single notes whatever the voicing, which then
+shapes only the chord lane (§4.6, the melody over the harmony).*
 
 *Extended 2026-10-22 (sound and voice, step 4.2 — palette the user asked to be able to change).*
 Three more keys, every one palette:

@@ -406,6 +406,54 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The melody over the harmony — single rhyme notes on top of the chord lane
+
+The user decided: with the jazz palette (`voicing = "seventh"`) and a harmony variant on, the rhyme
+melody and the chord lane both played four-tone chords, which was thick. Now, **whenever the harmony
+mapping is on (any variant but off), rhyme notes play as single notes on top of the chord lane,
+whatever the voicing says; the voicing shapes only the chord lane.** Harmony off: unchanged. No new
+variant, no core change.
+
+- **Emitter** (`prosody_emit::strudel`). `melody_voicing(score, style)` is the style's `Voicing`
+  unless the score has the harmony on (`!score.harmony().is_empty()` — the core records a harmony,
+  chord or rest, for every line exactly when the mapping ran), then `Voicing::Note`. The melody
+  layer uses it for its tones and for `chord_share`, so a single note takes the whole
+  `melody_gain` (jazz: postgain 0.375 → 0.750). `melody_over_harmony(score)` gives the words for the
+  header and the explain view. Both re-exported from `prosody_emit`.
+- **Decided, and documented in `SPEC.md` §4.6:** the switch is "the mapping is on", not "some bar
+  has a chord". The second is a whole-poem fact — an edit giving one stanza the poem's first chord
+  would revoice every other stanza's melody (I2). So a harmonised poem with no chord anywhere still
+  plays single notes; the header then says `single notes (… though no bar has a chord)`.
+- **Views.** Pattern header: `melody on gm_epiano1 as single notes over the chords (the harmony
+  mapping is on, so the voicing shapes only the chord lane)` in place of `as seventh chords (…)`.
+  Explain view (CLI and web), in the style block on the palette's column: `rhyme notes   single
+  notes over the chords (…)`. The page's Voicing tooltip, `README.md` and `SPEC.md` §5 say so too.
+- **Timing: nothing moved.** Only note values and one postgain change; the trace, reading, OSC
+  (which never voiced chords — one pitch a message) and the roll's bar maths are untouched.
+- **Tests.** Strudel unit (hand-worked, ABAB in C dorian under jazz): harmony off, melody steps
+  `60,63,67,70 / 62,65,69,72` ×4 at postgain 0.375; cadence, `60 / 62` ×4 at 0.750, chord lane
+  still sevenths (`[55,58,62,65]` = V of degree 0). I3 property: under rhyme/cadence/both, `note`
+  vs `seventh` differ only in the chord lane (3 vs 4 tones, same steps); the melody is never a
+  stack; the header names it exactly when there is a chord. CLI and web end-to-end tests for the
+  pattern and the explain row. The unit test and the property both fail with the change disabled.
+- **Snapshots: none changed** (no corpus snapshot has the harmony on). Across five header-less
+  examples × {default, jazz} × {note, seventh} × {off, cadence, both}, every `off` pattern and
+  explain is byte-identical to before; under the harmony the only changes are the `plays:` header
+  line, the explain row, and — seventh only — the melody lanes' notes (each chord → its lowest
+  tone) and postgain (0.375 → 0.750). The chord lanes are byte-identical.
+- **Measured**: every `cycle.sh` table (machine, jazz; off, cadence, both) is identical to before —
+  the scorer reads the score, never the voicing. machine 0.743 / cadence 0.778 / both 0.763; jazz
+  0.737 / 0.730 / 0.733.
+- **Browser** (Wilde, jazz palette, B harmony=cadence): B's rhyme-note haps are one per onset (87
+  onsets, notes 60/62…), chords below at 53 57 60 63…; A (harmony off) plays 60 63 67 70 stacks and
+  no chord lane. No console errors or warnings.
+- **Open, from review — register.** "On top" is a layer, not a register: the chord lane's sevenths
+  climb from MIDI 48 to as high as 69 in C dorian, the melody starts at 60, so in Wilde under jazz +
+  cadence many rhyme notes sit inside the sounding chord, some in unison with a chord tone (60
+  against `[53,57,60,63]`). Not changed in code: whether "on top" means register is the user's call;
+  if it does, a register offset for the chord lane (or the melody) under the harmony is palette and
+  moves no event. Recorded in `SPEC.md` §4.6.
+
 ### The cadence's ending — the last bar split, its own chord then the turnaround
 
 The user decided: under `harmony = cadence` (and `both`) a stanza's last bar had always been a

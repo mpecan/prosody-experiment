@@ -504,6 +504,11 @@ fn render(
             for (key, value) in fields {
                 let _ = writeln!(out, "{key:<width$} {value}");
             }
+            // Over a chord lane the melody is single notes whatever `voicing` says (`SPEC.md`
+            // §4.6), so the view says what is heard.
+            if let Some(words) = prosody_emit::melody_over_harmony(&score) {
+                let _ = writeln!(out, "{:<width$} {words}", "rhyme notes");
+            }
             // Every choice that is not the default, so the view says which piece it describes.
             let changed: Vec<String> = mappings
                 .changed()
@@ -1266,6 +1271,38 @@ mod tests {
         // C dorian, degree 0 as a seventh: C E♭ G B♭ from 60 — 60 63 67 70.
         assert!(body.contains("[60,63,67,70]"), "{body}");
         assert!(body.contains("//   voicing = seventh"), "{body}");
+    }
+
+    #[test]
+    fn under_the_harmony_the_jazz_melody_is_single_notes_over_the_chords() {
+        // The same jazz controls as above, with B's harmony on: degree 0 is the single note 60,
+        // not the chord [60,63,67,70], and the chord lane keeps the sevenths (an octave down,
+        // from 48: C dorian degree 0 is 48 51 55 58).
+        let jazz = prosody_emit::Style::preset("jazz").unwrap();
+        let pairs: Vec<(&str, String)> = controls(&jazz);
+        let mut query: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        query.push(("set", "harmony:cadence"));
+        let response = super::compile(&request(&query, SEED), &Output::Pattern);
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = &response.body;
+        let melody = body.lines().find(|l| l.contains("// the melody")).unwrap();
+        let notes = melody.split('"').nth(1).unwrap();
+        assert!(!notes.contains(','), "{melody}");
+        assert!(notes.contains(" 60") || notes.contains("[60"), "{melody}");
+        let chords = body.lines().find(|l| l.contains("// the chords")).unwrap();
+        assert!(
+            chords.split('"').nth(1).unwrap().contains(",58]"),
+            "{chords}"
+        );
+        assert!(body.contains("as single notes over the chords"), "{body}");
+        let explain = super::compile(&request(&query, SEED), &Output::Explain);
+        assert!(
+            explain
+                .body
+                .contains("\nrhyme notes   single notes over the chords"),
+            "{}",
+            explain.body
+        );
     }
 
     #[test]

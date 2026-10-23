@@ -46,7 +46,7 @@
 //! | which cycle, which step, which subdivision | `Event` position | §4.2 |
 //! | `.gain` | `Event::velocity` | §4.2, stress → accent |
 //! | `.note` | `Event::pitch` through the style's scale | §4.5 |
-//! | a rhyme note's chord tones | the same degree, stacked in the style's scale ([`Voicing`]) | §5 |
+//! | a rhyme note's chord tones | the same degree, stacked in the style's scale ([`Voicing`]); none over a chord lane, where the melody is single notes ([`melody_voicing`]) | §5, §4.6 |
 //! | `.lpf`, `.attack`, `.room` | `Event::sharpness` | §4.4 |
 //! | `.vowel` | `Event::bank` — the alliterating phoneme | §4.3, alliteration |
 //! | `.crush` depth | `Event::family` — distance from the family's root | §4.3, morphology |
@@ -494,6 +494,55 @@ fn chord_share(voicing: Voicing) -> f64 {
     1.0 / f64::from(tones).sqrt()
 }
 
+/// How this piece's rhyme melody is voiced: the style's [`Voicing`], unless the score has a chord
+/// lane to play over, and then one note a rhyme word whatever the voicing says.
+///
+/// The user decided it (`SPEC.md` §4.6, *the melody over the harmony*): under the jazz palette the
+/// rhyme melody and the chord lane both played four-tone chords, and two lanes of sevenths were
+/// thick. So whenever the harmony mapping is on — any variant but off — the melody plays single
+/// notes on top of the chords, and the voicing shapes only the chord lane (`chord_tones`). With
+/// the harmony off the voicing works as it always did.
+///
+/// It reads the **score**, not a style: whether the harmony mapping ran is a structural fact the
+/// score records ([`Score::harmony`] is empty exactly when it is off). The style still decides
+/// only how an event sounds, so I3 holds — no event is added, moved or removed, and every tone the
+/// melody drops was one of its own event's chord tones, never another event's. It asks whether the
+/// mapping is on rather than whether any bar has a chord because the second is a fact about the
+/// whole poem: an edit to one stanza that gave the poem its first chord would revoice the melody of
+/// every other stanza, which I2 forbids. Whether the mapping is on is the same for every stanza.
+#[must_use]
+pub fn melody_voicing(score: &Score, style: &Style) -> Voicing {
+    if under_harmony(score) {
+        Voicing::Note
+    } else {
+        style.voicing()
+    }
+}
+
+/// Whether the harmony mapping is on in this score (any variant but off) — what moves the rhyme
+/// melody to single notes ([`melody_voicing`]).
+fn under_harmony(score: &Score) -> bool {
+    !score.harmony().is_empty()
+}
+
+/// What the pattern header and the explain view say of the melody's voicing when the harmony
+/// mapping set it ([`melody_voicing`]): `None` with the harmony off, where the voicing is the
+/// palette's and says so itself.
+#[must_use]
+pub fn melody_over_harmony(score: &Score) -> Option<&'static str> {
+    if !under_harmony(score) {
+        None
+    } else if score.chords().next().is_some() {
+        Some(
+            "single notes over the chords (the harmony mapping is on, so the voicing shapes only the chord lane)",
+        )
+    } else {
+        Some(
+            "single notes (the harmony mapping is on, so the voicing shapes only the chord lane, though no bar has a chord)",
+        )
+    }
+}
+
 /// How many cycles of the pattern the piece plays a minute — its `.cpm`.
 ///
 /// One number for every consumer that has to land on the same clock: the pattern's own `.cpm`,
@@ -748,14 +797,17 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     // Stacking every other degree makes a seventh chord only in a seven-note scale; elsewhere it
     // makes something else, and the header names what is heard rather than what was asked for.
     let scale = style.scale();
-    let chords = match style.voicing() {
-        Voicing::Note => String::new(),
-        Voicing::Seventh if scale.len() == 7 => {
+    // Over a chord lane the melody is single notes whatever the voicing (`melody_voicing`), and
+    // the header says that instead.
+    let chords = match (melody_over_harmony(score), style.voicing()) {
+        (Some(words), _) => format!(" as {words}"),
+        (None, Voicing::Note) => String::new(),
+        (None, Voicing::Seventh) if scale.len() == 7 => {
             " as seventh chords (each rhyme word's degree with \
              the 3rd, 5th and 7th above it in the scale)"
                 .to_owned()
         }
-        Voicing::Seventh => format!(
+        (None, Voicing::Seventh) => format!(
             " as four-tone chords on every other degree of {} (not sevenths: the scale has {} \
              notes, not 7)",
             scale.name(),
@@ -1403,10 +1455,12 @@ fn pitched_layer(
         Pitched::Bass => style.bass_octave().midi_c(),
     };
 
-    // The melody may be voiced as chords (`Voicing`, palette — its doc argues it against I3); the
-    // bass is always one note, the root a chord would stand on.
+    // The melody may be voiced as chords (`Voicing`, palette — its doc argues it against I3), but
+    // not over a chord lane: under the harmony mapping it is single notes on top of the chords
+    // (`melody_voicing`, SPEC.md §4.6). The bass is always one note, the root a chord would stand
+    // on. The level follows: `chord_share` of one tone is the single note's level.
     let voicing = match role {
-        Pitched::Melody => style.voicing(),
+        Pitched::Melody => melody_voicing(score, style),
         Pitched::Bass => Voicing::Note,
     };
     let note = |event: &Event| match role {
@@ -3101,6 +3155,70 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("as seventh chords in minor"), "{text}");
+    }
+
+    #[test]
+    fn over_the_harmony_the_jazz_melody_plays_single_notes() {
+        // The jazz palette: C dorian (C D Eb F G A Bb), the melody at octave 4 from MIDI 60, the
+        // seventh voicing, melody level 0.75. ABAB's rhyme classes: A (`bA`, `tA`) degree 0, B
+        // (`bo`, `do`) degree 1. Hand-worked, the seventh on degree 0 is C Eb G Bb = 60 63 67 70
+        // and on degree 1 D F A C = 62 65 69 72; as single notes, 60 and 62.
+        let jazz = Style::preset("jazz").unwrap();
+        let melody_steps = |text: &str| -> (Vec<String>, String) {
+            let line = text
+                .lines()
+                .find(|l| l.contains("// the melody"))
+                .unwrap()
+                .to_owned();
+            let steps: Vec<String> = line
+                .split('"')
+                .nth(1)
+                .unwrap()
+                .split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+                .map(|t| t.split('@').next().unwrap_or(t))
+                .map(|t| t.trim_start_matches('[').trim_end_matches(']').to_owned())
+                .filter(|t| !t.is_empty() && t != "~")
+                .collect();
+            (steps, line)
+        };
+        let off = Strudel::new()
+            .render(&harmonised(ABAB, prosody_core::Variant::Off), &jazz)
+            .unwrap();
+        let on = Strudel::new()
+            .render(&harmonised(ABAB, prosody_core::Variant::Cadence), &jazz)
+            .unwrap();
+        let (chords, off_line) = melody_steps(&off);
+        let (notes, on_line) = melody_steps(&on);
+        // Harmony off: the voicing is the palette's, each rhyme word a seventh chord.
+        assert_eq!(
+            chords,
+            ["60,63,67,70", "62,65,69,72", "60,63,67,70", "62,65,69,72"].repeat(2),
+            "{off_line}"
+        );
+        // Harmony on: the same steps, each its chord's lowest tone alone.
+        assert_eq!(notes, ["60", "62", "60", "62"].repeat(2), "{on_line}");
+        // The level: four tones at 0.75 / √4 off, one tone at the whole 0.75 on.
+        assert!(off_line.contains(".postgain(0.375)"), "{off_line}");
+        assert!(on_line.contains(".postgain(0.750)"), "{on_line}");
+        // The voicing still shapes the chord lane: V of degree 0 is degree 4, G Bb D F from 48.
+        assert!(chord_line(&on).contains("[55,58,62,65]"), "{on}");
+        assert!(
+            on.contains("melody on gm_epiano1 as single notes over the chords"),
+            "{on}"
+        );
+        assert!(!off.contains("single notes"), "{off}");
+        assert!(
+            off.contains("melody on gm_epiano1 as seventh chords"),
+            "{off}"
+        );
+        assert_eq!(
+            super::melody_voicing(&harmonised(ABAB, prosody_core::Variant::Rhyme), &jazz),
+            crate::Voicing::Note
+        );
+        assert_eq!(
+            super::melody_voicing(&harmonised(ABAB, prosody_core::Variant::Off), &jazz),
+            crate::Voicing::Seventh
+        );
     }
 
     #[test]

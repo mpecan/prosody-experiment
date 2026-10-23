@@ -459,6 +459,11 @@ fn explain(
     for (key, value) in fields {
         let _ = writeln!(out, "  {key:<width$} {value}");
     }
+    // The one place the score overrides a palette value's effect: over a chord lane the melody is
+    // single notes whatever `voicing` says (`SPEC.md` §4.6), so the view says what is heard.
+    if let Some(words) = prosody_emit::melody_over_harmony(score) {
+        let _ = writeln!(out, "  {:<width$} {words}", "rhyme notes");
+    }
     // Every candidate mapping not at its default, so the view says which piece it describes.
     let changed: Vec<Choice> = mappings.changed().collect();
     if !changed.is_empty() {

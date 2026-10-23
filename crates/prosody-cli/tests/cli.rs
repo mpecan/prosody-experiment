@@ -180,6 +180,34 @@ fn the_explain_views_palette_values_share_one_column() {
 }
 
 #[test]
+fn over_the_harmony_the_melody_is_single_notes_and_the_views_say_so() {
+    // The jazz palette voices each rhyme word as a seventh chord; with the harmony mapping on,
+    // the melody plays single notes over the chord lane instead (`SPEC.md` §4.6).
+    let poem = format!("+++\npreset = \"jazz\"\n+++\n{COUPLET}");
+    let melody = |text: &str| -> String {
+        let line = text.lines().find(|l| l.contains("// the melody")).unwrap();
+        line.split('"').nth(1).unwrap().to_owned()
+    };
+    let (off, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(melody(&off).contains(','), "seventh chords: {off}");
+    let (on, err, code) = run(&["--set", "harmony=cadence"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!melody(&on).contains(','), "single notes: {on}");
+    assert!(on.contains("as single notes over the chords"), "{on}");
+
+    // The explain view says it in the style block, on the palette's column.
+    let (explained, err, code) = run(&["--explain", "--set", "harmony=cadence"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        explained.contains("\n  rhyme notes   single notes over the chords (the harmony mapping is on, so the voicing shapes only the chord lane)\n"),
+        "{explained}"
+    );
+    let (plain, _, _) = run(&["--explain"], &poem);
+    assert!(!plain.contains("rhyme notes"), "{plain}");
+}
+
+#[test]
 fn a_broken_pipe_is_not_a_crash() {
     // `prosody poem.txt | head -1` is the most ordinary thing anyone does with this program, and
     // Rust panics on EPIPE unless you handle it.

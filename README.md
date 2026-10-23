@@ -105,7 +105,9 @@ each rhyme word as the seventh chord on its degree, an upright bass, the ride ke
 snare comping on the sampled acoustic R-8 kit, triplet swing, dorian, a warm room — the one
 palette that also sets the scale, swing and bank). Move any control and it reads *custom*. **Kit**
 picks kick-and-hat or ride-and-snare for the two drum layers, and **Voicing** plays each rhyme word
-as one note or as a seventh chord built in the current scale; neither moves an event. **Ride
+as one note or as a seventh chord built in the current scale; neither moves an event. With a side's
+harmony mapping on, that side's rhyme words play as single notes over the chord lane whatever the
+voicing, and the voicing shapes only the chords. **Ride
 stand-in** picks what keeps time under the ride kit on a bank without one (open hat or crash), and
 **Bass octave** and **Melody octave** move each role's register by whole octaves. **Levels follow
 density** (in the mix) turns down the bars where several lines sound at once — a stanza looping
@@ -494,7 +496,7 @@ The rest of the header, every key optional:
 | `preset` | a named palette to start from — `default`, `warm`, `raw`, `jazz` (which also sets `scale = "dorian"`, `swing = 0.33`, `bank = "r8"`); applied before every other key | | `default` |
 | `kit` | which drum each layer plays: `machine` (kick on the foundation, hat on the flourish) or `ride` (ride and snare; on `tr808` and `tr707`, which have no ride, the open hat keeps time instead and the pattern's header says so) | | `machine` |
 | `ride_fallback` | what keeps time under `kit = "ride"` on a bank with no ride (`tr808`, `tr707`): `open_hat` or `crash`; named on the pattern header's `plays:` line | | `open_hat` |
-| `voicing` | each rhyme word as one `note`, or as the `seventh` chord on its degree in the scale (the level is shared between the tones; in a scale without seven notes it stacks every other degree all the same — fourths in `pentatonic_minor`) | | `note` |
+| `voicing` | each rhyme word as one `note`, or as the `seventh` chord on its degree in the scale (the level is shared between the tones; in a scale without seven notes it stacks every other degree all the same — fourths in `pentatonic_minor`). With the harmony mapping on, rhyme words are single notes over the chords whatever this says, and it shapes only the chord lane | | `note` |
 | `chord_sound` | the chord lane's instrument (heard only with the harmony mapping on): any name `bass` and `melody` take | | `gm_pad_warm` (`warm`, `jazz`: `gm_epiano1`; `raw`: `triangle`) |
 | `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_fretless_bass`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
 | `reverb` | reverb send (the drums take half, plus §4.4's rise with distinctiveness; the bass three tenths) | 0–1 | 0.25 |
