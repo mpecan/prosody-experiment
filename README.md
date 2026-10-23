@@ -135,6 +135,31 @@ the first Play needs an internet connection; each instrument a pattern uses is l
 starts. The page's output goes through a gentle compressor and then a soft clipper that cannot
 exceed 0.95, so a dense bar bends rather than clips.
 
+### Path A′ — the same page, without a server
+
+The page also builds as static files, with the whole compiler inside it as WebAssembly:
+
+```sh
+./scripts/build-site.sh                  # into target/site: the page, the compiler as WebAssembly
+python3 -m http.server -d target/site    # or any static host; then open http://localhost:8000
+```
+
+It is the same page with the same controls, and it answers itself: every request the served page
+sends to `prosody-web` goes to `prosody_bg.wasm` instead (`crates/prosody-wasm`, bound to the
+page by `wasm-bindgen`). It can be put on any
+static host (GitHub Pages, a bucket), and since it compiles in the visitor's browser, nothing on
+the host runs arbitrary input. The compiler is about 5 MB, about 1 MB compressed — nearly all of
+it the pronouncing dictionary — and the first compile takes a moment while the dictionary loads.
+Opening `index.html` straight from disk does not work: browsers refuse to fetch a file beside a
+`file://` page.
+
+`./scripts/check-wasm.sh` builds both and checks that the browser build answers every view of every
+example, under several palettes and mapping choices, byte for byte as the native server does —
+invariant I1 across targets. It needs node. Building needs the `wasm32-unknown-unknown` target and
+the `llvm-tools` component, which `rust-toolchain.toml` asks rustup for, and the `wasm-bindgen`
+CLI at exactly the crate's version, which the script installs into `target/tools` the first time
+(leaving any other `wasm-bindgen` on your PATH alone).
+
 ### Path B — Strudel, by hand
 
 1. Compile a poem and copy the output:
@@ -431,7 +456,8 @@ crates/
   prosody-emit/       Style, and the Strudel and OSC backends
   prosody-score/      how interesting a compiled poem is, and whether it still listens to the poem
   prosody-cli/        arguments, files, stdout, the watcher — all IO lives here
-  prosody-web/        a local page for writing a poem and hearing it, also all IO
+  prosody-web/        the page: what it asks answered by a library, plus a local server
+  prosody-wasm/       that library built for the browser, for the static page
   tree-sitter-prosody/  the grammar
 ```
 

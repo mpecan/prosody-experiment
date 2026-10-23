@@ -406,6 +406,45 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The page without a server — the compiler in WebAssembly
+
+The page now also builds as static files that compile in the browser (`scripts/build-site.sh`).
+No mapping and no emitted byte changed.
+
+- **The C parser builds for `wasm32-unknown-unknown`.** The generated `parser.c` includes
+  `stdlib.h`, which that target lacks; `tree-sitter-language` ships the minimal headers the runtime
+  builds against there and passes their path to its direct dependents, so the grammar's build
+  script includes them on a wasm target (five lines). The link then needs `llvm-ar`: macOS's `ar`
+  writes archives whose wasm objects the linker cannot see, and every `ts_*` symbol comes back
+  undefined. `rust-toolchain.toml` now asks for `llvm-tools` and the wasm target.
+- **`prosody-web` is a library and a binary.** The library (`Site`, `Request`, `Response`) is the
+  page and the answer to every request, with no IO; the binary is the localhost server around it,
+  plus `--site DIR` to write the static page. `Request`/`Response` and the query decoding moved out
+  of the server into `exchange.rs`, so a request can be built from a target string anywhere.
+- **`prosody-wasm`** binds that library to the page with `wasm-bindgen` (pinned `=0.2.129`; the
+  user chose it over hand-written pointer-passing exports, which needed `unsafe` and a second
+  lint exemption). One function, `respond(target, body) -> Answer { status, body }`. The crate
+  keeps the workspace lints, `forbid(unsafe_code)` included, on both targets. The generator CLI
+  must match the crate exactly, so `build-site.sh` installs that version into `target/tools`
+  rather than touching whatever `wasm-bindgen` is on PATH. New crates: the `wasm-bindgen` family,
+  `bumpalo`, `once_cell`.
+- **The page has one transport.** Every request goes through `ask(path, query, body)`, which is a
+  `fetch` when served and a call into the compiler when static; both return a `Response`, so
+  nothing else in the page changed. The import map points at `./strudel-globals.mjs`, relative, so
+  the static page works under a subdirectory of a host.
+- **I1 across targets is checked, not assumed.** `scripts/check-wasm.sh` asks the wasm build and the
+  native server for all four views of all nine examples under six settings (palettes, swing,
+  humanise, density, every mapping's variants, all three profiles) — 216 answers, byte-identical,
+  scores included. A deliberately wrong palette on the wasm side fails it at the first differing
+  byte. CI runs it.
+- Measured: `prosody_bg.wasm` is 5.1 MB, 1.2 MB gzipped, 0.97 MB brotli; almost all of it is the
+  3.6 MB dictionary. The first compile in the page takes about 100 ms (the dictionary loads), later
+  ones well under a millisecond for a short poem. In Chromium from `python3 -m http.server`: the
+  page compiles, plays Blake with the reading on Strudel's clock, scores (overall 0.757, the cycle
+  table's), with no console errors and every request 200.
+- Not done: no hosting is set up — that publishes the page, and is the user's call. The dictionary
+  could be packed far smaller (a sorted, prefix-shared table) if the download matters.
+
 ### The off-rhythm feel — a trace, and cross-rhythm in the jazz profile
 
 The user heard off-rhythm beats; the scorer's syncopation gave The Tyger 0.017. Traced on the

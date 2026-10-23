@@ -2,4 +2,8 @@
 # floating toolchain is a silent way to break that promise across machines.
 [toolchain]
 channel = "1.96.1"
-components = ["rustfmt", "clippy"]
+# `wasm32-unknown-unknown` and `llvm-tools` are for the page's browser build
+# (`scripts/build-site.sh`): the target itself, and the `llvm-ar` that can index the C parser's
+# wasm objects, which the system `ar` on macOS cannot.
+components = ["rustfmt", "clippy", "llvm-tools"]
+targets = ["wasm32-unknown-unknown"]

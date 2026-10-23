@@ -21,83 +21,7 @@
 use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 
-/// One parsed request.
-pub(crate) struct Request {
-    /// `GET` or `POST`.
-    pub(crate) method: String,
-    /// The path, without the query string.
-    pub(crate) path: String,
-    /// The decoded query parameters, in the order they appeared.
-    pub(crate) query: Vec<(String, String)>,
-    /// The request body.
-    pub(crate) body: String,
-}
-
-impl Request {
-    /// One query parameter, if it was given.
-    pub(crate) fn param(&self, name: &str) -> Option<&str> {
-        self.query
-            .iter()
-            .find(|(key, _)| key == name)
-            .map(|(_, value)| value.as_str())
-    }
-}
-
-/// What to send back.
-pub(crate) struct Response {
-    /// The HTTP status code.
-    pub(crate) status: u16,
-    /// The `Content-Type`.
-    pub(crate) content_type: &'static str,
-    /// The body.
-    pub(crate) body: String,
-}
-
-impl Response {
-    /// A successful plain-text response.
-    #[must_use]
-    pub(crate) fn text(body: String) -> Self {
-        Self {
-            status: 200,
-            content_type: "text/plain; charset=utf-8",
-            body,
-        }
-    }
-
-    /// A successful HTML response.
-    #[must_use]
-    pub(crate) fn html(body: String) -> Self {
-        Self {
-            status: 200,
-            content_type: "text/html; charset=utf-8",
-            body,
-        }
-    }
-
-    /// A successful JavaScript module.
-    #[must_use]
-    pub(crate) fn javascript(body: String) -> Self {
-        Self {
-            status: 200,
-            content_type: "text/javascript; charset=utf-8",
-            body,
-        }
-    }
-
-    /// A refusal, with the reason as the body so the page can show it to the writer.
-    ///
-    /// A poem that will not compile is the normal case while someone is typing, so the reason
-    /// matters more than the status — `CLAUDE.md` §6's rule that a fallback must be visible,
-    /// applied to a text box.
-    #[must_use]
-    pub(crate) fn problem(status: u16, body: String) -> Self {
-        Self {
-            status,
-            content_type: "text/plain; charset=utf-8",
-            body,
-        }
-    }
-}
+use prosody_web::{Request, Response};
 
 /// Serves until interrupted, calling `handle` for every request.
 ///
@@ -162,7 +86,6 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
             "malformed request line",
         ));
     };
-    let (method, target) = (method.to_owned(), target.to_owned());
 
     let mut length = 0_usize;
     loop {
@@ -184,63 +107,11 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
     let mut body = vec![0_u8; length.min(LIMIT)];
     reader.read_exact(&mut body)?;
 
-    let (path, query) = match target.split_once('?') {
-        Some((path, query)) => (path.to_owned(), parse_query(query)),
-        None => (target, Vec::new()),
-    };
-
-    Ok(Some(Request {
+    Ok(Some(Request::new(
         method,
-        path,
-        query,
-        body: String::from_utf8_lossy(&body).into_owned(),
-    }))
-}
-
-/// Splits and percent-decodes a query string.
-fn parse_query(query: &str) -> Vec<(String, String)> {
-    query
-        .split('&')
-        .filter(|pair| !pair.is_empty())
-        .map(|pair| {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            (decode(key), decode(value))
-        })
-        .collect()
-}
-
-/// Percent-decoding, with `+` for a space.
-fn decode(text: &str) -> String {
-    let bytes = text.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes.get(index) {
-            Some(b'+') => {
-                out.push(b' ');
-                index += 1;
-            }
-            Some(b'%') => {
-                let digits = text
-                    .get(index + 1..index + 3)
-                    .and_then(|pair| u8::from_str_radix(pair, 16).ok());
-                if let Some(byte) = digits {
-                    out.push(byte);
-                    index += 3;
-                } else {
-                    // A stray `%` is a literal one rather than a reason to fail.
-                    out.push(b'%');
-                    index += 1;
-                }
-            }
-            Some(byte) => {
-                out.push(*byte);
-                index += 1;
-            }
-            None => break,
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
+        target,
+        String::from_utf8_lossy(&body).into_owned(),
+    )))
 }
 
 fn write_response(stream: &mut TcpStream, response: &Response) -> std::io::Result<()> {
@@ -263,48 +134,4 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> std::io::Resul
     )?;
     stream.write_all(response.body.as_bytes())?;
     stream.flush()
-}
-
-#[cfg(test)]
-#[allow(clippy::indexing_slicing)] // test code; a panic here is a test failure. See CLAUDE.md §3.
-mod tests {
-    use super::{decode, parse_query};
-
-    #[test]
-    fn a_query_string_decodes() {
-        let query = parse_query("scale=phrygian_dominant&root=F%23&swing=12");
-        assert_eq!(
-            query[0],
-            ("scale".to_owned(), "phrygian_dominant".to_owned())
-        );
-        assert_eq!(
-            query[1],
-            ("root".to_owned(), "F#".to_owned()),
-            "percent-decoded"
-        );
-        assert_eq!(query[2], ("swing".to_owned(), "12".to_owned()));
-    }
-
-    #[test]
-    fn decoding_handles_the_awkward_cases() {
-        assert_eq!(decode("a+b"), "a b", "plus is a space");
-        assert_eq!(decode("%E2%80%94"), "—", "multi-byte utf-8");
-        assert_eq!(
-            decode("100%"),
-            "100%",
-            "a stray percent is literal, not an error"
-        );
-        assert_eq!(decode("%zz"), "%zz", "and so is an invalid escape");
-        assert_eq!(decode(""), "");
-    }
-
-    #[test]
-    fn an_empty_query_yields_nothing() {
-        assert!(parse_query("").is_empty());
-        assert_eq!(
-            parse_query("bare").len(),
-            1,
-            "a key with no value is still a key"
-        );
-    }
 }

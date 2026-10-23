@@ -286,14 +286,39 @@
 -->
 <script type="importmap">
 { "imports": {
-  "@strudel/core": "/strudel-globals.mjs",
-  "@strudel/webaudio": "/strudel-globals.mjs",
-  "sfumato": "/strudel-globals.mjs"
+  "@strudel/core": "./strudel-globals.mjs",
+  "@strudel/webaudio": "./strudel-globals.mjs",
+  "sfumato": "./strudel-globals.mjs"
 } }
 </script>
 <script src="https://unpkg.com/@strudel/web@1.3.0"></script>
 <script>
 const $ = (id) => document.getElementById(id);
+
+// Where the page's questions go. Served by `prosody-web`, they are HTTP requests to it; built as
+// static files (`scripts/build-site.sh`), the whole compiler is `prosody_bg.wasm` beside the page
+// (bound by `prosody.js`) and answers the same requests in-process, so a static host needs nothing
+// else. Either way the answer is a `Response`, so nothing below knows which. Kept before
+// `initStrudel`, which fills the global scope with names of its own.
+const TRANSPORT = __TRANSPORT__;
+const NativeResponse = Response;
+let compiler = null;
+function loadCompiler() {
+  // The generated module finds `prosody_bg.wasm` beside itself.
+  compiler ??= import('./prosody.js').then(async (bindings) => {
+    await bindings.default();
+    return bindings;
+  });
+  return compiler;
+}
+async function ask(path, query, body) {
+  if (TRANSPORT === 'server') return fetch(path + '?' + query, { method: 'POST', body });
+  const { respond } = await loadCompiler();
+  const answer = respond(path + '?' + query, body);
+  const reply = new NativeResponse(answer.body, { status: answer.status });
+  answer.free();
+  return reply;
+}
 // Every palette control's id is its key in the style header, and every value is in header units.
 const SOUND = ['bass', 'melody', 'kit', 'ride_fallback', 'voicing', 'bass_octave', 'melody_octave',
   'chord_sound', 'reverb', 'room_size', 'delay', 'high_cut', 'drive', 'compress', 'humanise', 'drums_gain',
@@ -467,7 +492,7 @@ function hear(side) {
   showPattern();
   if (playing && latestPattern) { fromTheTop = true; play(); }
   else status(side + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', ''));
-  fetch('/explain?' + query(), { method: 'POST', body: $('poem').value })
+  ask('/explain', query(), $('poem').value)
     .then((response) => response.text())
     .then((text) => { $('explain').textContent = text; })
     .catch(() => {});
@@ -475,7 +500,7 @@ function hear(side) {
 
 async function measure(poem) {
   const one = async (side) => {
-    const response = await fetch('/score?' + query(side), { method: 'POST', body: poem });
+    const response = await ask('/score', query(side), poem);
     return response.ok ? response.json() : null;
   };
   $('scoreRows').innerHTML = '<tr><td colspan="5">measuring…</td></tr>';
@@ -531,11 +556,11 @@ async function compile() {
   status('compiling…');
   try {
     const [patternA, patternB, explain, readingA, readingB] = await Promise.all([
-      fetch('/pattern?' + query('A'), { method: 'POST', body: poem }),
-      fetch('/pattern?' + query('B'), { method: 'POST', body: poem }),
-      fetch('/explain?' + query(), { method: 'POST', body: poem }),
-      fetch('/reading?' + query('A'), { method: 'POST', body: poem }),
-      fetch('/reading?' + query('B'), { method: 'POST', body: poem }),
+      ask('/pattern', query('A'), poem),
+      ask('/pattern', query('B'), poem),
+      ask('/explain', query(), poem),
+      ask('/reading', query('A'), poem),
+      ask('/reading', query('B'), poem),
     ]);
     readings = {
       A: readingA.ok ? await readingA.json() : null,

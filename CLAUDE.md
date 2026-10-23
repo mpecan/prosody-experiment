@@ -39,7 +39,8 @@ crates/
   prosody-emit/      backend emitters (Strudel/Tidal text first; OSC later)
   prosody-score/     measuring a compiled poem: interest metrics and the one-word edit test
   prosody-cli/       argument parsing, file reads, stdout, the watcher. All IO lives here.
-  prosody-web/       a localhost page for writing and hearing a poem. Also all IO.
+  prosody-web/       the page: a pure library answering what it asks, and a localhost server (IO)
+  prosody-wasm/      that library built for the browser, so the page can be static files
   tree-sitter-prosody/  the grammar
 ```
 

@@ -23,6 +23,12 @@ thiserror = "2"
 # requires it regardless. `display` and `std` are off; nothing here writes TOML.
 toml = { version = "0.9", default-features = false, features = ["parse", "serde"] }
 tree-sitter = "0.26"
+# The page's browser build (`prosody-wasm`): the bindings between the compiler and the page's
+# script. The alternative is hand-written exports passing raw pointers, which needs `unsafe` in our
+# code and a calling convention kept in step by hand on both sides. Pinned exactly, because the
+# `wasm-bindgen` CLI that generates the JavaScript must be the same version
+# (`scripts/build-site.sh` installs that version).
+wasm-bindgen = "=0.2.129"
 tree-sitter-prosody = { path = "crates/tree-sitter-prosody" }
 prosody-core = { path = "crates/prosody-core" }
 prosody-cmudict = { path = "crates/prosody-cmudict" }
@@ -31,6 +37,7 @@ prosody-lts = { path = "crates/prosody-lts" }
 prosody-emit = { path = "crates/prosody-emit" }
 prosody-score = { path = "crates/prosody-score" }
 prosody-web = { path = "crates/prosody-web" }
+prosody-wasm = { path = "crates/prosody-wasm" }
 
 # See CLAUDE.md §3. Lints live here, not in per-file `#![allow]`.
 [workspace.lints.rust]
