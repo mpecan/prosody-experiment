@@ -36,12 +36,22 @@ fn run(arguments: &[&str], poem: &str) -> (String, String, Option<i32>) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("the binary should start");
-    child
+    // A binary that refuses its arguments exits without reading the poem, and whether it has
+    // exited before this write is a race: on a fast machine the write meets a closed pipe. That is
+    // not a failure of the binary, so a broken pipe is let through and the exit code and stderr
+    // say what happened.
+    let written = child
         .stdin
         .as_mut()
         .expect("stdin")
-        .write_all(poem.as_bytes())
-        .expect("writing the poem");
+        .write_all(poem.as_bytes());
+    if let Err(error) = written {
+        assert_eq!(
+            error.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "writing the poem: {error}"
+        );
+    }
     let finished = child.wait_with_output().expect("the binary should finish");
     (
         String::from_utf8_lossy(&finished.stdout).into_owned(),
