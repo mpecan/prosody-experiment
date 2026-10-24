@@ -3,111 +3,225 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The reader's light or dark choice, applied before anything is painted, so it never flashes. -->
+<script>try { const t = localStorage.getItem('prosody.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <title>prosody</title>
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400&display=swap">
 <style>
+  /* Two materials. The poem is light on a dark ground — the one bold thing, lit syllable by
+     syllable. Everything you set lives in paper folders along the bottom edge, each with its tab
+     sticking up in one of the five layer colours: open one and it slides up over the lower part of
+     the page, open another and they swap, open the open one and it closes. The same on a phone and
+     on a desk; only the proportions change. */
   :root {
     color-scheme: dark;
     --bg: #14131a; --panel: #1c1b24; --line: #2e2c3a;
     --ink: #e6e3ef; --dim: #918da8; --accent: #c9a6ff; --warn: #ff9b8a;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --serif: Spectral, Georgia, "Times New Roman", serif;
+    /* The layer colours (prosody_emit::strudel::Colour): the roll, the lit poem, the tabs. */
+    --pulse: #c9a6ff; --ornament: #6fd6c5; --bass: #ffb86b; --rhyme: #ff7aa8; --chords: #8fb3ff;
+    --paper: #efe6d3; --paper-back: #ddd0b4; --paper-ink: #2b2620; --paper-dim: #6c6252;
+    --paper-line: #cdbd9e;
+    /* What the themes change. Dark: the poem glows on a dark ground. Light: dark ink on warm
+       paper, and the lit syllables in deeper versions of the layer colours (--lit-strength mixes
+       each toward black), since the tints the roll uses are made for a dark ground. */
+    --control: #262433; --field: #17161f; --on-accent: #191423; --unlit: #8a86a0;
+    --select: rgba(201, 166, 255, .3); --wash: rgba(244, 238, 222, .08); --wash-strong: rgba(244, 238, 222, .26);
+    --shade: rgba(0, 0, 0, .25); --lit-strength: 100%;
+  }
+  /* Light: the system's preference unless the reader chose dark, or the reader's choice. */
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme=dark]) {
+      color-scheme: light;
+      --bg: #f7f2e8; --panel: #efe7d7; --line: #dccfb6; --ink: #24202b; --dim: #6c6676;
+      --accent: #6b4bb8; --warn: #b4412d; --control: #fbf7ef; --field: #fffcf5; --on-accent: #ffffff;
+      --unlit: #8c8494; --select: rgba(107, 75, 184, .22); --wash: rgba(43, 38, 32, .06);
+      --wash-strong: rgba(43, 38, 32, .16); --shade: rgba(60, 45, 20, .10); --lit-strength: 58%;
+    }
+  }
+  :root[data-theme=light] {
+    color-scheme: light;
+    --bg: #f7f2e8; --panel: #efe7d7; --line: #dccfb6; --ink: #24202b; --dim: #6c6676;
+    --accent: #6b4bb8; --warn: #b4412d; --control: #fbf7ef; --field: #fffcf5; --on-accent: #ffffff;
+    --unlit: #8c8494; --select: rgba(107, 75, 184, .22); --wash: rgba(43, 38, 32, .06);
+    --wash-strong: rgba(43, 38, 32, .16); --shade: rgba(60, 45, 20, .10); --lit-strength: 58%;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-    height: 100vh; display: flex; flex-direction: column;
+    height: 100dvh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr); overflow: hidden;
   }
-  header {
-    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-    padding: .7rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel);
-  }
-  h1 { font-size: 1rem; margin: 0; font-weight: 600; letter-spacing: .02em; }
-  h1 span { color: var(--dim); font-weight: 400; }
+  a { color: inherit; }
   button {
     font: inherit; font-weight: 600; padding: .4rem 1rem; border-radius: 6px;
-    border: 1px solid var(--line); background: #262433; color: var(--ink); cursor: pointer;
+    border: 1px solid var(--line); background: var(--control); color: var(--ink); cursor: pointer;
   }
   button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); color: #191423; border-color: var(--accent); }
+  button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   button:disabled { opacity: .45; cursor: default; border-color: var(--line); }
-  #status { color: var(--dim); font-size: .85rem; margin-left: auto; }
+
+  /* ---- The top bar ---- */
+  header.top {
+    display: flex; align-items: center; gap: .6rem 1rem; flex-wrap: wrap;
+    padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  .brand { display: flex; align-items: baseline; gap: .6rem; margin-right: auto; }
+  /* The name, syllable by syllable, in the colours a lit poem uses. */
+  .brand h1 { margin: 0; font: italic 500 1.6rem/1 var(--serif); letter-spacing: .01em; }
+  .brand h1 span { --c: var(--pulse); color: color-mix(in srgb, var(--c) var(--lit-strength), #000); }
+  .brand h1 span:nth-child(1) { --c: var(--pulse); }
+  .brand h1 span:nth-child(2) { --c: var(--ornament); }
+  .brand h1 span:nth-child(3) { --c: var(--bass); }
+  .tag {
+    font-size: .72rem; font-weight: 600; color: #191423; background: var(--rhyme);
+    padding: .1rem .5rem; border-radius: 999px; transform: rotate(-3deg); display: inline-block;
+  }
+  .links { display: flex; gap: .2rem; align-items: center; order: 2; }
+  .links button, .links a {
+    background: none; border: 0; color: var(--dim); font-weight: 500; font-size: .85rem;
+    padding: .3rem .5rem; text-decoration: none; border-radius: 6px;
+  }
+  .links button:hover, .links a:hover { color: var(--ink); background: var(--control); }
+  .controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; order: 3; }
+  #preset { max-width: 18rem; }
+  #play { position: relative; }
+  /* While it plays, the Play button breathes on the beat (--beat, from the piece's tempo). */
+  #play.beating::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 9px; border: 2px solid var(--accent);
+    animation: beat var(--beat, .5s) ease-out infinite; pointer-events: none;
+  }
+  @keyframes beat { from { opacity: .8; transform: scale(1); } to { opacity: 0; transform: scale(1.12); } }
+  .ab { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .ab span { padding: .4rem .6rem; color: var(--dim); font-size: .8rem; }
+  .ab button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: .4rem .8rem; }
+  .ab button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  @media (max-width: 720px) {
+    header.top { padding: .5rem .75rem; gap: .45rem .6rem; }
+    .brand { gap: .45rem; min-width: 0; }
+    .brand h1 { font-size: 1.35rem; }
+    .links button, .links a { padding: .3rem .35rem; }
+    /* The poem picker gets a row of its own; Play, Stop and the A/B switch share the next. */
+    .controls { width: 100%; order: 4; gap: .4rem; }
+    #preset { flex: 1 1 100%; max-width: none; min-width: 0; }
+    #play { flex: 1; }
+    .ab span { display: none; }
+    #notice { padding: .35rem .75rem; font-size: .8rem; }
+  }
+
+  #status {
+    padding: .25rem 1rem; font-size: .8rem; color: var(--dim); background: var(--bg);
+    border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   #status.bad { color: var(--warn); }
+  #notice {
+    display: flex; gap: .8rem; align-items: center; padding: .45rem 1rem; font-size: .85rem;
+    background: color-mix(in srgb, var(--rhyme) 14%, var(--bg)); color: var(--ink);
+    border-bottom: 1px solid var(--line);
+  }
+  #notice p { margin: 0; flex: 1; }
+  #notice button { background: none; border: 0; color: var(--dim); padding: .1rem .4rem; font-size: 1rem; }
+  #notice[hidden] { display: none; }
+  .notices { min-width: 0; }
 
-  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); min-height: 0; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-auto-rows: minmax(60vh, auto); } }
-  section { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-  section + section { border-left: 1px solid var(--line); }
-  section.panels { overflow-y: auto; background: var(--panel); }
-
-  /* The editor: a transparent text box over the lit verse. Both layers must lay text out
+  /* ---- The poem: a transparent text box over the lit verse. Both layers must lay text out
      identically — same font, size, padding, wrapping and scrollbar gutter — or the caret drifts off
-     the letters it is in. */
-  #editor { position: relative; flex: 1; min-height: 0; }
+     the letters it is in. ---- */
+  main { position: relative; min-height: 0; }
+  #editor { position: absolute; inset: 0; }
   #lit, #poem {
-    position: absolute; inset: 0; margin: 0; border: 0; padding: 1.6rem 2rem 4rem;
-    font-family: Spectral, Georgia, "Times New Roman", serif; font-size: 1.32rem; line-height: 1.75;
+    position: absolute; inset: 0; margin: 0; border: 0; padding: 1.6rem max(1.2rem, calc((100% - 46rem) / 2)) 3rem;
+    font-family: var(--serif); font-size: 1.32rem; line-height: 1.75;
     font-weight: 400; letter-spacing: 0; white-space: pre-wrap; overflow-wrap: break-word;
     tab-size: 4; scrollbar-gutter: stable;
   }
+  @media (max-width: 720px) { #lit, #poem { font-size: 1.12rem; padding: 1.1rem 1rem 2rem; } }
   #lit { overflow: hidden; color: var(--ink); pointer-events: none; }
   #poem {
     overflow-y: auto; resize: none; outline: 0; background: transparent;
     color: transparent; caret-color: var(--ink);
   }
-  #poem::selection { background: rgba(201, 166, 255, .3); color: transparent; }
+  #poem::selection { background: var(--select); color: transparent; }
   #poem::placeholder { color: var(--dim); }
-  #editor:focus-within { box-shadow: inset 2px 0 0 var(--accent); }
+  /* While it plays, the unlit verse steps back so the lit syllables carry the page. */
+  #editor.playing #lit { color: var(--unlit); }
+  #lit span { transition: color .45s ease-out, text-decoration-color .45s ease-out;
+    text-decoration: underline 2px transparent; text-underline-offset: .28em; }
+  #lit span.on { color: color-mix(in srgb, var(--c) var(--lit-strength), #000); transition: none; text-decoration-color: var(--u, transparent); }
+  #lit span.echo { color: color-mix(in srgb, color-mix(in srgb, var(--c) var(--lit-strength), #000) 60%, var(--unlit)); transition: none;
+    text-decoration-color: color-mix(in srgb, var(--u, transparent) 55%, transparent); }
+  /* The reading has the background, the music the letters: the music colours each syllable and
+     underlines a note, the voice lays a pale wash behind the line it is reading and a brighter one
+     behind the word it is saying. One channel each, so both stay legible when they meet. */
+  #lit span.reading { background: var(--wash); box-decoration-break: clone;
+    -webkit-box-decoration-break: clone; }
+  #lit span.spoken { background: var(--wash-strong); }
+
+  /* ---- The folders ---- */
+  #folders { position: relative; z-index: 2; }
+  .tabs {
+    display: flex; gap: .25rem; padding: 0 .75rem; overflow-x: auto; scrollbar-width: none;
+    background: linear-gradient(to bottom, transparent 60%, var(--shade));
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button {
+    flex: none; margin-top: .5rem; padding: .45rem 1rem .4rem; border: 0; border-radius: 10px 10px 0 0;
+    background: var(--paper-back); color: var(--paper-ink); font: italic 500 1rem/1.2 var(--serif);
+    box-shadow: inset 0 3px 0 var(--t); transform: translateY(4px); transition: transform .15s;
+  }
+  .tabs button:hover { transform: translateY(0); border: 0; }
+  .tabs button[aria-selected=true] { background: var(--paper); transform: translateY(0); }
+  .tabs button .count { font: 600 .7rem/1 system-ui, sans-serif; color: var(--paper-dim); margin-left: .3rem; }
+  .sheet {
+    background: var(--paper); color: var(--paper-ink); max-height: min(52dvh, 34rem); overflow-y: auto;
+    border-top: 1px solid var(--paper-line); box-shadow: 0 -12px 30px rgba(0, 0, 0, .35);
+    animation: rise .18s ease-out;
+    /* Inside the paper, the page's colours are the paper's. */
+    --ink: var(--paper-ink); --dim: var(--paper-dim); --line: var(--paper-line); --warn: #b4412d; --accent: #6b4bb8;
+  }
+  @media (max-width: 720px) { .sheet { max-height: 46dvh; } }
+  @keyframes rise { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+  .sheet[hidden] { display: none; }
+  .folder[hidden] { display: none; }
+  .folder > .lede { margin: 0; padding: .9rem 1.2rem .2rem; font: italic 1.05rem/1.4 var(--serif); color: var(--paper-dim); }
+  .sheet select, .sheet input { background: #fffaf0; color: var(--paper-ink); border-color: var(--paper-line); }
+  .sheet button { background: #f7f0e1; color: var(--paper-ink); border-color: var(--paper-line); }
+  .sheet button[aria-selected=true] { background: var(--paper-ink); color: var(--paper); border-color: var(--paper-ink); }
+  .sheet code { background: rgba(43, 38, 32, .07); padding: 0 .2em; border-radius: 3px; }
 
   .palette {
-    padding: .2rem 1.2rem 1rem; display: grid; gap: .55rem .9rem;
+    padding: .6rem 1.2rem 1rem; display: grid; gap: .55rem .9rem;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
-  .palette h2 { grid-column: 1 / -1; margin: .4rem 0 0; font-size: .82rem; color: var(--dim); font-weight: 600; }
-
-  /* Every panel can be folded away; the page remembers which. */
-  .panel { border-bottom: 1px solid var(--line); }
-  .panel > summary {
-    cursor: pointer; padding: .7rem 1.2rem; font-weight: 600; font-size: .92rem; list-style: none;
-    display: flex; align-items: baseline; gap: .6rem;
-  }
-  .panel > summary::-webkit-details-marker { display: none; }
-  .panel > summary::before { content: "▸"; color: var(--dim); transition: transform .15s; }
-  .panel[open] > summary::before { transform: rotate(90deg); }
-  .panel > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .panel .aside { color: var(--dim); font-weight: 400; font-size: .82rem; }
-  #panelViews pre { max-height: 60vh; }
-  .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .78rem; }
-  label { display: flex; flex-direction: column; gap: .2rem; font-size: .74rem; color: var(--dim); }
-  header select { width: auto; }
+  .palette h2 { grid-column: 1 / -1; margin: .4rem 0 0; font: italic 600 1rem var(--serif); color: var(--dim); }
+  .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .8rem; max-width: 60rem; }
+  label { display: flex; flex-direction: column; gap: .2rem; font-size: .76rem; color: var(--dim); }
   select, input {
     font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 5px;
-    border: 1px solid var(--line); background: #17161f; color: var(--ink);
+    border: 1px solid var(--line); background: var(--field); color: var(--ink);
   }
-  input[type=range] { padding: 0; }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
   .row { display: flex; gap: .4rem; }
   .row input { width: 100%; min-width: 0; }
 
-  nav { display: flex; gap: .3rem; padding: .5rem .8rem; border-bottom: 1px solid var(--line); }
-  nav button { padding: .25rem .7rem; font-size: .8rem; font-weight: 500; }
-  nav button[aria-selected=true] { background: var(--accent); color: #191423; border-color: var(--accent); }
+  .views-nav { display: flex; gap: .3rem; padding: .7rem 1.2rem .5rem; flex-wrap: wrap; }
+  .views-nav button { padding: .25rem .7rem; font-size: .82rem; font-weight: 500; }
   pre {
-    flex: 1; margin: 0; overflow: auto; padding: 1rem 1.2rem;
+    margin: 0; overflow: auto; padding: .6rem 1.2rem 1.2rem; max-height: 44dvh;
     font-family: var(--mono); font-size: 12px; line-height: 1.55;
     white-space: pre; tab-size: 2;
   }
   pre.wrapped { white-space: pre-wrap; word-break: break-all; }
   .hidden { display: none; }
 
-  .ab { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  .ab span { padding: .4rem .6rem; color: var(--dim); font-size: .8rem; }
-  .ab button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: .4rem .8rem; }
-  .ab button[aria-pressed=true] { background: var(--accent); color: #191423; }
-
-  .mappings table { grid-column: 1 / -1; border-collapse: collapse; font-size: .8rem; }
+  .mappings table { grid-column: 1 / -1; border-collapse: collapse; font-size: .82rem; }
   .mappings th { color: var(--dim); font-weight: 600; text-align: center; padding: 0 .5rem; }
   .mappings td { padding: .15rem .5rem; vertical-align: top; }
   .mappings td:first-child { padding-left: 0; }
@@ -115,82 +229,129 @@
   .mappings code { font-family: var(--mono); color: var(--ink); }
   .mappings .what { color: var(--dim); }
   .mappings select { width: auto; font-size: .78rem; padding: .1rem .2rem; }
-  .mappings select.changed { border-color: var(--ink); }
+  .mappings select.changed { border-color: var(--ink); border-width: 2px; }
   .reading .check span { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .82rem; }
   .reading input[type=checkbox] { width: auto; }
 
-  /* Watch: the poem as it sounds. The verse is the one bold thing on the page; the roll above it
-     and the key below the roll stay quiet. The five layer colours are the emitter's `.color()`
-     values (prosody_emit::strudel::Colour), so a lit syllable and its note on the roll match. */
-  #roll { width: 100%; height: 220px; display: block; background: #18171f;
-    border-top: 1px solid var(--line); }
-  .rollbar { display: flex; align-items: end; gap: 1.2rem; padding: 0 1.2rem .6rem; flex-wrap: wrap; }
+  #roll { width: 100%; height: clamp(150px, 26dvh, 240px); display: block; background: #18171f; }
+  .rollbar { display: flex; align-items: center; gap: .6rem 1.2rem; padding: .6rem 1.2rem; flex-wrap: wrap; }
   .rollbar label { flex-direction: row; align-items: center; gap: .5rem; }
-  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .78rem; color: var(--dim); }
+  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .8rem; color: var(--dim); }
   .key span { display: inline-flex; align-items: center; gap: .4rem; }
-  .key i { width: .6rem; height: .6rem; border-radius: 50%; background: var(--c); }
+  .key i { width: .65rem; height: .65rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
   .key .echo i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dim); }
-  /* While it plays, the unlit verse steps back so the lit syllables carry the page. */
-  #editor.playing #lit { color: #8a86a0; }
-  #lit span { transition: color .45s ease-out, text-decoration-color .45s ease-out;
-    text-decoration: underline 2px transparent; text-underline-offset: .28em; }
-  #lit span.on { color: var(--c); transition: none; text-decoration-color: var(--u, transparent); }
-  #lit span.echo { color: color-mix(in srgb, var(--c) 60%, #8a86a0); transition: none;
-    text-decoration-color: color-mix(in srgb, var(--u, transparent) 55%, transparent); }
-  /* The reading has the background, the music the letters: the music colours each syllable and
-     underlines a note, the voice lays a pale wash behind the line it is reading and a brighter one
-     behind the word it is saying. One channel each, so both stay legible when they meet. */
-  #lit span.reading { background: rgba(244, 238, 222, .08); box-decoration-break: clone;
-    -webkit-box-decoration-break: clone; }
-  #lit span.spoken { background: rgba(244, 238, 222, .26); }
-  .key .voice i { border-radius: 2px; width: 1.1rem; background: rgba(244, 238, 222, .26); }
-  @media (prefers-reduced-motion: reduce) { #lit span, .panel > summary::before { transition: none; } }
+  .key .voice i { border-radius: 2px; width: 1.1rem; background: rgba(43, 38, 32, .22); }
 
-  #score { overflow: auto; padding: 1rem 1.2rem; }
+  #score { padding: .6rem 1.2rem 1.2rem; }
   #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
   #score table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
   #score th { color: var(--dim); font-weight: 600; text-align: right; padding: .2rem .7rem; }
   #score th:first-child, #score td:first-child { text-align: left; padding-left: 0; }
   #score td { text-align: right; padding: .2rem .7rem; border-top: 1px solid var(--line); }
   #score td.out { color: var(--warn); }
-  #score td.up { color: #9be3a5; }
+  #score td.up { color: #2f7d3c; }
   #score td.down { color: var(--warn); }
   #score tr.total td { font-weight: 700; }
   #score p { color: var(--dim); font-size: .8rem; max-width: 46rem; }
+
+  /* ---- The welcome, the download question and the loader: paper cards over the dimmed page ---- */
+  dialog {
+    border: 0; padding: 0; max-width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem);
+    background: var(--paper); color: var(--paper-ink); border-radius: 14px; overflow: auto;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .55);
+    --ink: var(--paper-ink); --dim: var(--paper-dim); --line: var(--paper-line); --accent: #6b4bb8;
+  }
+  dialog::backdrop { background: rgba(10, 9, 14, .72); backdrop-filter: blur(2px); }
+  .card { padding: 1.6rem 1.8rem 1.4rem; position: relative; }
+  .card .close {
+    position: absolute; top: .7rem; right: .7rem; width: 2.2rem; height: 2.2rem; padding: 0;
+    border-radius: 50%; background: transparent; border: 1px solid var(--paper-line); color: var(--paper-ink);
+    font-size: 1.1rem; line-height: 1;
+  }
+  .card h2 { margin: 0 0 .4rem; font: 600 1.1rem/1.3 system-ui, sans-serif; }
+  .card p { margin: .6rem 0; line-height: 1.55; }
+  .card .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1.1rem; }
+  .card .actions button { background: #f7f0e1; color: var(--paper-ink); border-color: var(--paper-line); }
+  .card .actions button.primary { background: var(--paper-ink); color: var(--paper); border-color: var(--paper-ink); }
+  .card .small { font-size: .82rem; color: var(--paper-dim); }
+  .entry { font-family: var(--serif); border-bottom: 1px solid var(--paper-line); padding-bottom: .9rem; margin-bottom: .9rem; }
+  .entry .head { font-size: 2.1rem; font-weight: 500; font-style: italic; }
+  .entry .head span:nth-child(1) { color: #7b55d6; }
+  .entry .head span:nth-child(2) { color: #1f9483; }
+  .entry .head span:nth-child(3) { color: #c26a12; }
+  .entry .pron { color: var(--paper-dim); margin-left: .4rem; }
+  .entry .pos { font-style: italic; color: var(--paper-dim); }
+  .entry ol { margin: .4rem 0 0; padding-left: 1.3rem; font-size: 1.05rem; line-height: 1.5; }
+  .entry .field { font-style: italic; color: var(--paper-dim); }
+  .card .lead { font: italic 1.1rem/1.5 var(--serif); }
+  .bar-outer { height: .55rem; border-radius: 999px; background: var(--paper-back); overflow: hidden; margin: .8rem 0 .3rem; }
+  .bar-inner { height: 100%; width: 0; background: linear-gradient(90deg, var(--pulse), var(--rhyme)); transition: width .2s; }
+  .bar-inner.unknown { width: 35%; animation: sweep 1.2s ease-in-out infinite; }
+  @keyframes sweep { from { margin-left: -35%; } to { margin-left: 100%; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    #lit span, .tabs button, .sheet, .bar-inner { transition: none; animation: none; }
+    #play.beating::after { animation: none; opacity: 0; }
+  }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>prosody <span>— a poem is the score</span></h1>
-  <select id="preset" title="Load one of the example poems, with its palette">
-    <option value="">example poems…</option>
-  </select>
-  <button id="play" class="primary">▶ Play</button>
-  <button id="stop" disabled>■ Stop</button>
-  <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
-    <span>hearing</span>
-    <button id="hearA" aria-pressed="true">A</button>
-    <button id="hearB" aria-pressed="false">B</button>
-  </span>
-  <span id="status">ready</span>
+<header class="top">
+  <div class="brand">
+    <h1 aria-label="prosody"><span>pro</span><span>so</span><span>dy</span></h1>
+    <span class="tag">an experiment</span>
+  </div>
+  <nav class="links" aria-label="About this site">
+    <button id="theme" type="button" title="Light or dark: as your system says, or always one">◐ auto</button>
+    <button id="about" type="button">about</button>
+    <a href="https://github.com/mpecan/prosody-experiment" rel="noopener" target="_blank">source</a>
+  </nav>
+  <div class="controls">
+    <select id="preset" title="Load one of the example poems, with its palette" aria-label="Example poems">
+      <option value="">example poems…</option>
+    </select>
+    <button id="play" class="primary">▶ Play</button>
+    <button id="stop" disabled>■ Stop</button>
+    <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
+      <span>hearing</span>
+      <button id="hearA" aria-pressed="true">A</button>
+      <button id="hearB" aria-pressed="false">B</button>
+    </span>
+  </div>
 </header>
 
-<main>
-  <section class="writing">
-    <!-- The poem you write is the poem you watch: the text box lies exactly over the verse that
-         lights up, its own letters transparent, so typing, the caret and selecting work as in any
-         text box while the colour underneath shows what is sounding. -->
-    <div id="editor">
-      <div id="lit" aria-hidden="true"></div>
-      <textarea id="poem" spellcheck="false" autofocus aria-label="The poem"
-        placeholder="Write a poem, or pick one of the examples."></textarea>
-    </div>
-  </section>
+<div class="notices">
+  <div id="notice" hidden>
+    <p><strong>An experiment:</strong> every word of the poem becomes part of the music. Edit a line
+      and hear what changes.</p>
+    <button id="noticeClose" type="button" aria-label="Dismiss">✕</button>
+  </div>
+  <div id="status" role="status">ready</div>
+</div>
 
-  <section class="panels">
-    <details class="panel" id="panelRoll" open>
-      <summary>Roll <span class="aside">the notes as they play, a bar per poem line</span></summary>
+<main>
+  <!-- The poem you write is the poem you watch: the text box lies exactly over the verse that
+       lights up, its own letters transparent, so typing, the caret and selecting work as in any
+       text box while the colour underneath shows what is sounding. -->
+  <div id="editor">
+    <div id="lit" aria-hidden="true"></div>
+    <textarea id="poem" spellcheck="false" aria-label="The poem"
+      placeholder="Write a poem, or pick one of the examples."></textarea>
+  </div>
+</main>
+
+<!-- Folders along the bottom edge: a tab each, one open at a time, the open one again to close. -->
+<footer id="folders">
+  <div class="tabs" role="tablist" aria-label="Settings">
+    <button role="tab" id="tabRoll" data-folder="folderRoll" aria-controls="folderRoll" aria-selected="false" style="--t: var(--pulse)">Roll</button>
+    <button role="tab" id="tabSound" data-folder="folderSound" aria-controls="folderSound" aria-selected="false" style="--t: var(--ornament)">Sound</button>
+    <button role="tab" id="tabMappings" data-folder="folderMappings" aria-controls="folderMappings" aria-selected="false" style="--t: var(--bass)">Mappings</button>
+    <button role="tab" id="tabReading" data-folder="folderReading" aria-controls="folderReading" aria-selected="false" style="--t: var(--rhyme)">Reading</button>
+    <button role="tab" id="tabViews" data-folder="folderViews" aria-controls="folderViews" aria-selected="false" style="--t: var(--chords)">Under the hood</button>
+  </div>
+  <div class="sheet" id="sheet" hidden>
+    <section class="folder" id="folderRoll" role="tabpanel" aria-labelledby="tabRoll" hidden>
       <div class="rollbar">
         <label>Bars shown
           <select id="rollBars">
@@ -211,10 +372,9 @@
         </div>
       </div>
       <canvas id="roll" aria-label="The notes playing now, scrolling past a playhead: each row one sound, coloured by its layer; faint lines mark the bars"></canvas>
-    </details>
-
-    <details class="panel" id="panelPalette" open>
-      <summary>Palette <span class="aside">how it sounds, never what happens</span></summary>
+    </section>
+    <section class="folder" id="folderSound" role="tabpanel" aria-labelledby="tabSound" hidden>
+      <p class="lede">How it sounds: change any of it and the same poem plays the same things, differently.</p>
       <div class="palette">
         <label>Scale
           <select id="scale"></select>
@@ -304,10 +464,9 @@
           soft, drawn from its own line, so the same poem always strays the same way.
         </p>
       </div>
-    </details>
-
-    <details class="panel" id="panelMappings">
-      <summary>Mappings <span class="aside">what happens: A and B, to compare</span></summary>
+    </section>
+    <section class="folder" id="folderMappings" role="tabpanel" aria-labelledby="tabMappings" hidden>
+      <p class="lede">What happens: which feature of the poem becomes which sound. Set A and B, then switch while it plays.</p>
       <div class="palette mappings">
         <table>
           <thead><tr><th></th><th>A</th><th>B</th></tr></thead>
@@ -324,10 +483,9 @@
           subdivision wherever the two would cross.
         </p>
       </div>
-    </details>
-
-    <details class="panel" id="panelReading">
-      <summary>Reading <span class="aside">the poem spoken over the music</span></summary>
+    </section>
+    <section class="folder" id="folderReading" role="tabpanel" aria-labelledby="tabReading" hidden>
+      <p class="lede">A voice reading the poem over the music.</p>
       <div class="palette reading">
         <label>Engine
           <select id="engine" title="Who reads: your browser's own voice, a neural voice that runs in this page — downloaded once you choose it, then kept by the browser — or readings recorded ahead of time for the example poems, a small file a line">
@@ -369,11 +527,9 @@
           Piper speaks many languages, Slovenian among them. Kitten needs WebGPU.
         </p>
       </div>
-    </details>
-
-    <details class="panel" id="panelViews">
-      <summary>Pattern, annotation and score</summary>
-      <nav>
+    </section>
+    <section class="folder" id="folderViews" role="tabpanel" aria-labelledby="tabViews" hidden>
+      <nav class="views-nav">
         <button id="tabPattern" aria-selected="true">Pattern</button>
         <button id="tabExplain" aria-selected="false">What each word became</button>
         <button id="tabScore" aria-selected="false">Score A vs B</button>
@@ -402,9 +558,63 @@
           over them.
         </p>
       </div>
-    </details>
-  </section>
-</main>
+    </section>
+  </div>
+</footer>
+
+<!-- The welcome: open on a first visit, again from "about". -->
+<dialog id="welcome" aria-labelledby="welcomeTitle">
+  <div class="card">
+    <button class="close" type="button" data-close aria-label="Close">✕</button>
+    <div class="entry">
+      <div class="head" id="welcomeTitle"><span>pro</span><span>so</span><span>dy</span><span class="pron">/ˈprɒsədi/</span></div>
+      <div class="pos">noun</div>
+      <ol>
+        <li>the patterns of rhythm and sound in poetry: where the stresses fall, how the lines move,
+          what rhymes with what.</li>
+        <li><span class="field">linguistics</span> the stress and intonation of speech.</li>
+      </ol>
+    </div>
+    <p class="lead"><strong>This is an experiment.</strong> Here a poem is the source code for a piece
+      of music.</p>
+    <p>Each line becomes a bar. Stressed syllables become the beat. Rhymes become notes. Repeated lines
+      become loops that build up and wear away. A voice can read the poem over it. Every sound
+      traces back to a word, and the words light up as they play. Change a word and you'll hear
+      exactly what it changed.</p>
+    <p>Pick a poem, or write your own, and press Play.</p>
+    <div class="actions"><button class="primary" type="button" data-close>Start listening</button></div>
+    <p class="small">How it works, and the source: <a href="https://github.com/mpecan/prosody-experiment"
+      rel="noopener" target="_blank">github.com/mpecan/prosody-experiment</a>. Questions, poems,
+      ideas: <a href="mailto:me@prosody.rocks">me@prosody.rocks</a>.</p>
+  </div>
+</dialog>
+
+<!-- Asked before a neural voice is downloaded for the first time. -->
+<dialog id="download" aria-labelledby="downloadTitle">
+  <div class="card">
+    <button class="close" type="button" data-close aria-label="Close">✕</button>
+    <h2 id="downloadTitle"></h2>
+    <p id="downloadText"></p>
+    <div class="actions">
+      <button class="primary" type="button" id="downloadYes"></button>
+      <button type="button" id="downloadNo">Keep the current voice</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- While something big loads: the instruments on the first Play, a voice once chosen. -->
+<dialog id="loader" aria-labelledby="loaderTitle">
+  <div class="card">
+    <h2 id="loaderTitle"></h2>
+    <p id="loaderText" class="small"></p>
+    <div class="bar-outer"><div class="bar-inner unknown" id="loaderBar"></div></div>
+    <p id="loaderProgress" class="small"></p>
+    <div class="actions">
+      <button type="button" id="loaderHide">Hide — keep loading</button>
+      <button type="button" id="loaderCancel">Cancel</button>
+    </div>
+  </div>
+</dialog>
 
 <!--
   `@strudel/soundfonts` imports `@strudel/core` and `@strudel/webaudio` by name. Answering those
@@ -1080,7 +1290,7 @@ const LEAD = 0.05;     // the least ahead of now a late line is started, in seco
 const SCHEDULER_CPS = 1;   // reading::SCHEDULER_CPS, and the page's repl.setCps(1)
 
 // The reading's own settings, remembered per browser like the voice picker.
-const READING_DEFAULTS = { engine: 'kokoro', pace: 'natural', level: 1, voices: {} };
+const READING_DEFAULTS = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };
 let readingSettings = { ...READING_DEFAULTS };
 try {
   const saved = JSON.parse(localStorage.getItem('prosody.reading') || 'null');
@@ -1186,8 +1396,10 @@ function workerEngine(name) {
           engine.listed = info.voices;
           engine.state = 'ready';
         } catch (error) {
-          engine.state = 'failed';
-          engine.error = error.message;
+          // Cancelled by the listener (cancel(), below): not a failure, just not loaded.
+          engine.state = engine.cancelling ? 'idle' : 'failed';
+          engine.error = engine.cancelling ? null : error.message;
+          engine.cancelling = false;
           // A worker that failed to load is let go, so choosing the engine again starts afresh.
           worker?.terminate();
           worker = null;
@@ -1197,6 +1409,19 @@ function workerEngine(name) {
         }
       })();
       return engine.loading;
+    },
+    // Stops a download the listener no longer wants: the worker is let go at once, so the network
+    // and the CPU are freed, and every request waiting on it is told so. The engine is idle again,
+    // to be chosen afresh.
+    cancel() {
+      engine.cancelling = engine.state === 'loading';
+      const error = new Error('cancelled');
+      error.cancelled = true;
+      for (const pending of waiting.values()) pending.reject(error);
+      waiting.clear();
+      worker?.terminate();
+      worker = null;
+      if (!engine.cancelling) { engine.state = 'idle'; engine.listed = null; }
     },
     voices(lang) {
       const listed = engine.listed || Object.entries(ENGINE_INFO[name].defaults)
@@ -1418,14 +1643,18 @@ function ensureEngine(retry = false) {
     // Said in the status bar as it moves, a whole percent at a time; logged only when it is done.
     const said = `${name}: ${progress.text}${progress.fraction != null ? ' (' + Math.round(progress.fraction * 100) + '%)' : ''}`;
     if (said !== shown) { noteReading(shown = said, false, true); progressShown = true; }
+    loaderProgress(engine.name, progress);
   }).then(() => {
     console.log(`[reading] ${engine.name} loaded on ${engine.device}`);
+    try { localStorage.setItem('prosody.fetched.' + engine.name, '1'); } catch (e) {}
     showVoices();
     if (!chosenEngine(engine)) return;
     noteReading(`${name} ready (${engine.device === 'files' ? 'from files' : engine.device === 'webgpu' ? 'WebGPU' : 'WebAssembly'})`);
     prerender();
   }, (error) => {
+    if (error.cancelled) { showVoices(); return; }
     console.warn(`[reading] ${engine.name} failed to load:`, error);
+    loaderFailed(engine.name, error);
     showVoices();
     if (!chosenEngine(engine)) return;
     noteReading(`${name} could not load: ${error.message} — reading with the browser voice`, true);
@@ -2049,7 +2278,7 @@ function readingChanged(retry = false) {
   }
   noteReading(speaker().why, speaker().bad);
 }
-$('engine').addEventListener('change', () => { readingSettings.engine = $('engine').value; readingChanged(true); });
+$('engine').addEventListener('change', () => chooseEngine($('engine').value));
 $('pace').addEventListener('change', () => { readingSettings.pace = $('pace').value; readingChanged(); });
 $('language').addEventListener('change', () => { language = $('language').value; readingChanged(); });
 $('voice').addEventListener('change', () => {
@@ -2123,12 +2352,19 @@ async function play() {
   if (!latestPattern) return;
   if (!strudelReady) {
     status('loading Strudel, drum machines and soundfonts…');
+    openLoader({
+      title: 'Getting the instruments ready',
+      text: 'Strudel, the drum machines and the soundfonts: a few MB, once. Then it plays.',
+    });
     try {
       await startStrudel();
       strudelReady = true;
     } catch (error) {
       status('could not start Strudel: ' + error.message, true);
+      closeLoader();
       return;
+    } finally {
+      if (loading?.engine === null) closeLoader();
     }
   }
   try {
@@ -2188,6 +2424,7 @@ async function play() {
     $('editor').classList.add('playing');
     fitRoll();
     playing = true;
+    showBeat();
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
     // A line the reading leaves out is said, not left for the listener to miss (SPEC.md §4.7).
@@ -2220,6 +2457,7 @@ function stop() {
   clearRoll();
   $('editor').classList.remove('playing');
   playing = false;
+  showBeat();
   $('stop').disabled = true;
   $('play').textContent = '▶ Play';
   status('stopped');
@@ -2323,7 +2561,7 @@ function rollContext() {
 }
 
 function paintRoll(haps, time) {
-  if (!drawRoll || !$('panelRoll').open) return;
+  if (!drawRoll || $('folderRoll').hidden) return;
   const span = rollWindow();
   const ctx = rollContext();
   // Only the music: every layer of it carries a colour, and the reading's cues carry none.
@@ -2500,15 +2738,203 @@ try {
   if (bars && [...$('rollBars').options].some((o) => o.value === bars)) $('rollBars').value = bars;
 } catch (e) {}
 
-// Which panels are folded away, remembered per browser.
-for (const panel of document.querySelectorAll('details.panel')) {
-  try {
-    const saved = localStorage.getItem('prosody.panel.' + panel.id);
-    if (saved !== null) panel.open = saved === 'open';
-  } catch (e) {}
-  panel.addEventListener('toggle', () => {
-    try { localStorage.setItem('prosody.panel.' + panel.id, panel.open ? 'open' : 'closed'); } catch (e) {}
+// ---- Light and dark ----
+// As the system says (auto), or always light, or always dark: the reader's choice, remembered.
+const THEMES = ['auto', 'light', 'dark'];
+function setTheme(theme) {
+  if (theme === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  $('theme').textContent = { auto: '◐ auto', light: '☀ light', dark: '☾ dark' }[theme];
+  $('theme').setAttribute('aria-label', `Theme: ${theme}. Change it`);
+  try { localStorage.setItem('prosody.theme', theme); } catch (e) {}
+}
+$('theme').addEventListener('click', () => {
+  const now = document.documentElement.dataset.theme || 'auto';
+  setTheme(THEMES[(THEMES.indexOf(now) + 1) % THEMES.length]);
+});
+try { const saved = localStorage.getItem('prosody.theme'); setTheme(THEMES.includes(saved) ? saved : 'auto'); } catch (e) { setTheme('auto'); }
+
+// ---- Folders ----
+//
+// One open at a time, or none: a tab opens its folder, another tab swaps it, the open one's tab
+// closes it. Which is open is remembered per browser.
+const TABS = [...document.querySelectorAll('.tabs [role=tab]')];
+function openFolder(id) {
+  for (const tab of TABS) {
+    const mine = tab.dataset.folder === id;
+    tab.setAttribute('aria-selected', mine);
+    $(tab.dataset.folder).hidden = !mine;
+  }
+  $('sheet').hidden = !id;
+  try { localStorage.setItem('prosody.folder', id || ''); } catch (e) {}
+}
+for (const tab of TABS) {
+  tab.addEventListener('click', () => openFolder(tab.getAttribute('aria-selected') === 'true' ? null : tab.dataset.folder));
+}
+try {
+  const saved = localStorage.getItem('prosody.folder');
+  if (saved && $(saved)?.classList.contains('folder')) openFolder(saved);
+} catch (e) {}
+
+// ---- Dialogs ----
+
+// A dialog's ✕ and its other closing buttons; a click on the dimmed page around it closes it too.
+for (const dialog of document.querySelectorAll('dialog')) {
+  for (const button of dialog.querySelectorAll('[data-close]')) button.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (event) => { if (event.target === dialog && dialog.id !== 'loader') dialog.close(); });
+}
+
+// The welcome: open on a first visit; once closed it stays closed, and "about" opens it again.
+$('about').addEventListener('click', () => $('welcome').showModal());
+$('welcome').addEventListener('close', () => {
+  try { localStorage.setItem('prosody.welcomed', '1'); } catch (e) {}
+  $('poem').focus({ preventScroll: true });
+});
+// The line under the bar saying what this is, until dismissed.
+$('noticeClose').addEventListener('click', () => {
+  $('notice').hidden = true;
+  try { localStorage.setItem('prosody.notice', 'dismissed'); } catch (e) {}
+});
+try {
+  if (localStorage.getItem('prosody.notice') !== 'dismissed') $('notice').hidden = false;
+  if (!localStorage.getItem('prosody.welcomed')) $('welcome').showModal();
+} catch (e) { $('notice').hidden = false; $('welcome').showModal(); }
+
+// ---- Choosing a voice that has to be downloaded ----
+//
+// A neural voice is a download of tens or hundreds of MB, so the first time one is chosen the page
+// says what it costs and asks; until it is ready the browser's own voice reads, and the music never
+// waits. The sizes are what each engine fetched when measured here, rounded and said as "about".
+const DOWNLOADS = {
+  // Kokoro fetches its full model where it runs on WebGPU, its compact one on WebAssembly — which
+  // `?device=wasm` forces, as the worker does (speech-worker.mjs).
+  kokoro: () => navigator.gpu && new URLSearchParams(location.search).get('device') !== 'wasm'
+    ? 'about 330 MB (the full model, since this browser has WebGPU)'
+    : 'about 90 MB (the compact model)',
+  piper: () => 'about 60 MB for each voice, fetched when the voice first reads',
+  kitten: () => 'about 25 MB',
+};
+let previousEngine = readingSettings.engine;
+function chooseEngine(name) {
+  const engine = engines[name];
+  let asked = false;
+  try { asked = !!localStorage.getItem('prosody.fetched.' + name); } catch (e) {}
+  if (DOWNLOADS[name] && engine.state !== 'ready' && engine.state !== 'loading' && !asked) {
+    const label = ENGINE_INFO[name].label;
+    $('downloadTitle').textContent = `${label} needs a one-time download of ${DOWNLOADS[name]()}.`;
+    $('downloadText').textContent = `It runs entirely in your browser and is kept after this, so it won't download again. `
+      + `Until it's ready, the poem is read by your browser's own voice, and the music plays on.`;
+    $('downloadYes').textContent = `Download ${label}`;
+    const dialog = $('download');
+    const answer = (yes) => () => {
+      $('downloadYes').onclick = $('downloadNo').onclick = null;
+      dialog.onclose = null;
+      dialog.close();
+      if (yes) useEngine(name, true);
+      else $('engine').value = previousEngine;
+    };
+    $('downloadYes').onclick = answer(true);
+    $('downloadNo').onclick = answer(false);
+    dialog.onclose = () => { dialog.onclose = null; $('engine').value = previousEngine; };
+    dialog.showModal();
+    return;
+  }
+  useEngine(name, false);
+}
+function useEngine(name, show) {
+  const before = previousEngine;   // what Cancel goes back to
+  previousEngine = name;
+  $('engine').value = name;
+  readingSettings.engine = name;
+  readingChanged(true);   // starts the download (ensureEngine)
+  const engine = engines[name];
+  if (!show || !engine.render) return;
+  openLoader({
+    engine: name,
+    back: before === name ? 'recorded' : before,
+    title: `Downloading ${ENGINE_INFO[name].label}`,
+    text: `${DOWNLOADS[name]?.() ?? 'A download'}, once. Your browser's voice reads meanwhile; Hide lets it carry on in the background.`,
   });
+  warmVoice(name);
+}
+
+// ---- The loader ----
+//
+// For the instruments on the first Play, and for a voice once chosen: what is loading, how far it
+// has got (a bar when the size is known, a sweep when not), Hide to let it carry on behind the
+// page, and — for a voice — Cancel, which stops the download and keeps the voice there was.
+let loading = null;   // { engine } while the loader is open; engine null for the instruments
+function openLoader({ title, text, engine = null, back = null }) {
+  loading = { engine, back };
+  $('loaderTitle').textContent = title;
+  $('loaderText').textContent = text;
+  $('loaderProgress').textContent = '';
+  $('loaderBar').classList.add('unknown');
+  $('loaderBar').style.width = '';
+  $('loaderCancel').hidden = engine === null;
+  if (!$('loader').open) $('loader').showModal();
+}
+function closeLoader() {
+  loading = null;
+  if ($('loader').open) $('loader').close();
+}
+function loaderProgress(name, progress) {
+  if (loading?.engine !== name) return;
+  $('loaderProgress').textContent = progress.text;
+  const bar = $('loaderBar');
+  if (progress.fraction != null) { bar.classList.remove('unknown'); bar.style.width = Math.round(progress.fraction * 100) + '%'; }
+  else { bar.classList.add('unknown'); bar.style.width = ''; }
+}
+function loaderFailed(name, error) {
+  if (loading?.engine !== name) return;
+  $('loaderTitle').textContent = `${ENGINE_INFO[name].label} could not load`;
+  $('loaderProgress').textContent = `${error.message}. The browser's voice reads instead; choose it again to try again.`;
+  $('loaderBar').classList.remove('unknown');
+  $('loaderBar').style.width = '0';
+  $('loaderCancel').hidden = true;
+  $('loaderHide').textContent = 'Close';
+}
+// A voice's model may come with its first line (Piper fetches each voice then), so the loader
+// stays until the voice has read something: the first line of the poem in front of the reader,
+// rendered now — which also means that line is ready before Play.
+async function warmVoice(name) {
+  const engine = engines[name];
+  try {
+    if (engine.loading) await engine.loading;
+    if (engine.state !== 'ready') return;
+    const line = (readings[hearing]?.lines || []).find((l) => l.text.trim());
+    if (line && engine.render) {
+      $('loaderProgress').textContent = 'preparing the voice…';
+      await whenRendered(name, voiceOf(name), line.pace, line.text, true);
+    }
+    if (loading?.engine === name) closeLoader();
+  } catch (error) {
+    if (!error.cancelled && !error.dropped) loaderFailed(name, error);
+  }
+}
+$('loaderHide').addEventListener('click', () => {
+  closeLoader();
+  $('loaderHide').textContent = 'Hide — keep loading';
+});
+$('loaderCancel').addEventListener('click', () => {
+  const name = loading?.engine;
+  const back = loading?.back || 'recorded';
+  closeLoader();
+  if (!name) return;
+  engines[name].cancel?.();
+  useEngine(back, false);
+  noteReading(`${ENGINE_INFO[name].label} download cancelled; reading with ${ENGINE_INFO[back].label}`);
+});
+
+// ---- The beat on the Play button ----
+// Under the steady pulse a cycle is a beat, so the trace's cycles a minute are the tempo; under
+// the elastic one there is no single beat to show, and the button stays still.
+function showBeat() {
+  const trace = traces[hearing];
+  const steady = (settings?.[hearing]?.pulse ?? 'steady') !== 'elastic';
+  const beat = playing && steady && trace?.cpm > 0 ? 60 / trace.cpm : null;
+  $('play').classList.toggle('beating', !!beat);
+  if (beat) $('play').style.setProperty('--beat', beat.toFixed(3) + 's');
 }
 
 compile();

@@ -80,10 +80,17 @@ the browser's voice reports its words), so the voice and the music stay legible 
 the music colours the letters, the voice lights what lies behind them. Keep typing while it plays:
 the verse goes plain for the moment it takes to recompile, then lights again.
 
-Beside it, every panel folds away and the page remembers which: the **roll** (Strudel's own piano
-roll, `@strudel/draw`, showing a set number of bars — poem lines — with faint lines where one bar
-hands over to the next), the **palette**, the **mappings** A and B, the **reading**, and the
-pattern, annotation and score views.
+Everything you set lives in **folders along the bottom edge**, the same on a phone and on a desk:
+the **Roll** (Strudel's own piano roll, `@strudel/draw`, showing a set number of bars — poem lines —
+with faint lines where one bar hands over to the next), **Sound** (the palette), **Mappings** (A and
+B), **Reading** and **Under the hood** (the pattern, what each word became, and the score). A tab
+opens its folder over the lower part of the page, another tab swaps it, the open one's tab closes
+it; the page remembers which was open. The page opens with a welcome — what *prosody* means and what
+this experiment does — which stays closed once closed (**about** reopens it); it follows the
+system's light or dark setting, or the reader's choice (the ◐ button). A neural voice is never
+downloaded unasked: the first time one is chosen the page says how big it is and asks, then shows
+its download with a progress bar, Hide and Cancel. Until then, and by default, the recorded
+readings read.
 
 The lighting is `SPEC.md` §8's traceability made visible: every lit syllable is the span the sound
 came from. The page gets it from `/trace` (`prosody_emit::trace`), a silent pattern of syllable ids

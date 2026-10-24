@@ -984,8 +984,9 @@ mod tests {
                 "{engine}"
             );
         }
+        // The recorded readings by default: a first visit downloads no model it was not asked about.
         assert!(html.contains(
-            "const READING_DEFAULTS = { engine: 'kokoro', pace: 'natural', level: 1, voices: {} };"
+            "const READING_DEFAULTS = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };"
         ));
         assert!(
             html.contains(
@@ -1014,7 +1015,7 @@ mod tests {
         // A failed engine is retried only when it is chosen again, and only the chosen engine
         // speaks in the status bar.
         assert!(html.contains("if (engine.state === 'failed' && !retry) return;"));
-        assert!(html.contains("readingChanged(true); });"));
+        assert!(html.contains("readingChanged(true);   // starts the download (ensureEngine)"));
         // At the fitted pace a rendered line that overruns its bar is rendered again to fit.
         assert!(html.contains("room: slotLength(reading, cue.slot) * reading.fill"));
         // The queue holds only lines still to be read — of the poems loaded, at this pace, in this
@@ -1128,6 +1129,45 @@ mod tests {
                 .body
                 .starts_with("// compiled from a poem by prosody\n")
         );
+    }
+
+    #[test]
+    fn the_page_says_what_it_is_and_keeps_its_settings_in_folders() {
+        let html = page(super::Transport::Wasm).unwrap();
+        // An experiment, said at the top, defined in the welcome, with the source and a contact.
+        assert!(html.contains("<span class=\"tag\">an experiment</span>"));
+        assert!(html.contains("<dialog id=\"welcome\""));
+        assert!(html.contains("the patterns of rhythm and sound in poetry"));
+        assert!(html.contains("href=\"https://github.com/mpecan/prosody-experiment\""));
+        assert!(html.contains("href=\"mailto:me@prosody.rocks\""));
+        // Five folders, each a tab controlling its panel, and no panel outside them.
+        for folder in [
+            "folderRoll",
+            "folderSound",
+            "folderMappings",
+            "folderReading",
+            "folderViews",
+        ] {
+            assert!(
+                html.contains(&format!(
+                    "data-folder=\"{folder}\" aria-controls=\"{folder}\""
+                )),
+                "{folder}"
+            );
+            assert!(
+                html.contains(&format!("id=\"{folder}\" role=\"tabpanel\"")),
+                "{folder}"
+            );
+        }
+        assert!(
+            !html.contains("<details"),
+            "the old folding panels are gone"
+        );
+        // A neural voice is asked about before it downloads, and its download can be cancelled.
+        assert!(html.contains("<dialog id=\"download\""));
+        assert!(html.contains("needs a one-time download of"));
+        assert!(html.contains("<dialog id=\"loader\""));
+        assert!(html.contains("engines[name].cancel?.();"));
     }
 
     #[test]

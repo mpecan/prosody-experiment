@@ -406,6 +406,40 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The page for everyone: folders, a welcome, light and dark, downloads asked about
+
+Before publishing at prosody.rocks, the page was reworked to work on a phone as on a desk, to say
+plainly that it is an experiment, and to be more playful. Nothing the compiler does changed.
+
+- **Folders along the bottom edge** replace the right-hand column of panels: Roll, Sound, Mappings,
+  Reading, Under the hood, each a paper folder whose tab sticks up in one of the five layer colours.
+  One open at a time; it slides up over the lower part of the page; remembered. The poem has the
+  page. Checked at 1280–1440 and 390 px: no sideways scroll (the page grid's column is pinned to
+  the viewport — it had sized itself to the row of tabs), the poem keeps ~180 px with a folder open
+  on a phone.
+- **What it is:** "prosody" set in the lit poem's colours, syllable by syllable, with an "an
+  experiment" tag; a dismissible line under the bar; and a **welcome** dialog on a first visit — the
+  dictionary entry for *prosody*, what the experiment does, the source on GitHub and
+  me@prosody.rocks — reopened by "about".
+- **Light and dark**: the system's choice by default, or the reader's (◐ cycles auto, light, dark),
+  applied in the head so it never flashes. Every colour is a token; in light mode the lit syllables
+  are the layer colours mixed toward black (`--lit-strength`), since the tints are made for a dark
+  ground; the roll stays a dark screen in both.
+- **No download unasked:** the default reading engine is now the recorded readings (no model). The
+  first time Kokoro, Piper or Kitten is chosen, a dialog says the size (Kokoro's by the device it
+  will use: about 90 MB compact, 330 MB on WebGPU) and asks; accepting opens a loader with the
+  engine's own progress, Hide and Cancel — Cancel terminates the worker (a new `cancel()` on the
+  worker engines), keeps the voice there was, and says so. The loader stays until the voice has
+  rendered the poem's first line, so that line is ready before Play (Piper fetches each voice with
+  its first line). The instruments get the same loader on the first Play.
+- **The Play button beats** with the piece under the steady pulse (the trace's cycles a minute are
+  its beats a minute); still under elastic and with reduced motion.
+- The "stanza 1 never read" seen on the deploy branch's engines commit does not reproduce on this
+  branch (the render queue was reworked by the recordings step): on Naidu with Piper cold, line 1
+  read 7 s late (its voice's download), the rest in time.
+- Zdravljica's recordings re-rendered for the full poem (52 lines, Piper Slovenian); 1,025
+  recordings, 9.3 MB.
+
 ### Recorded readings — review: a recording fetched at the natural pace is fitted at the fitted pace
 
 A second review of the uncommitted recordings. `SPEC.md` §4.7 ("Engines", `recorded`; the fitted
