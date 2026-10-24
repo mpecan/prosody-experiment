@@ -1,4 +1,6 @@
 /target
+# Wrangler's local state (`wrangler dev`).
+/.wrangler
 
 # Editor and OS cruft
 .DS_Store
