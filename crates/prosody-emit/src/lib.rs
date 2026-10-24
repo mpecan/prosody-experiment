@@ -42,8 +42,8 @@ pub mod trace;
 use prosody_core::voice::Score;
 
 pub use osc::Osc;
-pub use reading::{Cue, Reading, ReadingError};
-pub use strudel::{Strudel, StrudelError};
+pub use reading::{Cue, Reading, ReadingError, Unread};
+pub use strudel::{Strudel, StrudelError, melody_over_harmony, melody_voicing};
 pub use style::{
     Bpm, Kit, Note, Octave, RideFallback, Scale, Style, StyleError, Swing, TempoRange, Voicing,
 };

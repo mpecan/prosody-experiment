@@ -72,6 +72,22 @@ impl Rarity {
 pub trait Lexicon {
     /// How uncommon `word` is. Unknown words are [`Rarity::RAREST`].
     fn rarity(&self, word: &str) -> Rarity;
+
+    /// Whether `word` is a *function word* of the language — one of the closed class of articles,
+    /// pronouns, possessives, conjunctions, short prepositions and auxiliaries that carry grammar
+    /// rather than content.
+    ///
+    /// Read by the light variant of
+    /// [`Mapping::Function`](crate::mapping::Mapping::Function) (`SPEC.md` §4.2), which strikes
+    /// a one-syllable function word lightly where the metre does not need its stress — a
+    /// pronunciation dictionary gives "or" and "thy" the same primary stress as "hand".
+    ///
+    /// On the lexicon, not on the phonemiser or in the core, because which words are closed-class
+    /// is a fact about one language's grammar, exactly as a frequency table is (`SPEC.md` §9): a
+    /// Slovenian lexicon answers it for Slovenian. Required rather than defaulted, so a second
+    /// language cannot inherit "no function words" without saying so. Unknown words are not
+    /// function words — the class is closed, so anything a list does not name is open-class.
+    fn is_function_word(&self, word: &str) -> bool;
 }
 
 /// How much a word stands out, as an exact rational in `0..=1`.
@@ -162,6 +178,7 @@ pub struct WordSurprisal {
     novelty: Surprisal,
     surprisal: Surprisal,
     provenance: Provenance,
+    function: bool,
 }
 
 impl WordSurprisal {
@@ -196,6 +213,16 @@ impl WordSurprisal {
     #[must_use]
     pub fn rests_on_a_guess(&self) -> bool {
         self.provenance.is_guess()
+    }
+
+    /// Whether the lexicon calls the word a function word ([`Lexicon::is_function_word`]).
+    ///
+    /// Carried here because this is the pass that asks the lexicon about each word; it plays no
+    /// part in the word's surprisal. The lowering reads it for `SPEC.md` §4.2's light function
+    /// words (`crate::accent`).
+    #[must_use]
+    pub const fn is_function_word(&self) -> bool {
+        self.function
     }
 }
 
@@ -294,6 +321,7 @@ fn scan_line(
                 novelty,
                 surprisal: combine(rarity, novelty),
                 provenance: *provenance,
+                function: lexicon.is_function_word(text),
             }
         })
         .collect()
@@ -375,6 +403,11 @@ mod tests {
     struct Bands;
 
     impl Lexicon for Bands {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, word: &str) -> Rarity {
             match word {
                 "the" | "and" => Rarity::COMMONEST,

@@ -63,6 +63,11 @@ impl Phonemiser for Spelled {
 struct Flat;
 
 impl Lexicon for Flat {
+    // No closed class: every word keeps its dictionary stress under either variant.
+    fn is_function_word(&self, _: &str) -> bool {
+        false
+    }
+
     fn rarity(&self, _: &str) -> Rarity {
         Rarity::band(3)
     }
@@ -372,6 +377,9 @@ fn i3_the_notes_move_but_the_degrees_do_not() {
             .unwrap_or_default()
             .replace(['<', '>', '[', ']'], " ")
             .split_whitespace()
+            // A bar's `@` weight is how long it lasts, not a value.
+            .map(|t| t.split('@').next().unwrap_or(t))
+            .filter(|t| !t.is_empty())
             .find(|token| *token != "~")
             .unwrap_or_default()
             .to_owned()
@@ -556,6 +564,74 @@ proptest::proptest! {
         }
     }
 
+    /// The voicing under the harmony layer (`SPEC.md` §4.6, the melody over the chords): with any
+    /// harmony variant on, the rhyme melody is single notes whatever `voicing` says, and the
+    /// voicing shapes only the chord lane. So between `note` and `seventh` under the harmony:
+    ///
+    /// - the arrangement is the same (I3: no event moves);
+    /// - every line but the chord lane's is byte for byte the same, the melody's included — its
+    ///   level too, since a single note takes the single note's level under either voicing;
+    /// - no step of the melody is a stack (`,` never appears in its note pattern);
+    /// - and the chord lane, where there is one, has the same steps with three tones a chord under
+    ///   `note` and four under `seventh`.
+    #[test]
+    fn i3_under_the_harmony_the_voicing_shapes_only_the_chord_lane(
+        body in poem(),
+        one in palette(),
+        harmony in proptest::sample::select(vec![
+            prosody_core::Variant::Rhyme,
+            prosody_core::Variant::Cadence,
+            prosody_core::Variant::Both,
+        ]),
+    ) {
+        let single = one.replace("voicing = \"seventh\"", "voicing = \"note\"");
+        let seventh = one.replace("voicing = \"note\"", "voicing = \"seventh\"");
+        let mappings = prosody_core::Mappings::all()
+            .with(prosody_core::Mapping::Harmony.choose(harmony).unwrap());
+        let (score, style_single) = score_with(&format!("{single}{body}"), &mappings);
+        let (_, style_seventh) = score_with(&format!("{seventh}{body}"), &mappings);
+        let backend = Strudel::new();
+        let (Ok(a), Ok(b)) = (
+            backend.render(&score, &style_single),
+            backend.render(&score, &style_seventh),
+        ) else {
+            return Ok(());
+        };
+        proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+        let music = |text: &str| -> Vec<String> {
+            text.lines().filter(|l| !l.starts_with("//")).map(str::to_owned).collect()
+        };
+        let (a_lines, b_lines) = (music(&a), music(&b));
+        proptest::prop_assert_eq!(a_lines.len(), b_lines.len());
+        let tones = |line: &str| -> Vec<usize> {
+            let pattern = line.split('"').nth(1).unwrap_or_default();
+            pattern
+                .split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+                .map(|t| t.split('@').next().unwrap_or(t))
+                .map(|t| t.trim_start_matches('[').trim_end_matches(']'))
+                .filter(|t| !t.is_empty() && *t != "~")
+                .map(|t| t.split(',').count())
+                .collect()
+        };
+        for (x, y) in a_lines.iter().zip(&b_lines) {
+            if x.contains("// the chords") {
+                let (three, four) = (tones(x), tones(y));
+                proptest::prop_assert_eq!(three.len(), four.len());
+                proptest::prop_assert!(three.iter().all(|n| *n == 3), "{}", x);
+                proptest::prop_assert!(four.iter().all(|n| *n == 4), "{}", y);
+                continue;
+            }
+            proptest::prop_assert_eq!(x, y);
+            if x.contains("// the melody") {
+                proptest::prop_assert!(tones(x).iter().all(|n| *n == 1), "{}", x);
+            }
+        }
+        // The header says so under either voicing, wherever there is a chord to be over.
+        let header = "as single notes over the chords";
+        proptest::prop_assert_eq!(a.contains(header), score.chords().next().is_some());
+        proptest::prop_assert_eq!(b.contains(header), score.chords().next().is_some());
+    }
+
     /// Levels that follow density, isolated. `density_level` is the one palette value that reads
     /// the score's structure — how many lines each bar sounds — so the claim it makes against I3 is
     /// checked directly: between `0` and any other amount, every line of the output is byte for
@@ -596,6 +672,9 @@ proptest::proptest! {
                             after[..end]
                                 .replace(['<', '>', '[', ']'], " ")
                                 .split_whitespace()
+                // A bar's `@` weight is how long it lasts, not a value.
+                .map(|t| t.split('@').next().unwrap_or(t))
+                .filter(|t| !t.is_empty())
                                 .filter(|t| *t != "~")
                                 .map(|t| t.parse::<f64>().unwrap()),
                         );
@@ -662,6 +741,8 @@ fn chords_are_one_event(
     // Steps, in order: rests and notes, brackets and alternation stripped.
     let steps = |text: &str| -> Vec<String> {
         text.split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+            // A bar's `@` weight is how long it lasts, the same under either voicing: not a step.
+            .map(|t| t.split('@').next().unwrap_or(t))
             .map(|t| t.trim_start_matches('[').trim_end_matches(']').to_owned())
             .filter(|t| !t.is_empty())
             .collect()

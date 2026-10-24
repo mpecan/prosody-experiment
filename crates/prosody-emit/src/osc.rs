@@ -27,6 +27,12 @@
 //! a palette value ([`Style::tempo_range`](crate::Style::tempo_range)), so turning beats into
 //! seconds is the last thing that happens and it happens in one place — which also keeps
 //! invariant I3 true here: change the tempo and every onset in beats is identical.
+//!
+//! So every bar lasts its beats and every beat the same time: the **steady** pulse, always
+//! (`SPEC.md` §4.2, `Mapping::Pulse`). The Strudel backend's **elastic** variant, where every bar
+//! lasts one cycle and a longer bar hurries its beats, is not applied here — a schedule in beats
+//! has no bar to stretch — and a schedule of a score chosen elastic says so
+//! ([`Schedule::elastic_unapplied`]) rather than playing something its Strudel text does not.
 
 use std::fmt::Write as _;
 
@@ -219,7 +225,11 @@ pub struct Schedule {
     beats_per_minute: u16,
     unapplied: Vec<(&'static str, String)>,
     unsent_chords: usize,
+    unsent_turnarounds: usize,
     unsent_bass: usize,
+    elastic_unapplied: bool,
+    straightened: Option<usize>,
+    lightened: Option<usize>,
 }
 
 /// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
@@ -271,6 +281,14 @@ impl Schedule {
         self.unsent_chords
     }
 
+    /// How many of [`Schedule::unsent_chords`] are turnarounds: the second chord of a stanza's
+    /// last bar under `cadence` or `both`, from the bar's half (`SPEC.md` §4.6). Each split bar
+    /// counts two chords, its own and this one.
+    #[must_use]
+    pub const fn unsent_turnarounds(&self) -> usize {
+        self.unsent_turnarounds
+    }
+
     /// How many bass notes the arrangement plays that this schedule does not send: a message has
     /// one pitch, and where a walking bass (`SPEC.md` §4.6, `bass = syllables` or `feet`) puts a
     /// bass note under a rhyme word, the message carries the melody's. Zero under the height bass,
@@ -278,6 +296,29 @@ impl Schedule {
     #[must_use]
     pub const fn unsent_bass(&self) -> usize {
         self.unsent_bass
+    }
+
+    /// Whether the score was chosen the elastic pulse (`Mapping::Pulse`), which this schedule
+    /// does not apply: its onsets are in beats, and every bar lasts its beats — the steady pulse.
+    /// Said in [`Schedule::to_text`] and on `--send` (`CLAUDE.md` §6: a fallback must be visible).
+    #[must_use]
+    pub const fn elastic_unapplied(&self) -> bool {
+        self.elastic_unapplied
+    }
+
+    /// Under the straight stack (`Mapping::Stack`), how many beats it fitted a stacked line to its
+    /// host in — applied here as in the Strudel pattern; `None` under crossing, the default.
+    #[must_use]
+    pub const fn straightened(&self) -> Option<usize> {
+        self.straightened
+    }
+
+    /// Under the light function words (`Mapping::Function`), how many syllables were struck
+    /// lightly — their velocity is the score's, applied here as in the Strudel pattern; `None`
+    /// under full, the default.
+    #[must_use]
+    pub const fn lightened(&self) -> Option<usize> {
+        self.lightened
     }
 
     /// How long the piece lasts, in beats.
@@ -326,10 +367,40 @@ impl Schedule {
                 keys.join(", ")
             );
         }
-        if self.unsent_chords > 0 {
+        if self.elastic_unapplied {
             let _ = writeln!(
                 out,
-                "# not scheduled here: {} chords of the harmony layer (there is no chord message)",
+                "# not applied here: pulse = elastic (onsets are in beats, so every bar lasts \
+                 its beats: the pulse is steady)"
+            );
+        }
+        if let Some(beats) = self.straightened {
+            let _ = writeln!(
+                out,
+                "# stack = straight: a stacked line fitted to its bar's line's subdivision in \
+                 {beats} beat(s)"
+            );
+        }
+        if let Some(syllables) = self.lightened {
+            let _ = writeln!(
+                out,
+                "# function-words = light: a one-syllable function word off the metre's strong \
+                 positions sent at 2/3 velocity, in {syllables} syllable(s)"
+            );
+        }
+        if self.unsent_chords > 0 {
+            let turnarounds = if self.unsent_turnarounds > 0 {
+                format!(
+                    ", {} of them turnarounds from a bar's half",
+                    self.unsent_turnarounds
+                )
+            } else {
+                String::new()
+            };
+            let _ = writeln!(
+                out,
+                "# not scheduled here: {} chords of the harmony layer{turnarounds} (there is no \
+                 chord message)",
                 self.unsent_chords
             );
         }
@@ -378,9 +449,9 @@ impl Backend for Osc {
 
         // Walk the arrangement, not the bars: a stanza may sound many times, looping under others
         // or transforming into a rival (`prosody_core::arrange`). Slots differ in length —
-        // `SPEC.md` §4.2 insists on it — so their starts are accumulated rather than multiplied,
-        // which is the whole reason this backend can honour an odd metre where a fixed-length
-        // cycle cannot.
+        // `SPEC.md` §4.2 insists on it — so their starts are accumulated rather than multiplied:
+        // the steady pulse, which the Strudel backend now plays too (`strudel::weights` counts
+        // the same beats).
         let mut messages: Vec<Message> = Vec::new();
         let mut unsent_bass = 0;
         let mut slot_start = 0_u64;
@@ -388,7 +459,10 @@ impl Backend for Osc {
             let slot_beats = u64::try_from(slot.beats()).unwrap_or(1).max(1);
             for placement in slot.placements() {
                 // A whole line, or a call lifted out of one: either way, its own beats.
-                let placed = score.placed(*placement);
+                // Each event where it sounds in this slot: under the straight stack, a stacked
+                // line fitted to its host where they would cross (`Score::placed_in`), as the
+                // Strudel pattern and the scorer place it.
+                let placed = score.placed_in(slot, *placement);
                 let extent = Extent {
                     first: u64::try_from(placed.first_beat()).unwrap_or(0),
                     beats: u64::try_from(placed.beats()).unwrap_or(1).max(1),
@@ -397,8 +471,8 @@ impl Backend for Osc {
                 // Under a walking bass, one walk a bar: the bar's foundation line's
                 // (`Score::sounds_bass`), as the Strudel backend plays it.
                 let bass_sounds = score.sounds_bass(slot, placement);
-                for event in placed.events() {
-                    let at = fitted(event, slot_start, room, extent);
+                for (event, subdivision) in placed.onsets() {
+                    let at = fitted(event, subdivision, slot_start, room, extent);
                     let bass = event.bass().filter(|_| bass_sounds);
                     if event.pitch().is_some() && bass.is_some() {
                         unsent_bass += 1;
@@ -410,6 +484,12 @@ impl Backend for Osc {
         }
         // One total order before anything is sent (`CLAUDE.md` §4). Ties break by span, so two
         // events at the same instant always leave in the same order.
+        let played: Vec<prosody_core::Harmony> = score
+            .arrangement()
+            .slots()
+            .iter()
+            .filter_map(|slot| score.harmony_in(slot))
+            .collect();
         messages.sort_by(|a, b| a.at.cmp(&b.at).then(a.span.start().cmp(&b.span.start())));
 
         Ok(Schedule {
@@ -419,13 +499,17 @@ impl Backend for Osc {
                 .at_density(score.events().len(), score.bars())
                 .get(),
             unapplied: unapplied(style),
-            unsent_chords: score
-                .arrangement()
-                .slots()
+            unsent_chords: played.iter().map(|harmony| harmony.chords().count()).sum(),
+            unsent_turnarounds: played
                 .iter()
-                .filter(|slot| score.chord_in(slot).is_some())
+                .filter(|harmony| harmony.turnaround().is_some())
                 .count(),
             unsent_bass,
+            elastic_unapplied: score.pulse() == prosody_core::Variant::Elastic,
+            straightened: (score.stack() == prosody_core::Variant::Straight)
+                .then(|| crate::strudel::straightened(score)),
+            lightened: (score.function() == prosody_core::Variant::Light)
+                .then(|| score.lightened()),
         })
     }
 }
@@ -443,9 +527,18 @@ struct Extent {
 /// Bar-locked (`prosody_core::arrange`): a line is fitted into its `room` in the slot
 /// ([`Slot::room_for`](prosody_core::Slot::room_for)) — its own beats when it fits, so it keeps
 /// one beat per foot and rests for the rest of the bar, and the whole bar when it is longer.
-fn fitted(event: &Event, slot_start: u64, room: u64, extent: Extent) -> Onset {
-    let of = u64::try_from(event.subdivision().of()).unwrap_or(1).max(1);
-    let within = u64::try_from(event.subdivision().index()).unwrap_or(0);
+///
+/// `subdivision` is the event's place in its beat in this slot ([`Score::placed_in`]), which the
+/// straight stack may have fitted to the host.
+fn fitted(
+    event: &Event,
+    subdivision: prosody_core::Subdivision,
+    slot_start: u64,
+    room: u64,
+    extent: Extent,
+) -> Onset {
+    let of = u64::try_from(subdivision.of()).unwrap_or(1).max(1);
+    let within = u64::try_from(subdivision.index()).unwrap_or(0);
     let beat = u64::try_from(event.beat().get())
         .unwrap_or(0)
         .saturating_sub(extent.first);
@@ -623,6 +716,11 @@ mod tests {
     struct Flat;
 
     impl Lexicon for Flat {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, _: &str) -> Rarity {
             Rarity::band(3)
         }
@@ -777,6 +875,38 @@ mod tests {
                 .contains("# not scheduled here: 8 chords of the harmony layer"),
             "{}",
             with.to_text()
+        );
+        assert_eq!(with.unsent_turnarounds(), 0);
+        // Under cadence the stanza's last bar is split (`SPEC.md` §4.6): its own chord, then the
+        // turnaround. It is played twice — stated and in the outro — so ten chords, two of them
+        // turnarounds, and none sent.
+        let cadence = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &Flat),
+                roles: &roles,
+            },
+            &prosody_core::Mappings::all().with(
+                prosody_core::Mapping::Harmony
+                    .choose(prosody_core::Variant::Cadence)
+                    .unwrap(),
+            ),
+        )
+        .unwrap();
+        let turning = Osc::new().render(&cadence, &Style::default()).unwrap();
+        assert_eq!(turning.unsent_chords(), 10);
+        assert_eq!(turning.unsent_turnarounds(), 2);
+        assert!(
+            turning.to_text().contains(
+                "# not scheduled here: 10 chords of the harmony layer, 2 of them turnarounds \
+                 from a bar's half (there is no chord message)\n"
+            ),
+            "{}",
+            turning.to_text()
         );
         // The messages are the ones the piece without the harmony sends.
         let without = schedule(source);

@@ -241,7 +241,7 @@
           <select id="kit" title="Which drum carries each layer: kick and hat, or ride and snare"></select>
         </label>
         <label>Voicing
-          <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree"></select>
+          <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree. With a side's harmony mapping on, rhyme words are single notes over the chords and this voices only the chord lane"></select>
         </label>
         <label>Ride stand-in
           <select id="ride_fallback" title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash"></select>
@@ -316,7 +316,12 @@
         <p>
           Candidate mappings still under review. Each is a selector: choose a variant — or
           <code>off</code> — for each setting, then switch between A and B while it plays; the Score
-          tab measures both. A bold border marks a choice that is not the default.
+          tab measures both. A bold border marks a choice that is not the default. The
+          <code>pulse</code> has no off: <code>steady</code> gives every bar as long as its beats,
+          <code>elastic</code> every bar the same span, as the page once played every poem. Nor
+          has the <code>stack</code>: <code>crossing</code> keeps every line on its own feet,
+          <code>straight</code> fits a line sounding under the bar's line to that line's
+          subdivision wherever the two would cross.
         </p>
       </div>
     </details>
@@ -330,6 +335,8 @@
         <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
         <p>
           Whether and when lines are read is the <code>reading</code> mapping above:
+          <code>breath</code> (the default) reads each stanza through, a line a bar, with a silent
+          bar before the next stanza and never before the music has begun it;
           <code>arrives</code> speaks each line once, in the bar where it is first heard;
           <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
           stanza that transforms a loop is read through rather than a line every few bars;
@@ -494,6 +501,10 @@ let playing = false;
 // can light.
 let traces = { A: null, B: null };
 let tracePattern = null;
+// Where the bars of the pattern now playing fall, in seconds (barsOf): taken from that pattern's
+// own trace when it starts, so the roll keeps the clock of what is sounding while the text box
+// runs ahead of it.
+let heardBars = null;
 let lit = { trace: null, marks: [] };
 let drawer = null, drawRoll = null, strudelRepl = null, drawing = false;
 // Set when the next play() must restart Strudel's clock at cycle 0 rather than hand the running
@@ -506,10 +517,11 @@ let latestPattern = '';
 let timer = null;
 
 // The two settings being compared: a variant for every mapping, by name. A is the piece as
-// specified — every default — and B the piece before any candidate mapping, every one off, until
-// the writer says otherwise.
+// specified — every default — and B the piece before any candidate mapping, each at its first
+// variant, what preceded it (off; for the pulse, which has no off, elastic; for the stack,
+// which has none either, crossing), until the writer says otherwise.
 const defaults = (pick) => Object.fromEntries(MAPPINGS.map((m) => [m[0], pick(m)]));
-let settings = { A: defaults((m) => m[3]), B: defaults(() => 'off') };
+let settings = { A: defaults((m) => m[3]), B: defaults((m) => m[2][0]) };
 let hearing = 'A';
 let patterns = { A: '', B: '' };
 // The reading of each setting (`prosody_emit::reading`): a cue pattern and the lines it speaks.
@@ -524,7 +536,7 @@ let scores = { A: null, B: null };
 function restore(side, saved, readOff) {
   const out = {};
   for (const [name, , variants, fallback] of MAPPINGS) {
-    let variant = Array.isArray(saved) ? (saved.includes(name) ? 'off' : fallback) : saved?.[name];
+    let variant = Array.isArray(saved) ? (saved.includes(name) ? variants[0] : fallback) : saved?.[name];
     if (Array.isArray(saved) && name === 'reading' && readOff) variant = 'off';
     out[name] = variants.includes(variant) ? variant : settings[side][name];
   }
@@ -828,8 +840,9 @@ async function warmUp(code) {
 // Strudel's own `speak`, `duck` and `silence` on the global scope, over any page function of
 // that name: a `speak` here was silently replaced by Strudel's pattern function and said nothing.
 //
-// Each cue is an event of the reading's own pattern, `n("<0 1 ~ 2 …>").cpm(…)`, one element per
-// bar at the music's cycles per minute, so Strudel's scheduler fires it as the bar begins. Its
+// Each cue is an event of the reading's own pattern, `n("<0@3 1@4 ~@3 2@4 …>").cpm(…)`, one element
+// per bar, each as long as the music's bar (under the elastic pulse, `<0 1 ~ 2 …>`, a cycle a
+// bar), at the music's cycles per minute, so Strudel's scheduler fires it as the bar begins. Its
 // callback is attached with `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the
 // `true` makes it the cue's only output, so the default webaudio output never tries to sound an
 // event with no `s`). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
@@ -951,6 +964,7 @@ async function play() {
     const pattern = cues ? stack(music, cues) : music;
     // The trace is evaluated but never played: the drawing queries it for which syllable sounds.
     let nextTrace = null;
+    const nextBars = barsOf(traces[hearing]);
     try { nextTrace = traces[hearing] ? (0, eval)(traces[hearing].pattern) : null; } catch (error) {
       console.warn('[watch] trace pattern refused:', error);
     }
@@ -965,6 +979,7 @@ async function play() {
     fromTheTop = false;
     pattern.play();
     tracePattern = nextTrace;
+    heardBars = nextBars;
     // `play()` hands the scheduler its pattern a moment later (@strudel/web's `initDone`), and the
     // drawer reads the scheduler's pattern as it starts, so it starts — once — after that. On a
     // later play it only looks ahead again, or the roll would show the old piece's notes to come.
@@ -978,7 +993,12 @@ async function play() {
     playing = true;
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
-    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread, !!unread);
+    // A line the reading leaves out is said, not left for the listener to miss (SPEC.md §4.7).
+    const lost = reading?.unread?.length
+      ? ' · not read: ' + reading.unread.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ')
+      : '';
+    if (lost) console.log('[reading]' + lost);
+    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread + lost, !!unread);
   } catch (error) {
     status('Strudel refused the pattern: ' + error.message, true);
   }
@@ -991,6 +1011,7 @@ function stop() {
   drawer?.stop();
   drawing = false;
   tracePattern = null;
+  heardBars = null;
   lightUp(null);
   clearRoll();
   $('editor').classList.remove('playing');
@@ -1050,16 +1071,36 @@ async function startDrawing() {
   }
 }
 
-// How long one bar lasts on the scheduler's clock: a cycle of the pattern is a slot of the
-// arrangement, one poem line, and `.cpm` sets how many a minute — on a scheduler at one cycle a
-// second, `60 / cpm` of its cycles. Read from the pattern itself so it is the tempo being heard.
-function barLength() {
-  const cpm = [...(latestPattern || '').matchAll(/\.cpm\(([\d.]+)\)/g)].pop();
-  const perMinute = cpm ? Number(cpm[1]) : 30;
-  return perMinute > 0 ? 60 / perMinute : 2;
+// Where the bars of a trace (prosody_emit::trace) fall on the scheduler's clock, in seconds: each
+// bar's start, and last the piece's length, where it loops round. The trace is built by the music's
+// own walk: under the steady pulse a bar lasts its beats, so bars of three and four beats are not
+// evenly spaced; under the elastic pulse every bar is one cycle. A cycle lasts `60 / cpm` on a
+// scheduler at one cycle a second. Null without a trace that says so.
+function barsOf(trace) {
+  if (!trace || !Array.isArray(trace.bars) || trace.bars.length < 2 || !(trace.cpm > 0)) return null;
+  const cycle = 60 / trace.cpm;
+  return trace.bars.map((at) => at * cycle);
 }
 
-// The roll shows a whole number of bars — the setting — half behind the playhead and half ahead.
+// The bars of the piece being heard: while it plays, those of the pattern that is sounding — not
+// of the text box, which an edit puts ahead of the music until the next compile is playing — and
+// otherwise those of the setting's last compile. The bars are times, not places in the text, so
+// unlike the lit verse they need no guard on the text box. Only with no trace at all is there
+// nothing to go by; a neutral two-second bar then keeps the roll drawable, claiming no meter. (The
+// pattern's `.cpm` alone is no bar length: under the steady pulse a cycle is a beat.)
+function barTimes() {
+  return heardBars || barsOf(traces[hearing]) || [0, 2];
+}
+
+// How long a bar lasts on average: the piece's length over its bars. Equal to every bar's length
+// under the elastic pulse; under the steady pulse, the mean of bars that differ.
+function barLength() {
+  const times = barTimes();
+  return times[times.length - 1] / (times.length - 1);
+}
+
+// The roll shows about a whole number of bars — the setting, at the mean bar length — half behind
+// the playhead and half ahead.
 function rollWindow() {
   const half = (Number($('rollBars').value) || 4) * barLength() / 2;
   return [-half, half];
@@ -1088,15 +1129,21 @@ function paintRoll(haps, time) {
     background: '#18171f', playheadColor: '#e6e3ef', inactive: '#4a4760', active: '#ffffff',
     colorizeInactive: 1, fillActive: 1,
   });
-  // Bar lines, where one poem line hands over to the next.
+  // Bar lines, where one bar of the arrangement hands over to the next — at the trace's bar starts,
+  // repeated each time the piece loops round, so they fall where the music's bars change length.
   const [from, to] = [time + span[0], time + span[1]];
-  const bar = barLength();
+  const times = barTimes();
+  const piece = times[times.length - 1];
   ctx.save();
   ctx.strokeStyle = 'rgba(230, 227, 239, 0.16)';
   ctx.lineWidth = Math.max(1, (window.devicePixelRatio || 1));
-  for (let k = Math.ceil(from / bar); k * bar <= to; k++) {
-    const x = Math.round(((k * bar - from) / (to - from)) * ctx.canvas.width) + 0.5;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
+  for (let loop = Math.floor(from / piece); loop * piece <= to; loop++) {
+    for (const start of times.slice(0, -1)) {
+      const at = loop * piece + start;
+      if (at < from || at > to) continue;
+      const x = Math.round(((at - from) / (to - from)) * ctx.canvas.width) + 0.5;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
+    }
   }
   ctx.restore();
 }

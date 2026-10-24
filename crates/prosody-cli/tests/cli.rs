@@ -180,6 +180,34 @@ fn the_explain_views_palette_values_share_one_column() {
 }
 
 #[test]
+fn over_the_harmony_the_melody_is_single_notes_and_the_views_say_so() {
+    // The jazz palette voices each rhyme word as a seventh chord; with the harmony mapping on,
+    // the melody plays single notes over the chord lane instead (`SPEC.md` §4.6).
+    let poem = format!("+++\npreset = \"jazz\"\n+++\n{COUPLET}");
+    let melody = |text: &str| -> String {
+        let line = text.lines().find(|l| l.contains("// the melody")).unwrap();
+        line.split('"').nth(1).unwrap().to_owned()
+    };
+    let (off, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(melody(&off).contains(','), "seventh chords: {off}");
+    let (on, err, code) = run(&["--set", "harmony=cadence"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!melody(&on).contains(','), "single notes: {on}");
+    assert!(on.contains("as single notes over the chords"), "{on}");
+
+    // The explain view says it in the style block, on the palette's column.
+    let (explained, err, code) = run(&["--explain", "--set", "harmony=cadence"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        explained.contains("\n  rhyme notes   single notes over the chords (the harmony mapping is on, so the voicing shapes only the chord lane)\n"),
+        "{explained}"
+    );
+    let (plain, _, _) = run(&["--explain"], &poem);
+    assert!(!plain.contains("rhyme notes"), "{plain}");
+}
+
+#[test]
 fn a_broken_pipe_is_not_a_crash() {
     // `prosody poem.txt | head -1` is the most ordinary thing anyone does with this program, and
     // Rust panics on EPIPE unless you handle it.
@@ -664,6 +692,17 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
     );
     let (plain, _, _) = run(&["--explain"], COUPLET);
     assert!(!plain.contains("mappings\n"), "{plain}");
+    // `breath` is the reading's default, so choosing it lists nothing; `arrives`, the reading as
+    // it shipped, is now a choice away from the default and is listed.
+    let (breath, err, code) = run(&["--explain", "--set", "reading=breath"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert_eq!(breath, plain);
+    let (arrives, err, code) = run(&["--explain", "--set", "reading=arrives"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        arrives.contains("mappings\n  reading       arrives\n\n"),
+        "{arrives}"
+    );
 
     for (given, expected) in [
         ("polka=on", "unknown mapping `polka`"),
@@ -673,7 +712,7 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
         ),
         (
             "reading=on",
-            "unknown variant `on` of mapping `reading` (it has off, arrives, stanza)",
+            "unknown variant `on` of mapping `reading` (it has off, arrives, stanza, breath)",
         ),
         ("reading", "--set wants name=variant, not `reading`"),
     ] {
@@ -684,6 +723,56 @@ fn set_chooses_variants_and_without_is_its_shorthand() {
     let (_, err, code) = run(&["--set"], COUPLET);
     assert_ne!(code, Some(0));
     assert!(err.contains("--set needs a list"), "{err}");
+}
+
+#[test]
+fn the_pulse_is_steady_unless_set_elastic_and_has_no_off() {
+    // The default is steady: a cycle is a beat. `--without pulse` is its first variant, elastic,
+    // the pattern as it was — the pulse has no `off`.
+    let (steady, err, code) = run(&[], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        steady.contains("//   pulse = steady: a cycle is a beat"),
+        "{steady}"
+    );
+    let (elastic, err, code) = run(&["--set", "pulse=elastic"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        elastic.contains("//   pulse = elastic: every bar one cycle"),
+        "{elastic}"
+    );
+    assert!(!elastic.contains('@'), "{elastic}");
+    let (without, _, _) = run(&["--without", "pulse"], COUPLET);
+    assert_eq!(without, elastic);
+    let (_, err, code) = run(&["--set", "pulse=off"], COUPLET);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `pulse` (it has elastic, steady)"),
+        "{err}"
+    );
+    // The OSC schedule is in beats, so always steady, and says so when elastic was asked for.
+    let (schedule, err, code) = run(&["--osc", "--set", "pulse=elastic"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        schedule.contains("# not applied here: pulse = elastic"),
+        "{schedule}"
+    );
+    let (osc_steady, _, _) = run(&["--osc"], COUPLET);
+    assert!(!osc_steady.contains("pulse"), "{osc_steady}");
+    // Both are JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        for (name, text) in [("steady", &steady), ("elastic", &elastic)] {
+            let file = std::env::temp_dir().join(format!("prosody-pulse-{name}.js"));
+            std::fs::write(&file, text).expect("writing the pattern");
+            let checked = Command::new(&node)
+                .arg("--check")
+                .arg(&file)
+                .output()
+                .expect("node should run");
+            let _ = std::fs::remove_file(&file);
+            assert!(checked.status.success(), "{name}: {text}");
+        }
+    }
 }
 
 #[test]
@@ -723,12 +812,13 @@ fn score_reports_every_metric_and_an_edit_per_word() {
 fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
     // The couplet's stanzas are night/light and sea/me: A on degree 0, B on degree 1, each pair
     // in one stanza. rhyme: each line's class's degree. cadence: the first line of each pair
-    // opens (V of its degree), and the second — the stanza's last bar — turns round onto the
-    // first chord (V of that root). both: the same, since every line opens or turns round.
+    // opens (V of its degree), and the second — the stanza's last bar — closes it (I on the
+    // degree) and from the bar's half turns round onto the first chord (V of that root). both:
+    // the same, since every line opens or closes.
     for (variant, expected) in [
         ("rhyme", "1:I/0 2:I/0 3:I/1 4:I/1"),
-        ("cadence", "1:V/4 2:V/8 3:V/5 4:V/9"),
-        ("both", "1:V/4 2:V/8 3:V/5 4:V/9"),
+        ("cadence", "1:V/4 2:I/0+V/8 3:V/5 4:I/1+V/9"),
+        ("both", "1:V/4 2:I/0+V/8 3:V/5 4:I/1+V/9"),
     ] {
         let set = format!("harmony={variant}");
         let (out, err, code) = run(&["--set", &set], COUPLET);
@@ -760,6 +850,15 @@ fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
             "{explained}"
         );
         assert!(explained.contains("  harmony V deg 4 (V of deg 0)") || variant == "rhyme");
+        // The split last bar is its own row: the turnaround onto the first chord, V of 4.
+        assert_eq!(
+            explained.contains(
+                "  harmony then, from the bar's half, V deg 8 (V of deg 4) · cadence: the \
+                 stanza's last bar, turning round onto its first chord, deg 4\n"
+            ),
+            variant != "rhyme",
+            "{explained}"
+        );
     }
     // Off — the default — nothing about chords at all.
     let (out, _, _) = run(&[], COUPLET);
@@ -768,4 +867,160 @@ fn the_harmony_adds_a_chord_lane_that_is_valid_javascript() {
     let (osc, err, code) = run(&["--osc", "--set", "harmony=rhyme"], COUPLET);
     assert_eq!(code, Some(0), "{err}");
     assert!(osc.contains("# not scheduled here: "), "{osc}");
+    // Under cadence each stanza's last bar holds two chords. Two stanzas of two lines, stated and
+    // then repeated by the outro: eight slots with one chord each, and the four last bars' four
+    // turnarounds on top — twelve.
+    let (osc, err, code) = run(&["--osc", "--set", "harmony=cadence"], COUPLET);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        osc.contains(
+            "# not scheduled here: 12 chords of the harmony layer, 4 of them turnarounds from a \
+             bar's half (there is no chord message)\n"
+        ),
+        "{osc}"
+    );
+}
+
+#[test]
+fn function_words_are_full_unless_set_light_and_have_no_off() {
+    // The Tyger, whose "What immortal hand or eye" strikes "or" as hard as "hand". Under the
+    // default nothing new is printed; `function-words=light` names itself, and every surface
+    // counts the same syllables: the pattern header, the OSC schedule, the explain view's summary
+    // line and its rows marked `function-words`.
+    let poem = std::fs::read_to_string(examples().join("blake-tyger.poem")).unwrap();
+    let (full, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!full.contains("function-words"), "{full}");
+    let (without, _, _) = run(&["--without", "function-words"], &poem);
+    assert_eq!(without, full);
+    let (_, err, code) = run(&["--set", "function-words=off"], &poem);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `function-words` (it has full, light)"),
+        "{err}"
+    );
+
+    let (view, err, code) = run(&["--explain", "--set", "function-words=light"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    let marked = view
+        .lines()
+        .filter(|line| line.ends_with(",function-words"))
+        .count();
+    assert!(marked > 0, "{view}");
+    assert!(
+        view.contains(&format!(
+            "function-words light · a one-syllable function word off the metre's strong \
+             positions is struck at 0.67, not full force: {marked} syllable(s) (§4.2)"
+        )),
+        "{view}"
+    );
+    // "or" in bar 2 — the spondee "hand or" of a falling line — is light; "hand" is not.
+    let row = |view: &str, start: &str| {
+        view.lines()
+            .find(|line| line.trim_start().starts_with(start))
+            .unwrap()
+            .to_owned()
+    };
+    let or = row(&view, "or             2.2.1/2");
+    assert!(
+        or.contains(" 0.67 ") && or.ends_with(",function-words"),
+        "{or}"
+    );
+    assert!(!row(&view, "hand           2.2.0/2").contains("function-words"));
+    let (full_view, _, _) = run(&["--explain"], &poem);
+    assert!(row(&full_view, "or             2.2.1/2").contains(" 1.00 "));
+
+    let (light, err, code) = run(&["--set", "function-words=light"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        light.contains(&format!(
+            "//   function-words = light: a one-syllable function word off the metre's strong \
+             positions is struck at 2/3 of full force, in {marked} syllable(s)"
+        )),
+        "{light}"
+    );
+    let (schedule, err, code) = run(&["--osc", "--set", "function-words=light"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        schedule.contains(&format!(
+            "# function-words = light: a one-syllable function word off the metre's strong \
+             positions sent at 2/3 velocity, in {marked} syllable(s)"
+        )),
+        "{schedule}"
+    );
+    // And the pattern is JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-function-words-light.js");
+        std::fs::write(&file, &light).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}
+
+#[test]
+fn the_stack_crosses_unless_set_straight_and_has_no_off() {
+    // Wilde's Theocritus stacks dactylic line-ends against iambs: the default pattern keeps them
+    // crossing and says nothing new; `stack=straight` names itself and fits 38 beats — the 38
+    // `cross_rhythm` counts (`PLAN.md`, the off-rhythm trace) — and the scorer then counts none.
+    let poem = std::fs::read_to_string(examples().join("wilde-theocritus.poem")).unwrap();
+    let (crossing, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!crossing.contains("stack ="), "{crossing}");
+    let (straight, err, code) = run(&["--set", "stack=straight"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        straight.contains("//   stack = straight: a line stacked under a bar's line is fitted to that line's subdivision wherever the two would cross, in 38 beat(s)"),
+        "{straight}"
+    );
+    assert!(straight.contains("@2 "), "{straight}");
+    let (without, _, _) = run(&["--without", "stack"], &poem);
+    assert_eq!(without, crossing);
+    let (_, err, code) = run(&["--set", "stack=off"], &poem);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `stack` (it has crossing, straight)"),
+        "{err}"
+    );
+    let cross_rhythm = |arguments: &[&str]| {
+        let (report, err, code) = run(arguments, &poem);
+        assert_eq!(code, Some(0), "{err}");
+        report
+            .lines()
+            .find(|line| line.starts_with("cross_rhythm"))
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(cross_rhythm(&["--score", "--profile", "jazz"]), "0.302");
+    assert_eq!(
+        cross_rhythm(&["--score", "--profile", "jazz", "--set", "stack=straight"]),
+        "0.000"
+    );
+    // The schedule applies it too, and says so.
+    let (schedule, err, code) = run(&["--osc", "--set", "stack=straight"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(schedule.contains("# stack = straight: a stacked line fitted to its bar's line's subdivision in 38 beat(s)"), "{schedule}");
+    // And the pattern is JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-stack-straight.js");
+        std::fs::write(&file, &straight).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
 }

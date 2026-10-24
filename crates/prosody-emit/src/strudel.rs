@@ -18,13 +18,26 @@
 //! That is what an earlier version of this file emitted, and it is `SPEC.md` §1's failure mode
 //! reached through a one-character separator: output that sounds plausible and traces to nothing.
 //!
-//! # A cycle is a line, so the beat is elastic
+//! # How long a bar lasts: the pulse
 //!
-//! Every cycle takes the same time, and a bar is a line, so a two-foot line and a five-foot line
-//! occupy the same span — the *foot* stretches rather than the bar growing. §4.2 says "line → bar
-//! (or phrase)", which admits this reading, and warns against quantising to 4/4, which this does
-//! not do. But it does mean the pulse is not constant, which is a mapping question rather than an
-//! emitter detail; `PLAN.md` records it.
+//! Which is a mapping, `Mapping::Pulse`, chosen per piece and recorded on the score:
+//!
+//! - **steady** (the default). A bar lasts as many beats as it holds, so every beat of the piece
+//!   lasts the same time — §4.2's "foot → beat" taken at its word. A **cycle is a beat**: the
+//!   whole arrangement is one `<…>` whose bars carry mini-notation weights, `<[bar]@3 [bar]@4>`,
+//!   and `.cpm` is the tempo itself. In `@strudel/mini` 1.2.6 `<…>` is a `polymeter_slowcat`: its
+//!   sequence is a `timeCat` of the weighted bars, slowed by the weights' sum, so a bar of weight
+//!   *w* lasts exactly *w* cycles — integers all the way, no rounded tempo (`sequence`).
+//! - **elastic** — the pattern as it was. A **cycle is a bar**: `<[bar] [bar]>`, one element per
+//!   cycle, every cycle the same time, at one `.cpm` for the piece (the tempo over the integer
+//!   mean bar length). A two-foot line and a five-foot line occupy the same span, so the *foot*
+//!   stretches or hurries — Wilde's Theocritus plays its 4-beat bars at 161 bpm among 3-beat bars
+//!   at 121.
+//!
+//! Either way the bars, beats and subdivisions inside each bar are the same strings: only how long
+//! a bar lasts differs. Every consumer that must land on the music's clock — this pattern, the
+//! page's trace ([`crate::trace`]), the reading's cues ([`crate::reading`]) — asks the same
+//! functions here (`weights`, `cycles_per_minute`, `clock`).
 //!
 //! # What comes from where
 //!
@@ -33,14 +46,14 @@
 //! | which cycle, which step, which subdivision | `Event` position | §4.2 |
 //! | `.gain` | `Event::velocity` | §4.2, stress → accent |
 //! | `.note` | `Event::pitch` through the style's scale | §4.5 |
-//! | a rhyme note's chord tones | the same degree, stacked in the style's scale ([`Voicing`]) | §5 |
+//! | a rhyme note's chord tones | the same degree, stacked in the style's scale ([`Voicing`]); none over a chord lane, where the melody is single notes ([`melody_voicing`]) | §5, §4.6 |
 //! | `.lpf`, `.attack`, `.room` | `Event::sharpness` | §4.4 |
 //! | `.vowel` | `Event::bank` — the alliterating phoneme | §4.3, alliteration |
 //! | `.crush` depth | `Event::family` — distance from the family's root | §4.3, morphology |
 //! | which sample, which instrument, tempo, swing | [`Style`] | §5 |
 //! | `.room` floor, `.roomsize`, `.delay`, `.shape`, `.compressor`, `.postgain` | [`Style::mix`] | §5, §9 "tuning the ranges" |
 //! | `.nudge`, `.velocity` — the human stray | each line's own seed, scaled by [`Style::mix`] | §6 I2 |
-//! | the chord lane: which bar has a chord, on which degree | `Score::chord_in` — the harmony mapping | §4.6, candidate |
+//! | the chord lane: which bar has a chord, on which degree | `Score::harmony_in` — the harmony mapping; a stanza's last bar under cadence split, its own chord then the turnaround from the half | §4.6, candidate |
 //! | the chord lane's sound, tones, register, level | [`Style::chord_sound`], [`Voicing`], the melody's octave less one, `chord_gain` | §5 |
 //!
 //! # Three pitched and percussive roles
@@ -62,7 +75,7 @@ use std::fmt::Write as _;
 
 use prosody_core::mapping::Variant;
 use prosody_core::role::Layer;
-use prosody_core::voice::{Event, Score, Voice};
+use prosody_core::voice::{Event, Score, Subdivision, Voice};
 use prosody_core::{BassNote, Chord, Chromatic, Harmony, Silence, VoiceId};
 use rand_core::Rng as _;
 
@@ -107,9 +120,9 @@ impl Backend for Strudel {
             return Err(StrudelError::Silent);
         }
 
-        // `cpm` is *cycles* per minute and a cycle is a bar, so the tempo in beats has to be
-        // divided by how many beats a bar holds. Emitting the BPM directly ran every poem at
-        // roughly five times its stated tempo, which made `SPEC.md` §5's window decorative.
+        // The tempo in beats. `cpm` is *cycles* per minute, and what a cycle is depends on the
+        // pulse ([`cycles_per_minute`]); emitting the BPM as the `.cpm` of a cycle-per-bar pattern
+        // once ran every poem at roughly five times its stated tempo.
         let tempo = style
             .tempo_range()
             .at_density(score.events().len(), score.bars());
@@ -157,22 +170,25 @@ impl Backend for Strudel {
 pub(crate) fn clock(score: &Score, style: &Style) -> String {
     let mut clock = String::new();
     if style.swing().hundredths() > 0 {
-        // `swingBy(x, n)` slices the *cycle* into `n` and delays the back half of each
-        // slice. A cycle is a bar, so the slices must be its beats — with `n = 2` this was a
-        // rubato across half a line rather than a shuffle between syllables.
+        // `swingBy(x, n)` is `inside(n, late(seq(0, x / 2)))` (`@strudel/core` 1.2.6
+        // `pattern.mjs`): it slices the *cycle* into `n` and delays the back half of each slice.
+        // The slices must be the beats — with `n = 2` across a bar this was a rubato across half
+        // a line rather than a shuffle between syllables. Under the steady pulse a cycle *is* a
+        // beat, so `n = 1` swings every beat whatever its bar's length; under the elastic pulse a
+        // cycle is a bar, sliced by the mean bar length ([`swing_slices`]).
         //
         // It must come *before* `.cpm`. `cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6
         // `pattern.mjs`, which `@strudel/web` 1.3.0 pins), so after it a cycle is the
-        // scheduler's one second, not a bar: `swingBy` then sliced the second into `n`, out
-        // of step with the bar's beats — onsets moved to irregular times, and a held chord's
+        // scheduler's one second, not a beat or a bar: `swingBy` then sliced the second into `n`,
+        // out of step with the beats — onsets moved to irregular times, and a held chord's
         // onset could fall in no slice's front half (never sounding) or be split across two
-        // (sounding twice). Swinging first slices the bar, and `cpm` then speeds the swung
-        // bar up as a whole.
+        // (sounding twice). Swinging first slices the pattern's own cycles, and `cpm` then speeds
+        // the swung piece up as a whole.
         let _ = writeln!(
             clock,
             "  .swingBy({}, {})",
             fmt_param(f64::from(style.swing().hundredths()) / 100.0),
-            mean_beats(score).max(1)
+            swing_slices(score)
         );
     }
     let _ = writeln!(
@@ -181,6 +197,75 @@ pub(crate) fn clock(score: &Score, style: &Style) -> String {
         fmt_param(cycles_per_minute(score, style))
     );
     clock
+}
+
+/// How many cycles of the pattern each slot of the arrangement lasts, in slot order.
+///
+/// `SPEC.md` §4.2, the pulse (`Mapping::Pulse`): under the steady pulse a cycle is a beat, so a
+/// slot lasts its beats (at least one — a bar of nothing still takes its place); under the elastic
+/// pulse a cycle is a slot, so every slot lasts one. Read from the score alone, never the style:
+/// when a bar falls is structure (I3). The OSC schedule counts its beats with the same numbers.
+#[must_use]
+pub(crate) fn weights(score: &Score) -> Vec<u64> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| match score.pulse() {
+            Variant::Elastic => 1,
+            _ => u64::try_from(slot.beats()).unwrap_or(1).max(1),
+        })
+        .collect()
+}
+
+/// The cycle of the pattern each slot begins on, from 0, and after them the piece's length — the
+/// cycle it loops round on. Exact: integers.
+#[must_use]
+pub(crate) fn starts(score: &Score) -> Vec<u64> {
+    let mut at = 0_u64;
+    let mut out = vec![0];
+    for weight in weights(score) {
+        at += weight;
+        out.push(at);
+    }
+    out
+}
+
+/// One element per slot of the arrangement, laid end to end as the piece: the single place a
+/// pattern's bars become a sequence, so the music, the trace and the reading's cues all last
+/// exactly as long, bar for bar.
+///
+/// Elastic: `<a [b c]>`, one element per cycle (`<…>` takes one a cycle), or a single bar bare.
+/// Steady: `<a@3 [b c]@4>` — in `@strudel/mini` 1.2.6 the angle brackets are a
+/// `polymeter_slowcat` whose sequence is a `timeCat` of its weighted elements, slowed by their
+/// weights' sum, so an element of weight *w* lasts exactly *w* cycles: *w* beats.
+///
+/// A bar with a space in it is bracketed into one element. Separating bars with `|` would be worse
+/// than wrong: in mini-notation `|` means *choose at random* (see the module docs).
+pub(crate) fn sequence(score: &Score, bars: &[String]) -> String {
+    let element = |bar: &String| {
+        if bar.contains(' ') {
+            format!("[{bar}]")
+        } else {
+            bar.clone()
+        }
+    };
+    match (score.pulse(), bars) {
+        (_, []) => "~".to_owned(),
+        (Variant::Elastic, [bar]) => bar.clone(),
+        (Variant::Elastic, _) => format!(
+            "<{}>",
+            bars.iter().map(element).collect::<Vec<_>>().join(" ")
+        ),
+        (_, _) => format!(
+            "<{}>",
+            bars.iter()
+                .zip(weights(score))
+                .map(|(bar, weight)| format!("{}@{weight}", element(bar)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    }
 }
 
 /// A layer's colour, for Strudel's drawing (`.color`): the page's piano roll, or `pianoroll()` on
@@ -409,23 +494,92 @@ fn chord_share(voicing: Voicing) -> f64 {
     1.0 / f64::from(tones).sqrt()
 }
 
-/// How many cycles — slots of the arrangement — the piece plays a minute.
+/// How this piece's rhyme melody is voiced: the style's [`Voicing`], unless the score has a chord
+/// lane to play over, and then one note a rhyme word whatever the voicing says.
 ///
-/// One number for every consumer that has to land on the same clock: the pattern's own `.cpm`,
-/// and the reading ([`crate::reading`]), whose cues must fall on the bars they name.
-pub(crate) fn cycles_per_minute(score: &Score, style: &Style) -> f64 {
-    let tempo = style
-        .tempo_range()
-        .at_density(score.events().len(), score.bars());
-    f64::from(tempo.get()) / f64::from(mean_beats(score).max(1))
+/// The user decided it (`SPEC.md` §4.6, *the melody over the harmony*): under the jazz palette the
+/// rhyme melody and the chord lane both played four-tone chords, and two lanes of sevenths were
+/// thick. So whenever the harmony mapping is on — any variant but off — the melody plays single
+/// notes on top of the chords, and the voicing shapes only the chord lane (`chord_tones`). With
+/// the harmony off the voicing works as it always did.
+///
+/// It reads the **score**, not a style: whether the harmony mapping ran is a structural fact the
+/// score records ([`Score::harmony`] is empty exactly when it is off). The style still decides
+/// only how an event sounds, so I3 holds — no event is added, moved or removed, and every tone the
+/// melody drops was one of its own event's chord tones, never another event's. It asks whether the
+/// mapping is on rather than whether any bar has a chord because the second is a fact about the
+/// whole poem: an edit to one stanza that gave the poem its first chord would revoice the melody of
+/// every other stanza, which I2 forbids. Whether the mapping is on is the same for every stanza.
+#[must_use]
+pub fn melody_voicing(score: &Score, style: &Style) -> Voicing {
+    if under_harmony(score) {
+        Voicing::Note
+    } else {
+        style.voicing()
+    }
 }
 
-/// How many beats a bar holds, on average across the piece — over the arrangement's slots, since a
-/// cycle is a slot.
+/// Whether the harmony mapping is on in this score (any variant but off) — what moves the rhyme
+/// melody to single notes ([`melody_voicing`]).
+fn under_harmony(score: &Score) -> bool {
+    !score.harmony().is_empty()
+}
+
+/// What the pattern header and the explain view say of the melody's voicing when the harmony
+/// mapping set it ([`melody_voicing`]): `None` with the harmony off, where the voicing is the
+/// palette's and says so itself.
+#[must_use]
+pub fn melody_over_harmony(score: &Score) -> Option<&'static str> {
+    if !under_harmony(score) {
+        None
+    } else if score.chords().next().is_some() {
+        Some(
+            "single notes over the chords (the harmony mapping is on, so the voicing shapes only the chord lane)",
+        )
+    } else {
+        Some(
+            "single notes (the harmony mapping is on, so the voicing shapes only the chord lane, though no bar has a chord)",
+        )
+    }
+}
+
+/// How many cycles of the pattern the piece plays a minute — its `.cpm`.
 ///
-/// Bars genuinely differ in length — `SPEC.md` §4.2 insists on it — but a cycle is a fixed span,
-/// so one number has to stand for the piece when converting beats to cycles. Integer arithmetic,
-/// so the tempo stays byte-stable (`CLAUDE.md` §4).
+/// One number for every consumer that has to land on the same clock: the pattern's own `.cpm`,
+/// the trace's, and the reading ([`crate::reading`]), whose cues must fall on the bars they name.
+///
+/// Steady: a cycle is a beat, so this is the tempo itself, an integer, and every beat lasts
+/// `60 / tempo` seconds. Elastic: a cycle is a bar, so the tempo in beats is divided by how many
+/// beats a bar holds on average ([`mean_beats`]), and a bar of more beats than that hurries them.
+pub(crate) fn cycles_per_minute(score: &Score, style: &Style) -> f64 {
+    let tempo = f64::from(
+        style
+            .tempo_range()
+            .at_density(score.events().len(), score.bars())
+            .get(),
+    );
+    match score.pulse() {
+        Variant::Elastic => tempo / f64::from(mean_beats(score).max(1)),
+        _ => tempo,
+    }
+}
+
+/// How many slices `swingBy` cuts a cycle into, so that each slice is a beat: one under the
+/// steady pulse, whose cycle is a beat; the mean bar length under the elastic pulse, whose cycle
+/// is a bar — which is a beat only in a bar of exactly that length.
+fn swing_slices(score: &Score) -> u16 {
+    match score.pulse() {
+        Variant::Elastic => mean_beats(score).max(1),
+        _ => 1,
+    }
+}
+
+/// How many beats a bar holds, on average across the piece — over the arrangement's slots — for
+/// the elastic pulse, whose cycle is a slot.
+///
+/// Bars genuinely differ in length — `SPEC.md` §4.2 insists on it — but an elastic cycle is a
+/// fixed span, so one number has to stand for the piece when converting beats to cycles. Integer
+/// arithmetic, so the tempo stays byte-stable (`CLAUDE.md` §4).
 fn mean_beats(score: &Score) -> u16 {
     let slots = score.arrangement().slots();
     if slots.is_empty() {
@@ -433,6 +587,89 @@ fn mean_beats(score: &Score) -> u16 {
     }
     let total: usize = slots.iter().map(prosody_core::Slot::beats).sum();
     u16::try_from(total / slots.len()).unwrap_or(1).max(1)
+}
+
+/// The header's line for the pulse: how long a bar lasts, and so what tempo each bar's beats are
+/// heard at — the one place the pattern says its tempo in beats a minute.
+fn pulse_header(out: &mut String, score: &Score, style: &Style) {
+    let tempo = style
+        .tempo_range()
+        .at_density(score.events().len(), score.bars())
+        .get();
+    let mut lengths: Vec<usize> = score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| slot.beats().max(1))
+        .collect();
+    lengths.sort_unstable();
+    lengths.dedup();
+    let named: Vec<String> = lengths.iter().map(ToString::to_string).collect();
+    match score.pulse() {
+        Variant::Elastic => {
+            // What the elastic bar does to each length, spelled out: the hurrying is the point.
+            let cpm = cycles_per_minute(score, style);
+            let heard: Vec<String> = lengths
+                .iter()
+                .map(|beats| {
+                    let beats_f = f64::from(u32::try_from(*beats).unwrap_or(u32::MAX));
+                    format!("{beats} beats at {} bpm", fmt_param(cpm * beats_f))
+                })
+                .collect();
+            let _ = writeln!(
+                out,
+                "//   pulse = elastic: every bar one cycle, {} a minute (the tempo {tempo} over \
+                 the mean bar of {} beats), so the beat follows the bar's length: {}",
+                fmt_param(cpm),
+                mean_beats(score).max(1),
+                heard.join(", ")
+            );
+        }
+        _ => {
+            let _ = writeln!(
+                out,
+                "//   pulse = steady: a cycle is a beat at {tempo} bpm, and every bar lasts its \
+                 beats (bars of {} beats)",
+                named.join(", ")
+            );
+        }
+    }
+}
+
+/// The header's line for the straight stack, which names its variant and how many beats it
+/// fitted. Crossing — each line by its own feet — is the piece as it shipped, and says nothing new.
+fn stack_header(out: &mut String, score: &Score) {
+    if score.stack() != Variant::Straight {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   stack = straight: a line stacked under a bar's line is fitted to that line's \
+         subdivision wherever the two would cross, in {} beat(s) — three syllables over two are \
+         [a@2 b c], two over three [a@2 b] (SPEC.md §4.2, §4.6, candidate)",
+        straightened(score)
+    );
+}
+
+/// The header's line for the light function words, which names the variant and how many
+/// syllables it struck lightly. Full — every syllable at its dictionary stress — is the piece as it
+/// shipped, and says nothing new.
+fn function_header(out: &mut String, score: &Score) {
+    if score.function() != Variant::Light {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   function-words = light: a one-syllable function word off the metre's strong \
+         positions is struck at 2/3 of full force, in {} syllable(s) (SPEC.md §4.2, candidate)",
+        score.lightened()
+    );
+}
+
+/// How many beats of the piece the straight stack fitted: [`Score::straightened_beats`], the
+/// count the explain view prints too.
+pub(crate) fn straightened(score: &Score) -> usize {
+    score.straightened_beats()
 }
 
 /// How many events the piece plays: every line's syllables, once for each slot it sounds in.
@@ -560,14 +797,17 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     // Stacking every other degree makes a seventh chord only in a seven-note scale; elsewhere it
     // makes something else, and the header names what is heard rather than what was asked for.
     let scale = style.scale();
-    let chords = match style.voicing() {
-        Voicing::Note => String::new(),
-        Voicing::Seventh if scale.len() == 7 => {
+    // Over a chord lane the melody is single notes whatever the voicing (`melody_voicing`), and
+    // the header says that instead.
+    let chords = match (melody_over_harmony(score), style.voicing()) {
+        (Some(words), _) => format!(" as {words}"),
+        (None, Voicing::Note) => String::new(),
+        (None, Voicing::Seventh) if scale.len() == 7 => {
             " as seventh chords (each rhyme word's degree with \
              the 3rd, 5th and 7th above it in the scale)"
                 .to_owned()
         }
-        Voicing::Seventh => format!(
+        (None, Voicing::Seventh) => format!(
             " as four-tone chords on every other degree of {} (not sevenths: the scale has {} \
              notes, not 7)",
             scale.name(),
@@ -585,6 +825,9 @@ fn header(out: &mut String, score: &Score, style: &Style) {
         chords_header(out, score, style);
     }
     bass_header(out, score, has_chords);
+    pulse_header(out, score, style);
+    stack_header(out, score);
+    function_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
         let _ = writeln!(
@@ -924,8 +1167,9 @@ pub(crate) fn grid_by_slot(
     }
 
     // One element per slot of the arrangement, not per line: a stanza sounds again wherever it
-    // loops or yields (`prosody_core::arrange`). A cycle is a slot; a line divides it into the
-    // slot's beats, or its own when it has more — which is the bar-locked fitting. Lines sounding
+    // loops or yields (`prosody_core::arrange`). A slot is one element of the piece's sequence,
+    // lasting as long as the pulse says ([`sequence`]); a line divides it into the slot's beats,
+    // or its own when it has more — which is the bar-locked fitting. Lines sounding
     // together are *not* stacked with `,` inside the pattern: see [`Lane`]. This pattern carries
     // the `lane.index`-th of them, and rests where a bar has fewer.
     let mut bars = Vec::new();
@@ -939,16 +1183,19 @@ pub(crate) fn grid_by_slot(
                 // A whole line, or a call lifted out of one: its own events, its beats counted
                 // from where it starts. A line's width comes from the score, not from the events
                 // in *this* pattern, so the melody and the rhythm divide it the same way and a
-                // note lands on its own syllable.
-                let placed = score.placed(*placement);
-                let present: BTreeMap<usize, Vec<&Event>> = by_bar
+                // note lands on its own syllable. Each event's place in its beat is the one it
+                // has *in this slot* — under the straight stack, fitted to the host where the two
+                // would cross (`Score::placed_in`, which the OSC schedule and the scorer read too).
+                let placed = score.placed_in(slot, *placement);
+                let present: BTreeMap<usize, Vec<(&Event, Subdivision)>> = by_bar
                     .get(&placement.bar().get())?
                     .iter()
                     .filter_map(|(beat, syllables)| {
-                        let covered: Vec<&Event> = syllables
+                        let covered: Vec<(&Event, Subdivision)> = syllables
                             .iter()
                             .copied()
                             .filter(|event| placement.part().covers(event.span()))
+                            .map(|event| (event, placed.subdivision(event)))
                             .collect();
                         (!covered.is_empty())
                             .then(|| (beat.saturating_sub(placed.first_beat()), covered))
@@ -974,28 +1221,14 @@ pub(crate) fn grid_by_slot(
         );
     }
 
-    match bars.len() {
-        0 => "~".to_owned(),
-        1 => bars.into_iter().next().unwrap_or_else(|| "~".to_owned()),
-        // One element per cycle, so each bar is bracketed into a single element.
-        _ => format!(
-            "<{}>",
-            bars.iter()
-                .map(|bar| if bar.contains(' ') {
-                    format!("[{bar}]")
-                } else {
-                    bar.clone()
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        ),
-    }
+    // The piece: one element per slot, each lasting as long as the pulse says (`sequence`).
+    sequence(score, &bars)
 }
 
 /// One line's events in this pattern, as the steps of one cycle: a step per beat, subdivided by
 /// its syllables.
 fn line(
-    present: &BTreeMap<usize, Vec<&Event>>,
+    present: &BTreeMap<usize, Vec<(&Event, Subdivision)>>,
     beats: usize,
     value: &dyn Fn(&Event) -> String,
     absent: &str,
@@ -1009,7 +1242,7 @@ fn line(
             Some(syllables) if whole_beats => steps.push(
                 syllables
                     .first()
-                    .map_or_else(|| absent.to_owned(), |e| value(e)),
+                    .map_or_else(|| absent.to_owned(), |(e, _)| value(e)),
             ),
             // A foot divided into one part is the whole beat. More than one, and the beat is
             // subdivided — *even when this pattern has only one value for it*, which is the
@@ -1017,30 +1250,15 @@ fn line(
             // so its note belongs in the second half of the beat, not across the whole of it.
             Some(syllables)
                 if syllables.len() == 1
-                    && syllables.first().is_some_and(|e| e.subdivision().of() == 1) =>
+                    && syllables.first().is_some_and(|(_, at)| at.of() == 1) =>
             {
                 steps.push(
                     syllables
                         .first()
-                        .map_or_else(|| absent.to_owned(), |e| value(e)),
+                        .map_or_else(|| absent.to_owned(), |(e, _)| value(e)),
                 );
             }
-            Some(syllables) => {
-                // A foot's syllables subdivide its beat. Where this pattern has no value for
-                // one of them — an unpitched syllable in the melody — it rests, so the ones
-                // that do sound keep their place inside the foot.
-                let width = syllables
-                    .first()
-                    .map_or(syllables.len(), |e| e.subdivision().of())
-                    .max(syllables.len());
-                let mut inner = vec![absent.to_owned(); width];
-                for event in syllables {
-                    if let Some(slot) = inner.get_mut(event.subdivision().index()) {
-                        *slot = value(event);
-                    }
-                }
-                steps.push(format!("[{}]", inner.join(" ")));
-            }
+            Some(syllables) => steps.push(subdivided(syllables, value, absent)),
         }
     }
     if steps.is_empty() {
@@ -1048,6 +1266,44 @@ fn line(
     } else {
         steps.join(" ")
     }
+}
+
+/// One beat subdivided by its syllables: `[a b]`, `[a b c]`.
+///
+/// A foot's syllables subdivide its beat. Where this pattern has no value for one of them — an
+/// unpitched syllable in the melody — it rests, so the ones that do sound keep their place inside
+/// the foot. A syllable lasting more than one part — only a stacked line the straight stack fitted
+/// to its host (`prosody_core::stack`) — is weighted with mini-notation's `@`: three syllables
+/// over a host's pair are `[a@2 b c]`, onsets at 0, ½ and ¾. A rest under a long syllable this
+/// pattern does not sound stays a run of `~`, which lasts the same.
+fn subdivided(
+    syllables: &[(&Event, Subdivision)],
+    value: &dyn Fn(&Event) -> String,
+    absent: &str,
+) -> String {
+    let width = syllables
+        .first()
+        .map_or(syllables.len(), |(_, at)| at.of())
+        .max(syllables.len());
+    // `None` is a part covered by a long syllable before it, written as that syllable's weight.
+    let mut inner: Vec<Option<String>> = vec![Some(absent.to_owned()); width];
+    for (event, at) in syllables {
+        let parts = at.parts().max(1);
+        if let Some(slot) = inner.get_mut(at.index()) {
+            *slot = Some(if parts > 1 {
+                format!("{}@{parts}", value(event))
+            } else {
+                value(event)
+            });
+        }
+        for covered in at.index() + 1..at.index() + parts {
+            if let Some(slot) = inner.get_mut(covered) {
+                *slot = None;
+            }
+        }
+    }
+    let written: Vec<String> = inner.into_iter().flatten().collect();
+    format!("[{}]", written.join(" "))
 }
 
 /// `SPEC.md` §4.2: stress becomes accent — times the bar's level under `density_level`, which is 1
@@ -1199,10 +1455,12 @@ fn pitched_layer(
         Pitched::Bass => style.bass_octave().midi_c(),
     };
 
-    // The melody may be voiced as chords (`Voicing`, palette — its doc argues it against I3); the
-    // bass is always one note, the root a chord would stand on.
+    // The melody may be voiced as chords (`Voicing`, palette — its doc argues it against I3), but
+    // not over a chord lane: under the harmony mapping it is single notes on top of the chords
+    // (`melody_voicing`, SPEC.md §4.6). The bass is always one note, the root a chord would stand
+    // on. The level follows: `chord_share` of one tone is the single note's level.
     let voicing = match role {
-        Pitched::Melody => style.voicing(),
+        Pitched::Melody => melody_voicing(score, style),
         Pitched::Bass => Voicing::Note,
     };
     let note = |event: &Event| match role {
@@ -1399,23 +1657,18 @@ fn chord_instrument(style: &Style) -> &'static str {
     strudel_instrument(style.chord_sound(), Pitched::Melody)
 }
 
-/// One pattern element per slot of the arrangement, as [`grid_by_slot`] writes them.
-fn per_slot(elements: Vec<String>) -> String {
-    match elements.len() {
-        0 => "~".to_owned(),
-        1 => elements
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| "~".to_owned()),
-        _ => format!("<{}>", elements.join(" ")),
-    }
-}
-
 /// The chord lane: one chord a slot, held for the bar, wherever the arrangement plays a foundation
-/// line the harmony mapping gave a chord (`SPEC.md` §4.6, [`Score::chord_in`]); a rest elsewhere.
+/// line the harmony mapping gave a chord (`SPEC.md` §4.6, [`Score::harmony_in`]); a rest
+/// elsewhere. A stanza's last bar under H2 is two halves (`Harmony::Turning`): its own chord, or a
+/// rest, then the turnaround — `[a b]` in the slot's element, so the change lands exactly on the
+/// bar's half under either pulse.
 ///
 /// `None` when the score has no chord — the mapping is off, or nothing in the poem earned one — so
 /// a piece without the harmony is byte for byte what it was.
+///
+/// The slots are laid end to end by [`sequence`], as every other pattern's bars are: under the
+/// steady pulse a chord lasts its bar's beats, not one cycle — one beat — as it did when this lane
+/// wrote its own `<…>`.
 ///
 /// Which slots have a chord, and on which degree, is the score's. Everything here is palette: the
 /// instrument (`chord_sound`), how many tones ([`chord_tones`], from the [`Voicing`]), the
@@ -1423,32 +1676,46 @@ fn per_slot(elements: Vec<String>) -> String {
 /// shared between the tones like the melody's, times the bar's density level) and a soft
 /// envelope, so a held chord swells in under the syllables rather than striking with them.
 fn chord_layer(score: &Score, style: &Style, density: &[f64]) -> Option<(String, String)> {
-    let chords: Vec<Option<Chord>> = score
+    let harmonies: Vec<Option<Harmony>> = score
         .arrangement()
         .slots()
         .iter()
-        .map(|slot| score.chord_in(slot))
+        .map(|slot| score.harmony_in(slot))
         .collect();
-    if chords.iter().all(Option::is_none) {
+    if harmonies
+        .iter()
+        .all(|harmony| harmony.is_none_or(|harmony| harmony.chords().next().is_none()))
+    {
         return None;
     }
-    let notes = per_slot(
-        chords
+    // One element per slot: `~`, one chord, or a turning bar's two halves.
+    let element = |harmony: &Option<Harmony>, value: &dyn Fn(Chord) -> String| -> String {
+        let one = |chord: Option<Chord>| chord.map_or_else(|| "~".to_owned(), value);
+        match harmony {
+            Some(harmony @ Harmony::Turning { turn, .. }) => {
+                format!("{} {}", one(harmony.chord()), value(*turn))
+            }
+            Some(harmony) => one(harmony.chord()),
+            None => "~".to_owned(),
+        }
+    };
+    let notes = sequence(
+        score,
+        &harmonies
             .iter()
-            .map(|chord| chord.map_or_else(|| "~".to_owned(), |chord| chord_note(chord, style)))
-            .collect(),
+            .map(|harmony| element(harmony, &|chord| chord_note(chord, style)))
+            .collect::<Vec<_>>(),
     );
-    let gains = per_slot(
-        chords
+    let gains = sequence(
+        score,
+        &harmonies
             .iter()
             .enumerate()
-            .map(|(slot, chord)| {
-                chord.map_or_else(
-                    || "~".to_owned(),
-                    |_| fmt_param(density.get(slot).copied().unwrap_or(1.0)),
-                )
+            .map(|(slot, harmony)| {
+                let level = fmt_param(density.get(slot).copied().unwrap_or(1.0));
+                element(harmony, &|_| level.clone())
             })
-            .collect(),
+            .collect::<Vec<_>>(),
     );
     let mix = style.mix();
     let mut layer = format!(
@@ -1470,7 +1737,9 @@ fn chord_layer(score: &Score, style: &Style, density: &[f64]) -> Option<(String,
     layer.push_str(&colour(Colour::Chords));
     Some((
         layer,
-        "the chords — one a bar of a foundation stanza, from the harmony mapping".to_owned(),
+        "the chords — one a bar of a foundation stanza (a stanza's last bar under cadence: its \
+         own, then the turnaround), from the harmony mapping"
+            .to_owned(),
     ))
 }
 
@@ -1504,22 +1773,36 @@ fn chords_header(out: &mut String, score: &Score, style: &Style) {
             scale.len()
         );
     }
-    // Line by line, counting from 1 as a reader does: `V/4` is V on degree 4, `-` a rest. Flourish
-    // lines carry no harmony and are left out.
+    // Line by line, counting from 1 as a reader does: `V/4` is V on degree 4, `-` a rest, and
+    // `I/0+V/8` a stanza's last bar split — its own chord, then the turnaround from its half.
+    // Flourish lines carry no harmony and are left out.
+    let name = |chord: Chord| format!("{}/{}", chord.function().numeral(), chord.root().get());
     let lines: Vec<String> = score
         .harmony()
         .iter()
         .filter_map(|harmony| match harmony {
-            Harmony::Chord(chord) => Some(format!(
-                "{}:{}/{}",
-                chord.bar().get() + 1,
-                chord.function().numeral(),
-                chord.root().get()
+            Harmony::Chord(chord) => Some(format!("{}:{}", chord.bar().get() + 1, name(*chord))),
+            Harmony::Turning { own, turn } => Some(format!(
+                "{}:{}+{}",
+                turn.bar().get() + 1,
+                own.map_or_else(|| "-".to_owned(), name),
+                name(*turn)
             )),
             Harmony::Rest(rest) if rest.why() == Silence::Flourish => None,
             Harmony::Rest(rest) => Some(format!("{}:-", rest.bar().get() + 1)),
         })
         .collect();
+    if score
+        .harmony()
+        .iter()
+        .any(|harmony| harmony.turnaround().is_some())
+    {
+        let _ = writeln!(
+            out,
+            "//   chords: a stanza's last bar is split — its own chord, then from the bar's half V \
+             of the stanza's first chord, turning round onto it (a+b below)"
+        );
+    }
     let _ = writeln!(out, "//   chords by line: {}", lines.join(" "));
 }
 
@@ -1538,6 +1821,7 @@ mod tests {
 
     use super::{BANK_SAMPLES, Strudel, StrudelError, bank_has, sample_for, strudel_bank};
     use crate::Backend as _;
+    use crate::fmt_param;
     use crate::style::{BANKS, KITS, RIDE_FALLBACKS, Style};
 
     /// Spelling is pronunciation: `A` and `o` are stressed vowels, `e` unstressed, `i` secondary.
@@ -1576,6 +1860,11 @@ mod tests {
     struct ByLength;
 
     impl Lexicon for ByLength {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, word: &str) -> Rarity {
             Rarity::band(u8::try_from(word.chars().count()).unwrap_or(u8::MAX))
         }
@@ -1622,6 +1911,9 @@ mod tests {
         argument(text, "note")
             .replace(['<', '>', '[', ']', '|'], " ")
             .split_whitespace()
+            // A bar's `@` weight is how long it lasts, not a value.
+            .map(|t| t.split('@').next().unwrap_or(t))
+            .filter(|t| !t.is_empty())
             .find(|token| *token != "~")
             .unwrap_or_default()
             .to_owned()
@@ -1630,11 +1922,12 @@ mod tests {
     #[test]
     fn a_foot_is_a_step_and_its_syllables_subdivide_it() {
         // SPEC.md §4.2, straight through to mini-notation. "eA" is an iamb, so one step holding
-        // two syllables; two of them is two steps. One cycle for the line, one for the outro.
+        // two syllables; two of them is two steps. One bar for the line, one for the outro, each
+        // two beats long: weight 2, two cycles of a beat each.
         let text = render("eA eA\n", &Style::default());
         assert_eq!(
             argument(&text, "s"),
-            "<[[bd bd] [bd bd]] [[bd bd] [bd bd]]>"
+            "<[[bd bd] [bd bd]]@2 [[bd bd] [bd bd]]@2>"
         );
     }
 
@@ -1645,7 +1938,7 @@ mod tests {
         let text = render("eiA\n", &Style::default());
         assert_eq!(
             argument(&text, "gain"),
-            "<[[0.333 0.667 1.000]] [[0.333 0.667 1.000]]>"
+            "<[[0.333 0.667 1.000]]@1 [[0.333 0.667 1.000]]@1>"
         );
     }
 
@@ -1655,7 +1948,8 @@ mod tests {
         // silence plays at the wrong time.
         // Voice 0 plays bar 0 and rests in bar 1 — in the statement and again in the outro.
         let text = render("bA\ntA\n", &Style::default());
-        assert_eq!(argument(&text, "s"), "<bd ~ bd ~>", "{text}");
+        // Every bar one beat long, so weight 1 each.
+        assert_eq!(argument(&text, "s"), "<bd@1 ~@1 bd@1 ~@1>", "{text}");
     }
 
     #[test]
@@ -1827,6 +2121,9 @@ mod tests {
         let sounding = melody
             .replace(['<', '>', '[', ']'], " ")
             .split_whitespace()
+            // A bar's `@` weight is how long it lasts, not a value.
+            .map(|t| t.split('@').next().unwrap_or(t))
+            .filter(|t| !t.is_empty())
             .filter(|token| *token != "~")
             .count();
         assert_eq!(
@@ -1856,6 +2153,9 @@ mod tests {
         let values: Vec<String> = gains
             .replace(['<', '>', '[', ']'], " ")
             .split_whitespace()
+            // A bar's `@` weight is how long it lasts, not a value.
+            .map(|t| t.split('@').next().unwrap_or(t))
+            .filter(|t| !t.is_empty())
             .filter(|t| *t != "~")
             .map(ToOwned::to_owned)
             .collect();
@@ -1889,6 +2189,9 @@ mod tests {
                 pattern
                     .replace(['<', '>', '[', ']'], " ")
                     .split_whitespace()
+                    // A bar's `@` weight is how long it lasts, not a value.
+                    .map(|t| t.split('@').next().unwrap_or(t))
+                    .filter(|t| !t.is_empty())
                     .filter(|t| *t != "~")
                     .map(ToOwned::to_owned)
                     .collect::<Vec<_>>()
@@ -1996,6 +2299,9 @@ mod tests {
         let depths: Vec<u32> = crush
             .replace(['<', '>', '[', ']'], " ")
             .split_whitespace()
+            // A bar's `@` weight is how long it lasts, not a value.
+            .map(|t| t.split('@').next().unwrap_or(t))
+            .filter(|t| !t.is_empty())
             .filter_map(|token| token.parse().ok())
             .collect();
         // Two words, in the statement and again in the outro.
@@ -2039,8 +2345,9 @@ mod tests {
         let text = render("bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n", &Style::default());
         let first = text.lines().find(|line| line.contains("voice 0")).unwrap();
         // The outro repeats stanza 2, and stanza 1 keeps looping under it from bar 0: `hh ~`.
+        // Under the steady pulse each bar lasts its beats: stanza 1's bars three, stanza 2's one.
         assert!(
-            first.starts_with("  s(\"<[hh ~ ~] ~ hh ~ hh ~>\")"),
+            first.starts_with("  s(\"<[hh ~ ~]@3 ~@3 hh@1 ~@1 hh@1 ~@1>\")"),
             "{text}"
         );
     }
@@ -2056,7 +2363,7 @@ mod tests {
             // ...and then both again, in the outro: the line with its call silent under it, and
             // the call under bar 1.
             first.starts_with(
-                "  s(\"<[[bd bd] [bd bd]] [[bd bd] ~] [[bd bd] [bd bd]] [[bd bd] ~]>\")"
+                "  s(\"<[[bd bd] [bd bd]]@2 [[bd bd] ~]@2 [[bd bd] [bd bd]]@2 [[bd bd] ~]@2>\")"
             ),
             "{text}"
         );
@@ -2097,6 +2404,9 @@ mod tests {
                     .unwrap()
                     .replace(['<', '>', '[', ']'], " ")
                     .split_whitespace()
+                    // A bar's `@` weight is how long it lasts, not a value.
+                    .map(|t| t.split('@').next().unwrap_or(t))
+                    .filter(|t| !t.is_empty())
                     .filter(|t| *t != "~")
                     .count()
             })
@@ -2118,6 +2428,9 @@ mod tests {
         rest[..rest.find('"').unwrap()]
             .replace(['<', '>', '[', ']', ','], " ")
             .split_whitespace()
+            // A bar's `@` weight is how long it lasts, not a value.
+            .map(|t| t.split('@').next().unwrap_or(t))
+            .filter(|t| !t.is_empty())
             .filter(|t| *t != "~")
             .map(|t| t.parse().unwrap())
             .collect()
@@ -2154,6 +2467,9 @@ mod tests {
                 .unwrap()
                 .replace(['<', '>', '[', ']'], " ")
                 .split_whitespace()
+                // A bar's `@` weight is how long it lasts, not a value.
+                .map(|t| t.split('@').next().unwrap_or(t))
+                .filter(|t| !t.is_empty())
                 .filter(|t| *t != "~")
                 .map(ToOwned::to_owned)
                 .collect()
@@ -2177,6 +2493,8 @@ mod tests {
             .nth(1)
             .unwrap()
             .split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+            // A bar's `@` weight is how long it lasts, not a chord.
+            .map(|t| t.split('@').next().unwrap_or(t))
             .map(|t| t.trim_start_matches('[').trim_end_matches(']'))
             .filter(|t| !t.is_empty() && *t != "~")
             .collect();
@@ -2328,6 +2646,9 @@ mod tests {
             argument(line, "note")
                 .replace(['<', '>', '[', ']'], " ")
                 .split_whitespace()
+                // A bar's `@` weight is how long it lasts, not a value.
+                .map(|t| t.split('@').next().unwrap_or(t))
+                .filter(|t| !t.is_empty())
                 .filter(|t| *t != "~")
                 .map(ToOwned::to_owned)
                 .collect()
@@ -2715,6 +3036,11 @@ mod tests {
 
     /// A poem lowered with the harmony's `variant` chosen.
     fn harmonised(source: &str, variant: prosody_core::Variant) -> Score {
+        harmonised_with(source, variant, false)
+    }
+
+    /// [`harmonised`], under the elastic pulse when `elastic`.
+    fn harmonised_with(source: &str, variant: prosody_core::Variant, elastic: bool) -> Score {
         let poem = Poem::parse(source.to_owned()).unwrap();
         let meter = meter::scan(&poem, &Spelled);
         let rhyme = rhyme::analyse(&poem, &Spelled);
@@ -2722,8 +3048,15 @@ mod tests {
         let sound = sound::analyse(&poem, &Spelled);
         let surprisal = surprisal::analyse(&poem, &Spelled, &ByLength);
         let roles = role::assign(&meter, &repetition).unwrap();
-        let mappings = prosody_core::Mappings::all()
+        let mut mappings = prosody_core::Mappings::all()
             .with(prosody_core::Mapping::Harmony.choose(variant).unwrap());
+        if elastic {
+            mappings = mappings.with(
+                prosody_core::Mapping::Pulse
+                    .choose(prosody_core::Variant::Elastic)
+                    .unwrap(),
+            );
+        }
         lower::run_with(
             Analyses {
                 poem: &poem,
@@ -2772,7 +3105,8 @@ mod tests {
             )
             .unwrap();
         let line = chord_line(&text);
-        let one = "[48,51,55] [50,53,56]";
+        // Each line is one beat (a spondee), so under the steady pulse each chord lasts `@1`.
+        let one = "[48,51,55]@1 [50,53,56]@1";
         assert!(
             line.starts_with(&format!(
                 "  note(\"<{one} {one} {one} {one}>\").sound(\"gm_pad_warm\")"
@@ -2782,7 +3116,9 @@ mod tests {
         // Every slot has a chord at the bar's own level; the lane's level 0.40 is shared by the
         // three tones: 0.4 / √3.
         assert!(
-            line.contains(".gain(\"<1.000 1.000 1.000 1.000 1.000 1.000 1.000 1.000>\")"),
+            line.contains(
+                ".gain(\"<1.000@1 1.000@1 1.000@1 1.000@1 1.000@1 1.000@1 1.000@1 1.000@1>\")"
+            ),
             "{line}"
         );
         assert!(line.contains(".postgain(0.231)"), "{line}");
@@ -2797,15 +3133,17 @@ mod tests {
 
     #[test]
     fn cadence_voiced_as_sevenths_folds_its_roots_into_one_octave() {
-        // Cadence on ABAB: V/4, V/5, I/0, and the turnaround V/8 — degree 8 is degree 1 folded
-        // into the octave. Sevenths in C minor from 48: degree 4 is G Bb D F (55 58 62 65),
-        // 5 is Ab C Eb G (56 60 63 67), 0 is C Eb G Bb (48 51 55 58), 1 is D F Ab C (50 53 56 60).
+        // Cadence on ABAB: V/4, V/5, I/0, and the last bar I/1 then the turnaround V/8 — degree 8
+        // is degree 1 folded into the octave, so here the turnaround restrikes the bar's own
+        // chord. Sevenths in C minor from 48: degree 4 is G Bb D F (55 58 62 65), 5 is Ab C Eb G
+        // (56 60 63 67), 0 is C Eb G Bb (48 51 55 58), 1 is D F Ab C (50 53 56 60).
         let style = Style::parse("+++\nvoicing = \"seventh\"\n+++").unwrap();
         let text = Strudel::new()
             .render(&harmonised(ABAB, prosody_core::Variant::Cadence), &style)
             .unwrap();
         let line = chord_line(&text);
-        let one = "[55,58,62,65] [56,60,63,67] [48,51,55,58] [50,53,56,60]";
+        let one = "[55,58,62,65]@1 [56,60,63,67]@1 [48,51,55,58]@1 \
+                   [[50,53,56,60] [50,53,56,60]]@1";
         assert!(
             line.starts_with(&format!("  note(\"<{one} {one}>\")")),
             "{line}"
@@ -2813,10 +3151,74 @@ mod tests {
         // Four tones share the level: 0.4 / 2.
         assert!(line.contains(".postgain(0.200)"), "{line}");
         assert!(
-            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/0 4:V/8\n"),
+            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/0 4:I/1+V/8\n"),
             "{text}"
         );
         assert!(text.contains("as seventh chords in minor"), "{text}");
+    }
+
+    #[test]
+    fn over_the_harmony_the_jazz_melody_plays_single_notes() {
+        // The jazz palette: C dorian (C D Eb F G A Bb), the melody at octave 4 from MIDI 60, the
+        // seventh voicing, melody level 0.75. ABAB's rhyme classes: A (`bA`, `tA`) degree 0, B
+        // (`bo`, `do`) degree 1. Hand-worked, the seventh on degree 0 is C Eb G Bb = 60 63 67 70
+        // and on degree 1 D F A C = 62 65 69 72; as single notes, 60 and 62.
+        let jazz = Style::preset("jazz").unwrap();
+        let melody_steps = |text: &str| -> (Vec<String>, String) {
+            let line = text
+                .lines()
+                .find(|l| l.contains("// the melody"))
+                .unwrap()
+                .to_owned();
+            let steps: Vec<String> = line
+                .split('"')
+                .nth(1)
+                .unwrap()
+                .split(|c: char| c.is_whitespace() || c == '<' || c == '>')
+                .map(|t| t.split('@').next().unwrap_or(t))
+                .map(|t| t.trim_start_matches('[').trim_end_matches(']').to_owned())
+                .filter(|t| !t.is_empty() && t != "~")
+                .collect();
+            (steps, line)
+        };
+        let off = Strudel::new()
+            .render(&harmonised(ABAB, prosody_core::Variant::Off), &jazz)
+            .unwrap();
+        let on = Strudel::new()
+            .render(&harmonised(ABAB, prosody_core::Variant::Cadence), &jazz)
+            .unwrap();
+        let (chords, off_line) = melody_steps(&off);
+        let (notes, on_line) = melody_steps(&on);
+        // Harmony off: the voicing is the palette's, each rhyme word a seventh chord.
+        assert_eq!(
+            chords,
+            ["60,63,67,70", "62,65,69,72", "60,63,67,70", "62,65,69,72"].repeat(2),
+            "{off_line}"
+        );
+        // Harmony on: the same steps, each its chord's lowest tone alone.
+        assert_eq!(notes, ["60", "62", "60", "62"].repeat(2), "{on_line}");
+        // The level: four tones at 0.75 / √4 off, one tone at the whole 0.75 on.
+        assert!(off_line.contains(".postgain(0.375)"), "{off_line}");
+        assert!(on_line.contains(".postgain(0.750)"), "{on_line}");
+        // The voicing still shapes the chord lane: V of degree 0 is degree 4, G Bb D F from 48.
+        assert!(chord_line(&on).contains("[55,58,62,65]"), "{on}");
+        assert!(
+            on.contains("melody on gm_epiano1 as single notes over the chords"),
+            "{on}"
+        );
+        assert!(!off.contains("single notes"), "{off}");
+        assert!(
+            off.contains("melody on gm_epiano1 as seventh chords"),
+            "{off}"
+        );
+        assert_eq!(
+            super::melody_voicing(&harmonised(ABAB, prosody_core::Variant::Rhyme), &jazz),
+            crate::Voicing::Note
+        );
+        assert_eq!(
+            super::melody_voicing(&harmonised(ABAB, prosody_core::Variant::Off), &jazz),
+            crate::Voicing::Seventh
+        );
     }
 
     #[test]
@@ -2830,15 +3232,115 @@ mod tests {
             .unwrap();
         let line = chord_line(&text);
         assert!(
-            line.starts_with("  note(\"<[48,51,55] ~ [48,51,55] [48,51,55] ~ [48,51,55]>\")"),
+            line.starts_with(
+                "  note(\"<[48,51,55]@1 ~@1 [48,51,55]@1 [48,51,55]@1 ~@1 [48,51,55]@1>\")"
+            ),
             "{line}"
         );
         assert!(
-            line.contains(".gain(\"<1.000 ~ 1.000 1.000 ~ 1.000>\")"),
+            line.contains(".gain(\"<1.000@1 ~@1 1.000@1 1.000@1 ~@1 1.000@1>\")"),
             "{line}"
         );
         assert!(
             text.contains("//   chords by line: 1:I/0 2:- 3:I/0\n"),
+            "{text}"
+        );
+    }
+
+    /// ABBA in four-iamb lines: A (AA) is degree 0, B (OW) degree 1.
+    const ABBA: &str = "de dA de bA de sA de tA\nde do de bo de so de to\n\
+                        de bA de sA de dA de no\nde bo de so de to de bA\n";
+
+    #[test]
+    fn the_last_bar_plays_its_own_chord_then_the_turnaround_from_its_half() {
+        // Cadence on ABBA: A opens (V/4: G Bb D, 55 58 62), B opens (V/5: Ab C Eb, 56 60 63), B
+        // closes (I/1: D F Ab, 50 53 56), and A closes the stanza on I/0 (C Eb G, 48 51 55) — then
+        // from the bar's half V of the first chord's root, 4 + 4 = 8, which folds to degree 1
+        // (50 53 56). Four beats a bar: under the steady pulse `@4`, the split `[a b]` inside it,
+        // so the turnaround begins two beats in. Stated, then the outro's pass.
+        let score = harmonised(ABBA, prosody_core::Variant::Cadence);
+        let text = Strudel::new().render(&score, &Style::default()).unwrap();
+        let line = chord_line(&text);
+        let pass = "[55,58,62]@4 [56,60,63]@4 [50,53,56]@4 [[48,51,55] [50,53,56]]@4";
+        assert!(
+            line.starts_with(&format!("  note(\"<{pass} {pass}>\")")),
+            "{line}"
+        );
+        // On the music's clock: the lane's bar weights are the slots' beats, as every other
+        // pattern's (`weights`, the one walk's), so a chord lasts its bar and not one beat.
+        let lane_weights: Vec<u64> = argument(line, "note")
+            .split('@')
+            .skip(1)
+            .map(|rest| {
+                rest.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse()
+                    .unwrap()
+            })
+            .collect();
+        assert_eq!(lane_weights, super::weights(&score));
+        assert_eq!(lane_weights, vec![4; 8]);
+        // The levels split with the chords: both halves of a turning bar carry the bar's level.
+        let gains = argument(line, "gain");
+        let steps: Vec<&str> = gains.trim_matches(['<', '>', '"']).split("@4").collect();
+        assert!(steps[3].trim().starts_with('[') && steps[3].matches(' ').count() == 2);
+        assert!(
+            text.contains("//   chords by line: 1:V/4 2:V/5 3:I/1 4:I/0+V/8\n"),
+            "{text}"
+        );
+        assert!(
+            text.contains("//   chords: a stanza's last bar is split — its own chord, then"),
+            "{text}"
+        );
+        // Under the elastic pulse a bar is one cycle, and the turnaround still begins at its
+        // half.
+        let elastic = Strudel::new()
+            .render(
+                &harmonised_with(ABBA, prosody_core::Variant::Cadence, true),
+                &Style::default(),
+            )
+            .unwrap();
+        let pass = "[55,58,62] [56,60,63] [50,53,56] [[48,51,55] [50,53,56]]";
+        assert!(
+            chord_line(&elastic).starts_with(&format!("  note(\"<{pass} {pass}>\")")),
+            "{}",
+            chord_line(&elastic)
+        );
+        // Rhyme (H1) has no turnaround, so no split and no split line in the header.
+        let rhyme = Strudel::new()
+            .render(
+                &harmonised(ABBA, prosody_core::Variant::Rhyme),
+                &Style::default(),
+            )
+            .unwrap();
+        assert!(!rhyme.contains("is split"), "{rhyme}");
+        assert!(!chord_line(&rhyme).contains("[["), "{rhyme}");
+    }
+
+    #[test]
+    fn a_turning_bar_with_no_chord_of_its_own_rests_then_turns_round() {
+        // Under `both`, `ro bAn` (AA N) rhymes with nothing, so its first half has no chord; from
+        // its half it turns round onto the stanza's first chord: A opens on degree 0, V/4, so V/8,
+        // degree 1 folded (50 53 56).
+        let text = Strudel::new()
+            .render(
+                &harmonised("dA bA\nsA tA\nro bAn\n", prosody_core::Variant::Both),
+                &Style::default(),
+            )
+            .unwrap();
+        let line = chord_line(&text);
+        let pass = "[55,58,62]@1 [48,51,55]@1 [~ [50,53,56]]@1";
+        assert!(
+            line.starts_with(&format!("  note(\"<{pass} {pass}>\")")),
+            "{line}"
+        );
+        assert!(
+            line.contains(".gain(\"<1.000@1 1.000@1 [~ 1.000]@1"),
+            "{line}"
+        );
+        assert!(
+            text.contains("//   chords by line: 1:V/4 2:I/0 3:-+V/8\n"),
             "{text}"
         );
     }
@@ -2859,7 +3361,7 @@ mod tests {
             argument(chord_line(text), "note")
                 .trim_matches(['<', '>'])
                 .split(' ')
-                .map(|step| step == "~")
+                .map(|step| step.split('@').next() == Some("~"))
                 .collect()
         };
         assert_eq!(rests(&plain), rests(&coloured));
@@ -2959,7 +3461,12 @@ swing = 0.33
             current.push(character);
         }
         bars.push(current);
-        bars[index].clone()
+        // A bar's `@` weight is how long it lasts under the steady pulse, not part of the bar.
+        let bar = bars[index].clone();
+        match bar.rfind('@') {
+            Some(at) if bar[at + 1..].chars().all(|c| c.is_ascii_digit()) => bar[..at].to_owned(),
+            _ => bar,
+        }
     }
 
     #[test]
@@ -3093,5 +3600,516 @@ swing = 0.33
         assert_eq!(bar_of(bass, 0), "[36 39 38 36]", "{bass}");
         assert_eq!(bar_of(bass, 1), "[41 38 39 41]", "{bass}");
         assert!(text.contains("of the bar's chord"), "{text}");
+    }
+
+    /// Two stanzas of one layer — three iambs a line, then four — so the arrangement mixes bars of
+    /// three and four beats. No line rhymes within its stanza, so nothing is held.
+    const THREE_THEN_FOUR: &str = "deA deA deo\nteA teA teA\n\nbeA beA beA beo\nreA reA reA reA\n";
+
+    /// `source` lowered with the pulse set to `pulse`, every other mapping at its default.
+    fn pulsed(source: &str, pulse: prosody_core::Variant) -> (Poem, Score) {
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings =
+            prosody_core::Mappings::all().with(prosody_core::Mapping::Pulse.choose(pulse).unwrap());
+        let score = lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &ByLength),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap();
+        (poem, score)
+    }
+
+    /// The `@` weights of a sequence's top-level elements, in order: how many cycles each bar
+    /// lasts. Empty when it has none, as under the elastic pulse.
+    fn weights_in(sequence: &str) -> Vec<u64> {
+        let inner = sequence.trim_start_matches('<').trim_end_matches('>');
+        let mut depth = 0_i32;
+        let mut out = Vec::new();
+        let mut current = String::new();
+        for character in inner.chars().chain(std::iter::once(' ')) {
+            match character {
+                '[' => depth += 1,
+                ']' => depth -= 1,
+                ' ' if depth == 0 => {
+                    if let Some((_, weight)) = current.rsplit_once('@') {
+                        out.push(weight.parse().unwrap());
+                    }
+                    current.clear();
+                    continue;
+                }
+                _ => {}
+            }
+            current.push(character);
+        }
+        out
+    }
+
+    fn at_120() -> Style {
+        Style::parse("+++\ntempo_range = [120, 120]\n+++").unwrap()
+    }
+
+    #[test]
+    fn under_the_steady_pulse_each_bar_lasts_its_beats() {
+        // Hand-worked from `prosody_core::arrange`, a slot taking its host's stanza's period:
+        // stanza 1 stated (slots 0, 1: three beats each); stanza 2 transforms its loop a line a
+        // pass — slot 2 hosts its first line arriving (four), slot 3 the old loop's second line
+        // yielding (three), slot 4 the new first line looping, slot 5 the second arriving (four
+        // each); the outro plays stanza 2 again (four, four). A cycle is a beat, so the bars are
+        // weighted 3 3 4 3 4 4 4 4 and begin on beats 0 3 6 10 13 17 21 25; the piece is 29.
+        let (_, score) = pulsed(THREE_THEN_FOUR, prosody_core::Variant::Steady);
+        assert_eq!(super::weights(&score), vec![3, 3, 4, 3, 4, 4, 4, 4]);
+        assert_eq!(super::starts(&score), vec![0, 3, 6, 10, 13, 17, 21, 25, 29]);
+        let text = Strudel::new().render(&score, &at_120()).unwrap();
+        // Every pattern of the piece carries the same weights — the drums, and every parameter.
+        for line in text
+            .lines()
+            .filter(|l| l.starts_with("  s(") || l.starts_with("  note("))
+        {
+            let sequence = line.split('"').nth(1).unwrap();
+            assert_eq!(weights_in(sequence), vec![3, 3, 4, 3, 4, 4, 4, 4], "{line}");
+            for parameter in line.split(").").skip(1) {
+                if let Some(inner) = parameter.split('"').nth(1).filter(|p| p.starts_with('<')) {
+                    assert_eq!(
+                        weights_in(inner),
+                        vec![3, 3, 4, 3, 4, 4, 4, 4],
+                        "{parameter}"
+                    );
+                }
+            }
+        }
+        // ...at the tempo itself: a cycle is a beat, so one beat lasts 60 / 120 = 0.5 s, a bar of
+        // three 1.5 s and one of four 2 s.
+        assert!(text.ends_with("  .cpm(120.000)\n"), "{text}");
+        assert!(
+            text.contains(
+                "//   pulse = steady: a cycle is a beat at 120 bpm, and every bar lasts its beats \
+                 (bars of 3, 4 beats)"
+            ),
+            "{text}"
+        );
+        assert_eq!(
+            fmt_param(super::cycles_per_minute(&score, &at_120())),
+            "120.000"
+        );
+    }
+
+    #[test]
+    fn under_the_elastic_pulse_every_bar_lasts_one_cycle() {
+        // The same piece as the pattern was: 29 beats over 8 slots, integer mean 3, so one cycle a
+        // bar at 120 / 3 = 40 a minute — 1.5 s a bar whatever its length. A four-beat bar plays
+        // its beats in 1.5 / 4 = 0.375 s, which is 160 bpm; a three-beat bar at 120.
+        let (_, score) = pulsed(THREE_THEN_FOUR, prosody_core::Variant::Elastic);
+        assert_eq!(super::weights(&score), vec![1; 8]);
+        assert_eq!(super::starts(&score), (0..=8).collect::<Vec<u64>>());
+        let text = Strudel::new().render(&score, &at_120()).unwrap();
+        let drums = text.lines().find(|l| l.starts_with("  s(")).unwrap();
+        assert!(!drums.contains('@'), "{drums}");
+        assert!(text.ends_with("  .cpm(40.000)\n"), "{text}");
+        assert!(
+            text.contains("so the beat follows the bar's length: 3 beats at 120.000 bpm, 4 beats at 160.000 bpm"),
+            "{text}"
+        );
+        // Both pulses play the same bars, beats and subdivisions: only how long a bar lasts
+        // differs.
+        let steady = Strudel::new()
+            .render(
+                &pulsed(THREE_THEN_FOUR, prosody_core::Variant::Steady).1,
+                &at_120(),
+            )
+            .unwrap();
+        let unweighted = |text: &str| -> String {
+            text.lines()
+                .filter(|l| l.starts_with("  ") && !l.starts_with("  .cpm"))
+                .map(|l| {
+                    let mut out = String::new();
+                    let mut skipping = false;
+                    for c in l.chars() {
+                        if c == '@' {
+                            skipping = true;
+                        } else if skipping && c.is_ascii_digit() {
+                        } else {
+                            skipping = false;
+                            out.push(c);
+                        }
+                    }
+                    out
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        assert_eq!(unweighted(&text), unweighted(&steady));
+    }
+
+    #[test]
+    fn swing_slices_every_beat_under_either_pulse() {
+        // `swingBy(x, n)` slices a *cycle* into n. Steady: a cycle is a beat, so n = 1 swings
+        // every beat of a three- and a four-beat bar alike. Elastic: a cycle is a bar, sliced by
+        // the integer mean, 3 — which is a beat only in a bar of three.
+        let swung = Style::parse("+++\ntempo_range = [120, 120]\nswing = 0.33\n+++").unwrap();
+        let steady = Strudel::new()
+            .render(
+                &pulsed(THREE_THEN_FOUR, prosody_core::Variant::Steady).1,
+                &swung,
+            )
+            .unwrap();
+        assert!(
+            steady.ends_with("  .swingBy(0.330, 1)\n  .cpm(120.000)\n"),
+            "{steady}"
+        );
+        let elastic = Strudel::new()
+            .render(
+                &pulsed(THREE_THEN_FOUR, prosody_core::Variant::Elastic).1,
+                &swung,
+            )
+            .unwrap();
+        assert!(
+            elastic.ends_with("  .swingBy(0.330, 3)\n  .cpm(40.000)\n"),
+            "{elastic}"
+        );
+    }
+
+    #[test]
+    fn the_trace_and_the_reading_land_on_the_musics_bars_under_either_pulse() {
+        for (pulse, weights, cpm) in [
+            (
+                prosody_core::Variant::Steady,
+                vec![3, 3, 4, 3, 4, 4, 4, 4],
+                "120.000",
+            ),
+            (prosody_core::Variant::Elastic, vec![1; 8], "40.000"),
+        ] {
+            let (poem, score) = pulsed(THREE_THEN_FOUR, pulse);
+            let music = Strudel::new().render(&score, &at_120()).unwrap();
+            // The trace: the music's bar starts, the music's clock, and the music's weights on
+            // every lane.
+            let trace = crate::trace::plan(&score, &at_120());
+            assert_eq!(trace.bars(), super::starts(&score).as_slice(), "{pulse:?}");
+            assert_eq!(fmt_param(trace.cycles_per_minute()), cpm);
+            assert_eq!(
+                trace.pattern().lines().last(),
+                music.lines().last(),
+                "{pulse:?}"
+            );
+            for lane in trace.pattern().lines().filter(|l| l.starts_with("  n(")) {
+                let sequence = lane.split('"').nth(1).unwrap();
+                let found = weights_in(sequence);
+                if pulse == prosody_core::Variant::Steady {
+                    assert_eq!(found, weights, "{lane}");
+                } else {
+                    assert!(found.is_empty(), "{lane}");
+                }
+            }
+            // The reading under `arrives`: each cue in the slot where its line arrives, weighted
+            // as the music's bars, at the music's cycles a minute — so it fires on that bar's
+            // first beat.
+            let arrives = prosody_core::Mappings::all().with(
+                prosody_core::Mapping::Reading
+                    .choose(prosody_core::Variant::Arrives)
+                    .unwrap(),
+            );
+            let reading = crate::reading::plan(&poem, &score, &at_120(), &arrives).unwrap();
+            let slots: Vec<usize> = reading.cues().iter().map(crate::Cue::slot).collect();
+            assert_eq!(slots, vec![0, 1, 2, 5], "{pulse:?}");
+            let cue_pattern = reading.pattern();
+            let last = cue_pattern.lines().last().unwrap();
+            assert!(last.ends_with(&format!(".cpm({cpm})")), "{last}");
+            let sequence = last.split('"').nth(1).unwrap();
+            if pulse == prosody_core::Variant::Steady {
+                assert_eq!(sequence, "<0@3 1@3 2@4 ~@3 ~@4 3@4 ~@4 ~@4>");
+            } else {
+                assert_eq!(sequence, "<0 1 2 ~ ~ 3 ~ ~>");
+            }
+            // The rate is fitted to the bar the line is spoken in. Steady: six syllables in a
+            // three-beat bar, 1.5 s, and eight in a four-beat bar, 2 s — 1.5 / (0.85 × 1.5) and
+            // 2 / (0.85 × 2), both 1.176. Elastic: every bar 1.5 s, so the eight-syllable line
+            // is hurried, 2 / (0.85 × 1.5) = 1.569.
+            let rates: Vec<String> = reading.cues().iter().map(|c| fmt_param(c.rate())).collect();
+            if pulse == prosody_core::Variant::Steady {
+                assert_eq!(rates, vec!["1.176", "1.176", "1.176", "1.176"]);
+            } else {
+                assert_eq!(rates, vec!["1.176", "1.176", "1.569", "1.569"]);
+            }
+
+            // The default, `breath`: stanza 2 (lines 2, 3) arrives in slot 2, the breath after
+            // slot 1, so it is read in slots 3 and 4. Slot 3 is the old loop's three-beat bar
+            // (line 1 yielding), slot 4 a four-beat one — so the cue weights follow the music's
+            // bars, not the line's own, and so does the rate: line 2's eight syllables in a
+            // three-beat bar of 1.5 s are 2 / (0.85 × 1.5) = 1.569, line 3's in a four-beat bar
+            // of 2 s are 1.176.
+            let reading =
+                crate::reading::plan(&poem, &score, &at_120(), &prosody_core::Mappings::all())
+                    .unwrap();
+            let slots: Vec<usize> = reading.cues().iter().map(crate::Cue::slot).collect();
+            assert_eq!(slots, vec![0, 1, 3, 4], "{pulse:?}");
+            let cue_pattern = reading.pattern();
+            let last = cue_pattern.lines().last().unwrap();
+            assert!(last.ends_with(&format!(".cpm({cpm})")), "{last}");
+            let sequence = last.split('"').nth(1).unwrap();
+            let rates: Vec<String> = reading.cues().iter().map(|c| fmt_param(c.rate())).collect();
+            if pulse == prosody_core::Variant::Steady {
+                assert_eq!(sequence, "<0@3 1@3 ~@4 2@3 3@4 ~@4 ~@4 ~@4>");
+                assert_eq!(rates, vec!["1.176", "1.176", "1.569", "1.176"]);
+            } else {
+                assert_eq!(sequence, "<0 1 ~ 2 3 ~ ~ ~>");
+                assert_eq!(rates, vec!["1.176", "1.176", "1.569", "1.569"]);
+            }
+        }
+    }
+
+    /// ABAB, the first A line opening on an anapaest — `dee-e-A deA`, `u u S | u S` — and the
+    /// others two iambs, so the held A line sounds three against two under the B line in slot 1.
+    const HELD_ANAPAEST: &str = "deeA deA\nbeo beo\nteA teA\nreo reo\n";
+
+    /// `source` lowered with the stack set to `stack`, every other mapping at its default.
+    fn stacked(source: &str, stack: prosody_core::Variant) -> Score {
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let mappings =
+            prosody_core::Mappings::all().with(prosody_core::Mapping::Stack.choose(stack).unwrap());
+        lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme::analyse(&poem, &Spelled),
+                repetition: &repetition,
+                sound: &sound::analyse(&poem, &Spelled),
+                surprisal: &surprisal::analyse(&poem, &Spelled, &ByLength),
+                roles: &roles,
+            },
+            &mappings,
+        )
+        .unwrap()
+    }
+
+    /// The `index`-th bar of a `<…>` sequence, its `@` weight removed, with every value replaced
+    /// by `x` — the rhythm alone, so the music and the trace can be compared.
+    fn shape_of(sequence: &str, index: usize) -> String {
+        let inner = sequence.trim_start_matches('<').trim_end_matches('>');
+        let mut bars = Vec::new();
+        let (mut depth, mut current) = (0_i32, String::new());
+        for character in inner.chars() {
+            match character {
+                '[' => depth += 1,
+                ']' => depth -= 1,
+                ' ' if depth == 0 => {
+                    bars.push(std::mem::take(&mut current));
+                    continue;
+                }
+                _ => {}
+            }
+            current.push(character);
+        }
+        bars.push(current);
+        let bar = bars[index].clone();
+        let bar = match bar.rfind('@') {
+            Some(at) if !bar[at..].contains(']') => bar[..at].to_owned(),
+            _ => bar,
+        };
+        // Each step's value becomes `x`, its weight kept: `[bd@2 bd bd]` → `[x@2 x x]`.
+        let mut out = String::new();
+        let mut in_value = false;
+        let mut in_weight = false;
+        for character in bar.chars() {
+            match character {
+                '[' | ']' | ' ' => {
+                    in_value = false;
+                    in_weight = false;
+                    out.push(character);
+                }
+                '@' => {
+                    in_weight = true;
+                    out.push('@');
+                }
+                '~' if !in_value => out.push('~'),
+                _ if in_weight => out.push(character),
+                _ if !in_value => {
+                    in_value = true;
+                    out.push('x');
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The `index`-th sequence written as `call("…")` in a rendered pattern or trace, in order.
+    fn nth_call(text: &str, call: &str, index: usize) -> String {
+        let needle = format!("{call}(\"");
+        let lines: Vec<&str> = text.lines().filter(|l| l.contains(&needle)).collect();
+        let line = lines
+            .get(index)
+            .unwrap_or_else(|| panic!("no {call} {index} in:\n{text}"));
+        let start = line.find(&needle).unwrap() + needle.len();
+        let rest = &line[start..];
+        rest[..rest.find('"').unwrap()].to_owned()
+    }
+
+    #[test]
+    fn straight_fits_a_held_triplet_to_its_host_in_the_pattern_and_the_trace() {
+        let crossing = stacked(HELD_ANAPAEST, prosody_core::Variant::Crossing);
+        let straight = stacked(HELD_ANAPAEST, prosody_core::Variant::Straight);
+        let style = at_120();
+        let (cross_text, straight_text) = (
+            Strudel::new().render(&crossing, &style).unwrap(),
+            Strudel::new().render(&straight, &style).unwrap(),
+        );
+        // Every line is its own voice, so the A line's drums are the first `s(…)`. Slot 1: the B
+        // line hosts, `[x x] [x x]`, and the A line is held under it. Crossing, its anapaest
+        // divides beat 0 in three. Straight, by hand: the first syllable takes the host's first
+        // half (`@2` of four parts), the other two share the second — onsets 0, ½, ¾.
+        assert_eq!(
+            shape_of(&nth_call(&cross_text, "s", 0), 1),
+            "[[x x x] [x x]]"
+        );
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 0), 1),
+            "[[x@2 x x] [x x]]"
+        );
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 1), 1),
+            "[[x x] [x x]]"
+        );
+        // Where the A line hosts — slot 0, and slot 4 in the outro — nothing is under it, and
+        // it keeps its triplet.
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 0), 0),
+            "[[x x x] [x x]]"
+        );
+        assert_eq!(
+            shape_of(&nth_call(&straight_text, "s", 0), 4),
+            "[[x x x] [x x]]"
+        );
+        // Every parameter of the lane is written on the same grid, so each meets one event.
+        let lane = straight_text.lines().find(|l| l.contains("s(\"")).unwrap();
+        for parameter in lane.split(").").skip(1) {
+            if let Some(inner) = parameter.split('"').nth(1).filter(|p| p.starts_with('<')) {
+                assert_eq!(shape_of(inner, 1), "[[x@2 x x] [x x]]", "{parameter}");
+            }
+        }
+        // Only the straight header names the stack, and counts the one beat it fitted.
+        assert!(!cross_text.contains("stack ="), "{cross_text}");
+        assert!(
+            straight_text.contains("//   stack = straight: a line stacked under a bar's line is fitted to that line's subdivision wherever the two would cross, in 1 beat(s)"),
+            "{straight_text}"
+        );
+        // The trace is the music's walk: each of its lanes has the music's rhythm, slot by slot.
+        let trace = crate::trace::plan(&straight, &style);
+        for voice in 0..4 {
+            let traced = nth_call(trace.pattern(), "n", voice);
+            let music = nth_call(&straight_text, "s", voice);
+            for slot in 0..straight.arrangement().slots().len() {
+                assert_eq!(
+                    shape_of(&traced, slot),
+                    shape_of(&music, slot),
+                    "{voice} {slot}"
+                );
+            }
+        }
+        // Nothing else changed: besides the header, the A line's drums and the bass's second
+        // lane — the held line's bass note on its stressed third syllable, now at ¾ of the beat
+        // (`[~ ~ ~ 36]`, the long first syllable's rest written as its two parts).
+        let differing: Vec<&str> = cross_text
+            .lines()
+            .zip(straight_text.lines().filter(|l| !l.contains("stack =")))
+            .filter(|(a, b)| a != b)
+            .map(|(_, b)| b)
+            .collect();
+        assert_eq!(differing.len(), 2, "{differing:?}");
+        assert!(differing[0].starts_with("  s(\"<[[bd bd bd] [bd bd]]@2 [[bd@2 bd bd]"));
+        assert!(
+            differing[1].starts_with("  note(\"<~@2 [[~ ~ ~ 36] ~]@2"),
+            "{}",
+            differing[1]
+        );
+    }
+
+    #[test]
+    fn the_osc_schedule_sounds_the_fitted_onsets() {
+        // Every slot lasts two beats; slot 1 starts on beat 2. The held A line's first beat there
+        // is 2, 2⅓, 2⅔ crossing and 2, 2½, 2¾ straight; its second beat 3 and 3½ either way.
+        let onsets = |stack| {
+            let schedule = crate::Backend::render(
+                &crate::Osc::new(),
+                &stacked(HELD_ANAPAEST, stack),
+                &at_120(),
+            )
+            .unwrap();
+            let mut at: Vec<String> = schedule
+                .messages()
+                .iter()
+                .map(|m| fmt_param(m.at().as_beats()))
+                .filter(|at| at.starts_with("2.") || at.starts_with("3."))
+                .collect();
+            at.dedup();
+            (at, schedule)
+        };
+        let (crossing, crossing_schedule) = onsets(prosody_core::Variant::Crossing);
+        let (straight, straight_schedule) = onsets(prosody_core::Variant::Straight);
+        // The host's iambs sound at 2, 2½, 3, 3½ under both.
+        assert_eq!(
+            crossing,
+            vec!["2.000", "2.333", "2.500", "2.667", "3.000", "3.500"]
+        );
+        assert_eq!(straight, vec!["2.000", "2.500", "2.750", "3.000", "3.500"]);
+        assert_eq!(crossing_schedule.straightened(), None);
+        assert_eq!(straight_schedule.straightened(), Some(1));
+        assert!(straight_schedule.to_text().contains(
+            "# stack = straight: a stacked line fitted to its bar's line's subdivision in 1 beat(s)"
+        ));
+        assert_eq!(
+            crossing_schedule.messages().len(),
+            straight_schedule.messages().len()
+        );
+    }
+
+    #[test]
+    fn the_osc_schedule_counts_the_steady_bars_and_says_it_is_not_elastic() {
+        // OSC is in beats, so its bars are the steady pulse's whichever is chosen: every bar
+        // begins with its host line's first syllable, on beats 0 3 6 10 13 17 21 25.
+        for pulse in [
+            prosody_core::Variant::Steady,
+            prosody_core::Variant::Elastic,
+        ] {
+            let (_, score) = pulsed(THREE_THEN_FOUR, pulse);
+            let schedule = crate::Backend::render(&crate::Osc::new(), &score, &at_120()).unwrap();
+            let onsets: Vec<f64> = schedule
+                .messages()
+                .iter()
+                .map(|m| m.at().as_beats())
+                .collect();
+            for start in [0.0, 3.0, 6.0, 10.0, 13.0, 17.0, 21.0, 25.0] {
+                assert!(
+                    onsets.iter().any(|at| (at - start).abs() < 1e-9),
+                    "no onset on beat {start}"
+                );
+            }
+            let steady_starts: Vec<f64> =
+                super::starts(&pulsed(THREE_THEN_FOUR, prosody_core::Variant::Steady).1)
+                    .into_iter()
+                    .map(|beats| f64::from(u32::try_from(beats).unwrap()))
+                    .collect();
+            assert!(onsets.iter().all(|at| *at < steady_starts[8]), "{pulse:?}");
+            let elastic = pulse == prosody_core::Variant::Elastic;
+            assert_eq!(schedule.elastic_unapplied(), elastic);
+            assert_eq!(
+                schedule
+                    .to_text()
+                    .contains("# not applied here: pulse = elastic"),
+                elastic
+            );
+        }
     }
 }

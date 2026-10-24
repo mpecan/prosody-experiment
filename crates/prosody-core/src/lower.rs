@@ -5,7 +5,9 @@
 //! enough at poem scale." So this is four steps:
 //!
 //! 1. `rhythm` — every syllable placed in time, from the meter. This builds the whole event list;
-//!    the three after it only decorate what it produced.
+//!    the steps after it only decorate what it produced. Under the light function words
+//!    ([`crate::accent`]) a one-syllable function word the meter calls weak is then struck
+//!    lightly, before anything reads a velocity.
 //! 2. `melody` — pitch, on the rhyming words.
 //! 3. the bass ([`crate::bass`]) — a bass note on foundation syllables or feet, after the harmony
 //!    layer ([`crate::harmony`]) has decided each line's chord, which W2 walks on.
@@ -114,15 +116,22 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
 
     let by_line = lines_by_voice(analyses);
     let (mut events, bars, nuclei) = rhythm(analyses, &by_line);
+    // Straight after the rhythm, before anything reads a velocity: the light function words
+    // (§4.2, `crate::accent`) decide which syllables are accents, and the bass plays accents.
+    let function = mappings.get(Mapping::Function);
+    crate::accent::run(&mut events, analyses.surprisal, function);
     let degrees = degrees(analyses.rhyme);
     melody(&mut events, analyses, &degrees);
     // The harmony layer reads the rhyme and the roles and nothing the arrangement decides: a chord
-    // is a fact about its line, and `Score::chord_in` finds it wherever the line sounds. It comes
+    // is a fact about its line, and `Score::harmony_in` finds it wherever the line sounds. It comes
     // before the bass because W2's walk lands on the bar's chord tones.
     let harmony = crate::harmony::run(analyses.rhyme, analyses.roles, &degrees, mappings);
     // After the melody: the height bass leaves a rhyme word to §4.5's note, as it always has.
+    // W2 turns round where the chord lane does, at the half of the bar the line is stated in: so
+    // it learns that bar's length here, by the arrangement's own rule (`crate::arrange`).
     let walk = mappings.get(Mapping::Bass);
-    crate::bass::run(&mut events, &nuclei, analyses, &harmony, walk);
+    let own_bars = own_bars(analyses, &events, mappings.has(Mapping::StanzaPeriod));
+    crate::bass::run(&mut events, &nuclei, analyses, &harmony, &own_bars, walk);
     colour(&mut events, analyses);
     figures(&mut events, analyses);
     let voices = voices(analyses, &by_line, &events);
@@ -133,7 +142,14 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
     events.sort_by_key(Event::order);
     let score = Score::new(voices, events, bars, silent(analyses))
         .with_harmony(harmony)
-        .with_bass(walk);
+        .with_bass(walk)
+        // Recorded, never read here: how long a bar lasts is the backends' to lay out (§4.2).
+        .with_pulse(mappings.get(Mapping::Pulse))
+        // Recorded, never read here: a stacked line is fitted to its host slot by slot, where the
+        // arrangement has put the two together (`Score::placed_in`, §4.2 and §4.6).
+        .with_stack(mappings.get(Mapping::Stack))
+        // Already applied to the events above; recorded so the backends can name it.
+        .with_function(function);
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,
@@ -213,6 +229,32 @@ fn lines_by_voice(analyses: Analyses<'_>) -> BTreeMap<Span, VoiceId> {
         .flat_map(crate::repetition::StanzaRepetition::lines)
         .map(|line| (line.line(), line.voice()))
         .collect()
+}
+
+/// How many beats each line's bar lasts where the line is stated, its own host: its stanza's
+/// period under [`Mapping::StanzaPeriod`], else the line's own beats — what
+/// [`crate::arrange::Slot::beats`] gives that slot, computed by the same rule
+/// ([`crate::arrange::periods_by`]) before there is a score to arrange.
+fn own_bars(analyses: Analyses<'_>, events: &[Event], period: bool) -> BTreeMap<usize, usize> {
+    let beats_in = |bar: usize| {
+        events
+            .iter()
+            .filter(|event| event.bar().get() == bar)
+            .map(|event| event.beat().get() + 1)
+            .max()
+            .unwrap_or(0)
+    };
+    if period {
+        crate::arrange::periods_by(analyses.poem, beats_in)
+    } else {
+        let bars = analyses
+            .poem
+            .stanzas()
+            .iter()
+            .map(|s| s.lines().len())
+            .sum();
+        (0..bars).map(|bar| (bar, beats_in(bar))).collect()
+    }
 }
 
 /// Places every syllable in time (`SPEC.md` §4.2).
@@ -463,6 +505,11 @@ mod tests {
     struct Flat;
 
     impl Lexicon for Flat {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, _: &str) -> Rarity {
             Rarity::band(3)
         }

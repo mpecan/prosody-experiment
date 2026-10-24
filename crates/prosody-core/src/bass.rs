@@ -37,6 +37,8 @@
 //! emitter folds the chord's root into one octave as the chord lane does, and a step below the root
 //! sounds below it.
 
+use std::collections::BTreeMap;
+
 use crate::harmony::{Chord, Harmony};
 use crate::lower::Analyses;
 use crate::mapping::Variant;
@@ -259,12 +261,14 @@ impl BassNote {
 /// [`Variant::Off`].
 ///
 /// `nuclei` is each event's vowel, index for index; `harmony` the harmony layer's entry per line
-/// (empty when it is off), which only [`Variant::Feet`] reads.
+/// (empty when it is off) and `own_bars` how many beats each line's own bar lasts (its slot where
+/// it is stated, `crate::arrange::Slot::beats`), which only [`Variant::Feet`] reads.
 pub(crate) fn run(
     events: &mut [Event],
     nuclei: &[Phoneme],
     analyses: Analyses<'_>,
     harmony: &[Harmony],
+    own_bars: &BTreeMap<usize, usize>,
     variant: Variant,
 ) {
     let foundation: Vec<bool> = analyses
@@ -279,11 +283,11 @@ pub(crate) fn run(
         .flat_map(crate::meter::StanzaMeter::lines)
         .map(|line| line.feet().iter().map(crate::meter::Foot::span).collect())
         .collect();
-    let chord_of = |bar: usize| {
+    let harmony_of = |bar: usize| {
         harmony
             .iter()
             .find(|entry| entry.bar().get() == bar)
-            .and_then(|entry| entry.chord())
+            .copied()
     };
 
     // The events of one line are contiguous: the rhythm pass emits them bar by bar.
@@ -307,7 +311,8 @@ pub(crate) fn run(
                     line,
                     vowels,
                     feet.get(bar).map_or(&[][..], Vec::as_slice),
-                    chord_of(bar),
+                    harmony_of(bar),
+                    own_bars.get(&bar).copied().unwrap_or(0),
                 ),
                 Variant::Off => {}
                 // `Mapping::choose` stores only the bass's own variants, so anything else is the
@@ -436,7 +441,18 @@ fn signed(count: usize) -> i32 {
 /// repeat the walk's last note, the foot steps off it instead, up if the next foot's vowel is
 /// higher and down otherwise, so the line keeps moving. A foot whose vowel has no height has no
 /// note.
-fn by_foot(line: &mut [Event], vowels: &[Phoneme], feet: &[Span], chord: Option<Chord>) {
+///
+/// A stanza's last bar under H2 has two chords (`Harmony::Turning`, §4.6): a foot from the half of
+/// the line's bar — `bar_beats` long, the bar it is stated in, not the line, which may end early in
+/// it under the stanza period — walks on the turnaround, one before it on the bar's own chord: the
+/// chord the lane is sounding where the foot begins ([`Harmony::chord_at`]).
+fn by_foot(
+    line: &mut [Event],
+    vowels: &[Phoneme],
+    feet: &[Span],
+    harmony: Option<Harmony>,
+    bar_beats: usize,
+) {
     // (first syllable, most stressed syllable) of each foot, in order.
     let mut groups: Vec<(usize, usize)> = Vec::new();
     for (at, event) in line.iter().enumerate() {
@@ -455,9 +471,11 @@ fn by_foot(line: &mut [Event], vowels: &[Phoneme], feet: &[Span], chord: Option<
         }
     }
     let vowel_of = |strongest: usize| vowels.get(strongest).copied();
-    let root = ScaleDegree::new(chord.map_or(0, |chord| chord.root().get()));
+    let chord_at = |beat: usize| harmony.and_then(|harmony| harmony.chord_at(beat, bar_beats));
 
-    let mut last: Option<ScaleStep> = None;
+    // The walk's last note, as its root and its step: the same step above another root is
+    // another note, so it is no repeat.
+    let mut last: Option<(usize, ScaleStep)> = None;
     for (nth, &(first, strongest)) in groups.iter().enumerate() {
         let Some(vowel) = vowel_of(strongest) else {
             continue;
@@ -474,8 +492,10 @@ fn by_foot(line: &mut [Event], vowels: &[Phoneme], feet: &[Span], chord: Option<
         let Some(&span) = feet.get(event.beat().get()) else {
             continue;
         };
+        let chord: Option<Chord> = chord_at(event.beat().get());
+        let root = ScaleDegree::new(chord.map_or(0, |chord| chord.root().get()));
         let tone = height.tone();
-        let (step, why) = if last == Some(tone) {
+        let (step, why) = if last == Some((root.get(), tone)) {
             let next = groups
                 .get(nth + 1)
                 .and_then(|&(_, strongest)| vowel_of(strongest));
@@ -495,7 +515,7 @@ fn by_foot(line: &mut [Event], vowels: &[Phoneme], feet: &[Span], chord: Option<
         } else {
             (tone, BassReason::ChordTone { vowel, chord })
         };
-        last = Some(step);
+        last = Some((root.get(), step));
         let note = BassNote {
             span,
             root,

@@ -3,10 +3,16 @@
 //! *A candidate mapping, page-side, pending review* (`SPEC.md` §4.7), chosen between by
 //! [`Mapping::Reading`]'s variants:
 //!
-//! - **`arrives`** (the default). Each line is spoken once, in the slot of the arrangement where it
-//!   first sounds as a host — [`Cause::Stated`], [`Cause::Arriving`] or [`Cause::Overruling`] —
-//!   and never where it only loops, yields, holds, calls, refrains in its lane or repeats in the
-//!   outro. So the reading follows the poem in order, one line per bar it arrives in.
+//! - **`breath`** (the default). Each stanza is read through, one line a bar, in order. Stanza *k*
+//!   starts in the later of two slots: the one its first line first arrives in as a host (see
+//!   `arrives`), so a stanza is never read before the music has begun it; and the second slot
+//!   after stanza *k − 1*'s last cue, so one silent bar always separates two stanzas' readings. A
+//!   stanza that would run past the piece's last slot reads the lines that fit and loses the rest
+//!   (`SPEC.md` §4.7) — and says which, in [`Reading::unread`] and the cue pattern's header.
+//! - **`arrives`**. Each line is spoken once, in the slot of the arrangement where it first sounds
+//!   as a host — [`Cause::Stated`], [`Cause::Arriving`] or [`Cause::Overruling`] — and never where
+//!   it only loops, yields, holds, calls, refrains in its lane or repeats in the outro. So the
+//!   reading follows the poem in order, one line per bar it arrives in.
 //! - **`stanza`**. A stanza's lines are spoken one a bar, in order, from the first slot any of
 //!   them is heard in that way. A stanza that *transforms* a running loop (§4.6) brings its lines
 //!   in one a pass, so under `arrives` they are read several bars apart; under `stanza` the stanza
@@ -49,7 +55,7 @@ use prosody_core::voice::Score;
 use prosody_core::{Cause, Lane};
 
 use crate::fmt_param;
-use crate::strudel::cycles_per_minute;
+use crate::strudel::{cycles_per_minute, weights};
 use crate::style::Style;
 
 /// How many syllables a speech synthesiser says a second at rate 1.
@@ -132,6 +138,63 @@ impl Cue {
     }
 }
 
+/// A line the reading does not speak although it was not switched off, and why — so the loss is
+/// said, never silent (CLAUDE.md §6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unread {
+    line: usize,
+    span: Span,
+    text: String,
+    why: Why,
+}
+
+/// Why a line is left unread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Why {
+    /// The piece ends before the line's turn: its stanza was cut short, or would start after the
+    /// last slot (`breath` and `stanza`, `SPEC.md` §4.7).
+    PieceEnds,
+    /// The line is never heard as a host, so no variant has a slot to read it from.
+    NeverArrives,
+}
+
+impl Why {
+    /// The reason, in words, as the cue pattern's comment and the page say it.
+    #[must_use]
+    pub const fn says(self) -> &'static str {
+        match self {
+            Self::PieceEnds => "the piece ends before its turn",
+            Self::NeverArrives => "it never arrives in the music",
+        }
+    }
+}
+
+impl Unread {
+    /// Which line of the poem, in reading order from 0.
+    #[must_use]
+    pub const fn line(&self) -> usize {
+        self.line
+    }
+
+    /// The line's span in the source (I4).
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.span
+    }
+
+    /// The line exactly as written.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// Why it is not read.
+    #[must_use]
+    pub const fn why(&self) -> Why {
+        self.why
+    }
+}
+
 /// Why a reading could not be made.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ReadingError {
@@ -149,9 +212,14 @@ pub enum ReadingError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Reading {
     cues: Vec<Cue>,
+    unread: Vec<Unread>,
     slots: usize,
     cpm: f64,
     variant: Variant,
+    /// How many cycles each slot lasts — the music's own ([`weights`]) — or `None` under the
+    /// elastic pulse, where every slot is one cycle and the cue pattern is written as it always
+    /// was.
+    weights: Option<Vec<u64>>,
 }
 
 impl Reading {
@@ -161,9 +229,17 @@ impl Reading {
         &self.cues
     }
 
+    /// The lines left unread, in reading order, and why: empty when every line is read, and
+    /// always empty under `off`, where nothing is read by choice.
+    #[must_use]
+    pub fn unread(&self) -> &[Unread] {
+        &self.unread
+    }
+
     /// The cue pattern, as Strudel text: one element per slot, the spoken line's index where a
-    /// line is first heard and a rest elsewhere, at the pattern's own cycles per minute so each
-    /// cue falls on the first beat of its bar.
+    /// line is first heard and a rest elsewhere — weighted as the music's bars are under the
+    /// steady pulse (`<0@3 ~@4>`), one a cycle under the elastic — at the pattern's own cycles per
+    /// minute, so each cue falls on the first beat of its bar.
     ///
     /// The page evaluates this, attaches its speaking callback with `.onTrigger(…, true)` — the
     /// `true` keeps Strudel's default output from trying to sound the cue — and stacks it with the
@@ -171,6 +247,10 @@ impl Reading {
     #[must_use]
     pub fn pattern(&self) -> String {
         let what = match self.variant {
+            Variant::Breath => {
+                "each stanza read through a line a bar, a silent bar after the last, never before \
+                 the music begins it"
+            }
             Variant::Stanza => "each stanza read a line a bar from where it is first heard",
             Variant::Off => "switched off, nothing spoken",
             // The harmony's and the bass's variants are not the reading's: `Mapping::choose`
@@ -182,7 +262,13 @@ impl Reading {
             | Variant::Both
             | Variant::Height
             | Variant::Syllables
-            | Variant::Feet => "each line spoken in the bar it is first heard",
+            | Variant::Feet
+            | Variant::Steady
+            | Variant::Elastic
+            | Variant::Crossing
+            | Variant::Straight
+            | Variant::Full
+            | Variant::Light => "each line spoken in the bar it is first heard",
         };
         let mut out = format!(
             "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
@@ -198,6 +284,27 @@ impl Reading {
             fmt_param(SLOWEST),
             fmt_param(FASTEST),
         );
+        // A lost line is said where the reading is described, not left for the listener to notice
+        // (CLAUDE.md §6): `breath` can run out of piece (SPEC.md §4.7).
+        if !self.unread.is_empty() {
+            let _ = writeln!(
+                out,
+                "// {} of {} lines not read:",
+                self.unread.len(),
+                self.unread.len() + self.cues.len(),
+            );
+            for unread in &self.unread {
+                let _ = writeln!(
+                    out,
+                    "//   line {} (bytes {}..{}) is not read, {}: {}",
+                    unread.line + 1,
+                    unread.span.start(),
+                    unread.span.end(),
+                    unread.why.says(),
+                    comment_safe(&unread.text)
+                );
+            }
+        }
         for cue in &self.cues {
             let _ = writeln!(
                 out,
@@ -215,6 +322,14 @@ impl Reading {
         for cue in &self.cues {
             if let Some(step) = steps.get_mut(cue.slot) {
                 *step = cue.line.to_string();
+            }
+        }
+        // The music's bars, as long as the music's: under the steady pulse a slot lasts its
+        // beats in cycles, and a cue is weighted exactly as the music's bar is
+        // (`strudel::sequence`), so it fires on that bar's first beat.
+        if let Some(weights) = &self.weights {
+            for (step, weight) in steps.iter_mut().zip(weights) {
+                let _ = write!(step, "@{weight}");
             }
         }
         let _ = writeln!(
@@ -251,7 +366,15 @@ pub fn plan(
         });
     }
     let cpm = cycles_per_minute(score, style);
-    let bar_seconds = 60.0 / cpm / SCHEDULER_CPS;
+    // How long each slot sounds, on the scheduler: its cycles over the cycles a second. Under the
+    // steady pulse a slot of four beats lasts a third longer than one of three, and a line is
+    // fitted to the bar it is spoken in, not to an average one.
+    let all_weights = weights(score);
+    let bar_seconds = |slot: usize| {
+        let cycles = all_weights.get(slot).copied().unwrap_or(1);
+        let cycles = f64::from(u32::try_from(cycles).unwrap_or(u32::MAX));
+        cycles * 60.0 / cpm / SCHEDULER_CPS
+    };
     let slots = score.arrangement().slots().len();
     let variant = mappings.get(Mapping::Reading);
 
@@ -259,6 +382,7 @@ pub fn plan(
     let placed: Vec<(usize, usize)> = match variant {
         Variant::Off => Vec::new(),
         Variant::Stanza => by_stanza(poem, &arrivals, slots),
+        Variant::Breath => by_breath(poem, &arrivals, slots),
         // As above: only the reading's own variants can reach here.
         Variant::Arrives
         | Variant::On
@@ -267,7 +391,13 @@ pub fn plan(
         | Variant::Both
         | Variant::Height
         | Variant::Syllables
-        | Variant::Feet => arrivals,
+        | Variant::Feet
+        | Variant::Steady
+        | Variant::Elastic
+        | Variant::Crossing
+        | Variant::Straight
+        | Variant::Full
+        | Variant::Light => arrivals.clone(),
     };
 
     let mut cues = Vec::new();
@@ -296,15 +426,63 @@ pub fn plan(
             span: line.span(),
             text: text.to_owned(),
             syllables,
-            rate: fitted(syllables, bar_seconds),
+            rate: fitted(syllables, bar_seconds(slot)),
         });
     }
+    let unread = if variant == Variant::Off {
+        Vec::new()
+    } else {
+        unread(poem, &lines, &cues, &arrivals)
+    };
     Ok(Reading {
         cues,
+        unread,
         slots,
         cpm,
         variant,
+        weights: (score.pulse() != Variant::Elastic).then_some(all_weights),
     })
+}
+
+/// The lines of `lines` no cue speaks, and why: a line whose stanza is read in part, or which
+/// arrives, lost its turn to the end of the piece; any other never arrives at all.
+fn unread(
+    poem: &Poem,
+    lines: &[&prosody_core::parse::Line],
+    cues: &[Cue],
+    arrivals: &[(usize, usize)],
+) -> Vec<Unread> {
+    let read: std::collections::BTreeSet<usize> = cues.iter().map(|cue| cue.line).collect();
+    let arrived: std::collections::BTreeSet<usize> =
+        arrivals.iter().map(|(_, line)| *line).collect();
+    let mut out = Vec::new();
+    let mut first_line = 0;
+    for stanza in poem.stanzas() {
+        let stanza_lines = first_line..first_line + stanza.lines().len();
+        first_line = stanza_lines.end;
+        let started = stanza_lines.clone().any(|line| read.contains(&line));
+        for index in stanza_lines.filter(|line| !read.contains(line)) {
+            let Some(line) = lines.get(index) else {
+                continue;
+            };
+            let why = if started || arrived.contains(&index) {
+                Why::PieceEnds
+            } else {
+                Why::NeverArrives
+            };
+            out.push(Unread {
+                line: index,
+                span: line.span(),
+                text: line
+                    .span()
+                    .text(poem.source())
+                    .unwrap_or_default()
+                    .to_owned(),
+                why,
+            });
+        }
+    }
+    out
 }
 
 /// Each line's first arrival, as `(slot, line)` in slot order: where `arrives` reads it.
@@ -366,6 +544,59 @@ fn by_stanza(poem: &Poem, arrivals: &[(usize, usize)], slots: usize) -> Vec<(usi
     out
 }
 
+/// The `breath` variant, the default: each stanza read through, a line a slot, in order, with a
+/// silent slot between two stanzas' readings and never before the stanza's first line is heard
+/// (SPEC.md §4.7).
+///
+/// Stanza *k* starts at the later of its first line's first arrival and the second slot after
+/// the previous stanza's last cue. Its later lines follow one a slot, whether or not they have
+/// arrived yet — a transforming stanza brings them in one a pass (§4.6), and the point is to read
+/// the stanza as written, not as the loop reveals it. A stanza whose first line never arrives
+/// starts at the earliest arrival of any of its lines; one none of whose lines arrives (none
+/// does, in today's arrangement) is skipped and leaves no breath behind.
+///
+/// **Past the end** (decided, `SPEC.md` §4.7): a line that would fall after the piece's last slot
+/// is not read, so a stanza that runs out of piece reads the lines that fit and stops, as under
+/// `stanza`. The cue pattern loops with the music, so a cue after the last slot would land in the
+/// next round's first bars, on top of the first stanza; and starting the stanza earlier would read
+/// it before the music has begun it or without its breath. The outro (§4.6) plays the last stanza
+/// once more after the poem, which is what usually gives the last stanza room.
+fn by_breath(poem: &Poem, arrivals: &[(usize, usize)], slots: usize) -> Vec<(usize, usize)> {
+    let first_slot: std::collections::BTreeMap<usize, usize> =
+        arrivals.iter().map(|(slot, line)| (*line, *slot)).collect();
+    let mut out = Vec::new();
+    // The earliest slot the next stanza may start in: after the last cue and one silent slot.
+    let mut next_free = 0;
+    let mut first_line = 0;
+    for stanza in poem.stanzas() {
+        let count = stanza.lines().len();
+        let lines = first_line..first_line + count;
+        first_line += count;
+        let Some(arrival) = first_slot.get(&lines.start).copied().or_else(|| {
+            lines
+                .clone()
+                .filter_map(|line| first_slot.get(&line).copied())
+                .min()
+        }) else {
+            continue;
+        };
+        let start = arrival.max(next_free);
+        let mut last = None;
+        for (offset, line) in lines.enumerate() {
+            let slot = start + offset;
+            if slot >= slots {
+                break;
+            }
+            out.push((slot, line));
+            last = Some(slot);
+        }
+        if let Some(last) = last {
+            next_free = last + 2;
+        }
+    }
+    out
+}
+
 /// `text` made safe to sit inside a `//` comment the page evaluates as JavaScript.
 ///
 /// A line's span ends at a newline, but not every line terminator is a newline: JavaScript also
@@ -411,7 +642,7 @@ mod tests {
 
     use prosody_core::mapping::{Mapping, Mappings, Variant};
 
-    use super::{FASTEST, SLOWEST, by_stanza, comment_safe, fitted, plan};
+    use super::{Cue, FASTEST, SLOWEST, Why, by_breath, by_stanza, comment_safe, fitted, plan};
     use crate::fmt_param;
     use crate::style::Style;
 
@@ -446,6 +677,11 @@ mod tests {
     struct Flat;
 
     impl Lexicon for Flat {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, _word: &str) -> Rarity {
             Rarity::band(1)
         }
@@ -514,7 +750,7 @@ mod tests {
             ]
         );
 
-        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let reading = plan(&poem, &score, &at_120(), &reading(Variant::Arrives)).unwrap();
         // Each line once, in the slot it is first heard: line 2 in slot 2 (its first arrival, not
         // its second in slot 4), line 3 in slot 5. Slot 3 yields, slot 4 re-arrives, 6 and 7 are
         // the outro: silent.
@@ -535,7 +771,8 @@ mod tests {
         assert!(
             reading
                 .pattern()
-                .ends_with("n(\"<0 1 2 ~ ~ 3 ~ ~>\").cpm(60.000)\n"),
+                // Every line of two beats, so every bar two cycles — a cycle is a beat at 120.
+                .ends_with("n(\"<0@2 1@2 2@2 ~@2 ~@2 3@2 ~@2 ~@2>\").cpm(120.000)\n"),
             "{}",
             reading.pattern()
         );
@@ -571,7 +808,7 @@ mod tests {
         );
         let pattern = reading.pattern();
         assert!(
-            pattern.ends_with("n(\"<0 1 2 3 ~ ~ ~ ~>\").cpm(60.000)\n"),
+            pattern.ends_with("n(\"<0@2 1@2 2@2 3@2 ~@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"),
             "{pattern}"
         );
         assert!(
@@ -584,12 +821,284 @@ mod tests {
     }
 
     #[test]
-    fn the_arrives_variant_is_the_default() {
+    fn the_breath_variant_is_the_default() {
         let (poem, score) = lowered(TRANSFORMING);
         let default = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let breath = plan(&poem, &score, &at_120(), &reading(Variant::Breath)).unwrap();
+        assert_eq!(default, breath);
+        assert!(default.pattern().contains("reading = breath"));
         let arrives = plan(&poem, &score, &at_120(), &reading(Variant::Arrives)).unwrap();
-        assert_eq!(default, arrives);
-        assert!(default.pattern().contains("reading = arrives"));
+        assert_ne!(default, arrives);
+        assert!(arrives.pattern().contains("reading = arrives"));
+    }
+
+    /// `(slot, line, text)` of every cue.
+    fn spoken(reading: &super::Reading) -> Vec<(usize, usize, &str)> {
+        reading
+            .cues()
+            .iter()
+            .map(|cue| (cue.slot(), cue.line(), cue.text()))
+            .collect()
+    }
+
+    #[test]
+    fn the_breath_variant_reads_a_stanza_whole_with_a_silent_bar_before_the_next() {
+        // The arrangement asserted in the first test: line 0 stated in slot 0, line 1 in 1, line
+        // 2 arriving in 2 (pass 1, over the old loop's yielding line 1 in 3), line 3 in 5.
+        //
+        // By hand: stanza 1 starts at its first line's arrival, slot 0, and reads lines 0 and 1
+        // in slots 0 and 1. Stanza 2's first line arrives in slot 2, but slot 2 is the breath
+        // after slot 1, so it starts at the later of 2 and 1 + 2 = 3: line 2 in slot 3, line 3 in
+        // slot 4 — a bar apart, not the three of `arrives`, and after the music began it in 2.
+        let (poem, score) = lowered(TRANSFORMING);
+        let reading = plan(&poem, &score, &at_120(), &reading(Variant::Breath)).unwrap();
+        assert_eq!(
+            spoken(&reading),
+            vec![
+                (0, 0, "eA eA"),
+                (1, 1, "teA teA"),
+                (3, 2, "beA beA"),
+                (4, 3, "deA deA"),
+            ]
+        );
+        let pattern = reading.pattern();
+        // Every bar two beats, two cycles under the steady pulse: slot 2 is the breath.
+        assert!(
+            pattern.ends_with("n(\"<0@2 1@2 ~@2 2@2 3@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"),
+            "{pattern}"
+        );
+        assert!(
+            pattern.starts_with(
+                "// the reading: each stanza read through a line a bar, a silent bar after the \
+                 last, never before the music begins it (SPEC.md §4.7, candidate; reading = breath)"
+            ),
+            "{pattern}"
+        );
+        assert!(
+            pattern.contains("//   bar 4 speaks line 3 (bytes 15..22), 4 syllables at rate 1.176"),
+            "{pattern}"
+        );
+        // Each rate is fitted to the cue's own bar: two beats at 120, one second, four
+        // syllables — 1 / 0.85 = 1.176.
+        for cue in reading.cues() {
+            assert_eq!(fmt_param(cue.rate()), "1.176");
+        }
+    }
+
+    /// Three stanzas of three iambic lines, of one layer: the second transforms the first's loop,
+    /// the third the second's.
+    const THREE: &str =
+        "eA eA\nteA teA\nneA neA\n\nbeA beA\ndeA deA\neAn eAn\n\neAt eAt\neAd eAd\nbeAt beAt\n";
+
+    #[test]
+    fn the_three_stanza_arrangement_by_hand() {
+        let (_, score) = lowered(THREE);
+        // The arrangement by hand (SPEC.md §4.6): lines 0–2 stated in slots 0–2. Stanza 2
+        // transforms the loop a bar a pass: |3 1 2| in 3–5, |3 4 2| in 6–8, |3 4 5| in 9–11.
+        // Stanza 3 the same over stanza 2's loop: |6 4 5| in 12–14, |6 7 5| in 15–17, |6 7 8| in
+        // 18–20. The outro plays the last loop once more, |6 7 8| in 21–23.
+        let hosts: Vec<(usize, Cause)> = score
+            .arrangement()
+            .slots()
+            .iter()
+            .map(|slot| {
+                let host = slot.host().unwrap();
+                (host.bar().get(), host.cause())
+            })
+            .collect();
+        let arriving = |pass| Cause::Arriving { pass };
+        let yielding = |pass| Cause::Yielding { pass };
+        assert_eq!(
+            hosts,
+            vec![
+                (0, Cause::Stated),
+                (1, Cause::Stated),
+                (2, Cause::Stated),
+                (3, arriving(1)),
+                (1, yielding(1)),
+                (2, yielding(1)),
+                (3, arriving(2)),
+                (4, arriving(2)),
+                (2, yielding(2)),
+                (3, arriving(3)),
+                (4, arriving(3)),
+                (5, arriving(3)),
+                (6, arriving(1)),
+                (4, yielding(1)),
+                (5, yielding(1)),
+                (6, arriving(2)),
+                (7, arriving(2)),
+                (5, yielding(2)),
+                (6, arriving(3)),
+                (7, arriving(3)),
+                (8, arriving(3)),
+                (6, Cause::Repeating),
+                (7, Cause::Repeating),
+                (8, Cause::Repeating),
+            ]
+        );
+    }
+
+    #[test]
+    fn three_stanzas_under_every_variant_by_hand() {
+        // The arrangement is the one asserted just above.
+        let (poem, score) = lowered(THREE);
+        let slots = |variant| -> Vec<(usize, usize)> {
+            plan(&poem, &score, &at_120(), &reading(variant))
+                .unwrap()
+                .cues()
+                .iter()
+                .map(|cue| (cue.slot(), cue.line()))
+                .collect()
+        };
+        // `arrives`, unchanged: each line in the first slot it arrives in.
+        assert_eq!(
+            slots(Variant::Arrives),
+            vec![
+                (0, 0),
+                (1, 1),
+                (2, 2),
+                (3, 3),
+                (7, 4),
+                (11, 5),
+                (12, 6),
+                (16, 7),
+                (20, 8)
+            ]
+        );
+        // `stanza`, unchanged: each stanza a line a slot from its first arrival — stanza 2 from 3,
+        // straight after stanza 1, stanza 3 from 12.
+        assert_eq!(
+            slots(Variant::Stanza),
+            vec![
+                (0, 0),
+                (1, 1),
+                (2, 2),
+                (3, 3),
+                (4, 4),
+                (5, 5),
+                (12, 6),
+                (13, 7),
+                (14, 8)
+            ]
+        );
+        // `breath`: stanza 1 in 0–2. Stanza 2 arrives in 3, which is the breath after 2, so it
+        // starts at max(3, 2 + 2) = 4: slots 4–6. Stanza 3 arrives in 12, long after the breath
+        // after 6 (slot 8), so it starts at max(12, 6 + 2) = 12: slots 12–14.
+        assert_eq!(
+            slots(Variant::Breath),
+            vec![
+                (0, 0),
+                (1, 1),
+                (2, 2),
+                (4, 3),
+                (5, 4),
+                (6, 5),
+                (12, 6),
+                (13, 7),
+                (14, 8)
+            ]
+        );
+        let pattern = plan(&poem, &score, &at_120(), &Mappings::all())
+            .unwrap()
+            .pattern();
+        assert!(
+            pattern.ends_with(
+                "n(\"<0@2 1@2 2@2 ~@2 3@2 4@2 5@2 ~@2 ~@2 ~@2 ~@2 ~@2 6@2 7@2 8@2 ~@2 ~@2 ~@2 ~@2 \
+                 ~@2 ~@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"
+            ),
+            "{pattern}"
+        );
+    }
+
+    #[test]
+    fn a_breath_starts_at_the_later_of_the_arrival_and_the_silent_bar_and_stops_with_the_piece() {
+        // Hand-made arrivals, to reach the edges the arrangement does not reach today. Lines 0–1
+        // are stanza 1, 2–3 stanza 2, 4–5 stanza 3.
+        let poem =
+            prosody_core::Poem::parse("eA\nteA\n\nbeA\ndeA\n\nneA\ntA\n".to_owned()).unwrap();
+        // Stanza 1 from slot 0: 0, 1. Stanza 2's first line arrives in 6, after the breath (3):
+        // it waits for the music, 6, 7. Stanza 3's first line arrives in 7, before the breath
+        // after 7 (9): it waits for the breath, 9, 10.
+        let arrivals = [(0, 0), (1, 1), (6, 2), (7, 4), (8, 3), (9, 5)];
+        assert_eq!(
+            by_breath(&poem, &arrivals, 12),
+            vec![(0, 0), (1, 1), (6, 2), (7, 3), (9, 4), (10, 5)]
+        );
+        // Past the end: with ten slots (0–9) stanza 3 starts in 9 and only its first line fits;
+        // its second is not read rather than wrapping round onto the next pass's first bars.
+        assert_eq!(
+            by_breath(&poem, &arrivals, 10),
+            vec![(0, 0), (1, 1), (6, 2), (7, 3), (9, 4)]
+        );
+        // With nine, stanza 3 would start after the piece: not read at all.
+        assert_eq!(
+            by_breath(&poem, &arrivals, 9),
+            vec![(0, 0), (1, 1), (6, 2), (7, 3)]
+        );
+    }
+
+    #[test]
+    fn a_breath_starts_from_the_first_line_and_skips_a_stanza_never_heard() {
+        let poem =
+            prosody_core::Poem::parse("eA\nteA\n\nbeA\ndeA\n\nneA\ntA\n".to_owned()).unwrap();
+        // Stanza 2's second line (3) arrives in slot 4, before its first (2) in slot 6: the
+        // stanza waits for its first line, 6 and 7, never reading it before the music has.
+        // Stanza 3 never arrives: skipped, and it leaves no breath — nothing follows anyway.
+        let arrivals = [(0, 0), (1, 1), (4, 3), (6, 2)];
+        assert_eq!(
+            by_breath(&poem, &arrivals, 12),
+            vec![(0, 0), (1, 1), (6, 2), (7, 3)]
+        );
+        // A stanza whose first line never arrives as a host starts at the earliest of its lines'
+        // arrivals: line 3 in slot 4, so 4 and 5 — after the breath, slot 3.
+        let arrivals = [(0, 0), (1, 1), (4, 3), (9, 4), (10, 5)];
+        assert_eq!(
+            by_breath(&poem, &arrivals, 12),
+            vec![(0, 0), (1, 1), (4, 2), (5, 3), (9, 4), (10, 5)]
+        );
+    }
+
+    #[test]
+    fn a_line_left_unread_says_why() {
+        let poem =
+            prosody_core::Poem::parse("eA\nteA\n\nbeA\ndeA\n\nneA\ntA\n".to_owned()).unwrap();
+        let lines: Vec<_> = poem
+            .stanzas()
+            .iter()
+            .flat_map(prosody_core::parse::Stanza::lines)
+            .collect();
+        let cue = |line: usize| {
+            let span = lines[line].span();
+            Cue {
+                slot: line,
+                line,
+                span,
+                text: span.text(poem.source()).unwrap().to_owned(),
+                syllables: 1,
+                rate: 1.0,
+            }
+        };
+        // Lines 0 and 2 read. Line 1 arrived and its stanza was read: the piece ended first.
+        // Line 3 never arrived, but its stanza was read, so it too lost its turn to the end. Stanza
+        // 3 (lines 4 and 5) has no cue and no arrival: it never arrives.
+        let left = super::unread(&poem, &lines, &[cue(0), cue(2)], &[(0, 0), (1, 1), (4, 2)]);
+        let said: Vec<(usize, &str, Why)> = left
+            .iter()
+            .map(|line| (line.line(), line.text(), line.why()))
+            .collect();
+        assert_eq!(
+            said,
+            vec![
+                (1, "teA", Why::PieceEnds),
+                (3, "deA", Why::PieceEnds),
+                (4, "neA", Why::NeverArrives),
+                (5, "tA", Why::NeverArrives),
+            ]
+        );
+        // Bytes: "eA\nteA\n\nbeA\ndeA\n\n" is 3 + 4 + 1 + 4 + 4 + 1 = 17 bytes, so line 4
+        // is 17..20 (I4).
+        assert_eq!((left[2].span().start(), left[2].span().end()), (17, 20));
     }
 
     #[test]
@@ -601,7 +1110,7 @@ mod tests {
         assert!(
             reading
                 .pattern()
-                .ends_with("n(\"<~ ~ ~ ~ ~ ~ ~ ~>\").cpm(60.000)\n"),
+                .ends_with("n(\"<~@2 ~@2 ~@2 ~@2 ~@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"),
             "{}",
             reading.pattern()
         );
@@ -690,7 +1199,7 @@ mod tests {
         );
         assert!(causes.len() > 6, "an outro follows: {causes:?}");
 
-        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let reading = plan(&poem, &score, &at_120(), &reading(Variant::Arrives)).unwrap();
         let spoken: Vec<(usize, usize)> = reading
             .cues()
             .iter()
@@ -702,6 +1211,18 @@ mod tests {
             "eA eA",
             "the returning line, read again"
         );
+        // Under `breath`, the default, each stanza waits a silent bar after the last: stanza 2
+        // arrives in 2 but starts at 1 + 2 = 3, so 3 and 4; stanza 3 arrives in 4 but starts at
+        // 4 + 2 = 6, so 6 and 7 — over the outro, which plays it again (eight slots in all at
+        // least, asserted next). The returning stanza is still read.
+        assert!(causes.len() >= 8, "{causes:?}");
+        let breath = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let spoken: Vec<(usize, usize)> = breath
+            .cues()
+            .iter()
+            .map(|cue| (cue.slot(), cue.line()))
+            .collect();
+        assert_eq!(spoken, vec![(0, 0), (1, 1), (3, 2), (4, 3), (6, 4), (7, 5)]);
     }
 
     #[test]

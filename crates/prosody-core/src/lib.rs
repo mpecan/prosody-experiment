@@ -21,6 +21,8 @@
 //! - [`role`] — §4.1's load-bearing decision: which stanzas are foundation and which flourish.
 //! - [`voice`] — the IR of §3: sounding events, with nothing a style could supply.
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
+//! - [`accent`] — the light function words, a candidate: a one-syllable function word struck
+//!   lightly where the meter's scansion calls its position weak (§4.2's stress → accent).
 //! - [`mapping`] — which variant of each candidate mapping applies, so each can be heard against
 //!   the others and against its absence.
 //! - [`bass`] — §4.6's bass: by vowel height, or walking on every syllable or every foot.
@@ -28,6 +30,8 @@
 //!   scheme or from rhyme closure.
 //! - [`arrange`] — laying that IR out in time: stanzas loop until a competing stanza transforms
 //!   them or a refrain stanza overrules them.
+//! - [`stack`] — the straight stack, a candidate: a line stacked under a bar's host fitted to the
+//!   host's subdivision of each beat where the two would cross.
 //! - [`annotate`] — §8's debug view: the poem, with what each token became written under it.
 //!
 //! Analysis passes are added on top of these primitives; see `PLAN.md` for the build order.
@@ -39,6 +43,7 @@
     allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)
 )]
 
+pub mod accent;
 pub mod annotate;
 pub mod arrange;
 pub mod bass;
@@ -54,13 +59,14 @@ pub mod role;
 pub mod seed;
 pub mod sound;
 pub mod span;
+pub mod stack;
 pub mod surprisal;
 pub mod voice;
 
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
 pub use arrange::{Arrangement, Cause, Fit, Lane, Part, Placement, Slot};
 pub use bass::{BassNote, BassReason, Chromatic, Direction, Height, ScaleStep};
-pub use harmony::{Chord, Function, Harmony, Reason, Rest, Silence};
+pub use harmony::{Chord, Function, Harmony, Onset, Reason, Rest, Silence};
 pub use mapping::{Choice, Mapping, Mappings, Variant};
 pub use meter::{
     Beat, Foot, FootCount, FootKind, LineMeter, PoemMeter, StanzaMeter, SyllableCount, Variance,
@@ -82,5 +88,5 @@ pub use span::Span;
 pub use surprisal::{Lexicon, PoemSurprisal, Rarity, Surprisal, WordSurprisal};
 pub use voice::{
     Bar, BeatIndex, Detune, Event, Family, Pitch, PitchSource, Placed, ScaleDegree, Score,
-    Subdivision, Velocity, Voice,
+    Straightened, Subdivision, Velocity, Voice,
 };

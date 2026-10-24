@@ -8,7 +8,7 @@
 //! | Variant | Reads | Gives |
 //! |---|---|---|
 //! | [`Variant::Rhyme`] (H1) | each line's rhyme class (§4.5) | the chord on that class's degree, I: ABAB → i–ii–i–ii |
-//! | [`Variant::Cadence`] (H2) | whether a line's rhyme is *open* (answered later in its stanza — the held lane's test, §4.6) or *closes* one | open → V of its degree (*d*+4); its answer → I on the degree; a line with no rhyme in its stanza → IV of the stanza's key (*k*+3); the stanza's last bar → V of the stanza's first chord, a turnaround |
+//! | [`Variant::Cadence`] (H2) | whether a line's rhyme is *open* (answered later in its stanza — the held lane's test, §4.6) or *closes* one | open → V of its degree (*d*+4); its answer → I on the degree; a line with no rhyme in its stanza → IV of the stanza's key (*k*+3); the stanza's last bar is split — its own chord, then V of the stanza's first chord in its second half, a turnaround |
 //! | [`Variant::Both`] | both | H2 where it applies (open and closing lines, the turnaround), H1 in every other bar |
 //!
 //! # Structure here, colour in the emitter
@@ -26,15 +26,17 @@
 //! pronounceable word — even when the line rhymes with nothing and H2 gives it IV. A line with no
 //! pronounceable word has no rhyme word, so it has no chord: [`Silence::Wordless`].
 //!
-//! # One chord a bar, and when it sounds
+//! # One chord a bar — two in a stanza's last — and when it sounds
 //!
 //! A chord is a fact about a *line* of a foundation stanza, so it lives with that line's bar of
 //! the [`Score`](crate::voice::Score) and sounds wherever the arrangement plays that line in the
 //! foundation layer — stated, looping under a flourish, yielding or arriving in a transformation,
 //! repeating in the outro. Never in the call, held or refrain lanes: those are a line sounding
-//! *under* another, and a second chord in one bar would be two harmonies at once.
-//! [`Score::chord_in`](crate::voice::Score::chord_in) is the one place that decides which chord a
-//! slot of the arrangement plays.
+//! *under* another, and a second chord at one instant would be two harmonies at once. The one bar
+//! with two chords has them one after the other: a stanza's last bar under H2
+//! ([`Harmony::Turning`]), its own chord from the bar's start and the turnaround from its half.
+//! [`Score::harmony_in`](crate::voice::Score::harmony_in) is the one place that decides which
+//! harmony a slot of the arrangement plays.
 //!
 //! # The turnaround loops, so it stays inside its stanza (I2)
 //!
@@ -53,9 +55,17 @@
 //!   unresolved, so it takes V, and only the last A resolves. AAAA → V V V I.
 //! - **The stanza's key**, for IV: the degree of the stanza's first in-stanza rhyme (its first open
 //!   line's class); degree 0 when nothing in the stanza rhymes within it.
-//! - **The turnaround replaces the last bar's chord**, closing line or not: one chord a bar, and
-//!   the I it resolves to is the loop's first bar. A one-line stanza has no turnaround — its last
-//!   bar is its first.
+//! - **The turnaround shares the last bar** (the user's decision, `PLAN.md` "the cadence's
+//!   ending"): the bar's own chord — I when the line closes a rhyme, IV when it has none in its
+//!   stanza, H1's chord or a rest under `both` — from the bar's start, then V of the stanza's
+//!   first chord from the bar's half, leading into the loop's first bar. So ABAB, AABB and ABBA
+//!   land on I before they turn round. A one-line stanza has no turnaround — its last bar is its
+//!   first — and neither does a last line with no pronounceable word, or a stanza whose earlier
+//!   lines have no chord to lead back to.
+//! - **The turnaround traces to the last line's rhyme word** — the line whose bar it shares — not
+//!   to the first line's, whose chord only gives it its root ([`Reason::Turnaround`]'s `onto`).
+//!   Every chord of a bar then traces to the line that bar plays, so an edit to the first line
+//!   moves the turnaround's root and never what it is attributed to (I4).
 //! - **A flourish stanza has no harmony.** The proposal gives chords to foundation stanzas only;
 //!   each flourish line is recorded as a [`Rest`] so the debug view can say why.
 
@@ -115,8 +125,8 @@ pub enum Reason {
         /// The stanza's key: the degree of its first in-stanza rhyme, or 0.
         key: ScaleDegree,
     },
-    /// H2: the stanza's last bar, the dominant of the stanza's own first chord, which the loop
-    /// returns to next.
+    /// H2: the second half of the stanza's last bar, the dominant of the stanza's own first chord,
+    /// which the loop returns to next. Always the second chord of a [`Harmony::Turning`].
     Turnaround {
         /// The root of the stanza's first chord, which this leads back to.
         onto: ScaleDegree,
@@ -137,7 +147,16 @@ impl Reason {
     }
 }
 
-/// One bar's chord.
+/// Where in its bar a chord begins. A chord sounds until the next one, or the bar's end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Onset {
+    /// At the bar's start.
+    Start,
+    /// At the bar's half — the turnaround of a stanza's last bar ([`Harmony::Turning`]).
+    Half,
+}
+
+/// One bar's chord, or one half of a split bar's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Chord {
     bar: Bar,
@@ -184,6 +203,16 @@ impl Chord {
     pub const fn reason(self) -> Reason {
         self.reason
     }
+
+    /// Where in its bar it begins: the turnaround at the bar's half, every other chord at its
+    /// start.
+    #[must_use]
+    pub const fn onset(self) -> Onset {
+        match self.reason {
+            Reason::Turnaround { .. } => Onset::Half,
+            _ => Onset::Start,
+        }
+    }
 }
 
 /// Why a line's bar has no chord.
@@ -226,13 +255,25 @@ impl Rest {
     }
 }
 
-/// What the harmony made of one line: a chord, or a rest with its reason.
+/// What the harmony made of one line: a chord, a rest with its reason, or — a stanza's last bar
+/// under H2 — its own chord and then the turnaround.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Harmony {
-    /// The bar has this chord.
+    /// The bar has this chord, for the whole bar.
     Chord(Chord),
     /// The bar has none.
     Rest(Rest),
+    /// The stanza's last bar, split (`SPEC.md` §4.6, the user's decision): `own` from the bar's
+    /// start, `turn` from its half.
+    Turning {
+        /// What the bar would have had without the turnaround: a chord, or `None` where the line
+        /// rhymes with nothing and H1's half of `both` gives it none ([`Silence::Unrhymed`] — the
+        /// only rest a turning bar can have, since a line without a word has no turnaround and a
+        /// flourish line no harmony).
+        own: Option<Chord>,
+        /// The turnaround: V of the stanza's first chord ([`Reason::Turnaround`]).
+        turn: Chord,
+    },
 }
 
 impl Harmony {
@@ -240,18 +281,44 @@ impl Harmony {
     #[must_use]
     pub const fn bar(self) -> Bar {
         match self {
-            Self::Chord(chord) => chord.bar,
+            Self::Chord(chord) | Self::Turning { turn: chord, .. } => chord.bar,
             Self::Rest(rest) => rest.bar,
         }
     }
 
-    /// The chord, if there is one.
+    /// The chord from the bar's start, if there is one: the bar's chord, or a turning bar's own.
     #[must_use]
     pub const fn chord(self) -> Option<Chord> {
         match self {
             Self::Chord(chord) => Some(chord),
+            Self::Turning { own, .. } => own,
             Self::Rest(_) => None,
         }
+    }
+
+    /// The turnaround in the bar's second half, if this is a turning bar.
+    #[must_use]
+    pub const fn turnaround(self) -> Option<Chord> {
+        match self {
+            Self::Turning { turn, .. } => Some(turn),
+            Self::Chord(_) | Self::Rest(_) => None,
+        }
+    }
+
+    /// The chord sounding from beat `beat` of a bar `beats` long: a turning bar's turnaround from
+    /// the bar's half (`2 · beat ≥ beats`), the bar's own chord before it — where the chord lane
+    /// changes. What W2's walk lands on (`crate::bass`), given the bar the line is stated in.
+    #[must_use]
+    pub const fn chord_at(self, beat: usize, beats: usize) -> Option<Chord> {
+        match self {
+            Self::Turning { turn, .. } if 2 * beat >= beats => Some(turn),
+            _ => self.chord(),
+        }
+    }
+
+    /// Every chord of the bar, in the order they sound: none, one, or a turning bar's two.
+    pub fn chords(self) -> impl Iterator<Item = Chord> {
+        [self.chord(), self.turnaround()].into_iter().flatten()
     }
 }
 
@@ -295,27 +362,25 @@ pub(crate) fn run(
 /// One chord candidate before the turnaround: its root, function and reason.
 type Choice = (usize, Function, Reason);
 
-/// H2's turnaround: the last bar leads back to the stanza's own first chord, the bar the loop
-/// plays next — its own stanza, not the next one, so it stays inside the stanza (I2). It replaces
-/// whatever the last bar had; a one-line stanza, or a last line with no word, has none.
-fn turn_around(lines: &[LineRhyme], chosen: &mut [Option<Choice>]) {
-    let last = lines.len().saturating_sub(1);
-    if lines.len() < 2 || lines.get(last).and_then(LineRhyme::word).is_none() {
-        return;
-    }
+/// H2's turnaround: V of the stanza's own first chord, the bar the loop plays next — its own
+/// stanza, not the next one, so it stays inside the stanza (I2). It shares the last bar with that
+/// bar's own chord rather than replacing it (§4.6): the root it returns to is the first earlier
+/// line's. A one-line stanza, a last line with no word, or a stanza whose earlier lines have no
+/// chord, has none.
+fn turnaround(lines: &[LineRhyme], chosen: &[Option<Choice>]) -> Option<Choice> {
+    let last = lines.len().checked_sub(1)?;
+    lines.get(last).and_then(LineRhyme::word)?;
     let onto = chosen
         .iter()
         .take(last)
-        .find_map(|choice| choice.map(|(root, ..)| root));
-    if let (Some(onto), Some(slot)) = (onto, chosen.get_mut(last)) {
-        *slot = Some((
-            onto + Function::Dominant.steps(),
-            Function::Dominant,
-            Reason::Turnaround {
-                onto: ScaleDegree::new(onto),
-            },
-        ));
-    }
+        .find_map(|choice| choice.map(|(root, ..)| root))?;
+    Some((
+        onto + Function::Dominant.steps(),
+        Function::Dominant,
+        Reason::Turnaround {
+            onto: ScaleDegree::new(onto),
+        },
+    ))
 }
 
 /// The harmony of one foundation stanza, whose first line is bar `first_bar`.
@@ -356,7 +421,7 @@ fn stanza_harmony(
         .and_then(degree)
         .map_or(0, |(_, degree)| degree);
 
-    let mut chosen: Vec<Option<Choice>> = lines
+    let chosen: Vec<Option<Choice>> = lines
         .iter()
         .enumerate()
         .map(|(at, line)| {
@@ -395,9 +460,12 @@ fn stanza_harmony(
         })
         .collect();
 
-    if matches!(variant, Variant::Cadence | Variant::Both) {
-        turn_around(lines, &mut chosen);
-    }
+    let turn = if matches!(variant, Variant::Cadence | Variant::Both) {
+        turnaround(lines, &chosen)
+    } else {
+        None
+    };
+    let last = lines.len().saturating_sub(1);
 
     lines
         .iter()
@@ -405,20 +473,27 @@ fn stanza_harmony(
         .enumerate()
         .map(|(at, (line, choice))| {
             let bar = Bar::new(first_bar + at);
-            match (choice, line.word()) {
-                (Some((root, function, reason)), Some(span)) => Harmony::Chord(Chord {
-                    bar,
-                    span,
-                    root: ScaleDegree::new(root),
-                    function,
-                    reason,
-                }),
-                (_, None) => Harmony::Rest(Rest {
+            let chord = |(root, function, reason): Choice, span: Span| Chord {
+                bar,
+                span,
+                root: ScaleDegree::new(root),
+                function,
+                reason,
+            };
+            match (choice, line.word(), turn.filter(|_| at == last)) {
+                // The last bar: its own chord (or none), then the turnaround — both traced to this
+                // line's rhyme word, the line the bar plays.
+                (own, Some(span), Some(turn)) => Harmony::Turning {
+                    own: own.map(|own| chord(own, span)),
+                    turn: chord(turn, span),
+                },
+                (Some(choice), Some(span), None) => Harmony::Chord(chord(choice, span)),
+                (_, None, _) => Harmony::Rest(Rest {
                     bar,
                     line: line.line(),
                     why: Silence::Wordless,
                 }),
-                (None, Some(_)) => Harmony::Rest(Rest {
+                (None, Some(_), None) => Harmony::Rest(Rest {
                     bar,
                     line: line.line(),
                     why: Silence::Unrhymed,

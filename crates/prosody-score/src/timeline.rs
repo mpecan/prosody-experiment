@@ -112,17 +112,19 @@ impl Timeline {
             bar_starts.push(running);
             let slot_beats = to_u64(slot.beats()).max(1);
             for placement in slot.placements() {
-                let placed = score.placed(*placement);
+                // Where each event sounds in this slot — under the straight stack, fitted to the
+                // host where they would cross (`Score::placed_in`), as both backends play it.
+                let placed = score.placed_in(slot, *placement);
                 // Under a walking bass, one walk a bar (`Score::sounds_bass`), as it is played.
                 let bass_sounds = score.sounds_bass(slot, placement);
                 let first = placed.first_beat();
                 let line_beats = to_u64(placed.beats()).max(1);
                 let room = to_u64(slot.room_for(placed.beats()));
-                for event in placed.events() {
-                    let of = to_u64(event.subdivision().of()).max(1);
+                for (event, subdivision) in placed.onsets() {
+                    let of = to_u64(subdivision.of()).max(1);
                     // Counted from the placement's first beat: a call need not open its line.
                     let position = to_u64(event.beat().get().saturating_sub(first)) * of
-                        + to_u64(event.subdivision().index());
+                        + to_u64(subdivision.index());
                     // `position / (of · line_beats)` of the line's room in the slot.
                     let scaled = position * room;
                     let denominator = of * line_beats;
@@ -144,12 +146,24 @@ impl Timeline {
             }
             // The harmony layer (§4.6): one chord a slot, on the bar's first beat, held for the
             // bar. A timeline is onsets, so it is one hit — the held chord is not counted again in
-            // the bar's later beats.
-            if let Some(chord) = score.chord_in(slot) {
+            // the bar's later beats. A stanza's last bar under H2 is split: its own chord (if any)
+            // from the start, the turnaround from the bar's half — `slot_beats / 2` beats in, as
+            // the Strudel lane's `[a b]` places it.
+            let harmony = score.harmony_in(slot);
+            let chords = [
+                harmony
+                    .and_then(prosody_core::Harmony::chord)
+                    .map(|chord| (chord, 0)),
+                harmony
+                    .and_then(prosody_core::Harmony::turnaround)
+                    .map(|chord| (chord, slot_beats)),
+            ];
+            // `half` is in half-beats: the onset `half / 2` beats after the bar's start.
+            for (chord, half) in chords.into_iter().flatten() {
                 hits.push(Hit {
-                    slot: running,
+                    slot: running + half / 2,
                     bar: index,
-                    within: (0, 1),
+                    within: reduce(half % 2, 2),
                     voice: 0,
                     accent: false,
                     degree: Some(Tone::degree(chord.root().get())),

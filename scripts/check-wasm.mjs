@@ -25,9 +25,15 @@ const settings = [
   '',
   'scale=lydian&root=F%23&swing=0.33&humanise=0.5&density_level=0.5',
   'set=harmony:both,bass:feet,reading:stanza',
+  'set=reading:arrives,pulse:elastic',
   'set=harmony:rhyme,bass:syllables&voicing=seventh',
   'set=harmony:cadence&off=outro,period&profile=jazz',
   'off=held,refrain,bass&profile=interest',
+  'set=pulse:elastic&swing=0.33&profile=jazz',
+  'set=stack:straight&profile=jazz',
+  'set=stack:straight,bass:feet,harmony:cadence,pulse:elastic&swing=0.33&voicing=seventh',
+  'set=function-words:light&profile=jazz',
+  'set=function-words:light,bass:feet,stack:straight,harmony:both&density_level=0.5',
 ];
 const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
 

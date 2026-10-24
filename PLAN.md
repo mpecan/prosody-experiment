@@ -406,6 +406,491 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The breath says what it leaves unread — a lost line is listed, not silent
+
+Review of the breath step: with `outro` off, Pied Beauty (eleven bars) lost its closing line,
+"Praise him.", under `breath` and nothing said so — the cue header read "10 lines over 11 bars"
+(CLAUDE.md §6: a fallback must be visible). Hand-worked: stanza 1 in bars 1–6; stanza 2 arrives in
+bar 7, waits for its breath, max(7, 6 + 2) = bar 8, so bars 8–12, and bar 12 is past the piece.
+`arrives` and `stanza` read all eleven. The rule is unchanged; the loss is now said.
+
+- **`Reading::unread()`** (`prosody_emit::reading::Unread`, with `Why::PieceEnds` /
+  `Why::NeverArrives`): every line no cue speaks, under every variant but `off`, with its span and
+  text (I4). A line of a stanza that was read in part, or one that arrives, lost its turn to the end
+  of the piece; any other never arrives.
+- **Said in three places:** the cue pattern's header (`// 1 of 11 lines not read:` and
+  `//   line 11 (bytes …) is not read, the piece ends before its turn: Praise him.`), the web
+  `/reading` answer's new `unread` list, and the page's status bar and console while it plays
+  (`not read: line 11, the piece ends before its turn`). Nothing changes when every line is read.
+- **Tests.** Hand-worked: Pied Beauty outro off — 11 slots, arrives bars 1–11, breath 1–6 and 8–11,
+  line 11 unread with `PieceEnds`, both header lines exact; the same through the web `/reading`;
+  a unit test of the reason (a cut stanza's lines `PieceEnds`, a never-heard stanza's
+  `NeverArrives`, bytes 17..20). The breath property now also checks the unread list against the
+  cues on random poems, every example, and every example with the outro off.
+- `SPEC.md` §4.7's heading no longer describes `arrives` ("the poem spoken over the music, a stanza
+  at a time"), and the section says how a lost line is reported. Snapshots and `cycle.sh`: unchanged.
+
+### The reading takes a breath — stanzas read whole, a silent bar between, never ahead
+
+The user decided: under the old default `arrives`, a transforming stanza's lines were read one a
+pass (five bars apart) and each stanza's first line straight after the previous stanza, so a stanza
+sounded joined to the one before and then broken by long pauses (The Tyger: lines 1–4 in bars 1–4,
+line 5 in bar 5, lines 6–8 in bars 10, 15, 20). A **new default variant, `breath`**; `arrives` and
+`stanza` stay as variants.
+
+- **The rule** (`prosody_emit::reading::by_breath`). Each stanza is read through, one line a bar, in
+  order. Stanza *k* starts at max(its first line's first arrival as a host — `Stated`, `Arriving`,
+  `Overruling`, the same arrivals `arrives` reads — , stanza *k − 1*'s last cue + 2). A stanza whose
+  first line never arrives starts at the earliest arrival of any of its lines; one with no arrival
+  is skipped and leaves no breath.
+- **Past the end, decided:** a line that would fall after the piece's last slot is not read (as
+  under `stanza`); a stanza that would start there is not read at all. A later cue would wrap onto
+  the next round's first bars, and starting earlier breaks the breath or reads ahead of the music.
+  No example loses a line; four one-line stanzas do (bars 1, 3, 5 of a five-bar piece, the fourth
+  unread) — raised, not decided further (`SPEC.md` §4.7).
+- **Selector.** `Variant::Breath` (`breath`), `Mapping::Reading`'s fourth variant and its default
+  (`off, arrives, stanza, breath`). It reaches the page's A/B table, the CLI's `--set` and usage, and
+  the web `set=` through `Mapping::variants`; `Mappings::every` grows from 6144 to 8192. The cue
+  pattern's first comment says `reading = breath` and what it does; the explain view (CLI and web)
+  now lists `reading=arrives` when the old reading is chosen, and nothing under the default.
+- **Timing.** Nothing new on the clock: a breath cue is an ordinary cue in a slot, weighted as the
+  music's bar under the steady pulse, and its rate is fitted to *that* slot's bar — which under a
+  breath is often not its own line's bar (the strudel clock test: line 2's eight syllables read in a
+  three-beat bar of the old loop, 1.569, where `arrives` read it in its own four-beat bar, 1.176).
+  The trace, the music, the OSC schedule and the roll are untouched; the page's reading wash follows
+  the cue that fires.
+- **Tests.** Hand-worked: `TRANSFORMING` under breath (0, 1, 3, 4 and its cue pattern
+  `<0@2 1@2 ~@2 2@2 3@2 ~@2 ~@2 ~@2>`), a new three-stanza fixture with its full 24-slot
+  arrangement asserted and the cues of every variant (arrives 0 1 2 3 7 11 12 16 20; stanza
+  0–5, 12–14; breath 0–2, 4–6, 12–14), the refrain fixture (breath 0 1 3 4 6 7), hand-made arrivals
+  for the wait-for-music, wait-for-breath, cut-short, never-started, first-line-late and
+  never-heard edges, the steady/elastic clock test, the web reading test on the seed (breath 0–3,
+  5–8) and the Tyger plan. A proptest (`prosody-emit/tests/breath.rs`) checks every stanza's cues
+  against the arrives plan on random poems and all nine examples (and that every example reads
+  every line), with I1, I3 and I4. `arrives` and `stanza` tests now name their variant and are
+  unchanged.
+- **Snapshots: none changed** (the reading is not in the pattern, the trace or the explain view's
+  default). `cycle.sh` machine and jazz: identical before and after (0.743, 0.737) — the scorer
+  never reads the reading.
+- **I2, disclosed in `SPEC.md` §4.7:** a stanza that waits for its breath has cues that depend on
+  the previous stanza's reading, so adding a line to stanza *n* can move stanza *n + 1*'s cues by a
+  bar. Cues are not voices; the voice property is untouched.
+
+### The melody over the harmony — single rhyme notes on top of the chord lane
+
+The user decided: with the jazz palette (`voicing = "seventh"`) and a harmony variant on, the rhyme
+melody and the chord lane both played four-tone chords, which was thick. Now, **whenever the harmony
+mapping is on (any variant but off), rhyme notes play as single notes on top of the chord lane,
+whatever the voicing says; the voicing shapes only the chord lane.** Harmony off: unchanged. No new
+variant, no core change.
+
+- **Emitter** (`prosody_emit::strudel`). `melody_voicing(score, style)` is the style's `Voicing`
+  unless the score has the harmony on (`!score.harmony().is_empty()` — the core records a harmony,
+  chord or rest, for every line exactly when the mapping ran), then `Voicing::Note`. The melody
+  layer uses it for its tones and for `chord_share`, so a single note takes the whole
+  `melody_gain` (jazz: postgain 0.375 → 0.750). `melody_over_harmony(score)` gives the words for the
+  header and the explain view. Both re-exported from `prosody_emit`.
+- **Decided, and documented in `SPEC.md` §4.6:** the switch is "the mapping is on", not "some bar
+  has a chord". The second is a whole-poem fact — an edit giving one stanza the poem's first chord
+  would revoice every other stanza's melody (I2). So a harmonised poem with no chord anywhere still
+  plays single notes; the header then says `single notes (… though no bar has a chord)`.
+- **Views.** Pattern header: `melody on gm_epiano1 as single notes over the chords (the harmony
+  mapping is on, so the voicing shapes only the chord lane)` in place of `as seventh chords (…)`.
+  Explain view (CLI and web), in the style block on the palette's column: `rhyme notes   single
+  notes over the chords (…)`. The page's Voicing tooltip, `README.md` and `SPEC.md` §5 say so too.
+- **Timing: nothing moved.** Only note values and one postgain change; the trace, reading, OSC
+  (which never voiced chords — one pitch a message) and the roll's bar maths are untouched.
+- **Tests.** Strudel unit (hand-worked, ABAB in C dorian under jazz): harmony off, melody steps
+  `60,63,67,70 / 62,65,69,72` ×4 at postgain 0.375; cadence, `60 / 62` ×4 at 0.750, chord lane
+  still sevenths (`[55,58,62,65]` = V of degree 0). I3 property: under rhyme/cadence/both, `note`
+  vs `seventh` differ only in the chord lane (3 vs 4 tones, same steps); the melody is never a
+  stack; the header names it exactly when there is a chord. CLI and web end-to-end tests for the
+  pattern and the explain row. The unit test and the property both fail with the change disabled.
+- **Snapshots: none changed** (no corpus snapshot has the harmony on). Across five header-less
+  examples × {default, jazz} × {note, seventh} × {off, cadence, both}, every `off` pattern and
+  explain is byte-identical to before; under the harmony the only changes are the `plays:` header
+  line, the explain row, and — seventh only — the melody lanes' notes (each chord → its lowest
+  tone) and postgain (0.375 → 0.750). The chord lanes are byte-identical.
+- **Measured**: every `cycle.sh` table (machine, jazz; off, cadence, both) is identical to before —
+  the scorer reads the score, never the voicing. machine 0.743 / cadence 0.778 / both 0.763; jazz
+  0.737 / 0.730 / 0.733.
+- **Browser** (Wilde, jazz palette, B harmony=cadence): B's rhyme-note haps are one per onset (87
+  onsets, notes 60/62…), chords below at 53 57 60 63…; A (harmony off) plays 60 63 67 70 stacks and
+  no chord lane. No console errors or warnings.
+- **Open, from review — register.** "On top" is a layer, not a register: the chord lane's sevenths
+  climb from MIDI 48 to as high as 69 in C dorian, the melody starts at 60, so in Wilde under jazz +
+  cadence many rhyme notes sit inside the sounding chord, some in unison with a chord tone (60
+  against `[53,57,60,63]`). Not changed in code: whether "on top" means register is the user's call;
+  if it does, a register offset for the chord lane (or the melody) under the harmony is palette and
+  moves no event. Recorded in `SPEC.md` §4.6.
+
+### The cadence's ending — the last bar split, its own chord then the turnaround
+
+The user decided: under `harmony = cadence` (and `both`) a stanza's last bar had always been a
+whole bar of V turning round onto the stanza's first chord, even when its line closes a rhyme, so
+ABAB, AABB and ABBA never landed on I. Now that bar is **split**: its own chord first — I when the
+line closes a rhyme, whatever H2 would otherwise give it — then, from the bar's half, V of the
+stanza's own first chord (still I2-safe: it reads only its own stanza). No new variant; `rhyme`
+and every line that is not last in its stanza are unchanged.
+
+- **Core** (`prosody_core::harmony`). `Harmony::Turning { own: Option<Chord>, turn: Chord }` beside
+  `Chord` and `Rest`; `Harmony::chord()` (from the bar's start), `turnaround()`, `chords()`,
+  `chord_at(beat, beats)`; `Chord::onset()` (`Onset::Start`/`Half`, the turnaround's being `Half`).
+  `Score::chord_in` became `Score::harmony_in(slot)`, the one place a slot's harmony is chosen, so
+  every consumer has to handle the second chord; `Score::chords()` yields both.
+- **Decided and documented** (`SPEC.md` §4.6): the turnaround's **span is the last line's rhyme
+  word** — the line whose bar it shares; the first line, which gives it its root, is in its reason
+  (`Turnaround { onto }`). **An unanswered last line keeps its IV** and turns round from the half
+  (IV–V into the loop's first chord), rather than a whole bar of V — the user's rule is "its own
+  chord first". Under `both` a last line that rhymes with nothing **rests for the first half**
+  (`own: None`), then turns round. No turnaround, as before, for a one-line stanza, a last line with
+  no word, or a stanza whose earlier lines have no chord. The half is the bar's, in time: beat 2 of
+  4, beat 1½ of 3 (swing then moves it like any offbeat — palette).
+- **W2's walk follows the split, at the bar's half.** A foot from the half of the bar its line is
+  stated in (`2·beat ≥ beats`, `beats` the bar's) walks on the turnaround, the ones before on the
+  bar's own chord; a repeat is now judged by (root, step), so the same step over another root is no
+  repeat. The bar's length comes from the arrangement's own rule (`arrange::periods_by`, shared with
+  the slots; `lower::own_bars`), since the bass runs before there is a score to arrange. A first
+  draft turned round at the *line's* half; review found that under the stanza period (the default)
+  a last line shorter than its stanza's longest walked on the turnaround while the lane still held
+  the bar's own chord (an F against C minor). Over the shipped poems that was 9 feet (Annabel Lee 7,
+  the Slovenian corpus poem 2) under cadence; now none: every W2 foot of a split bar, 57 of them
+  under another host (under cadence), walks on the lane's chord. Tests: in `tests/bass.rs`, ABBA
+  with a four-foot last line in five-beat bars (roots 0 0 0 8, steps 0 2 3 4) and its period-off
+  twin (0 0 8 8, steps 0 2 2 4); in `tests/invariants.rs`, the property that W2 walks on the chord
+  the lane is sounding, over rhymed ragged stanzas (it fails on the first draft). Left, and disclosed in §4.6:
+  a walk is one per line, so under the period a stanza's last line looping under a flourish stanza
+  of another period can turn a foot away from the lane — no shipped poem reaches it.
+- **Every surface.** Strudel: a turning slot's element is `[own turn]` (or `[~ turn]`), gains
+  likewise; the header gains `//   chords: a stanza's last bar is split — …` and writes the bar as
+  `4:I/1+V/8` (`-+V/8` for a resting first half). Explain view: a second row, `harmony then, from the
+  bar's half, V deg 8 (V of deg 4) · cadence: the stanza's last bar, …`. OSC: `# not scheduled here:
+  110 chords of the harmony layer, 22 of them turnarounds from a bar's half` (Tyger), the same count
+  on `--send`'s stderr; `Schedule::unsent_turnarounds`. Scorer: a second chord hit `slot_beats / 2`
+  beats into the bar. The trace lights syllables only, never chords — checked, unchanged; the
+  reading is unchanged.
+- **Found and fixed on the way: the chord lane was off the clock under the steady pulse.** It wrote
+  its own `<a b c>` (one element a *cycle*), so since the steady pulse every chord lasted one beat
+  and the lane drifted through the piece, contrary to that entry's claim that the chord lane agreed
+  bar for bar. It now goes through `strudel::sequence` with every other pattern (`<a@4 b@3 …>`), so a
+  chord lasts its bar; a test checks the lane's weights equal `strudel::weights`. This changes the
+  chord lane under `rhyme` too (weights only; under `elastic` `rhyme` is byte-identical apart from
+  the lane's comment).
+- **Tests (hand-worked).** Core: ABAB → `1 I closes B then 8 V turnaround onto 4`; AABB → `I/1 then
+  V/8`; ABBA → `I/0 then V/8`; ABAC (unanswered last line) → `IV/3 then V/8`; the mixed fixture under
+  cadence and both (resting first halves); AAAO; a one-line stanza (no split, `IV/3` whole bar; `both`
+  rests); spans (`dA dO tA tO tO`); slot onsets (`Start`/`Half`) stated, in the outro and looping
+  under a flourish. W2 on ABAB: roots `1 1 8 8` in the last bar, steps `0 2 2 1`. Explain rows, incl.
+  the resting half. Strudel: ABBA four-beat `[[48,51,55] [50,53,56]]@4`, weights `4 ×8`, elastic
+  `[[…] […]]`, rhyme unsplit; `[~ [50,53,56]]@1` for the resting half; the existing chord tests now
+  carry `@1`. OSC: ABAB cadence 10 chords, 2 turnarounds. CLI: the couplet `2:I/0+V/8 4:I/1+V/9`, the
+  explain row, OSC `12 chords …, 4 of them turnarounds`. Scorer: AABB pitched 24/40 (rhyme) and 26/42
+  (cadence). Properties: the I2 harmony shape now includes the split; the W2 I4 property checks each
+  note's root against `chord_at`.
+- **Snapshots: none changed** — no corpus snapshot has the harmony on. Every example's pattern,
+  OSC and explain under `harmony=off` is byte-identical to before.
+- **Measured** (`./scripts/cycle.sh <profile> harmony=<variant>`). Off: machine 0.743, jazz 0.737,
+  every row identical. Before → after: machine cadence 0.775 → **0.778**, both 0.763 → 0.763; jazz
+  cadence 0.730 → 0.730, both 0.733 → 0.733. The extra onset raises layering and pitched slightly
+  (Tyger cadence layering 3.837 → 3.900); legibility cannot move (a chord is no event).
+
+`machine`, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000      - |  0.932  0.811  0.756
+carroll-jabberwocky     2.915  0.911  0.559  1.651  0.600  0.887  1.000      - |  0.826  0.957  0.790
+dickinson-because       2.761  0.907  0.701  1.573  0.362  0.887  1.000      - |  0.936  0.831  0.777
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933      - |  0.955  0.946  0.904
+poe-annabel-lee         3.950  0.911  0.514  1.847  0.154  0.841  0.811      - |  0.876  0.914  0.801
+preseren-zdravljica     2.417  0.791  0.735  1.542  0.214  0.643  1.000      - |  0.561  1.000  0.561
+shakespeare-sonnet-18   2.345  0.818  0.766  1.854  0.364  0.993  1.000      - |  0.821  1.000  0.821
+whitman-song-of-myself  2.797  0.879  0.339  1.546  0.150  0.894  1.000      - |  0.948  0.837  0.794
+wilde-theocritus        3.059  0.913  0.738  2.099  0.341  0.944  0.844      - |  0.971  0.820  0.796
+mean overall 0.778 over 9 poems
+```
+`machine`, harmony=both:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000      - |  0.932  0.811  0.756
+carroll-jabberwocky     2.761  0.903  0.540  1.651  0.600  0.887  1.000      - |  0.809  0.957  0.774
+dickinson-because       2.458  0.879  0.670  1.573  0.362  0.887  1.000      - |  0.903  0.831  0.750
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933      - |  0.955  0.946  0.904
+poe-annabel-lee         3.906  0.908  0.511  1.847  0.154  0.841  0.811      - |  0.876  0.914  0.801
+preseren-zdravljica     2.139  0.743  0.705  1.542  0.214  0.643  1.000      - |  0.521  1.000  0.521
+shakespeare-sonnet-18   2.288  0.800  0.761  1.854  0.364  0.993  1.000      - |  0.793  1.000  0.793
+whitman-song-of-myself  2.706  0.869  0.324  1.546  0.150  0.894  1.000      - |  0.926  0.837  0.775
+wilde-theocritus        3.042  0.911  0.737  2.099  0.341  0.944  0.844      - |  0.972  0.820  0.797
+mean overall 0.763 over 9 poems
+```
+`jazz`, harmony=cadence:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000  0.031 |  0.726  0.811  0.589
+carroll-jabberwocky     2.915  0.911  0.559  1.651  0.600  0.887  1.000  0.144 |  0.881  0.957  0.843
+dickinson-because       2.761  0.907  0.701  1.573  0.362  0.887  1.000  0.013 |  0.785  0.831  0.652
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933  0.279 |  0.845  0.946  0.800
+poe-annabel-lee         3.950  0.911  0.514  1.847  0.154  0.841  0.811  0.093 |  0.797  0.914  0.729
+preseren-zdravljica     2.417  0.791  0.735  1.542  0.214  0.643  1.000  0.000 |  0.710  1.000  0.710
+shakespeare-sonnet-18   2.345  0.818  0.766  1.854  0.364  0.993  1.000  0.021 |  0.880  1.000  0.880
+whitman-song-of-myself  2.797  0.879  0.339  1.546  0.150  0.894  1.000  0.119 |  0.765  0.837  0.640
+wilde-theocritus        3.059  0.913  0.738  2.099  0.341  0.944  0.844  0.302 |  0.885  0.820  0.725
+mean overall 0.730 over 9 poems
+```
+`jazz`, harmony=both:
+```
+poem                    layer  recur  pitch   entr   sync  pulse steady  cross |  inter  legib overall
+blake-tyger             3.900  0.949  0.701  2.063  0.017  0.994  1.000  0.031 |  0.726  0.811  0.589
+carroll-jabberwocky     2.761  0.903  0.540  1.651  0.600  0.887  1.000  0.144 |  0.889  0.957  0.850
+dickinson-because       2.458  0.879  0.670  1.573  0.362  0.887  1.000  0.013 |  0.808  0.831  0.671
+hopkins-pied-beauty     3.305  0.829  0.468  1.745  0.163  0.953  0.933  0.279 |  0.845  0.946  0.800
+poe-annabel-lee         3.906  0.908  0.511  1.847  0.154  0.841  0.811  0.093 |  0.800  0.914  0.731
+preseren-zdravljica     2.139  0.743  0.705  1.542  0.214  0.643  1.000  0.000 |  0.710  1.000  0.710
+shakespeare-sonnet-18   2.288  0.800  0.761  1.854  0.364  0.993  1.000  0.021 |  0.880  1.000  0.880
+whitman-song-of-myself  2.706  0.869  0.324  1.546  0.150  0.894  1.000  0.119 |  0.768  0.837  0.643
+wilde-theocritus        3.042  0.911  0.737  2.099  0.341  0.944  0.844  0.302 |  0.886  0.820  0.726
+mean overall 0.733 over 9 poems
+```
+
+- **In the browser** (Chromium, port 4914, the page's Tyger preset, B harmony=cadence): with B's
+  default `pulse=elastic` the scheduler's chord lane struck bar 3's IV/3 at 4.219 s and V/8 at
+  4.941 s (the half, 4.922 s, swung by `swingBy(0.08, 3)`); with B `pulse=steady`, IV/3 at 5.156 s and
+  V/8 at 6.094 s, exactly half of the 1.875 s bar, chords lasting 1.875, 1.406 and 0.938 s (a 4-beat
+  bar, a 3-beat bar, a half); a drum onset at each of the first 8 bar starts; 86 trace onsets in 8
+  bars, every one a music onset; the roll showed the split bar's two chords and the poem lit as it
+  played. No console errors or warnings. Nobody has heard it.
+- **Raised, not done.** A stanza that opens on an open rhyme starts on V of its degree *d*, so its
+  turnaround is V of V, *d*+8, which folds onto *d*+1 in a seven-note scale: whenever the last line
+  closes the class one degree above the first's, the bar re-strikes the same triad at its half
+  (ABAB ending I/1: `4:I/1+V/8`; in The Tyger `8:I/4+V/11`, `16:I/7+V/14`, `20:I/9+V/16`). ABBA,
+  ending I/0, does turn. Whether the turnaround should lead onto the stanza's first
+  *tonic*, or on a beat rather than the exact half in odd bars, is the user's call.
+
+### Softening function words — a variant, full kept
+
+The user decided: `CMUdict` gives one-syllable function words primary stress, so §4.2's "stress →
+accent" strikes "or" in The Tyger's "hand or eye" like "hand"; today's behaviour stays the default
+and a **light** variant softens them where the metre does not need them. A new selector,
+`Mapping::Function` (`function-words`): **`full`** (default, first — what preceded it; no `off`)
+and **`light`**.
+
+- **The rule** (`prosody_core::accent`). Under `light`, a syllable is struck at
+  `Velocity::SECONDARY` (2/3) when its word is a function word (the lexicon says), has one syllable,
+  carries primary stress, and is *not* on a strong position of the meter's own scansion: its foot's
+  template stressed there (read from `Event::foot` and `Event::subdivision`, nothing re-scanned).
+  The spondee is read further, because the meter makes one exactly where a function word's
+  dictionary stress meets a content word: its strong position is the first in a falling line (more
+  trochees/dactyls than iambs/anapests), the second in a rising one, and in a level line the content
+  word's (two function words: the one on the beat). Hand-worked: "What immortal hand or eye" scans
+  trochee, trochee, spondee, single — falling — so "or" is light and "What" (a trochee's head)
+  stays; "In the forests of the night" scans anapest, iamb, iamb, and "of" (an iamb's strong half)
+  stays; "Did he who made the Lamb make thee" scans spondee, spondee, iamb, spondee — rising — so
+  "Did" and "who" are light and the rhyme word "thee" stays. The direction rule was added after the
+  first version (spondee → content word always) lightened Blake's rhyme word "thee" in that line.
+- **Where the list lives.** `Lexicon::is_function_word` — a *required* method on the core's
+  language-agnostic `Lexicon` trait, so a second language must answer it — with the English closed
+  class in `prosody-lexicon/src/function.rs`, beside the frequency table: word class is language
+  data (§9), and the lexicon is already the one English-word table every caller passes in, so no
+  call site of the pipeline changed. A fixed sorted list (binary search, a test checks the order):
+  articles, pronouns incl. thou/thee/thy/thine, possessives, conjunctions, short prepositions,
+  auxiliaries and their archaic forms. Left out on purpose: negatives, quantifiers, `so`/`yet`/
+  `when`/`where`/`how`/`while`, `up`/`down`/`out`/`off`, `there`, `art` (Tyger's "what art").
+  The surprisal pass, which already asks the lexicon about each word, records the answer
+  (`WordSurprisal::is_function_word`); it plays no part in surprisal.
+- **Every consumer.** Decided once in the lowering, right after the rhythm and before the bass, on
+  `Event::velocity` itself: Strudel gains, OSC velocities, the scorer's accents, the height bass
+  (primary syllables only — a light "or" loses its bass note) and W2's strongest syllable all read
+  it. `Event::is_light` marks the event; `Score::function` and `Score::lightened` name and count.
+- **Visible.** Pattern header `function-words = light: … in N syllable(s)`; OSC
+  `# function-words = light: …`; the explain view's `function-words light · … N syllable(s)` line and
+  `function-words` in the *from* column of each light row; the CLI help; the page's mapping table
+  (from `Mapping::ALL`, unchanged code). Under the default nothing new is printed, so **no snapshot
+  changed** (the insta suites passed untouched; no `.snap.new`).
+- **Tests (hand-worked).** Core `tests/accent.rs` (a table phonemiser with `CMUdict`'s stresses):
+  the three lines above, full vs light, with their scansions asserted first; a level line ("hand or
+  eye": "or" light; "or thy hand": "thy" light, "or" keeps the beat); a two-syllable "function word"
+  left alone; the height bass losing "or"'s note and nothing else moving; the explain view; a
+  property under every other mapping choice that only force changes and only on lightened
+  one-syllable function words off a non-spondee strong position; an I2 property (an edit to stanza 1
+  leaves the last stanza's forces alone). Mutation-checked: removing the one-syllable clause, the
+  spondee rule, the direction or the strong-position test each fails a test. Lexicon: list order,
+  members, omissions, case/apostrophe matching. Emit (real `CMUdict`): "or"'s gain 1.000 → 0.667 in
+  both passes of the one-line poem, the bass lane `[36 36]` → `[36 ~]`, every other pattern line
+  identical; OSC: exactly the two "or" messages change, velocity 1.000 → 0.667, degree 36 → −1.
+  Scorer: `dAda dAda dA dO da dA` syncopation 0.25 → 0, pitched 5/8 → 1/2, pulse/steadiness/
+  cross-rhythm/layering/recurrence equal. CLI: the counts agree across header, OSC and explain;
+  `--without function-words` is the default; `function-words=off` refused; `node --check` passes.
+  Web: the selector, `/pattern` and `/explain` agree, the score's syncopation moves. `check-wasm.sh`
+  gained two `function-words:light` settings: 495 answers byte-identical. The invariants' lexicon
+  now calls words of ≤ 2 letters and "and"/"the" function words, so the I1/I4 properties under any
+  mappings exercise `light`; the stack property's `pick` range grew to cover the doubled space (6144).
+- **Measured** (`./scripts/cycle.sh`, mean overall). Default: machine 0.743, jazz 0.737 — every row
+  byte-identical to before. `function-words=light`: machine **0.710**, jazz **0.747**. Syllables
+  lightened: Tyger 24, Sonnet 24, Whitman 18, Dickinson 15, Poe 13, Hopkins 9, Jabberwocky 7,
+  Wilde 4, Prešeren 0. Syncopation rises almost everywhere (Dickinson 0.362 → 0.694, Sonnet 0.364 →
+  0.657, Jabberwocky 0.600 → 0.738, Whitman 0.150 → 0.331, Tyger 0.017 → 0.020): a light function
+  word *on a beat* (a rising line's spondee head, "Could", "Did") leaves that beat unaccented after
+  the previous offbeat accent, which is exactly what LHL counts. Machine's band (0.1–0.4) punishes
+  that, jazz's (0.45–0.9) rewards it — the Sonnet 0.880 → 0.926 under jazz, 0.733 → 0.636 under
+  machine. Pitched falls with the lost bass notes (Tyger 0.681 → 0.570). Legibility unchanged
+  (Tyger 116 of 143 explained). The scorer reads it, as it should; whether it sounds better is the
+  user's call.
+- **In the browser** (Chromium, the page's Tyger preset — its first two stanzas — A `full`, B
+  `light`, every other B mapping set to A's): B's header counts 6 (bars 0–7: "or" ×2, "Could",
+  "thy", "thine", "what" — the same rows the CLI marks); evaluating each side's pattern, "or" at bar 2
+  beat 2½ is `bd` gain 1 plus a bass note on A and `bd` gain 0.667 with no bass note on B; on both
+  sides every trace onset in a 6 s window was a music onset on the scheduler's clock (22 of 22); the
+  lit poem followed the lines in order; no console errors or warnings.
+- **Raised, not done.** Secondary (2/3) or unstressed (1/3) for a light word; whether a spondee's
+  direction should come from the stanza rather than the line; phrasal stress beyond function words
+  (§9's "content" noun/adjective) is still not attempted.
+
+### Straightening stacked lines — a variant, crossing kept
+
+The user decided: where a line stacked under the bar's host divides a beat incompatibly with it
+(three against two — the cross-rhythm traced in *the off-rhythm feel* below), today's crossing stays
+the default, and a **straight** variant fits the stacked line to the host. A new selector,
+`Mapping::Stack` (`stack`): **`crossing`** (default, first — what preceded it; no `off`) and
+**`straight`**.
+
+- **The rule** (`prosody_core::stack`). Per beat, a line's grid is the lcm of its onsets' reduced
+  denominators — exactly what `cross_rhythm` reads — and two grids cross when neither divides the
+  other. Where a stacked, on-grid line crosses the host in a beat, its *n* syllables are fitted to
+  the host's *h* parts, "the first takes the long": *n* > *h* — the first *h* − 1 take a part each
+  and the rest share the last part (three over two: `[a@2 b c]`, onsets 0, ½, ¾); *n* < *h* — the
+  first holds the parts the line lacks (two over three: `[a@2 b]`, 0 and ⅔). Every syllable stays
+  its own event, in the same beat, traced to the same word. Left alone: the host; beats where the
+  host is silent; placements off the slot's grid (a squeezed or stretched loop); two stacked lines
+  crossing each other but not the host. `fit` is tested over every *n* ≤ 9, *h* ≤ 7: distinct
+  ordered onsets filling the beat, never crossing *h*.
+- **Where it lives: the core, not an emitter.** `Score::placed_in(slot, placement)` is
+  `Score::placed` with each event's place in its beat *in that slot* (`Placed::subdivision`,
+  `Placed::onsets`, `Placed::straightened`); the Strudel walk (`grid_by_slot`, so the page's trace
+  too), the OSC schedule and the scorer's timeline all read it, so the four agree by construction
+  and the scorer measures what is played. An emitter-side fit would have left the scorer counting
+  crossings no one hears. `Score::events` is unchanged; the variant is recorded (`Score::stack`).
+  `Subdivision` gained `parts` (1 everywhere but a fitted long syllable), written in the pattern
+  with `@` inside the beat.
+- **Checked against the real packages.** With `@strudel/core` and `@strudel/mini` 1.2.6 (the
+  versions `@strudel/web` 1.3.0 pins) in node, `[[bd@2 bd bd] [bd bd]]@2` as slot 1 sounds at 2,
+  2.5, 2.75, 3, 3.5 cycles. Wilde's whole pattern, evaluated the same way, sounds 331 distinct
+  onset instants in one pass under `crossing` and 293 under `straight` — in both cases exactly the
+  OSC schedule's instants (38 fewer: each 3-into-2 beat trades ⅓ and ⅔ for ¾).
+- **Visible.** The pattern header's `stack = straight: … in 38 beat(s) — three syllables over two
+  are [a@2 b c], two over three [a@2 b]`; the OSC schedule's `# stack = straight: …`; the explain
+  view's `stack straight · … 38 beat(s)` line and, under each fitted line, `straight 2 into 3 at
+  4.0 · 3 into 2 at 3.1 3.2 4.1 … (slot.beat)`; the CLI help; the page's mapping table, which
+  lists it unchanged from `Mapping::ALL` (B starts at `crossing`, its first variant). Under the
+  default nothing new is printed — the precedent of the height bass — so **no snapshot changed**.
+- **Tests (hand-worked).** Core (`tests/stack.rs`, toy `a`/`A`/`o`/`O`): ABAB with an opening
+  anapaest — slot 1's held A line is `(0/3 1/3 2/3)` crossing and `(0/4 ×2, 2/4, 3/4)` straight in
+  beat 0, beat 1 untouched, the host and every other slot identical, `Score::events` and the
+  arrangement identical; a three-foot A line fitted with the stanza period (bar of 3) and left alone
+  without it (squeezed into 2); the explain view's two new lines and nothing else; and a property
+  over generated poems of two- and three-syllable feet, rhymes, refrains and commas under any
+  mappings — events/voices/arrangement/harmony unchanged, same events per placement, host never
+  moved, unfitted beats as crossing, distinct instants, and no on-grid stacked line crossing its
+  host (mutation-checked: it fails with the fit disabled, and with two syllables sharing an onset).
+  Emit: the pattern's `[[x x x] [x x]]` → `[[x@2 x x] [x x]]` in the held line's slot, every
+  parameter on that grid, only that line and the bass's second lane changed, the trace's lanes the
+  music's rhythm slot by slot; OSC 2, 2⅓, 2½, 2⅔, 3, 3½ → 2, 2½, 2¾, 3, 3½. Scorer: the fixture's
+  `cross_rhythm` 1/16 → 0, pulse/steadiness/layering/pitched/recurrence equal. CLI: Wilde's header
+  and OSC count 38, `cross_rhythm` 0.302 → 0.000, `--without stack` is the default, `stack=off`
+  refused, the pattern passes `node --check`. Web: the selector, `/pattern` and `/trace` carry the
+  same 38 fitted long syllables, `/score` under jazz reads 0.000, `/explain` names it.
+  `check-wasm.sh` gained two settings with `stack:straight`.
+- **Measured** (`./scripts/cycle.sh`, mean overall). Default: machine 0.743, jazz 0.737 — both
+  unchanged, every row identical. `stack=straight`: machine 0.743 (`cross_rhythm` is not in it, and
+  no other column moved at three places), jazz **0.705**: cross-rhythm falls to 0.000 on every
+  example but Poe (0.005: three slots where a six-beat line is squeezed into a five-beat bar, which
+  straight leaves alone), so it drops below the jazz band's 0.1 floor everywhere and interest falls
+  (Wilde 0.903 → 0.840, Hopkins 0.845 → 0.786, Jabberwocky 0.900 → 0.838). Beats fitted: Wilde 38,
+  Hopkins 24, Jabberwocky 23, Poe 19, Whitman 19, Tyger 11, Sonnet 3, Dickinson 2, Prešeren 0. The
+  jazz profile rewards some cross-rhythm, so this is the number moving the way the profile says,
+  not a verdict; whether the ear prefers it is the user's call.
+- **Disclosed against I2** (`SPEC.md` §4.2): under `straight` a stacked line's onsets within a beat
+  depend on its host's feet, which can be another stanza's. Events, beats, voices, seeds, accents
+  are untouched, and every I2 property compares those.
+- **Review fixes.** (1) The one-word edit test (`prosody_score::sensitivity`) built each line from
+  `Score::events` alone, so under `straight` it compared timing nobody plays: an edit to a host that
+  re-fitted another stanza's stacked line still counted as local. Each slot a line sounds in now
+  carries its onsets from `Score::placed_in`, and a slot hosted by the edited stanza may change them
+  as it may change its length. Under `crossing` those onsets are each event's own, so every number
+  is as it was. Under `straight` *local* falls — Wilde 29 → 18 of 61, Jabberwocky 46 → 28 of 69, Poe
+  83 → 51 of 116, Tyger 68 → 50 of 143 — and *explained* does not move anywhere (the re-fitted line
+  sounds under the edited one), so the `legib` column is unchanged. Hand-worked in
+  `prosody-score/tests/pipeline.rs`: one edit (`so` → `sasa`) turns stanza 2's host beat into a
+  triplet, so stanza 1's looped triplet is no longer fitted — 9 local under crossing, 8 under
+  straight, 9 explained in both (mutation-checked: it fails with the scorer reading the events' own
+  subdivisions). (2) The explain view summed fitted beats per line while the pattern and OSC header
+  counted each `(slot, beat)` once; both now print `Score::straightened_beats`. ABCABC fixture in
+  `tests/stack.rs`: slot 2 fits two held lines in beat 0 and slot 3 one — 2 beats, not 3.
+- **Raised, not done.** Two stacked lines crossing each other where neither crosses the host are
+  left crossing (fitting them to each other would need a choice of which one leads); a squeezed or
+  stretched loop is not fitted (its beats are not the host's); the "first takes the long" rule
+  ignores stress — an anapaest's stressed third syllable lands on ¾, off the host's onset, where
+  a stress-led rule would put it on ½.
+
+### A steady beat — the pulse, decided
+
+The user decided the Strudel pattern's bar lasts as long as its beats, so the beat is one speed
+throughout; the old behaviour stays as a variant to A/B. A new selector, `Mapping::Pulse`
+(`pulse`): **`steady`** (default) and **`elastic`** (as it was). It is structure, recorded on the
+score (`Score::pulse`) and laid out by the backends; the lowering places nothing by it.
+
+- **Strudel.** Under `steady` a cycle is a beat: one `<…>` per pattern whose bars carry `@` weights
+  equal to the slot's beats, and `.cpm(tempo)`. Checked against the `@strudel/mini` 1.2.6 source:
+  `<…>` is a `polymeter_slowcat`, its sequence a `timeCat` of the weighted children slowed by the
+  weights' sum, so a bar of weight *w* lasts *w* cycles (`@n` adds `n − 1` to a default weight of
+  1). One function, `strudel::sequence`, writes every pattern's bars, so the drums, every parameter,
+  the pitched layers, the chord lane and the trace agree bar for bar; `strudel::weights`/`starts`
+  are the bars' lengths and starts for everything else. Under `elastic` every byte is as before.
+- **Swing.** `swingBy(x, n)` is `inside(n, late(seq(0, x/2)))` (`@strudel/core` 1.2.6): it slices a
+  cycle. A cycle being a beat, `steady` writes `.swingBy(x, 1)` — every beat swung in bars of three
+  and four alike. Measured with the real 1.2.6 packages in node on Theocritus at swing 0.33: every
+  half-beat onset lands at 0.665 of its beat and every second triplet at 0.832, 331 onsets as
+  without swing. Under `elastic` (`swingBy(0.33, 3)`) the four-beat bars land at 0.125, 0.25, 0.375,
+  0.54, 0.79, 0.915 of a beat, and Strudel sounds 338 onsets — seven doubled across slice edges.
+- **On one clock.** The trace carries the music's bar starts and `.cpm` (`Trace::bars`,
+  `Trace::cycles_per_minute`, and `"bars"`/`"cpm"` in `/trace`'s JSON); the page's roll draws its
+  bar lines at those starts, repeated each loop, and sizes its window from the mean bar. The
+  reading's cue pattern is weighted like the music's bars, and each line's rate is fitted to the
+  bar it is spoken in (under `elastic` an eight-syllable line in a four-beat bar is hurried to
+  1.569; under `steady` it reads at 1.176 like the rest). The OSC schedule was always steady; asked
+  for `elastic` it says `# not applied here: pulse = elastic …` (and so does `--send`).
+- **The pulse has no `off`.** A piece cannot be without one, so its first variant is what preceded
+  it, `elastic`; `Mapping::off` now returns a mapping's first variant (`off` for every other one),
+  `--without pulse` / `off=pulse` mean `elastic`, and the page's B side starts each mapping at its
+  first variant — so A is steady and B elastic by default.
+- **Visible.** The pattern header's `pulse = steady: a cycle is a beat at 121 bpm, … (bars of 3, 4
+  beats)` or `pulse = elastic: … 3 beats at 121.000 bpm, 4 beats at 161.333 bpm`; the explain view's
+  `pulse …` line under the passes; the CLI help; the page's mapping table.
+- **Tests (hand-worked).** A two-stanza fixture of three-iamb then four-iamb lines: slot weights
+  3 3 4 3 4 4 4 4 and starts 0 3 6 10 13 17 21 25 (29) under `steady`, at `.cpm(120.000)`; all ones
+  at `.cpm(40.000)` under `elastic`, the same bar strings otherwise; swing slices 1 and 3; the
+  trace's bars, clock and lane weights are the music's, the cues' `<0@3 1@3 2@4 ~@3 ~@4 3@4 ~@4 ~@4>`
+  and rates (1.176 ×4 steady; 1.176, 1.176, 1.569, 1.569 elastic); OSC onsets on beats 0 3 6 10 13
+  17 21 25 under either. The web trace JSON for Theocritus (126 beats in bars of 3 and 4 against 0
+  to 33), the CLI's `--set`/`--without pulse`, and the selector's variants.
+- **Snapshots.** All 15 `prosody-emit` corpus snapshots changed, and only mechanically: every
+  pattern gained the `pulse = steady` header line, `@n` weights on each bar, and `.cpm` became the
+  tempo (16 → 128, 30.25 → 121, 25 → 125, 25.2 → 126) with the villanelle-jazz `.swingBy(0.330, 5)`
+  → `(0.330, 1)`; every view gained the one `pulse steady …` line. No corpus poem mixes bar
+  lengths, so in every snapshot each bar lasts exactly what it did (checked: with weights, the
+  header line and the clock lines stripped, every snapshot is byte-identical to before). Of the
+  examples only Hopkins (bars of 5 and 6), Poe (5, 6) and Wilde (3, 4) change in time; with
+  `pulse=elastic` every example's pattern is byte-identical to before apart from the header line,
+  and every OSC schedule is unchanged.
+- **Measured.** `./scripts/cycle.sh machine` 0.743 and `jazz` 0.737, unchanged, and the same under
+  `pulse=elastic`: the scorer reads the score, which already kept a steady beat, so it cannot tell
+  the two apart (raised below). `check-wasm.sh` gained a `pulse:elastic` setting: 315 answers.
+- **In the browser** (Chromium, Wilde, A steady / B elastic): over 60 samples on each side the
+  trace's active syllables equalled the music's, every bar start carried a drum onset at the
+  trace's bar time (33 of 33 on A, 30 of 30 on B), cues fired at 0, 1.488, 2.975, 4.463, 11.405 s
+  — the steady bar starts — and the roll's bar lines followed the 3- and 4-beat bars. No console
+  errors or warnings.
+- **Raised, not done.** The scorer could model the elastic pulse (a slot as the mean bar) so the
+  A/B score shows a difference; the roll's "bars shown" is a mean bar under `steady`.
+
 ### Watching it play — the roll and the lit poem
 
 A **Watch** tab, the page's new default, shows the piece while it plays. No mapping changed and no

@@ -42,7 +42,7 @@ use crate::phoneme::{Phoneme, Provenance};
 use crate::role::{Layer, LineBasis, StanzaBasis};
 use crate::seed::Seed;
 use crate::span::Span;
-use crate::voice::{Event, Family, Pitch, Score, Velocity};
+use crate::voice::{Event, Family, Pitch, Score, Straightened, Velocity};
 
 /// Which analysis pass decided a value, and where `SPEC.md` says so.
 ///
@@ -135,6 +135,7 @@ pub struct Syllable {
     of: usize,
     foot: FootKind,
     velocity: Velocity,
+    light: bool,
 }
 
 impl Syllable {
@@ -154,6 +155,13 @@ impl Syllable {
     #[must_use]
     pub const fn velocity(&self) -> Velocity {
         self.velocity
+    }
+
+    /// Whether the light function words struck it lightly ([`Event::is_light`]): the row's gain
+    /// was decided by `Mapping::Function`, not by the dictionary's stress alone.
+    #[must_use]
+    pub const fn is_light(&self) -> bool {
+        self.light
     }
 }
 
@@ -258,6 +266,7 @@ pub struct AnnotatedLine {
     walks: Vec<(usize, Cause)>,
     harmony: Option<Harmony>,
     bass: Vec<(Syllable, BassNote)>,
+    straightened: Vec<(usize, Straightened)>,
     tokens: Vec<Annotation>,
 }
 
@@ -326,6 +335,13 @@ impl AnnotatedLine {
         &self.bass
     }
 
+    /// Every beat the straight stack fitted to the host of the slot it sounds in, with that
+    /// slot's index, in playing order (`crate::stack`) — empty under the default, crossing.
+    #[must_use]
+    pub fn straightened(&self) -> &[(usize, Straightened)] {
+        &self.straightened
+    }
+
     /// Its tokens, in source order.
     #[must_use]
     pub fn tokens(&self) -> &[Annotation] {
@@ -339,6 +355,15 @@ pub struct Annotated {
     stanzas: Vec<Vec<AnnotatedLine>>,
     basis: Vec<StanzaBasis>,
     bass: Variant,
+    pulse: Variant,
+    stack: Variant,
+    /// [`Score::straightened_beats`]: each fitted beat of a slot once, as the pattern header and
+    /// the OSC schedule count it — not once per line fitted there.
+    straightened_beats: usize,
+    function: Variant,
+    /// [`Score::lightened`]: the syllables the light function words struck lightly.
+    lightened: usize,
+    lengths: Vec<usize>,
 }
 
 impl Annotated {
@@ -346,6 +371,44 @@ impl Annotated {
     #[must_use]
     pub fn stanzas(&self) -> &[Vec<AnnotatedLine>] {
         &self.stanzas
+    }
+
+    /// Which variant of the pulse the piece is played at (`SPEC.md` §4.2).
+    #[must_use]
+    pub const fn pulse(&self) -> Variant {
+        self.pulse
+    }
+
+    /// Which variant of the stack lays out its stacked lines (`SPEC.md` §4.2, §4.6).
+    #[must_use]
+    pub const fn stack(&self) -> Variant {
+        self.stack
+    }
+
+    /// How many beats of the piece the straight stack fitted, each `(slot, beat)` once
+    /// ([`Score::straightened_beats`]).
+    #[must_use]
+    pub const fn straightened_beats(&self) -> usize {
+        self.straightened_beats
+    }
+
+    /// Which variant of the function words struck the syllables (`SPEC.md` §4.2).
+    #[must_use]
+    pub const fn function(&self) -> Variant {
+        self.function
+    }
+
+    /// How many syllables the light function words struck lightly ([`Score::lightened`]).
+    #[must_use]
+    pub const fn lightened(&self) -> usize {
+        self.lightened
+    }
+
+    /// Every bar length of the piece, in beats, smallest first, once each: what the pulse
+    /// decides the duration of.
+    #[must_use]
+    pub fn bar_lengths(&self) -> &[usize] {
+        &self.lengths
     }
 
     /// Which variant of the bass made the bass notes.
@@ -466,6 +529,7 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                             .filter(|event| event.bar().get() == index)
                             .filter_map(|event| Some((syllable(event), event.bass()?)))
                             .collect(),
+                        straightened: straightened_of(score, index),
                         tokens,
                     }
                 })
@@ -481,6 +545,22 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
             .map(crate::role::StanzaRole::basis)
             .collect(),
         bass: score.bass(),
+        pulse: score.pulse(),
+        stack: score.stack(),
+        straightened_beats: score.straightened_beats(),
+        function: score.function(),
+        lightened: score.lightened(),
+        lengths: {
+            let mut lengths: Vec<usize> = score
+                .arrangement()
+                .slots()
+                .iter()
+                .map(|slot| slot.beats().max(1))
+                .collect();
+            lengths.sort_unstable();
+            lengths.dedup();
+            lengths
+        },
     }
 }
 
@@ -493,6 +573,7 @@ const fn syllable(event: &Event) -> Syllable {
         of: event.subdivision().of(),
         foot: event.foot(),
         velocity: event.velocity(),
+        light: event.is_light(),
     }
 }
 
@@ -560,6 +641,43 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
         }
         let _ = writeln!(out, "  {:<11} {}", pass.name(), pass.section());
     }
+    // §4.2's pulse: how long the bars below last, which no token decides alone.
+    let lengths: Vec<String> = annotated
+        .bar_lengths()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    let _ = writeln!(
+        out,
+        "\npulse {} · bars of {} beats (§4.2)",
+        match annotated.pulse() {
+            Variant::Elastic => {
+                "elastic · every bar the same span, so a bar of more beats hurries them"
+            }
+            _ => "steady · every bar lasts its beats, so the beat keeps one speed",
+        },
+        lengths.join(", ")
+    );
+    // The straight stack (§4.2, §4.6), named only when chosen: under the default each line keeps
+    // its own feet wherever it sounds, which every row below already shows.
+    if annotated.stack() == Variant::Straight {
+        let fitted = annotated.straightened_beats();
+        let _ = writeln!(
+            out,
+            "stack straight · a line stacked under a bar's line is fitted to its subdivision \
+             where the two would cross: {fitted} beat(s) (§4.2, §4.6)"
+        );
+    }
+    // The light function words (§4.2), named only when chosen, like the straight stack: under
+    // the default every gain below is its syllable's dictionary stress.
+    if annotated.function() == Variant::Light {
+        let _ = writeln!(
+            out,
+            "function-words light · a one-syllable function word off the metre's strong \
+             positions is struck at 0.67, not full force: {} syllable(s) (§4.2)",
+            annotated.lightened()
+        );
+    }
     let _ = writeln!(out);
 
     for (index, stanza) in annotated.stanzas().iter().enumerate() {
@@ -596,7 +714,16 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
                 let _ = writeln!(out, "  sounds {}", describe_sounds(line.sounds()));
             }
             if let Some(harmony) = line.harmony() {
-                let _ = writeln!(out, "  harmony {}", describe_harmony(harmony));
+                for row in describe_harmony(harmony) {
+                    let _ = writeln!(out, "  harmony {row}");
+                }
+            }
+            if !line.straightened().is_empty() {
+                let _ = writeln!(
+                    out,
+                    "  straight {}",
+                    describe_straightened(line.straightened())
+                );
             }
             if walking && !line.bass().is_empty() {
                 render_bass(&mut out, source, annotated.bass(), harmonised, line);
@@ -768,49 +895,62 @@ fn describe_bass(note: BassNote, harmonised: bool) -> String {
 }
 
 /// `V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza`: which chord, on which
-/// degree, and the rule that chose it — or `no chord · ` and why not.
-fn describe_harmony(harmony: Harmony) -> String {
-    match harmony {
-        Harmony::Chord(chord) => {
-            let numeral = chord.function().numeral();
-            let root = chord.root().get();
-            let of = chord.of().get();
-            let chord_text = if of == root {
-                format!("{numeral} deg {root}")
-            } else {
-                format!("{numeral} deg {root} ({numeral} of deg {of})")
-            };
-            let why = match chord.reason() {
-                Reason::Class(class) => {
-                    format!("rhyme: class {}, on its degree", class.letter())
-                }
-                Reason::Opens(class) => format!(
-                    "cadence: {} opens, answered later in its stanza",
-                    class.letter()
-                ),
-                Reason::Closes(class) => format!(
-                    "cadence: {} closes, answering an earlier line of its stanza",
-                    class.letter()
-                ),
-                Reason::Unanswered { key } => format!(
-                    "cadence: no rhyme in its stanza, so IV of the stanza's key, deg {}",
-                    key.get()
-                ),
-                Reason::Turnaround { onto } => format!(
-                    "cadence: the stanza's last bar, turning round onto its first chord, deg {}",
-                    onto.get()
-                ),
-            };
-            format!("{chord_text} · {why}")
+/// degree, and the rule that chose it.
+fn describe_chord(chord: Chord) -> String {
+    let numeral = chord.function().numeral();
+    let root = chord.root().get();
+    let of = chord.of().get();
+    let chord_text = if of == root {
+        format!("{numeral} deg {root}")
+    } else {
+        format!("{numeral} deg {root} ({numeral} of deg {of})")
+    };
+    let why = match chord.reason() {
+        Reason::Class(class) => {
+            format!("rhyme: class {}, on its degree", class.letter())
         }
-        Harmony::Rest(rest) => format!(
-            "no chord · {}",
-            match rest.why() {
-                Silence::Unrhymed => "rhyme: the line rhymes with nothing, so it has no degree",
-                Silence::Wordless => "no pronounceable word to carry a chord (I4)",
-                Silence::Flourish => "a flourish stanza carries no harmony",
-            }
+        Reason::Opens(class) => format!(
+            "cadence: {} opens, answered later in its stanza",
+            class.letter()
         ),
+        Reason::Closes(class) => format!(
+            "cadence: {} closes, answering an earlier line of its stanza",
+            class.letter()
+        ),
+        Reason::Unanswered { key } => format!(
+            "cadence: no rhyme in its stanza, so IV of the stanza's key, deg {}",
+            key.get()
+        ),
+        Reason::Turnaround { onto } => format!(
+            "cadence: the stanza's last bar, turning round onto its first chord, deg {}",
+            onto.get()
+        ),
+    };
+    format!("{chord_text} · {why}")
+}
+
+/// Why a bar has no chord.
+const fn silence_words(why: Silence) -> &'static str {
+    match why {
+        Silence::Unrhymed => "rhyme: the line rhymes with nothing, so it has no degree",
+        Silence::Wordless => "no pronounceable word to carry a chord (I4)",
+        Silence::Flourish => "a flourish stanza carries no harmony",
+    }
+}
+
+/// One row per chord of the bar: its chord, or `no chord · ` and why not — and, in a stanza's last
+/// bar under H2, a second row for the turnaround from the bar's half (§4.6).
+fn describe_harmony(harmony: Harmony) -> Vec<String> {
+    match harmony {
+        Harmony::Chord(chord) => vec![describe_chord(chord)],
+        Harmony::Rest(rest) => vec![format!("no chord · {}", silence_words(rest.why()))],
+        Harmony::Turning { own, turn } => vec![
+            own.map_or_else(
+                || format!("no chord · {}", silence_words(Silence::Unrhymed)),
+                describe_chord,
+            ),
+            format!("then, from the bar's half, {}", describe_chord(turn)),
+        ],
     }
 }
 
@@ -828,6 +968,48 @@ fn sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
                 .map(move |placement| (index, placement.cause()))
         })
         .collect()
+}
+
+/// Every beat of a source bar the straight stack fitted to a host, by slot ([`Score::placed_in`]).
+fn straightened_of(score: &Score, bar: usize) -> Vec<(usize, Straightened)> {
+    score
+        .arrangement()
+        .slots()
+        .iter()
+        .enumerate()
+        .flat_map(|(index, slot)| {
+            slot.placements()
+                .iter()
+                .filter(move |placement| placement.bar().get() == bar)
+                .flat_map(move |placement| {
+                    score
+                        .placed_in(slot, *placement)
+                        .straightened()
+                        .iter()
+                        .map(move |fitted| (index, *fitted))
+                        .collect::<Vec<_>>()
+                })
+        })
+        .collect()
+}
+
+/// `3 into 2 at 1.0 6.0 · 2 into 3 at 4.1`: each fitting, with the slot and beat it happened in.
+fn describe_straightened(straightened: &[(usize, Straightened)]) -> String {
+    let mut by_kind: BTreeMap<(usize, usize), Vec<String>> = BTreeMap::new();
+    for (slot, fitted) in straightened {
+        by_kind
+            .entry((fitted.own(), fitted.host()))
+            .or_default()
+            .push(format!("{slot}.{}", fitted.beat()));
+    }
+    let kinds: Vec<String> = by_kind
+        .into_iter()
+        .map(|((own, host), at)| format!("{own} into {host} at {}", at.join(" ")))
+        .collect();
+    format!(
+        "{} — fitted to the bar's line (slot.beat)",
+        kinds.join(" · ")
+    )
 }
 
 /// Every slot a source bar sounds in where its bass sounds too ([`Score::sounds_bass`]).
@@ -1037,6 +1219,10 @@ fn render_token(out: &mut String, source: &str, token: &Annotation, walking: boo
                 from.push("phoneme(guessed)");
             }
         }
+        // Per syllable, not per token: this gain is the light function words' (§4.2).
+        if syllable.is_light() {
+            from.push("function-words");
+        }
 
         let _ = writeln!(
             out,
@@ -1123,6 +1309,11 @@ mod tests {
     struct ByLength;
 
     impl Lexicon for ByLength {
+        // No closed class: every word keeps its dictionary stress under either variant.
+        fn is_function_word(&self, _: &str) -> bool {
+            false
+        }
+
         fn rarity(&self, word: &str) -> Rarity {
             Rarity::band(u8::try_from(word.chars().count()).unwrap_or(u8::MAX))
         }
@@ -1212,6 +1403,7 @@ mod tests {
             ("§7.2 guessed", "phoneme(guessed)"),
             ("§7.2 unpronounceable", "no pronunciation"),
             ("I2 seed", "seed "),
+            ("§4.2 pulse", "pulse steady · every bar lasts its beats"),
         ] {
             assert!(
                 text.contains(needle),
@@ -1438,7 +1630,8 @@ mod tests {
     fn the_view_says_which_chord_each_bar_has_and_why() {
         // ABAB of one-syllable stressed words, every line two of them: a foundation stanza. A is
         // degree 0 and B degree 1. Under cadence: A opens (V of 0 = deg 4), B opens (V of 1 =
-        // deg 5), A closes (I on 0), and the last bar turns round onto the first chord (V of 4).
+        // deg 5), A closes (I on 0), and the last bar closes B (I on 1) and, from its half, turns
+        // round onto the first chord (V of 4) — two rows for the one line.
         let source = "dA bA\nro bo\nsA tA\nno do\n";
         let (text, annotated) = view_with(source, &harmony(crate::mapping::Variant::Cadence));
         let rows: Vec<&str> = text
@@ -1452,14 +1645,32 @@ mod tests {
                 "V deg 4 (V of deg 0) · cadence: A opens, answered later in its stanza",
                 "V deg 5 (V of deg 1) · cadence: B opens, answered later in its stanza",
                 "I deg 0 · cadence: A closes, answering an earlier line of its stanza",
-                "V deg 8 (V of deg 4) · cadence: the stanza's last bar, turning round onto \
-                 its first chord, deg 4",
+                "I deg 1 · cadence: B closes, answering an earlier line of its stanza",
+                "then, from the bar's half, V deg 8 (V of deg 4) · cadence: the stanza's last \
+                 bar, turning round onto its first chord, deg 4",
             ]
         );
         assert!(text.contains("  harmony     §4.6"), "{text}");
         assert_eq!(
             annotated.lines().filter(|l| l.harmony().is_some()).count(),
             4
+        );
+    }
+
+    #[test]
+    fn the_view_says_a_turning_bar_rests_before_its_turnaround() {
+        // Under `both`, `ro bAn` (AA N) rhymes with nothing: neither H2 nor H1 gives it a chord. As
+        // the stanza's last bar, it rests for its first half and from its half turns round onto
+        // the stanza's first chord — `dA bA` opens A, so H2's V of 0, deg 4 — with V of 4, deg 8.
+        let source = "dA bA\nsA tA\nro bAn\n";
+        let (text, _) = view_with(source, &harmony(crate::mapping::Variant::Both));
+        assert!(
+            text.contains(
+                "  harmony no chord · rhyme: the line rhymes with nothing, so it has no degree\n  \
+                 harmony then, from the bar's half, V deg 8 (V of deg 4) · cadence: the stanza's \
+                 last bar, turning round onto its first chord, deg 4\n"
+            ),
+            "{text}"
         );
     }
 

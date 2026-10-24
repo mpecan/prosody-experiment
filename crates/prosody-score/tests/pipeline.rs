@@ -55,6 +55,12 @@ impl Phonemiser for Toy {
 struct Flat;
 
 impl Lexicon for Flat {
+    // One closed-class word, `dO` (looked up lowercased, as every lexicon is asked), for the
+    // light function words' test below. Under the default, full, it changes nothing.
+    fn is_function_word(&self, word: &str) -> bool {
+        word == "do"
+    }
+
     fn rarity(&self, _: &str) -> Rarity {
         Rarity::band(3)
     }
@@ -237,6 +243,10 @@ fn compile_with(source: &str, bass: &str, harmony: &str) -> Score {
                 .choose_named(harmony)
                 .unwrap(),
         );
+    compile_under(source, &mappings)
+}
+
+fn compile_under(source: &str, mappings: &prosody_core::Mappings) -> Score {
     let poem = Poem::parse(source.to_owned()).unwrap();
     let meter = meter::scan(&poem, &Toy);
     let repetition = repetition::analyse(&poem);
@@ -251,7 +261,7 @@ fn compile_with(source: &str, bass: &str, harmony: &str) -> Score {
             surprisal: &surprisal::analyse(&poem, &Toy, &Flat),
             roles: &roles,
         },
-        &mappings,
+        mappings,
     )
     .unwrap()
 }
@@ -284,6 +294,20 @@ fn a_walking_bass_is_pitched_but_its_chords_root_adds_no_entropy() {
     let rhymed = compile_with(source, "feet", "rhyme");
     assert!(rhymed.chords().next().is_some());
     assert!((metric(&feet, "pitch_entropy") - metric(&rhymed, "pitch_entropy")).abs() < 1e-12);
+}
+
+#[test]
+fn a_split_last_bar_counts_two_chords() {
+    // The AABB above, under the height bass: eight slots (the stanza stated, then the outro's
+    // pass), nothing held, four syllables a slot of which two are pitched (the stressed `xA` and
+    // the rhyme word) — 16 of 32. H1 adds one chord a slot, pitched: 24 of 40. H2 splits each
+    // pass's last bar into its own chord and the turnaround (§4.6), two more onsets: 26 of 42.
+    let source = "da dA da dO\nma mA ma mO\nta tA ta tE\nsa sA sa sE\n";
+    let rhymed = compile_with(source, "height", "rhyme");
+    let cadence = compile_with(source, "height", "cadence");
+    assert_eq!(rhymed.arrangement().slots().len(), 8);
+    assert!((metric(&rhymed, "pitched") - 24.0 / 40.0).abs() < 1e-12);
+    assert!((metric(&cadence, "pitched") - 26.0 / 42.0).abs() < 1e-12);
 }
 
 #[test]
@@ -343,4 +367,139 @@ fn an_anapaest_held_under_an_iamb_crosses_its_beat() {
                 .all(|metric| metric.name() != "cross_rhythm")
         );
     }
+}
+
+#[test]
+fn straightened_the_held_anapaest_no_longer_crosses() {
+    // The fixture above under `stack = straight`: slot 1's held anapaest is fitted to its host's
+    // pair (onsets 0, ½, ¾ — a grid of 4, which 2 divides), so no beat of the 16 crosses. Nothing
+    // else is measured differently: the onsets moved, the events, beats and accents did not.
+    let source = "da da dA da dO\nma mA ma mE\nta tA ta tO\nsa sA sa sE\n";
+    let straight = compile_under(
+        source,
+        &prosody_core::Mappings::all().with(
+            prosody_core::Mapping::Stack
+                .choose_named("straight")
+                .unwrap(),
+        ),
+    );
+    let crossing = compile(source).unwrap();
+    let of = |score: &Score, name: &str| {
+        measure_as(score, Profile::Jazz)
+            .into_iter()
+            .find(|metric| metric.name() == name)
+            .unwrap()
+            .value()
+    };
+    assert!((of(&crossing, "cross_rhythm") - 1.0 / 16.0).abs() < 1e-12);
+    assert!(of(&straight, "cross_rhythm").abs() < 1e-12);
+    for name in ["pulse", "steadiness", "layering", "pitched", "recurrence"] {
+        assert!(
+            (of(&crossing, name) - of(&straight, name)).abs() < 1e-12,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn straightened_a_loop_is_re_timed_by_an_edit_to_its_host_in_another_stanza() {
+    // Stanza 1, `da da dA da dA`, opens on an anapaest; stanza 2, `so mO so mO`, is two iambs.
+    // Stanza 1 is the foundation and loops under stanza 2 (as in
+    // `silencing_a_word_reaches_only_what_sounds_under_it`), both two beats long, so in that slot
+    // the loop's beat 0 — three syllables — would cross its host's pair. Under `stack = straight`
+    // it is fitted: onsets 0, ½, ¾ instead of 0, ⅓, ⅔.
+    //
+    // Every probe but one is a homophone of its word (`daq` sounds as `da`), so eight edits change
+    // nothing. The sixth word, stanza 2's first `so`, becomes `sasa`: two unstressed syllables, so
+    // the host opens on an anapaest too, still two beats. Under crossing that edit is heard in
+    // stanza 2 alone — stanza 1's loop plays its own triplet either way: 9 local. Under straight
+    // the host's beat 0 now divides in three, nothing crosses, and the loop is no longer fitted:
+    // stanza 1 is re-timed as played, outside the edited stanza — 8 local. It sounds under the
+    // edited line, so it is explained either way.
+    let source = "da da dA da dA\n\nso mO so mO\n";
+    let probes = [
+        "daq", "daq", "dAq", "daq", "dAq", "sasa", "mOq", "soq", "mOq",
+    ];
+    let straight = prosody_core::Mappings::all().with(
+        prosody_core::Mapping::Stack
+            .choose_named("straight")
+            .unwrap(),
+    );
+    // The premise, checked: in the original, stanza 1's loop under stanza 2 is fitted somewhere.
+    let score = compile_under(source, &straight);
+    let fitted = score.arrangement().slots().iter().any(|slot| {
+        slot.host().is_some_and(|host| host.bar().get() == 1)
+            && slot.placements().iter().any(|placement| {
+                placement.bar().get() == 0
+                    && !score.placed_in(slot, *placement).straightened().is_empty()
+            })
+    });
+    assert!(fitted, "the loop is fitted to its host");
+
+    let crossing = sensitivity::measure(source, &probes, compile).unwrap();
+    let straightened =
+        sensitivity::measure(source, &probes, |text| Some(compile_under(text, &straight))).unwrap();
+    for result in [crossing, straightened] {
+        assert_eq!(result.edits(), 9);
+        assert_eq!(result.audible(), 1);
+        assert_eq!(result.explained(), 9);
+    }
+    assert_eq!(crossing.local(), 9);
+    assert_eq!(straightened.local(), 8);
+}
+
+#[test]
+fn a_light_function_word_is_no_accent_to_the_scorer() {
+    // `dAda dAda dA dO da dA`, `dO` a function word: S w S w S S w S, scanned trochee, trochee,
+    // spondee, iamb — two falling feet to one rising, so the spondee's strong position is its
+    // first and `dO`, on the offbeat of beat 2, is weak. One bar of four beats, played twice (the
+    // outro). Depths: downbeat 0, beat 1, offbeat 2; a syncopation is an accent followed, before
+    // the next accent, by an unaccented stronger position, by the difference.
+    //
+    // Full, accents at 0, 1, 2, 2½, 3½ of each bar. 2½ is followed by beat 3's unaccented `da`:
+    // 2 − 1 = 1. 3½ is followed by the next bar's downbeat, which is accented (`dA`), and in the
+    // last bar by nothing: 0. The rest are followed only by weaker offbeats. 1 + 1 = 2 over 8
+    // beats: 0.25.
+    //
+    // Light, `dO` unaccented: beat 2's accent is followed by 2½ and beat 3, neither stronger than
+    // a beat, so nothing syncopates: 0.
+    let source = "dAda dAda dA dO da dA\n";
+    let light = prosody_core::Mappings::all().with(
+        prosody_core::Mapping::Function
+            .choose(prosody_core::Variant::Light)
+            .unwrap(),
+    );
+    let (full, light) = (
+        compile_under(source, &prosody_core::Mappings::all()),
+        compile_under(source, &light),
+    );
+    assert_eq!(light.lightened(), 1);
+    assert!((metric(&full, "syncopation") - 0.25).abs() < 1e-9);
+    assert!(metric(&light, "syncopation").abs() < 1e-9);
+    // Only accents moved: when things sound, and how many lines and instruments, did not —
+    // read under the jazz profile, which measures the pulse, its steadiness and cross-rhythm too.
+    let jazz = |score: &Score, name: &str| {
+        measure_as(score, Profile::Jazz)
+            .into_iter()
+            .find(|metric| metric.name() == name)
+            .unwrap()
+            .value()
+    };
+    for name in [
+        "pulse",
+        "steadiness",
+        "cross_rhythm",
+        "layering",
+        "recurrence",
+    ] {
+        assert!(
+            (jazz(&full, name) - jazz(&light, name)).abs() < 1e-9,
+            "{name}"
+        );
+    }
+    // The height bass plays primary-stressed foundation syllables, and a one-line poem's last
+    // word rhymes with nothing, so under full the four `dA`s and `dO` carry a bass note: 5 of 8
+    // hits a bar. Under light `dO` is no longer primary: 4 of 8.
+    assert!((jazz(&full, "pitched") - 5.0 / 8.0).abs() < 1e-9);
+    assert!((jazz(&light, "pitched") - 0.5).abs() < 1e-9);
 }

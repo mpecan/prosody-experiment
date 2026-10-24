@@ -504,6 +504,11 @@ fn render(
             for (key, value) in fields {
                 let _ = writeln!(out, "{key:<width$} {value}");
             }
+            // Over a chord lane the melody is single notes whatever `voicing` says (`SPEC.md`
+            // §4.6), so the view says what is heard.
+            if let Some(words) = prosody_emit::melody_over_harmony(&score) {
+                let _ = writeln!(out, "{:<width$} {words}", "rhyme notes");
+            }
             // Every choice that is not the default, so the view says which piece it describes.
             let changed: Vec<String> = mappings
                 .changed()
@@ -538,7 +543,8 @@ fn render(
 }
 
 /// A reading as JSON: the cue pattern to evaluate, and each cue — the line it speaks, by index
-/// and by span, its text and its rate — for the page to look up when the cue fires.
+/// and by span, its text and its rate — for the page to look up when the cue fires; then each
+/// line left unread, and why, for the page to say.
 ///
 /// `start` and `end` are the line's bytes in the source, for the log; `from` and `to` are where it
 /// is in the text box, for the page to show the line being read (see [`text_box`]).
@@ -563,10 +569,26 @@ fn reading_json(reading: &Reading, source: &str, typed: &str) -> String {
             )
         })
         .collect();
+    // The lines the reading leaves out, so the page can say so (CLAUDE.md §6: a loss is visible).
+    let unread: Vec<String> = reading
+        .unread()
+        .iter()
+        .map(|line| {
+            format!(
+                "{{\"line\":{},\"start\":{},\"end\":{},\"why\":{},\"text\":{}}}",
+                line.line(),
+                line.span().start(),
+                line.span().end(),
+                json_string(line.why().says()),
+                json_string(line.text()),
+            )
+        })
+        .collect();
     format!(
-        "{{\"pattern\":{},\"cues\":[{}]}}\n",
+        "{{\"pattern\":{},\"cues\":[{}],\"unread\":[{}]}}\n",
         json_string(&reading.pattern()),
-        cues.join(",")
+        cues.join(","),
+        unread.join(",")
     )
 }
 
@@ -611,9 +633,15 @@ fn trace_json(trace: &prosody_emit::Trace, source: &str, typed: &str) -> String 
             )
         })
         .collect();
+    // Where each bar begins, in the pattern's cycles, and the piece's length last; with the
+    // cycles a minute, the page draws the roll's bar lines where the music's bars change — under
+    // the steady pulse they are not evenly spaced.
+    let bars: Vec<String> = trace.bars().iter().map(ToString::to_string).collect();
     format!(
-        "{{\"pattern\":{},\"marks\":[{}]}}\n",
+        "{{\"pattern\":{},\"bars\":[{}],\"cpm\":{},\"marks\":[{}]}}\n",
         json_string(trace.pattern()),
+        bars.join(","),
+        prosody_emit::fmt_param(trace.cycles_per_minute()),
         marks.join(",")
     )
 }
@@ -831,9 +859,28 @@ mod tests {
             "the bass selector"
         );
         assert!(
-            html.contains("[\"off\",\"arrives\",\"stanza\"],\"arrives\"]"),
+            html.contains("[\"off\",\"arrives\",\"stanza\",\"breath\"],\"breath\"]"),
             "the reading selector"
         );
+        assert!(
+            html.contains("[\"elastic\",\"steady\"],\"steady\"]"),
+            "the pulse selector"
+        );
+        assert!(
+            html.contains("[\"crossing\",\"straight\"],\"crossing\"]"),
+            "the stack selector"
+        );
+        assert!(
+            html.contains("[\"function-words\","),
+            "the function words' selector, by name"
+        );
+        assert!(
+            html.contains("[\"full\",\"light\"],\"full\"]"),
+            "the function words' selector"
+        );
+        // B starts at each mapping's first variant — what preceded it — not at `off`, which the
+        // pulse does not have: so B is elastic and A steady until the writer chooses.
+        assert!(html.contains("B: defaults((m) => m[2][0])"), "B's defaults");
         assert!(!html.contains("__MAPPINGS__"));
     }
 
@@ -900,6 +947,8 @@ mod tests {
         // |B1 B2 A3 A4| in 8–11, and so on, so under `arrives` (0-based) line 4 is read in slot
         // 4, line 5 in slot 9, line 6 in 14 and line 7 in 19 — five bars apart. Under `stanza`
         // lines 4–7 are read in slots 4, 5, 6, 7, while the loop is still turning into them.
+        // Under `breath`, the default, stanza 1 is read in slots 0–3 and stanza 2 arrives in slot
+        // 4 — the breath after slot 3 — so it starts at max(4, 3 + 2) = 5: slots 5, 6, 7, 8.
         let slots_of = |body: &str| -> Vec<(usize, usize)> {
             body.split("{\"slot\":")
                 .skip(1)
@@ -910,7 +959,11 @@ mod tests {
                 })
                 .collect()
         };
-        let arrives = super::compile(&request(&[], SEED), &Output::Reading);
+        let breath = super::compile(&request(&[], SEED), &Output::Reading);
+        let arrives = super::compile(
+            &request(&[("set", "reading:arrives")], SEED),
+            &Output::Reading,
+        );
         let stanza = super::compile(
             &request(&[("set", "reading:stanza")], SEED),
             &Output::Reading,
@@ -933,6 +986,28 @@ mod tests {
             slots_of(&stanza.body),
             (0..8).map(|n| (n, n)).collect::<Vec<_>>()
         );
+        assert_eq!(
+            slots_of(&breath.body),
+            vec![
+                (0, 0),
+                (1, 1),
+                (2, 2),
+                (3, 3),
+                (5, 4),
+                (6, 5),
+                (7, 6),
+                (8, 7)
+            ]
+        );
+        assert!(breath.body.contains("reading = breath"), "{}", breath.body);
+        assert_eq!(
+            breath.body,
+            super::compile(
+                &request(&[("set", "reading:breath")], SEED),
+                &Output::Reading
+            )
+            .body
+        );
         assert!(off.body.contains("\"cues\":[]"), "{}", off.body);
         // The pattern and the explain view say which reading this is.
         assert!(stanza.body.contains("reading = stanza"), "{}", stanza.body);
@@ -947,10 +1022,21 @@ mod tests {
         );
         let plain = super::compile(&request(&[], SEED), &Output::Explain);
         assert!(!plain.body.contains("mappings  "), "{}", plain.body);
+        // The reading as it shipped is now a choice away from the default, and is listed.
+        let shipped = super::compile(
+            &request(&[("set", "reading:arrives")], SEED),
+            &Output::Explain,
+        );
+        assert!(
+            shipped.body.contains("mappings      reading=arrives"),
+            "{}",
+            shipped.body
+        );
         // The music does not move: the reading is decided after the lowering.
         let music =
             |query: &[(&str, &str)]| super::compile(&request(query, SEED), &Output::Pattern).body;
         assert_eq!(music(&[]), music(&[("set", "reading:off")]));
+        assert_eq!(music(&[]), music(&[("set", "reading:arrives")]));
     }
 
     #[test]
@@ -1113,6 +1199,44 @@ mod tests {
             .filter_map(|rest| rest.split(',').next()?.parse().ok())
             .collect();
         assert_eq!(lines, (0..8).collect::<Vec<_>>(), "in reading order");
+        assert!(body.ends_with("\"unread\":[]}\n"), "nothing lost: {body}");
+    }
+
+    #[test]
+    fn a_line_the_reading_loses_is_listed_for_the_page() {
+        // Pied Beauty with the outro off — the page's setting B with the reading on breath. Eleven
+        // lines in eleven bars; stanza 2 arrives in bar 7, waits for its breath to bar 8, and its
+        // fifth line would fall in bar 12, past the piece (SPEC.md §4.7). The page is told.
+        let poem = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/hopkins-pied-beauty.poem"),
+        )
+        .unwrap();
+        let response = super::compile(
+            &request(&[("set", "reading:breath,outro:off")], &poem),
+            &Output::Reading,
+        );
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = &response.body;
+        let (cues, unread) = body.split_once("\"unread\":").unwrap();
+        assert!(
+            unread.starts_with("[{\"line\":10,")
+                && unread.contains("\"why\":\"the piece ends before its turn\"")
+                && unread.ends_with("Praise him.\"}]}\n"),
+            "{unread}"
+        );
+        assert!(!cues.contains("\"line\":10,"), "{cues}");
+        assert!(cues.contains("// 1 of 11 lines not read:"), "{cues}");
+        // The same piece under `arrives` loses nothing.
+        let arrives = super::compile(
+            &request(&[("set", "reading:arrives,outro:off")], &poem),
+            &Output::Reading,
+        );
+        assert!(
+            arrives.body.ends_with("\"unread\":[]}\n"),
+            "{}",
+            arrives.body
+        );
     }
 
     #[test]
@@ -1244,6 +1368,38 @@ mod tests {
     }
 
     #[test]
+    fn under_the_harmony_the_jazz_melody_is_single_notes_over_the_chords() {
+        // The same jazz controls as above, with B's harmony on: degree 0 is the single note 60,
+        // not the chord [60,63,67,70], and the chord lane keeps the sevenths (an octave down,
+        // from 48: C dorian degree 0 is 48 51 55 58).
+        let jazz = prosody_emit::Style::preset("jazz").unwrap();
+        let pairs: Vec<(&str, String)> = controls(&jazz);
+        let mut query: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        query.push(("set", "harmony:cadence"));
+        let response = super::compile(&request(&query, SEED), &Output::Pattern);
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = &response.body;
+        let melody = body.lines().find(|l| l.contains("// the melody")).unwrap();
+        let notes = melody.split('"').nth(1).unwrap();
+        assert!(!notes.contains(','), "{melody}");
+        assert!(notes.contains(" 60") || notes.contains("[60"), "{melody}");
+        let chords = body.lines().find(|l| l.contains("// the chords")).unwrap();
+        assert!(
+            chords.split('"').nth(1).unwrap().contains(",58]"),
+            "{chords}"
+        );
+        assert!(body.contains("as single notes over the chords"), "{body}");
+        let explain = super::compile(&request(&query, SEED), &Output::Explain);
+        assert!(
+            explain
+                .body
+                .contains("\nrhyme notes   single notes over the chords"),
+            "{}",
+            explain.body
+        );
+    }
+
+    #[test]
     fn the_register_the_ride_stand_in_and_density_reach_the_pattern() {
         let query = [
             ("bass_octave", "1"),
@@ -1368,5 +1524,195 @@ mod tests {
         )
         .expect("the seed poem");
         assert!(rendered.contains("stack("), "{rendered}");
+    }
+
+    #[test]
+    fn the_trace_says_where_the_bars_fall_under_either_pulse() {
+        // Wilde's Theocritus: 126 beats over 33 slots, bars of three and four (PLAN.md, the
+        // off-rhythm trace). Under the steady pulse a cycle is a beat, so the trace's bar starts
+        // run from 0 to 126 in steps of 3 and 4, at the tempo itself; under the elastic pulse a
+        // cycle is a bar, so they count 0 to 33 at 126 / 33's integer mean, 3, below it.
+        let wilde = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "wilde-theocritus")
+            .map(|(_, _, text)| body_of(text))
+            .unwrap();
+        let bars_and_cpm = |query: &[(&str, &str)]| -> (Vec<u64>, f64) {
+            let response = super::compile(&request(query, wilde), &Output::Trace);
+            assert_eq!(response.status, 200, "{}", response.body);
+            let bars = response.body.split("\"bars\":[").nth(1).unwrap();
+            let bars: Vec<u64> = bars[..bars.find(']').unwrap()]
+                .split(',')
+                .map(|n| n.parse().unwrap())
+                .collect();
+            let cpm = response.body.split("\"cpm\":").nth(1).unwrap();
+            let cpm: f64 = cpm[..cpm.find(',').unwrap()].parse().unwrap();
+            (bars, cpm)
+        };
+        let (steady, steady_cpm) = bars_and_cpm(&[]);
+        assert_eq!(steady.len(), 34);
+        assert_eq!(steady.last(), Some(&126));
+        let lengths: std::collections::BTreeSet<u64> =
+            steady.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        assert_eq!(lengths, [3, 4].into_iter().collect());
+        let (elastic, elastic_cpm) = bars_and_cpm(&[("set", "pulse:elastic")]);
+        assert_eq!(elastic, (0..=33).collect::<Vec<u64>>());
+        // The elastic cycle is three steady beats: 3 × 40.333 is the tempo, 121, to rounding.
+        assert!((steady_cpm - 121.0).abs() < 1e-9, "{steady_cpm}");
+        assert!(
+            (elastic_cpm * 3.0 - steady_cpm).abs() < 0.01,
+            "{elastic_cpm}"
+        );
+        // `off=pulse` is the pulse's first variant, elastic: the pulse has no off.
+        assert_eq!(bars_and_cpm(&[("off", "pulse")]).0, elastic);
+        // ...and the pattern and the explain view say which it is.
+        let pattern = super::compile(
+            &request(&[("set", "pulse:elastic")], wilde),
+            &Output::Pattern,
+        );
+        assert!(
+            pattern.body.contains("//   pulse = elastic"),
+            "{}",
+            pattern.body
+        );
+        let explain = super::compile(
+            &request(&[("set", "pulse:elastic")], wilde),
+            &Output::Explain,
+        );
+        assert!(explain.body.contains("pulse=elastic"), "{}", explain.body);
+        assert!(explain.body.contains("pulse elastic ·"), "{}", explain.body);
+    }
+
+    #[test]
+    fn light_function_words_reach_the_pattern_the_explain_view_and_the_score() {
+        // The Tyger, asked for with `set=function-words:light`: the pattern header and the explain
+        // view name it and agree on how many syllables it struck lightly; "or" in "hand or eye"
+        // is one of them; the score's syncopation is measured on the lightened accents. Under
+        // the default none of it appears.
+        let tyger = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "blake-tyger")
+            .map(|(_, _, text)| body_of(text))
+            .unwrap();
+        let light = &[("set", "function-words:light")];
+        let pattern = super::compile(&request(light, tyger), &Output::Pattern);
+        let explain = super::compile(&request(light, tyger), &Output::Explain);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(explain.status, 200, "{}", explain.body);
+        let marked = explain
+            .body
+            .lines()
+            .filter(|line| line.ends_with(",function-words"))
+            .count();
+        assert!(marked > 0, "{}", explain.body);
+        assert!(
+            pattern.body.contains(&format!(
+                "//   function-words = light: a one-syllable function word off the metre's \
+                 strong positions is struck at 2/3 of full force, in {marked} syllable(s)"
+            )),
+            "{}",
+            pattern.body
+        );
+        assert!(
+            explain.body.contains("function-words=light"),
+            "{}",
+            explain.body
+        );
+        let or = explain
+            .body
+            .lines()
+            .find(|line| line.trim_start().starts_with("or             2.2.1/2"))
+            .unwrap();
+        assert!(or.contains(" 0.67 "), "{or}");
+        let full = super::compile(&request(&[], tyger), &Output::Pattern);
+        assert!(!full.body.contains("function-words"));
+        let sync = |query: &[(&str, &str)]| -> String {
+            let score = super::compile(&request(query, tyger), &Output::Score);
+            assert_eq!(score.status, 200, "{}", score.body);
+            score
+                .body
+                .lines()
+                .find(|line| line.contains("syncopation"))
+                .unwrap()
+                .to_owned()
+        };
+        assert_ne!(sync(&[]), sync(light));
+        assert!(
+            super::compile(
+                &request(&[("set", "function-words:off")], tyger),
+                &Output::Pattern
+            )
+            .status
+                >= 400
+        );
+    }
+
+    #[test]
+    fn the_straight_stack_reaches_the_pattern_the_trace_and_the_score() {
+        // Wilde's Theocritus, whose bars are of three and four beats, so a `@2` inside a bar is
+        // only ever a fitted long syllable. Asked for with `set=stack:straight`, the music's drum
+        // sequences and the trace's lanes carry the same fitted beats — the trace is the music's
+        // walk — and the jazz score counts no crossed beat.
+        let wilde = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "wilde-theocritus")
+            .map(|(_, _, text)| body_of(text))
+            .unwrap();
+        // How many syllables hold two parts, in every `call("<…>")` sequence of `text`.
+        let held = |text: &str, call: &str| -> usize {
+            // In the trace's JSON a quote is escaped and `<` written `\u003c`.
+            let needle = format!("{call}(\\\"\\u003c");
+            let plain = format!("{call}(\"<");
+            text.split(&needle)
+                .skip(1)
+                .chain(text.split(&plain).skip(1))
+                .map(|rest| {
+                    let end = rest.find('>').unwrap_or(rest.len());
+                    rest[..end].matches("@2 ").count() + rest[..end].matches("@2]").count()
+                })
+                .sum()
+        };
+        let straight = &[("set", "stack:straight")];
+        let pattern = super::compile(&request(straight, wilde), &Output::Pattern);
+        let trace = super::compile(&request(straight, wilde), &Output::Trace);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(trace.status, 200, "{}", trace.body);
+        assert!(
+            pattern.body.contains("//   stack = straight"),
+            "{}",
+            pattern.body
+        );
+        let fitted = held(&pattern.body, "s");
+        assert!(fitted >= 38, "{fitted}");
+        assert_eq!(held(&trace.body, "n"), fitted);
+        // Under the default, nothing is held two parts and nothing is named.
+        let crossing = super::compile(&request(&[], wilde), &Output::Pattern);
+        assert_eq!(held(&crossing.body, "s"), 0);
+        assert!(!crossing.body.contains("stack ="));
+        let crossing_trace = super::compile(&request(&[], wilde), &Output::Trace);
+        assert_eq!(held(&crossing_trace.body, "n"), 0);
+        // The score reads the same onsets.
+        let score = super::compile(
+            &request(&[("set", "stack:straight"), ("profile", "jazz")], wilde),
+            &Output::Score,
+        );
+        assert!(score.body.contains("cross_rhythm"), "{}", score.body);
+        let row = score
+            .body
+            .lines()
+            .find(|line| line.contains("cross_rhythm"))
+            .unwrap();
+        assert!(row.contains("0.000"), "{row}");
+        let explain = super::compile(&request(straight, wilde), &Output::Explain);
+        assert!(
+            explain.body.contains("stack straight ·"),
+            "{}",
+            explain.body
+        );
+        assert!(
+            explain.body.contains("  straight 3 into 2 at"),
+            "{}",
+            explain.body
+        );
     }
 }

@@ -83,8 +83,14 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20                held, refrain, period, outro = off|on (default on);\n\
      \x20                bass = off|height|syllables|feet (default height);\n\
      \x20                harmony = off|rhyme|cadence|both (default off);\n\
-     \x20                reading = off|arrives|stanza (default arrives)\n\
+     \x20                reading = off|arrives|stanza|breath (default breath);\n\
+     \x20                pulse = elastic|steady (default steady);\n\
+     \x20                stack = crossing|straight (default crossing);\n\
+     \x20                function-words = full|light (default full)\n\
      \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
+     \x20                (the pulse, the stack and the function words have no off:\n\
+     \x20                --without pulse is pulse=elastic, --without stack is\n\
+     \x20                stack=crossing, --without function-words is function-words=full)\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
@@ -380,9 +386,20 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
     for (key, value) in schedule.unapplied() {
         eprintln!("prosody: {key} = {value} is not applied to an OSC schedule");
     }
-    if schedule.unsent_chords() > 0 {
+    if schedule.elastic_unapplied() {
         eprintln!(
-            "prosody: {} chords of the harmony layer are not sent: OSC has no chord message",
+            "prosody: pulse = elastic is not applied to an OSC schedule: it is in beats, and \
+             every bar lasts its beats"
+        );
+    }
+    if schedule.unsent_chords() > 0 {
+        let turnarounds = match schedule.unsent_turnarounds() {
+            0 => String::new(),
+            n => format!(" ({n} of them turnarounds from a bar's half)"),
+        };
+        eprintln!(
+            "prosody: {} chords of the harmony layer{turnarounds} are not sent: OSC has no chord \
+             message",
             schedule.unsent_chords()
         );
     }
@@ -441,6 +458,11 @@ fn explain(
     let width = fields.keys().map(|key| key.len()).max().unwrap_or(0);
     for (key, value) in fields {
         let _ = writeln!(out, "  {key:<width$} {value}");
+    }
+    // The one place the score overrides a palette value's effect: over a chord lane the melody is
+    // single notes whatever `voicing` says (`SPEC.md` §4.6), so the view says what is heard.
+    if let Some(words) = prosody_emit::melody_over_harmony(score) {
+        let _ = writeln!(out, "  {:<width$} {words}", "rhyme notes");
     }
     // Every candidate mapping not at its default, so the view says which piece it describes.
     let changed: Vec<Choice> = mappings.changed().collect();

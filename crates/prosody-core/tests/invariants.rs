@@ -33,6 +33,13 @@ use prosody_core::{
 struct LengthLexicon;
 
 impl Lexicon for LengthLexicon {
+    // A closed class by spelling — every word of one or two letters, and the repetitive poems'
+    // "and" and "the" — so the properties run under any mappings exercise the light function
+    // words (`Mapping::Function`) rather than holding vacuously for them.
+    fn is_function_word(&self, word: &str) -> bool {
+        word.chars().count() <= 2 || word == "and" || word == "the"
+    }
+
     fn rarity(&self, word: &str) -> Rarity {
         Rarity::band(u8::try_from(word.chars().count()).unwrap_or(u8::MAX))
     }
@@ -229,6 +236,30 @@ fn poem_with_a_regular_last_stanza() -> impl Strategy<Value = String> {
         })
 }
 
+/// Line endings that rhyme in pairs under the test phonemiser: `ba`/`da` (AA, coda B) and
+/// `bo`/`do` (OW, coda B).
+const ENDINGS: &[&str] = &["ba", "da", "bo", "do"];
+
+/// Stanzas of two to five rhymed lines of four or five one-syllable words, so lines rhyme within
+/// their stanzas, stanzas are foundation, and a last line is often a beat shorter than its
+/// stanza's period — the W2 turnaround's case, which `poem_source` almost never reaches (its
+/// random words seldom rhyme).
+fn poem_with_ragged_rhymed_stanzas() -> impl Strategy<Value = String> {
+    let line = (
+        proptest::collection::vec(0_usize..MONOSYLLABLES.len(), 0..7),
+        0_usize..ENDINGS.len(),
+    )
+        .prop_map(|(words, ending)| {
+            let mut line: Vec<&str> = words.into_iter().map(|w| MONOSYLLABLES[w]).collect();
+            line.push(ENDINGS[ending]);
+            line.join(" ")
+        });
+    proptest::collection::vec(proptest::collection::vec(line, 2..6), 1..4).prop_map(|stanzas| {
+        let rendered: Vec<String> = stanzas.iter().map(|lines| lines.join("\n")).collect();
+        format!("{}\n", rendered.join("\n\n"))
+    })
+}
+
 /// Every role in a poem, using the test phonemiser.
 fn roles_of(source: &str) -> role::PoemRoles {
     let poem = Poem::parse(source.to_owned()).unwrap();
@@ -407,20 +438,26 @@ fn harmony_shape(score: &Score, within: Span) -> Vec<(usize, usize, String)> {
         .harmony()
         .iter()
         .filter_map(|harmony| {
+            let rule = |chord: prosody_core::Chord| {
+                let rule = match chord.reason() {
+                    prosody_core::Reason::Class(_) => "class",
+                    prosody_core::Reason::Opens(_) => "opens",
+                    prosody_core::Reason::Closes(_) => "closes",
+                    prosody_core::Reason::Unanswered { .. } => "unanswered",
+                    prosody_core::Reason::Turnaround { .. } => "turnaround",
+                };
+                format!("{} {rule}", chord.function().numeral())
+            };
             let (span, what) = match harmony {
-                prosody_core::Harmony::Chord(chord) => {
-                    let rule = match chord.reason() {
-                        prosody_core::Reason::Class(_) => "class",
-                        prosody_core::Reason::Opens(_) => "opens",
-                        prosody_core::Reason::Closes(_) => "closes",
-                        prosody_core::Reason::Unanswered { .. } => "unanswered",
-                        prosody_core::Reason::Turnaround { .. } => "turnaround",
-                    };
-                    (
-                        chord.span(),
-                        format!("{} {rule}", chord.function().numeral()),
-                    )
-                }
+                prosody_core::Harmony::Chord(chord) => (chord.span(), rule(*chord)),
+                prosody_core::Harmony::Turning { own, turn } => (
+                    turn.span(),
+                    format!(
+                        "{} then {}",
+                        own.map_or_else(|| "rest".to_owned(), rule),
+                        rule(*turn)
+                    ),
+                ),
                 prosody_core::Harmony::Rest(rest) => (rest.line(), format!("{:?}", rest.why())),
             };
             within
@@ -1898,8 +1935,9 @@ proptest! {
 
     /// I4 — every bass note traces to the poem: under the height bass and W1 to its syllable's
     /// word, under W2 to its whole foot, which holds the syllable it sounds on. It sounds only in a
-    /// foundation line (§4.1's "drums, bass"), and under W2 it counts from its bar's chord's root,
-    /// or from degree 0 when the bar has none.
+    /// foundation line (§4.1's "drums, bass"), and under W2 it counts from the root of the chord
+    /// sounding at its foot — its bar's, or on a stanza's last bar under H2 from the half of the
+    /// bar it is stated in, the turnaround's — or from degree 0 when there is none.
     #[test]
     fn i4_every_bass_note_traces_to_its_syllable_or_foot(
         source in poem_source(),
@@ -1927,14 +1965,81 @@ proptest! {
                     feet[event.bar().get()].get(event.beat().get()).copied()
                 );
                 prop_assert_eq!(event.subdivision().index(), 0, "on the beat");
+                // The chord sounding at the foot: a stanza's last bar under H2 turns round from
+                // the half of the bar the line is stated in, its first slot as host
+                // (`Harmony::chord_at`).
+                let bar_beats = score
+                    .arrangement()
+                    .slots()
+                    .iter()
+                    .find(|slot| slot.host().map(prosody_core::Placement::bar) == Some(event.bar()))
+                    .map_or(0, prosody_core::Slot::beats);
                 let root = score
                     .harmony_of(event.bar().get())
-                    .and_then(prosody_core::Harmony::chord)
+                    .and_then(|harmony| harmony.chord_at(event.beat().get(), bar_beats))
                     .map_or(0, |chord| chord.root().get());
                 prop_assert_eq!(note.root().get(), root);
             } else {
                 prop_assert_eq!(note.span(), event.span());
                 prop_assert_eq!(note.root().get(), 0);
+            }
+        }
+    }
+
+    /// W2 walks on the chord the lane is sounding: each foot's root is the root of the chord the
+    /// chord lane holds at the foot's onset, the turnaround from the *bar's* half (`SPEC.md`
+    /// §4.6) — in every slot as long as the bar the walking line is stated in, and without the
+    /// stanza period in every slot (a stretched line keeps its half where the bar's is).
+    ///
+    /// Scoped, and disclosed in §4.6: a walk is decided once per line, for the bar it is stated
+    /// in, so under the period a stanza's last line looping under a flourish stanza whose period
+    /// differs (`ba ba ba ba ba / ba ba ba` then `ba / ba ba`: three beats squeezed into one)
+    /// can turn round a foot away from the lane.
+    #[test]
+    fn w2_walks_on_the_chord_the_lane_is_sounding(
+        source in poem_with_ragged_rhymed_stanzas(),
+        harmony in harmony_variant(),
+        period in proptest::sample::select(vec![Variant::On, Variant::Off]),
+    ) {
+        let mappings = bass_with(Variant::Feet, harmony)
+            .with(Mapping::StanzaPeriod.choose(period).unwrap());
+        let score = score_with(&source, &mappings);
+        let slots = score.arrangement().slots();
+        let stated = |bar| {
+            slots
+                .iter()
+                .find(|slot| slot.host().map(prosody_core::Placement::bar) == Some(bar))
+                .map(prosody_core::Slot::beats)
+        };
+        for slot in slots {
+            let Some(harmony) = score.harmony_in(slot) else { continue };
+            for placement in slot.placements() {
+                let own_bar = period == Variant::Off || stated(placement.bar()) == Some(slot.beats());
+                if !score.sounds_bass(slot, placement) || !own_bar {
+                    continue;
+                }
+                let placed = score.placed_in(slot, *placement);
+                let line_beats = placed.beats().max(1);
+                let room = slot.room_for(placed.beats());
+                for event in placed.events() {
+                    let Some(note) = event.bass() else { continue };
+                    // The foot's onset, `beat · room / line_beats` beats into the slot, is at or
+                    // past the bar's half when `2 · beat · room ≥ slot · line_beats`.
+                    let turned = 2 * event.beat().get() * room >= slot.beats() * line_beats;
+                    let chord = if turned {
+                        harmony.turnaround().or(harmony.chord())
+                    } else {
+                        harmony.chord()
+                    };
+                    prop_assert_eq!(
+                        note.root().get(),
+                        chord.map_or(0, |chord| chord.root().get()),
+                        "bar {} beat {} of a {}-beat slot",
+                        event.bar().get(),
+                        event.beat().get(),
+                        slot.beats()
+                    );
+                }
             }
         }
     }

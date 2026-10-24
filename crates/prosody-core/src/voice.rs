@@ -129,13 +129,16 @@ impl BeatIndex {
 /// [`Event::bar`], [`Event::beat`] and then the index, which is what the lowering does.
 ///
 /// The convention a backend needs: a beat divided into `of` parts sounds this event at
-/// `index / of` of the way through, each part lasting `1 / of` of the beat. There is no held
-/// note, tie or rest — a syllable is one part, which is what `SPEC.md` §4.2's "syllable →
-/// subdivision within the foot" describes and no more.
+/// `index / of` of the way through, lasting [`Subdivision::parts`] of those parts. In the score
+/// a syllable is always one part — there is no held note, tie or rest, which is what `SPEC.md`
+/// §4.2's "syllable → subdivision within the foot" describes and no more. Only a stacked line
+/// fitted to its host ([`Score::placed_in`] under the straight stack, `crate::stack`) can last
+/// longer: the long syllable of a long-short.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Subdivision {
     index: usize,
     of: usize,
+    parts: usize,
 }
 
 impl Subdivision {
@@ -149,6 +152,13 @@ impl Subdivision {
     #[must_use]
     pub const fn of(self) -> usize {
         self.of
+    }
+
+    /// How many of the beat's [`Subdivision::of`] parts it lasts: one, except where the straight
+    /// stack fits a stacked line to its host and a syllable takes the long half of a long-short.
+    #[must_use]
+    pub const fn parts(self) -> usize {
+        self.parts
     }
 }
 
@@ -428,6 +438,7 @@ pub struct Event {
     family: Option<Family>,
     anchor: Option<Anchor>,
     bank: Option<Phoneme>,
+    light: bool,
 }
 
 impl Event {
@@ -474,6 +485,16 @@ impl Event {
     #[must_use]
     pub const fn velocity(self) -> Velocity {
         self.velocity
+    }
+
+    /// Whether the light function words (`Mapping::Function`, `crate::accent`) struck this
+    /// syllable at [`Velocity::SECONDARY`] rather than its dictionary's primary stress: a
+    /// one-syllable function word on a position the meter calls weak. Always false under the
+    /// default, full. Carried so the debug view can say which pass decided the gain (`SPEC.md`
+    /// §8), and so a backend's header can count them.
+    #[must_use]
+    pub const fn is_light(self) -> bool {
+        self.light
     }
 
     /// Its note, if this syllable is the one the line's rhyme rests on.
@@ -550,6 +571,9 @@ pub struct Score {
     arrangement: Arrangement,
     harmony: Vec<Harmony>,
     bass: Variant,
+    pulse: Variant,
+    stack: Variant,
+    function: Variant,
 }
 
 impl Score {
@@ -568,6 +592,9 @@ impl Score {
             arrangement: Arrangement::default(),
             harmony: Vec::new(),
             bass: Variant::Off,
+            pulse: Variant::Steady,
+            stack: Variant::Crossing,
+            function: Variant::Full,
         }
     }
 
@@ -584,6 +611,63 @@ impl Score {
         self.bass
     }
 
+    /// The same score, recording which variant of the pulse its backends play it at.
+    pub(crate) const fn with_pulse(mut self, variant: Variant) -> Self {
+        self.pulse = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Pulse`](crate::mapping::Mapping::Pulse) the piece is played at:
+    /// [`Variant::Steady`], every bar as long as its beats, or [`Variant::Elastic`], every bar the
+    /// same span. Nothing in the score is laid out by it — every event's bar, beat and subdivision
+    /// is the same under both — so it is carried for the backends, which decide when a bar
+    /// sounds, and for the debug view.
+    #[must_use]
+    pub const fn pulse(&self) -> Variant {
+        self.pulse
+    }
+
+    /// The same score, recording which variant of the stack fits its stacked lines.
+    pub(crate) const fn with_stack(mut self, variant: Variant) -> Self {
+        self.stack = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Stack`](crate::mapping::Mapping::Stack) the piece's stacked
+    /// lines are laid out by: [`Variant::Crossing`], each by its own feet, or
+    /// [`Variant::Straight`], fitted to its host where they would cross. Nothing in
+    /// [`Score::events`] changes with it — a line's own material is the same under both; it is
+    /// applied slot by slot, by [`Score::placed_in`].
+    #[must_use]
+    pub const fn stack(&self) -> Variant {
+        self.stack
+    }
+
+    /// The same score, recording which variant of the function words struck its syllables.
+    pub(crate) const fn with_function(mut self, variant: Variant) -> Self {
+        self.function = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Function`](crate::mapping::Mapping::Function) struck the
+    /// piece's syllables: [`Variant::Full`], every one at its dictionary stress, or
+    /// [`Variant::Light`], a one-syllable function word off the meter's strong positions at
+    /// secondary force ([`Event::is_light`]). Unlike the pulse and the stack, it is already applied
+    /// to [`Score::events`]; it is recorded so the backends and the debug view can name it.
+    #[must_use]
+    pub const fn function(&self) -> Variant {
+        self.function
+    }
+
+    /// How many syllables of the poem the light function words struck lightly
+    /// ([`Event::is_light`]): each once, however many slots its line sounds in. Zero under
+    /// [`Variant::Full`]. The one count the pattern header, the OSC schedule and the explain view
+    /// print.
+    #[must_use]
+    pub fn lightened(&self) -> usize {
+        self.events.iter().filter(|event| event.is_light()).count()
+    }
+
     /// The same score, with each line's harmony ([`crate::harmony`]).
     pub(crate) fn with_harmony(mut self, harmony: Vec<Harmony>) -> Self {
         self.harmony = harmony;
@@ -597,9 +681,10 @@ impl Score {
         &self.harmony
     }
 
-    /// Every chord, in bar order.
+    /// Every chord, in the order they sound: bar by bar, and within a turning bar its own chord
+    /// before its turnaround.
     pub fn chords(&self) -> impl Iterator<Item = Chord> + '_ {
-        self.harmony.iter().filter_map(|harmony| harmony.chord())
+        self.harmony.iter().flat_map(|harmony| harmony.chords())
     }
 
     /// The harmony of one line, by its bar.
@@ -611,18 +696,19 @@ impl Score {
             .copied()
     }
 
-    /// The chord a slot of the arrangement plays: the chord of the whole line sounding in the
-    /// foundation layer there — its host, or the foundation's loop under a flourish host — if
-    /// that line has one. Never a line in the call, held or refrain lane: one chord a bar.
+    /// The harmony a slot of the arrangement plays: that of the whole line sounding in the
+    /// foundation layer there — its host, or the foundation's loop under a flourish host. Never a
+    /// line in the call, held or refrain lane: one harmony a bar — one chord, or a stanza's last
+    /// bar's two, one after the other ([`Harmony::Turning`]).
     ///
     /// The one place this is decided, so every backend and the scorer agree on it.
     #[must_use]
-    pub fn chord_in(&self, slot: &Slot) -> Option<Chord> {
+    pub fn harmony_in(&self, slot: &Slot) -> Option<Harmony> {
         let foundation = slot.placements().iter().find(|placement| {
             placement.lane() == Lane::Layer(crate::role::Layer::Foundation)
                 && placement.part() == Part::Line
         })?;
-        self.harmony_of(foundation.bar().get())?.chord()
+        self.harmony_of(foundation.bar().get())
     }
 
     /// Whether `placement`'s bass notes sound in `slot`.
@@ -632,7 +718,7 @@ impl Score {
     /// clash, and the default piece stays the piece it was.
     ///
     /// Under a walking bass (W1, W2), only the slot's foundation-layer line — the one
-    /// [`Score::chord_in`] takes the bar's chord from. A walk is *one* line moving by step and by
+    /// [`Score::harmony_in`] takes the bar's chords from. A walk is *one* line moving by step and by
     /// semitone; a held, refrain or call line walking in its own lane under it put two or three
     /// walks in one bar, and their passing and approach tones landed a semitone apart (on Blake's
     /// Tyger under W1, 59 of 257 bass onsets). One walk a bar, as one chord a bar (`SPEC.md` §4.6).
@@ -750,11 +836,58 @@ impl Score {
                 )
             }
         };
+        let subdivisions = events.iter().map(|event| event.subdivision).collect();
         Placed {
             events,
+            subdivisions,
             first_beat,
             beats,
+            straightened: Vec::new(),
         }
+    }
+
+    /// What a placement sounds *in this slot*: [`Score::placed`], with each event's position in
+    /// its beat as it is heard here — under the straight stack, a stacked line's beat that would
+    /// cross the host's is fitted to the host's subdivision ([`crate::stack`]).
+    ///
+    /// Every consumer that times an event — the Strudel pattern and the page's trace, the OSC
+    /// schedule, the scorer's timeline — reads [`Placed::subdivision`] from this, so they agree on
+    /// where every syllable falls under either variant. Under [`Variant::Crossing`] it is exactly
+    /// [`Score::placed`].
+    #[must_use]
+    pub fn placed_in(&self, slot: &Slot, placement: Placement) -> Placed<'_> {
+        let mut placed = self.placed(placement);
+        if self.stack == Variant::Straight {
+            crate::stack::straighten(self, slot, placement, &mut placed);
+        }
+        placed
+    }
+
+    /// How many beats of the piece the straight stack fitted: each `(slot, beat)` in which any
+    /// stacked line was fitted to its host ([`Score::placed_in`]) counts once, however many lines
+    /// were fitted there. Zero under [`Variant::Crossing`].
+    ///
+    /// The one count the pattern header, the OSC schedule and the explain view all print, so the
+    /// debug surfaces cannot disagree about it.
+    #[must_use]
+    pub fn straightened_beats(&self) -> usize {
+        self.arrangement
+            .slots()
+            .iter()
+            .map(|slot| {
+                slot.placements()
+                    .iter()
+                    .flat_map(|placement| {
+                        self.placed_in(slot, *placement)
+                            .straightened()
+                            .iter()
+                            .map(|fitted| fitted.beat())
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<std::collections::BTreeSet<usize>>()
+                    .len()
+            })
+            .sum()
     }
 
     /// The words that make no sound, because no pronunciation could be found for them.
@@ -772,8 +905,46 @@ impl Score {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Placed<'a> {
     events: Vec<&'a Event>,
+    /// Each event's position in its beat as it sounds here, parallel to `events`.
+    subdivisions: Vec<Subdivision>,
     first_beat: usize,
     beats: usize,
+    straightened: Vec<Straightened>,
+}
+
+/// One beat of a stacked line fitted to its host's subdivision by the straight stack
+/// ([`crate::stack`]): which beat, and the two grids that would have crossed there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Straightened {
+    beat: usize,
+    own: usize,
+    host: usize,
+}
+
+impl Straightened {
+    pub(crate) const fn new(beat: usize, own: usize, host: usize) -> Self {
+        Self { beat, own, host }
+    }
+
+    /// The beat of the slot, counted from the placement's first beat — which is also the slot's
+    /// beat, since only a placement on the slot's own grid is fitted.
+    #[must_use]
+    pub const fn beat(self) -> usize {
+        self.beat
+    }
+
+    /// The line's own subdivision of the beat: the least common multiple of its onsets'
+    /// denominators there (3 for a triplet).
+    #[must_use]
+    pub const fn own(self) -> usize {
+        self.own
+    }
+
+    /// The host's subdivision of the same beat, which the line was fitted to (2 for a pair).
+    #[must_use]
+    pub const fn host(self) -> usize {
+        self.host
+    }
 }
 
 impl<'a> Placed<'a> {
@@ -795,6 +966,49 @@ impl<'a> Placed<'a> {
     pub const fn beats(&self) -> usize {
         self.beats
     }
+
+    /// Where `event` sounds in its beat here: its own [`Event::subdivision`], or — under the
+    /// straight stack, in a beat that would have crossed the host's — the fitted one. An event
+    /// this placement does not sound keeps its own.
+    #[must_use]
+    pub fn subdivision(&self, event: &Event) -> Subdivision {
+        self.events
+            .iter()
+            .zip(&self.subdivisions)
+            .find(|(own, _)| {
+                own.bar == event.bar
+                    && own.beat == event.beat
+                    && own.subdivision == event.subdivision
+                    && own.span == event.span
+            })
+            .map_or(event.subdivision, |(_, fitted)| *fitted)
+    }
+
+    /// Every event with its position here, in playing order.
+    pub fn onsets(&self) -> impl Iterator<Item = (&'a Event, Subdivision)> + '_ {
+        self.events
+            .iter()
+            .copied()
+            .zip(self.subdivisions.iter().copied())
+    }
+
+    /// The beats the straight stack fitted to the host, in order — empty under crossing, for the
+    /// host itself, and wherever nothing would have crossed.
+    #[must_use]
+    pub fn straightened(&self) -> &[Straightened] {
+        &self.straightened
+    }
+
+    /// Fits the events of one beat: each `(position, subdivision)` replaces the subdivision of
+    /// the event at that position of [`Placed::events`].
+    pub(crate) fn fit(&mut self, fitted: &[(usize, Subdivision)], record: Straightened) {
+        for (position, subdivision) in fitted {
+            if let Some(slot) = self.subdivisions.get_mut(*position) {
+                *slot = *subdivision;
+            }
+        }
+        self.straightened.push(record);
+    }
 }
 
 // Constructors used by the lowering passes. Kept crate-internal so that the only route to an
@@ -814,7 +1028,16 @@ impl BeatIndex {
 
 impl Subdivision {
     pub(crate) const fn new(index: usize, of: usize) -> Self {
-        Self { index, of }
+        Self {
+            index,
+            of,
+            parts: 1,
+        }
+    }
+
+    /// A position lasting `parts` parts — only ever made by `crate::stack`.
+    pub(crate) const fn lasting(index: usize, of: usize, parts: usize) -> Self {
+        Self { index, of, parts }
     }
 }
 
@@ -906,7 +1129,15 @@ impl Event {
             family: None,
             anchor: None,
             bank: None,
+            light: false,
         }
+    }
+
+    /// The same syllable struck lightly: secondary force, marked as the function words' doing.
+    pub(crate) const fn lightened(mut self) -> Self {
+        self.velocity = Velocity::SECONDARY;
+        self.light = true;
+        self
     }
 
     pub(crate) const fn with_anchor(mut self, anchor: Anchor) -> Self {
