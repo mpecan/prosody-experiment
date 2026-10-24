@@ -3,111 +3,225 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The reader's light or dark choice, applied before anything is painted, so it never flashes. -->
+<script>try { const t = localStorage.getItem('prosody.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <title>prosody</title>
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400&display=swap">
 <style>
+  /* Two materials. The poem is light on a dark ground — the one bold thing, lit syllable by
+     syllable. Everything you set lives in paper folders along the bottom edge, each with its tab
+     sticking up in one of the five layer colours: open one and it slides up over the lower part of
+     the page, open another and they swap, open the open one and it closes. The same on a phone and
+     on a desk; only the proportions change. */
   :root {
     color-scheme: dark;
     --bg: #14131a; --panel: #1c1b24; --line: #2e2c3a;
     --ink: #e6e3ef; --dim: #918da8; --accent: #c9a6ff; --warn: #ff9b8a;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --serif: Spectral, Georgia, "Times New Roman", serif;
+    /* The layer colours (prosody_emit::strudel::Colour): the roll, the lit poem, the tabs. */
+    --pulse: #c9a6ff; --ornament: #6fd6c5; --bass: #ffb86b; --rhyme: #ff7aa8; --chords: #8fb3ff;
+    --paper: #efe6d3; --paper-back: #ddd0b4; --paper-ink: #2b2620; --paper-dim: #6c6252;
+    --paper-line: #cdbd9e;
+    /* What the themes change. Dark: the poem glows on a dark ground. Light: dark ink on warm
+       paper, and the lit syllables in deeper versions of the layer colours (--lit-strength mixes
+       each toward black), since the tints the roll uses are made for a dark ground. */
+    --control: #262433; --field: #17161f; --on-accent: #191423; --unlit: #8a86a0;
+    --select: rgba(201, 166, 255, .3); --wash: rgba(244, 238, 222, .08); --wash-strong: rgba(244, 238, 222, .26);
+    --shade: rgba(0, 0, 0, .25); --lit-strength: 100%;
+  }
+  /* Light: the system's preference unless the reader chose dark, or the reader's choice. */
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme=dark]) {
+      color-scheme: light;
+      --bg: #f7f2e8; --panel: #efe7d7; --line: #dccfb6; --ink: #24202b; --dim: #6c6676;
+      --accent: #6b4bb8; --warn: #b4412d; --control: #fbf7ef; --field: #fffcf5; --on-accent: #ffffff;
+      --unlit: #8c8494; --select: rgba(107, 75, 184, .22); --wash: rgba(43, 38, 32, .06);
+      --wash-strong: rgba(43, 38, 32, .16); --shade: rgba(60, 45, 20, .10); --lit-strength: 58%;
+    }
+  }
+  :root[data-theme=light] {
+    color-scheme: light;
+    --bg: #f7f2e8; --panel: #efe7d7; --line: #dccfb6; --ink: #24202b; --dim: #6c6676;
+    --accent: #6b4bb8; --warn: #b4412d; --control: #fbf7ef; --field: #fffcf5; --on-accent: #ffffff;
+    --unlit: #8c8494; --select: rgba(107, 75, 184, .22); --wash: rgba(43, 38, 32, .06);
+    --wash-strong: rgba(43, 38, 32, .16); --shade: rgba(60, 45, 20, .10); --lit-strength: 58%;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-    height: 100vh; display: flex; flex-direction: column;
+    height: 100dvh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr); overflow: hidden;
   }
-  header {
-    display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
-    padding: .7rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel);
-  }
-  h1 { font-size: 1rem; margin: 0; font-weight: 600; letter-spacing: .02em; }
-  h1 span { color: var(--dim); font-weight: 400; }
+  a { color: inherit; }
   button {
     font: inherit; font-weight: 600; padding: .4rem 1rem; border-radius: 6px;
-    border: 1px solid var(--line); background: #262433; color: var(--ink); cursor: pointer;
+    border: 1px solid var(--line); background: var(--control); color: var(--ink); cursor: pointer;
   }
   button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); color: #191423; border-color: var(--accent); }
+  button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   button:disabled { opacity: .45; cursor: default; border-color: var(--line); }
-  #status { color: var(--dim); font-size: .85rem; margin-left: auto; }
+
+  /* ---- The top bar ---- */
+  header.top {
+    display: flex; align-items: center; gap: .6rem 1rem; flex-wrap: wrap;
+    padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  .brand { display: flex; align-items: baseline; gap: .6rem; margin-right: auto; }
+  /* The name, syllable by syllable, in the colours a lit poem uses. */
+  .brand h1 { margin: 0; font: italic 500 1.6rem/1 var(--serif); letter-spacing: .01em; }
+  .brand h1 span { --c: var(--pulse); color: color-mix(in srgb, var(--c) var(--lit-strength), #000); }
+  .brand h1 span:nth-child(1) { --c: var(--pulse); }
+  .brand h1 span:nth-child(2) { --c: var(--ornament); }
+  .brand h1 span:nth-child(3) { --c: var(--bass); }
+  .tag {
+    font-size: .72rem; font-weight: 600; color: #191423; background: var(--rhyme);
+    padding: .1rem .5rem; border-radius: 999px; transform: rotate(-3deg); display: inline-block;
+  }
+  .links { display: flex; gap: .2rem; align-items: center; order: 2; }
+  .links button, .links a {
+    background: none; border: 0; color: var(--dim); font-weight: 500; font-size: .85rem;
+    padding: .3rem .5rem; text-decoration: none; border-radius: 6px;
+  }
+  .links button:hover, .links a:hover { color: var(--ink); background: var(--control); }
+  .controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; order: 3; }
+  #preset { max-width: 18rem; }
+  #play { position: relative; }
+  /* While it plays, the Play button breathes on the beat (--beat, from the piece's tempo). */
+  #play.beating::after {
+    content: ""; position: absolute; inset: -4px; border-radius: 9px; border: 2px solid var(--accent);
+    animation: beat var(--beat, .5s) ease-out infinite; pointer-events: none;
+  }
+  @keyframes beat { from { opacity: .8; transform: scale(1); } to { opacity: 0; transform: scale(1.12); } }
+  .ab { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .ab span { padding: .4rem .6rem; color: var(--dim); font-size: .8rem; }
+  .ab button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: .4rem .8rem; }
+  .ab button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
+  @media (max-width: 720px) {
+    header.top { padding: .5rem .75rem; gap: .45rem .6rem; }
+    .brand { gap: .45rem; min-width: 0; }
+    .brand h1 { font-size: 1.35rem; }
+    .links button, .links a { padding: .3rem .35rem; }
+    /* The poem picker gets a row of its own; Play, Stop and the A/B switch share the next. */
+    .controls { width: 100%; order: 4; gap: .4rem; }
+    #preset { flex: 1 1 100%; max-width: none; min-width: 0; }
+    #play { flex: 1; }
+    .ab span { display: none; }
+    #notice { padding: .35rem .75rem; font-size: .8rem; }
+  }
+
+  #status {
+    padding: .25rem 1rem; font-size: .8rem; color: var(--dim); background: var(--bg);
+    border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   #status.bad { color: var(--warn); }
+  #notice {
+    display: flex; gap: .8rem; align-items: center; padding: .45rem 1rem; font-size: .85rem;
+    background: color-mix(in srgb, var(--rhyme) 14%, var(--bg)); color: var(--ink);
+    border-bottom: 1px solid var(--line);
+  }
+  #notice p { margin: 0; flex: 1; }
+  #notice button { background: none; border: 0; color: var(--dim); padding: .1rem .4rem; font-size: 1rem; }
+  #notice[hidden] { display: none; }
+  .notices { min-width: 0; }
 
-  main { flex: 1; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); min-height: 0; }
-  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-auto-rows: minmax(60vh, auto); } }
-  section { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-  section + section { border-left: 1px solid var(--line); }
-  section.panels { overflow-y: auto; background: var(--panel); }
-
-  /* The editor: a transparent text box over the lit verse. Both layers must lay text out
+  /* ---- The poem: a transparent text box over the lit verse. Both layers must lay text out
      identically — same font, size, padding, wrapping and scrollbar gutter — or the caret drifts off
-     the letters it is in. */
-  #editor { position: relative; flex: 1; min-height: 0; }
+     the letters it is in. ---- */
+  main { position: relative; min-height: 0; }
+  #editor { position: absolute; inset: 0; }
   #lit, #poem {
-    position: absolute; inset: 0; margin: 0; border: 0; padding: 1.6rem 2rem 4rem;
-    font-family: Spectral, Georgia, "Times New Roman", serif; font-size: 1.32rem; line-height: 1.75;
+    position: absolute; inset: 0; margin: 0; border: 0; padding: 1.6rem max(1.2rem, calc((100% - 46rem) / 2)) 3rem;
+    font-family: var(--serif); font-size: 1.32rem; line-height: 1.75;
     font-weight: 400; letter-spacing: 0; white-space: pre-wrap; overflow-wrap: break-word;
     tab-size: 4; scrollbar-gutter: stable;
   }
+  @media (max-width: 720px) { #lit, #poem { font-size: 1.12rem; padding: 1.1rem 1rem 2rem; } }
   #lit { overflow: hidden; color: var(--ink); pointer-events: none; }
   #poem {
     overflow-y: auto; resize: none; outline: 0; background: transparent;
     color: transparent; caret-color: var(--ink);
   }
-  #poem::selection { background: rgba(201, 166, 255, .3); color: transparent; }
+  #poem::selection { background: var(--select); color: transparent; }
   #poem::placeholder { color: var(--dim); }
-  #editor:focus-within { box-shadow: inset 2px 0 0 var(--accent); }
+  /* While it plays, the unlit verse steps back so the lit syllables carry the page. */
+  #editor.playing #lit { color: var(--unlit); }
+  #lit span { transition: color .45s ease-out, text-decoration-color .45s ease-out;
+    text-decoration: underline 2px transparent; text-underline-offset: .28em; }
+  #lit span.on { color: color-mix(in srgb, var(--c) var(--lit-strength), #000); transition: none; text-decoration-color: var(--u, transparent); }
+  #lit span.echo { color: color-mix(in srgb, color-mix(in srgb, var(--c) var(--lit-strength), #000) 60%, var(--unlit)); transition: none;
+    text-decoration-color: color-mix(in srgb, var(--u, transparent) 55%, transparent); }
+  /* The reading has the background, the music the letters: the music colours each syllable and
+     underlines a note, the voice lays a pale wash behind the line it is reading and a brighter one
+     behind the word it is saying. One channel each, so both stay legible when they meet. */
+  #lit span.reading { background: var(--wash); box-decoration-break: clone;
+    -webkit-box-decoration-break: clone; }
+  #lit span.spoken { background: var(--wash-strong); }
+
+  /* ---- The folders ---- */
+  #folders { position: relative; z-index: 2; }
+  .tabs {
+    display: flex; gap: .25rem; padding: 0 .75rem; overflow-x: auto; scrollbar-width: none;
+    background: linear-gradient(to bottom, transparent 60%, var(--shade));
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button {
+    flex: none; margin-top: .5rem; padding: .45rem 1rem .4rem; border: 0; border-radius: 10px 10px 0 0;
+    background: var(--paper-back); color: var(--paper-ink); font: italic 500 1rem/1.2 var(--serif);
+    box-shadow: inset 0 3px 0 var(--t); transform: translateY(4px); transition: transform .15s;
+  }
+  .tabs button:hover { transform: translateY(0); border: 0; }
+  .tabs button[aria-selected=true] { background: var(--paper); transform: translateY(0); }
+  .tabs button .count { font: 600 .7rem/1 system-ui, sans-serif; color: var(--paper-dim); margin-left: .3rem; }
+  .sheet {
+    background: var(--paper); color: var(--paper-ink); max-height: min(52dvh, 34rem); overflow-y: auto;
+    border-top: 1px solid var(--paper-line); box-shadow: 0 -12px 30px rgba(0, 0, 0, .35);
+    animation: rise .18s ease-out;
+    /* Inside the paper, the page's colours are the paper's. */
+    --ink: var(--paper-ink); --dim: var(--paper-dim); --line: var(--paper-line); --warn: #b4412d; --accent: #6b4bb8;
+  }
+  @media (max-width: 720px) { .sheet { max-height: 46dvh; } }
+  @keyframes rise { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+  .sheet[hidden] { display: none; }
+  .folder[hidden] { display: none; }
+  .folder > .lede { margin: 0; padding: .9rem 1.2rem .2rem; font: italic 1.05rem/1.4 var(--serif); color: var(--paper-dim); }
+  .sheet select, .sheet input { background: #fffaf0; color: var(--paper-ink); border-color: var(--paper-line); }
+  .sheet button { background: #f7f0e1; color: var(--paper-ink); border-color: var(--paper-line); }
+  .sheet button[aria-selected=true] { background: var(--paper-ink); color: var(--paper); border-color: var(--paper-ink); }
+  .sheet code { background: rgba(43, 38, 32, .07); padding: 0 .2em; border-radius: 3px; }
 
   .palette {
-    padding: .2rem 1.2rem 1rem; display: grid; gap: .55rem .9rem;
+    padding: .6rem 1.2rem 1rem; display: grid; gap: .55rem .9rem;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   }
-  .palette h2 { grid-column: 1 / -1; margin: .4rem 0 0; font-size: .82rem; color: var(--dim); font-weight: 600; }
-
-  /* Every panel can be folded away; the page remembers which. */
-  .panel { border-bottom: 1px solid var(--line); }
-  .panel > summary {
-    cursor: pointer; padding: .7rem 1.2rem; font-weight: 600; font-size: .92rem; list-style: none;
-    display: flex; align-items: baseline; gap: .6rem;
-  }
-  .panel > summary::-webkit-details-marker { display: none; }
-  .panel > summary::before { content: "▸"; color: var(--dim); transition: transform .15s; }
-  .panel[open] > summary::before { transform: rotate(90deg); }
-  .panel > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .panel .aside { color: var(--dim); font-weight: 400; font-size: .82rem; }
-  #panelViews pre { max-height: 60vh; }
-  .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .78rem; }
-  label { display: flex; flex-direction: column; gap: .2rem; font-size: .74rem; color: var(--dim); }
-  header select { width: auto; }
+  .palette h2 { grid-column: 1 / -1; margin: .4rem 0 0; font: italic 600 1rem var(--serif); color: var(--dim); }
+  .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .8rem; max-width: 60rem; }
+  label { display: flex; flex-direction: column; gap: .2rem; font-size: .76rem; color: var(--dim); }
   select, input {
     font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 5px;
-    border: 1px solid var(--line); background: #17161f; color: var(--ink);
+    border: 1px solid var(--line); background: var(--field); color: var(--ink);
   }
-  input[type=range] { padding: 0; }
+  input[type=range] { padding: 0; accent-color: var(--accent); }
   .row { display: flex; gap: .4rem; }
   .row input { width: 100%; min-width: 0; }
 
-  nav { display: flex; gap: .3rem; padding: .5rem .8rem; border-bottom: 1px solid var(--line); }
-  nav button { padding: .25rem .7rem; font-size: .8rem; font-weight: 500; }
-  nav button[aria-selected=true] { background: var(--accent); color: #191423; border-color: var(--accent); }
+  .views-nav { display: flex; gap: .3rem; padding: .7rem 1.2rem .5rem; flex-wrap: wrap; }
+  .views-nav button { padding: .25rem .7rem; font-size: .82rem; font-weight: 500; }
   pre {
-    flex: 1; margin: 0; overflow: auto; padding: 1rem 1.2rem;
+    margin: 0; overflow: auto; padding: .6rem 1.2rem 1.2rem; max-height: 44dvh;
     font-family: var(--mono); font-size: 12px; line-height: 1.55;
     white-space: pre; tab-size: 2;
   }
   pre.wrapped { white-space: pre-wrap; word-break: break-all; }
   .hidden { display: none; }
 
-  .ab { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  .ab span { padding: .4rem .6rem; color: var(--dim); font-size: .8rem; }
-  .ab button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: .4rem .8rem; }
-  .ab button[aria-pressed=true] { background: var(--accent); color: #191423; }
-
-  .mappings table { grid-column: 1 / -1; border-collapse: collapse; font-size: .8rem; }
+  .mappings table { grid-column: 1 / -1; border-collapse: collapse; font-size: .82rem; }
   .mappings th { color: var(--dim); font-weight: 600; text-align: center; padding: 0 .5rem; }
   .mappings td { padding: .15rem .5rem; vertical-align: top; }
   .mappings td:first-child { padding-left: 0; }
@@ -115,82 +229,129 @@
   .mappings code { font-family: var(--mono); color: var(--ink); }
   .mappings .what { color: var(--dim); }
   .mappings select { width: auto; font-size: .78rem; padding: .1rem .2rem; }
-  .mappings select.changed { border-color: var(--ink); }
+  .mappings select.changed { border-color: var(--ink); border-width: 2px; }
   .reading .check span { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .82rem; }
   .reading input[type=checkbox] { width: auto; }
 
-  /* Watch: the poem as it sounds. The verse is the one bold thing on the page; the roll above it
-     and the key below the roll stay quiet. The five layer colours are the emitter's `.color()`
-     values (prosody_emit::strudel::Colour), so a lit syllable and its note on the roll match. */
-  #roll { width: 100%; height: 220px; display: block; background: #18171f;
-    border-top: 1px solid var(--line); }
-  .rollbar { display: flex; align-items: end; gap: 1.2rem; padding: 0 1.2rem .6rem; flex-wrap: wrap; }
+  #roll { width: 100%; height: clamp(150px, 26dvh, 240px); display: block; background: #18171f; }
+  .rollbar { display: flex; align-items: center; gap: .6rem 1.2rem; padding: .6rem 1.2rem; flex-wrap: wrap; }
   .rollbar label { flex-direction: row; align-items: center; gap: .5rem; }
-  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .78rem; color: var(--dim); }
+  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .8rem; color: var(--dim); }
   .key span { display: inline-flex; align-items: center; gap: .4rem; }
-  .key i { width: .6rem; height: .6rem; border-radius: 50%; background: var(--c); }
+  .key i { width: .65rem; height: .65rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
   .key .echo i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dim); }
-  /* While it plays, the unlit verse steps back so the lit syllables carry the page. */
-  #editor.playing #lit { color: #8a86a0; }
-  #lit span { transition: color .45s ease-out, text-decoration-color .45s ease-out;
-    text-decoration: underline 2px transparent; text-underline-offset: .28em; }
-  #lit span.on { color: var(--c); transition: none; text-decoration-color: var(--u, transparent); }
-  #lit span.echo { color: color-mix(in srgb, var(--c) 60%, #8a86a0); transition: none;
-    text-decoration-color: color-mix(in srgb, var(--u, transparent) 55%, transparent); }
-  /* The reading has the background, the music the letters: the music colours each syllable and
-     underlines a note, the voice lays a pale wash behind the line it is reading and a brighter one
-     behind the word it is saying. One channel each, so both stay legible when they meet. */
-  #lit span.reading { background: rgba(244, 238, 222, .08); box-decoration-break: clone;
-    -webkit-box-decoration-break: clone; }
-  #lit span.spoken { background: rgba(244, 238, 222, .26); }
-  .key .voice i { border-radius: 2px; width: 1.1rem; background: rgba(244, 238, 222, .26); }
-  @media (prefers-reduced-motion: reduce) { #lit span, .panel > summary::before { transition: none; } }
+  .key .voice i { border-radius: 2px; width: 1.1rem; background: rgba(43, 38, 32, .22); }
 
-  #score { overflow: auto; padding: 1rem 1.2rem; }
+  #score { padding: .6rem 1.2rem 1.2rem; }
   #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
   #score table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
   #score th { color: var(--dim); font-weight: 600; text-align: right; padding: .2rem .7rem; }
   #score th:first-child, #score td:first-child { text-align: left; padding-left: 0; }
   #score td { text-align: right; padding: .2rem .7rem; border-top: 1px solid var(--line); }
   #score td.out { color: var(--warn); }
-  #score td.up { color: #9be3a5; }
+  #score td.up { color: #2f7d3c; }
   #score td.down { color: var(--warn); }
   #score tr.total td { font-weight: 700; }
   #score p { color: var(--dim); font-size: .8rem; max-width: 46rem; }
+
+  /* ---- The welcome, the download question and the loader: paper cards over the dimmed page ---- */
+  dialog {
+    border: 0; padding: 0; max-width: min(36rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem);
+    background: var(--paper); color: var(--paper-ink); border-radius: 14px; overflow: auto;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .55);
+    --ink: var(--paper-ink); --dim: var(--paper-dim); --line: var(--paper-line); --accent: #6b4bb8;
+  }
+  dialog::backdrop { background: rgba(10, 9, 14, .72); backdrop-filter: blur(2px); }
+  .card { padding: 1.6rem 1.8rem 1.4rem; position: relative; }
+  .card .close {
+    position: absolute; top: .7rem; right: .7rem; width: 2.2rem; height: 2.2rem; padding: 0;
+    border-radius: 50%; background: transparent; border: 1px solid var(--paper-line); color: var(--paper-ink);
+    font-size: 1.1rem; line-height: 1;
+  }
+  .card h2 { margin: 0 0 .4rem; font: 600 1.1rem/1.3 system-ui, sans-serif; }
+  .card p { margin: .6rem 0; line-height: 1.55; }
+  .card .actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1.1rem; }
+  .card .actions button { background: #f7f0e1; color: var(--paper-ink); border-color: var(--paper-line); }
+  .card .actions button.primary { background: var(--paper-ink); color: var(--paper); border-color: var(--paper-ink); }
+  .card .small { font-size: .82rem; color: var(--paper-dim); }
+  .entry { font-family: var(--serif); border-bottom: 1px solid var(--paper-line); padding-bottom: .9rem; margin-bottom: .9rem; }
+  .entry .head { font-size: 2.1rem; font-weight: 500; font-style: italic; }
+  .entry .head span:nth-child(1) { color: #7b55d6; }
+  .entry .head span:nth-child(2) { color: #1f9483; }
+  .entry .head span:nth-child(3) { color: #c26a12; }
+  .entry .pron { color: var(--paper-dim); margin-left: .4rem; }
+  .entry .pos { font-style: italic; color: var(--paper-dim); }
+  .entry ol { margin: .4rem 0 0; padding-left: 1.3rem; font-size: 1.05rem; line-height: 1.5; }
+  .entry .field { font-style: italic; color: var(--paper-dim); }
+  .card .lead { font: italic 1.1rem/1.5 var(--serif); }
+  .bar-outer { height: .55rem; border-radius: 999px; background: var(--paper-back); overflow: hidden; margin: .8rem 0 .3rem; }
+  .bar-inner { height: 100%; width: 0; background: linear-gradient(90deg, var(--pulse), var(--rhyme)); transition: width .2s; }
+  .bar-inner.unknown { width: 35%; animation: sweep 1.2s ease-in-out infinite; }
+  @keyframes sweep { from { margin-left: -35%; } to { margin-left: 100%; } }
+
+  @media (prefers-reduced-motion: reduce) {
+    #lit span, .tabs button, .sheet, .bar-inner { transition: none; animation: none; }
+    #play.beating::after { animation: none; opacity: 0; }
+  }
 </style>
 </head>
 <body>
 
-<header>
-  <h1>prosody <span>— a poem is the score</span></h1>
-  <select id="preset" title="Load one of the example poems, with its palette">
-    <option value="">example poems…</option>
-  </select>
-  <button id="play" class="primary">▶ Play</button>
-  <button id="stop" disabled>■ Stop</button>
-  <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
-    <span>hearing</span>
-    <button id="hearA" aria-pressed="true">A</button>
-    <button id="hearB" aria-pressed="false">B</button>
-  </span>
-  <span id="status">ready</span>
+<header class="top">
+  <div class="brand">
+    <h1 aria-label="prosody"><span>pro</span><span>so</span><span>dy</span></h1>
+    <span class="tag">an experiment</span>
+  </div>
+  <nav class="links" aria-label="About this site">
+    <button id="theme" type="button" title="Light or dark: as your system says, or always one">◐ auto</button>
+    <button id="about" type="button">about</button>
+    <a href="https://github.com/mpecan/prosody-experiment" rel="noopener" target="_blank">source</a>
+  </nav>
+  <div class="controls">
+    <select id="preset" title="Load one of the example poems, with its palette" aria-label="Example poems">
+      <option value="">example poems…</option>
+    </select>
+    <button id="play" class="primary">▶ Play</button>
+    <button id="stop" disabled>■ Stop</button>
+    <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
+      <span>hearing</span>
+      <button id="hearA" aria-pressed="true">A</button>
+      <button id="hearB" aria-pressed="false">B</button>
+    </span>
+  </div>
 </header>
 
-<main>
-  <section class="writing">
-    <!-- The poem you write is the poem you watch: the text box lies exactly over the verse that
-         lights up, its own letters transparent, so typing, the caret and selecting work as in any
-         text box while the colour underneath shows what is sounding. -->
-    <div id="editor">
-      <div id="lit" aria-hidden="true"></div>
-      <textarea id="poem" spellcheck="false" autofocus aria-label="The poem"
-        placeholder="Write a poem, or pick one of the examples."></textarea>
-    </div>
-  </section>
+<div class="notices">
+  <div id="notice" hidden>
+    <p><strong>An experiment:</strong> every word of the poem becomes part of the music. Edit a line
+      and hear what changes.</p>
+    <button id="noticeClose" type="button" aria-label="Dismiss">✕</button>
+  </div>
+  <div id="status" role="status">ready</div>
+</div>
 
-  <section class="panels">
-    <details class="panel" id="panelRoll" open>
-      <summary>Roll <span class="aside">the notes as they play, a bar per poem line</span></summary>
+<main>
+  <!-- The poem you write is the poem you watch: the text box lies exactly over the verse that
+       lights up, its own letters transparent, so typing, the caret and selecting work as in any
+       text box while the colour underneath shows what is sounding. -->
+  <div id="editor">
+    <div id="lit" aria-hidden="true"></div>
+    <textarea id="poem" spellcheck="false" aria-label="The poem"
+      placeholder="Write a poem, or pick one of the examples."></textarea>
+  </div>
+</main>
+
+<!-- Folders along the bottom edge: a tab each, one open at a time, the open one again to close. -->
+<footer id="folders">
+  <div class="tabs" role="tablist" aria-label="Settings">
+    <button role="tab" id="tabRoll" data-folder="folderRoll" aria-controls="folderRoll" aria-selected="false" style="--t: var(--pulse)">Roll</button>
+    <button role="tab" id="tabSound" data-folder="folderSound" aria-controls="folderSound" aria-selected="false" style="--t: var(--ornament)">Sound</button>
+    <button role="tab" id="tabMappings" data-folder="folderMappings" aria-controls="folderMappings" aria-selected="false" style="--t: var(--bass)">Mappings</button>
+    <button role="tab" id="tabReading" data-folder="folderReading" aria-controls="folderReading" aria-selected="false" style="--t: var(--rhyme)">Reading</button>
+    <button role="tab" id="tabViews" data-folder="folderViews" aria-controls="folderViews" aria-selected="false" style="--t: var(--chords)">Under the hood</button>
+  </div>
+  <div class="sheet" id="sheet" hidden>
+    <section class="folder" id="folderRoll" role="tabpanel" aria-labelledby="tabRoll" hidden>
       <div class="rollbar">
         <label>Bars shown
           <select id="rollBars">
@@ -211,10 +372,9 @@
         </div>
       </div>
       <canvas id="roll" aria-label="The notes playing now, scrolling past a playhead: each row one sound, coloured by its layer; faint lines mark the bars"></canvas>
-    </details>
-
-    <details class="panel" id="panelPalette" open>
-      <summary>Palette <span class="aside">how it sounds, never what happens</span></summary>
+    </section>
+    <section class="folder" id="folderSound" role="tabpanel" aria-labelledby="tabSound" hidden>
+      <p class="lede">How it sounds: change any of it and the same poem plays the same things, differently.</p>
       <div class="palette">
         <label>Scale
           <select id="scale"></select>
@@ -304,10 +464,9 @@
           soft, drawn from its own line, so the same poem always strays the same way.
         </p>
       </div>
-    </details>
-
-    <details class="panel" id="panelMappings">
-      <summary>Mappings <span class="aside">what happens: A and B, to compare</span></summary>
+    </section>
+    <section class="folder" id="folderMappings" role="tabpanel" aria-labelledby="tabMappings" hidden>
+      <p class="lede">What happens: which feature of the poem becomes which sound. Set A and B, then switch while it plays.</p>
       <div class="palette mappings">
         <table>
           <thead><tr><th></th><th>A</th><th>B</th></tr></thead>
@@ -324,32 +483,53 @@
           subdivision wherever the two would cross.
         </p>
       </div>
-    </details>
-
-    <details class="panel" id="panelReading">
-      <summary>Reading <span class="aside">the poem spoken over the music</span></summary>
+    </section>
+    <section class="folder" id="folderReading" role="tabpanel" aria-labelledby="tabReading" hidden>
+      <p class="lede">A voice reading the poem over the music.</p>
       <div class="palette reading">
+        <label>Engine
+          <select id="engine" title="Who reads: your browser's own voice, a neural voice that runs in this page — downloaded once you choose it, then kept by the browser — or readings recorded ahead of time for the example poems, a small file a line">
+            <option value="kokoro">Kokoro-82M</option>
+            <option value="piper">Piper</option>
+            <option value="kitten">Kitten TTS (nano)</option>
+            <option value="recorded">recorded readings</option>
+            <option value="browser">browser voice</option>
+          </select>
+        </label>
+        <label>Language
+          <select id="language" title="The language the poem is read in: an example poem sets its own; each engine lists only its voices for it"></select>
+        </label>
         <label>Voice
           <select id="voice"><option value="">browser default</option></select>
         </label>
-        <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
+        <label>Pace
+          <select id="pace" title="natural: each line at the voice's own speed, a little faster or slower line by line, with pauses where the punctuation asks; fitted: each line squeezed or stretched to fill its bar">
+            <option value="natural">natural</option>
+            <option value="fitted">fitted to the bar</option>
+          </select>
+        </label>
+        <label>Reading level <span id="readingLevelOut"></span>
+          <input id="readingLevel" type="range" min="0" max="2" step="0.05" value="1" title="The voice's level into the master, against the music">
+        </label>
+        <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a stanza is read</span></label>
         <p>
           Whether and when lines are read is the <code>reading</code> mapping above:
-          <code>breath</code> (the default) reads each stanza through, a line a bar, with a silent
-          bar before the next stanza and never before the music has begun it;
-          <code>arrives</code> speaks each line once, in the bar where it is first heard;
-          <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
-          stanza that transforms a loop is read through rather than a line every few bars;
-          <code>off</code> reads nothing. Each line is fitted to its bar at the piece's tempo; loops,
-          lanes and the outro are never read. Strudel's clock fires each line; your browser's voice
-          speaks it.
+          <code>breath</code> (the default) reads each stanza through, with a silent bar before the
+          next stanza and never before the music has begun it;
+          <code>arrives</code> speaks each line once, where it is first heard;
+          <code>stanza</code> reads a stanza through from where it is first heard;
+          <code>off</code> reads nothing. Loops, lanes and the outro are never read.
+          At the <em>natural</em> pace a line follows the one before after a pause from how it
+          ends — a quarter of a second after a line that runs on, more after a comma, more after a
+          full stop, a second and a half at a stanza's end; <em>fitted</em> fits each line to its bar.
+          Strudel's clock places every line; a neural voice is rendered ahead and started exactly on
+          it, the browser's voice as near as its speech allows. Kokoro and Kitten speak English;
+          Piper speaks many languages, Slovenian among them. Kitten needs WebGPU.
         </p>
       </div>
-    </details>
-
-    <details class="panel" id="panelViews">
-      <summary>Pattern, annotation and score</summary>
-      <nav>
+    </section>
+    <section class="folder" id="folderViews" role="tabpanel" aria-labelledby="tabViews" hidden>
+      <nav class="views-nav">
         <button id="tabPattern" aria-selected="true">Pattern</button>
         <button id="tabExplain" aria-selected="false">What each word became</button>
         <button id="tabScore" aria-selected="false">Score A vs B</button>
@@ -378,9 +558,63 @@
           over them.
         </p>
       </div>
-    </details>
-  </section>
-</main>
+    </section>
+  </div>
+</footer>
+
+<!-- The welcome: open on a first visit, again from "about". -->
+<dialog id="welcome" aria-labelledby="welcomeTitle">
+  <div class="card">
+    <button class="close" type="button" data-close aria-label="Close">✕</button>
+    <div class="entry">
+      <div class="head" id="welcomeTitle"><span>pro</span><span>so</span><span>dy</span><span class="pron">/ˈprɒsədi/</span></div>
+      <div class="pos">noun</div>
+      <ol>
+        <li>the patterns of rhythm and sound in poetry: where the stresses fall, how the lines move,
+          what rhymes with what.</li>
+        <li><span class="field">linguistics</span> the stress and intonation of speech.</li>
+      </ol>
+    </div>
+    <p class="lead"><strong>This is an experiment.</strong> Here a poem is the source code for a piece
+      of music.</p>
+    <p>Each line becomes a bar. Stressed syllables become the beat. Rhymes become notes. Repeated lines
+      become loops that build up and wear away. A voice can read the poem over it. Every sound
+      traces back to a word, and the words light up as they play. Change a word and you'll hear
+      exactly what it changed.</p>
+    <p>Pick a poem, or write your own, and press Play.</p>
+    <div class="actions"><button class="primary" type="button" data-close>Start listening</button></div>
+    <p class="small">How it works, and the source: <a href="https://github.com/mpecan/prosody-experiment"
+      rel="noopener" target="_blank">github.com/mpecan/prosody-experiment</a>. Questions, poems,
+      ideas: <a href="mailto:me@prosody.rocks">me@prosody.rocks</a>.</p>
+  </div>
+</dialog>
+
+<!-- Asked before a neural voice is downloaded for the first time. -->
+<dialog id="download" aria-labelledby="downloadTitle">
+  <div class="card">
+    <button class="close" type="button" data-close aria-label="Close">✕</button>
+    <h2 id="downloadTitle"></h2>
+    <p id="downloadText"></p>
+    <div class="actions">
+      <button class="primary" type="button" id="downloadYes"></button>
+      <button type="button" id="downloadNo">Keep the current voice</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- While something big loads: the instruments on the first Play, a voice once chosen. -->
+<dialog id="loader" aria-labelledby="loaderTitle">
+  <div class="card">
+    <h2 id="loaderTitle"></h2>
+    <p id="loaderText" class="small"></p>
+    <div class="bar-outer"><div class="bar-inner unknown" id="loaderBar"></div></div>
+    <p id="loaderProgress" class="small"></p>
+    <div class="actions">
+      <button type="button" id="loaderHide">Hide — keep loading</button>
+      <button type="button" id="loaderCancel">Cancel</button>
+    </div>
+  </div>
+</dialog>
 
 <!--
   `@strudel/soundfonts` imports `@strudel/core` and `@strudel/webaudio` by name. Answering those
@@ -405,6 +639,13 @@ const $ = (id) => document.getElementById(id);
 // `initStrudel`, which fills the global scope with names of its own.
 const TRANSPORT = __TRANSPORT__;
 const NativeResponse = Response;
+//
+// The compiler runs in two workers, never on the page's own thread: compiling "Patterns" takes
+// about a second there and scoring it seven, and the page's thread is the one Strudel's scheduler
+// ticks on — a block there while the music plays is music skipped. One worker answers what plays
+// (pattern, trace, reading, explanation), the other only measures, so a new pattern never waits
+// behind the scores of the last one. Each loads its own copy of the compiler; their answers are
+// the same bytes, which `scripts/check-wasm.sh` checks against the server.
 let compiler = null;
 function loadCompiler() {
   // The generated module finds `prosody_bg.wasm` beside itself.
@@ -414,13 +655,60 @@ function loadCompiler() {
   });
   return compiler;
 }
+// A worker's script, as text: a worker made from a blob resolves nothing relative to the page,
+// so it is handed the bindings' absolute address.
+const COMPILER_THREAD = `
+  const bindings = import(${JSON.stringify(new URL('./prosody.js', document.baseURI).href)})
+    .then(async (module) => { await module.default(); return module; });
+  onmessage = async ({ data: { id, target, body } }) => {
+    try {
+      const { respond } = await bindings;
+      const answer = respond(target, body);
+      postMessage({ id, status: answer.status, body: answer.body });
+      answer.free();
+    } catch (error) {
+      postMessage({ id, status: 500, body: 'the compiler failed: ' + error });
+    }
+  };`;
+function compilerThread() {
+  const worker = new Worker(URL.createObjectURL(new Blob([COMPILER_THREAD], { type: 'text/javascript' })),
+    { type: 'module' });
+  const waiting = new Map();
+  let asked = 0;
+  worker.onmessage = ({ data }) => {
+    waiting.get(data.id)?.(data);
+    waiting.delete(data.id);
+  };
+  return (target, body) => new Promise((resolve) => {
+    asked += 1;
+    waiting.set(asked, resolve);
+    worker.postMessage({ id: asked, target, body });
+  });
+}
+let threads = null;
+function threadFor(path) {
+  if (threads === null) {
+    try {
+      threads = { compile: compilerThread(), measure: compilerThread() };
+    } catch (error) {
+      // No module workers: the compiler answers in-process, as it did before them.
+      console.warn('[compiler] no worker, compiling on the page:', error);
+      const inProcess = async (target, body) => {
+        const { respond } = await loadCompiler();
+        const answer = respond(target, body);
+        const reply = { status: answer.status, body: answer.body };
+        answer.free();
+        return reply;
+      };
+      threads = { compile: inProcess, measure: inProcess };
+    }
+  }
+  return path === '/score' ? threads.measure : threads.compile;
+}
 async function ask(path, query, body) {
   if (TRANSPORT === 'server') return fetch(path + '?' + query, { method: 'POST', body });
-  const { respond } = await loadCompiler();
-  const answer = respond(path + '?' + query, body);
-  const reply = new NativeResponse(answer.body, { status: answer.status });
-  answer.free();
-  return reply;
+  const answer = await threadFor(path)(path + '?' + query, body);
+  return new NativeResponse(answer.body, { status: answer.status });
 }
 // Every palette control's id is its key in the style header, and every value is in header units.
 const SOUND = ['bass', 'melody', 'kit', 'ride_fallback', 'voicing', 'bass_octave', 'melody_octave',
@@ -491,6 +779,19 @@ $('preset').addEventListener('input', () => {
   setControls(preset.palette, controls);
   $('poem').scrollTop = 0;
   fromTheTop = true;   // a new poem starts at its first bar, so the reading starts at its first line
+  // A preset is read in its own language, with a voice that speaks it (Prešeren in Slovenian).
+  // The old poem's reading is let go first — stopped, and its lines out of the render queue — so
+  // its lines are never rendered in the new poem's voice, nor the new poem's in the old one's:
+  // until the new poem has compiled there is nothing to read.
+  if (preset.language && preset.language !== language) {
+    readingGeneration = ++generations;   // nothing the old poem cues is read any more
+    quietReading();
+    playingReading = null;
+    playingCues = null;
+    readings = { A: null, B: null };
+    language = preset.language;
+    readingChanged();
+  }
   compile();
 });
 
@@ -521,7 +822,16 @@ let timer = null;
 // variant, what preceded it (off; for the pulse, which has no off, elastic; for the stack,
 // which has none either, crossing), until the writer says otherwise.
 const defaults = (pick) => Object.fromEntries(MAPPINGS.map((m) => [m[0], pick(m)]));
-let settings = { A: defaults((m) => m[3]), B: defaults((m) => m[2][0]) };
+// One exception, `long-stanzas`: B starts where A does. Its first variant, `gradual`, is the
+// quadratic arrangement erosion exists to remove (SPEC.md §4.6) — for "Patterns" 1,314 bars and a
+// 4 MB pattern, which the static page's compiler takes about 5 s to write and 8 s to score, and
+// Strudel seconds more to parse, on every edit, while the A side waits for it — so it is there
+// to choose, not loaded behind every long poem.
+const B_STARTS_AS_A = ['long-stanzas'];
+let settings = {
+  A: defaults((m) => m[3]),
+  B: defaults((m) => (B_STARTS_AS_A.includes(m[0]) ? m[3] : m[2][0])),
+};
 let hearing = 'A';
 let patterns = { A: '', B: '' };
 // The reading of each setting (`prosody_emit::reading`): a cue pattern and the lines it speaks.
@@ -578,8 +888,10 @@ for (const menu of document.querySelectorAll('#mappings select')) {
 }
 
 function status(text, bad = false) {
-  $('status').textContent = text;
-  $('status').classList.toggle('bad', bad);
+  statusText = text;
+  statusBad = bad;
+  $('status').textContent = text + (readingNote ? ' · ' + readingNote : '');
+  $('status').classList.toggle('bad', bad || readingNoteBad);
 }
 
 function query(side = hearing) {
@@ -595,8 +907,10 @@ function showPattern() {
   const reading = readings[hearing];
   // The cue pattern is shown under the music, apart from it: it is not part of what a writer
   // pastes into strudel.cc, where nothing would speak it.
-  $('pattern').textContent = latestPattern + (reading && reading.cues.length
-    ? '\n// ---- spoken by this page, not part of the pattern above ----\n' + reading.pattern
+  const cues = reading && (readingSettings.pace === 'fitted' ? reading.cues : reading.lines);
+  $('pattern').textContent = latestPattern + (cues && cues.length
+    ? '\n// ---- spoken by this page, not part of the pattern above ----\n'
+      + (readingSettings.pace === 'fitted' ? reading.pattern : reading.natural)
     : '');
 }
 
@@ -604,6 +918,7 @@ function hear(side) {
   hearing = side;
   $('hearA').setAttribute('aria-pressed', side === 'A');
   $('hearB').setAttribute('aria-pressed', side === 'B');
+  if (readingSettings.engine === 'recorded') showVoices();
   showPattern();
   buildLit();
   if (playing && latestPattern) { fromTheTop = true; play(); }
@@ -614,18 +929,37 @@ function hear(side) {
     .catch(() => {});
 }
 
+// One measurement at a time, and only of the newest poem: a request made while one is out waits
+// for it and then measures whatever the poem says by then, so a writer typing into a long poem
+// never queues a score per keystroke (each of "Patterns" takes seconds).
+let measuring = false, measureNext = null;
 async function measure(poem) {
-  const one = async (side) => {
-    const response = await ask('/score', query(side), poem);
-    return response.ok ? response.json() : null;
-  };
+  measureNext = poem;
   $('scoreRows').innerHTML = '<tr><td colspan="5">measuring…</td></tr>';
+  if (measuring) return;
+  measuring = true;
   try {
-    [scores.A, scores.B] = await Promise.all([one('A'), one('B')]);
-  } catch (error) {
-    scores = { A: null, B: null };
+    while (measureNext !== null) {
+      const asked = measureNext;
+      measureNext = null;
+      const one = async (side) => {
+        const response = await ask('/score', query(side), asked);
+        return response.ok ? response.json() : null;
+      };
+      let measured;
+      try {
+        measured = await Promise.all([one('A'), one('B')]);
+      } catch (error) {
+        measured = [null, null];
+      }
+      if (measureNext === null) {
+        [scores.A, scores.B] = measured;
+        renderScores();
+      }
+    }
+  } finally {
+    measuring = false;
   }
-  renderScores();
 }
 
 function renderScores() {
@@ -655,7 +989,23 @@ function renderScores() {
   $('scoreRows').innerHTML = rows.join('');
 }
 
+// One compilation at a time, the same way: an edit made while one is out is compiled when it
+// returns, so answers never arrive out of order and a long poem's compilations never pile up.
+let compiling = false, compileAgain = false;
 async function compile() {
+  if (compiling) { compileAgain = true; return; }
+  compiling = true;
+  try {
+    do {
+      compileAgain = false;
+      await compileOnce();
+    } while (compileAgain);
+  } finally {
+    compiling = false;
+  }
+}
+
+async function compileOnce() {
   showValues();
   const poem = $('poem').value;
   if (!poem.trim()) {
@@ -706,10 +1056,17 @@ async function compile() {
     showPattern();
     buildLit();
     measure(poem);
+    // The recorded voices are listed per poem, with how many of its lines each has.
+    if (readingSettings.engine === 'recorded') showVoices();
+    // Every changed line rendered again, ahead of its turn; the unchanged ones are kept. Not for
+    // a text already replaced: the compile of the newer one asks for its own lines.
+    if (!compileAgain) prerender();
     const patternText = latestPattern;
     const summary = patternText.split('\n')[1] || '';
     status(hearing + ' · ' + summary.replace('// ', '') + (playing ? ' · playing' : ''));
-    if (playing) play();          // live reload: keep going with the new version
+    // Live reload: keep going with the new version — unless a newer one is already being compiled,
+    // which plays instead (and keeps a preset's restart from being spent on the stale one).
+    if (playing && !compileAgain) play();
   } catch (error) {
     status('server unreachable — is `prosody-web` still running?', true);
   }
@@ -749,6 +1106,55 @@ async function startStrudel() {
   // without them and every drum layer, which carries `.crush`, failed to build. Load them now.
   await initAudio();
   honourNudge();
+  rememberParses();
+}
+
+// ---- Parsing ahead ----
+//
+// Evaluating a pattern is almost all Strudel parsing its mini-notation strings: "Patterns" has
+// about 1,200, and parsing them takes about a second, during which the scheduler cannot tick — so
+// a live edit while it plays used to skip a second of music. Two things keep the page's thread
+// free. Strudel turns every string into a pattern through the one parser `setStringParser` names
+// (@strudel/core 1.2.6, pattern.mjs `reify`; `initStrudel` sets it to `mini`), so the page sets
+// a parser that remembers what it has parsed: Strudel's patterns are immutable values, the same
+// string always parses to the same pattern, and an edit to one stanza leaves the strings of every
+// other voice byte-identical (I2), so after an edit almost every string is one already parsed.
+// And before each evaluation the page parses the strings it has not seen, a few milliseconds of
+// them at a time between the scheduler's ticks, so the evaluation itself only looks them up.
+// Entries no evaluation has asked for in the last PARSES_KEPT plays are let go.
+const parsed = new Map();   // mini-notation string → { pattern, play }
+let parsePlay = 0;
+const PARSES_KEPT = 3;      // the piece playing, the other side, and the one before
+const PARSE_SLICE_MS = 8;   // well inside the scheduler's 50 ms tick
+function rememberParses() {
+  setStringParser((text) => {
+    let entry = parsed.get(text);
+    if (!entry) {
+      entry = { pattern: mini(text), play: parsePlay };
+      parsed.set(text, entry);
+    }
+    entry.play = parsePlay;
+    return entry.pattern;
+  });
+}
+async function parseAhead(...codes) {
+  parsePlay += 1;
+  let slice = performance.now();
+  for (const code of codes) {
+    // Every string literal: the mini-notation of `note("…")`, `s("…")` and the rest, and a few
+    // plain names (`.bank("…")`), which parse to themselves. One that does not parse is left for
+    // the evaluation to refuse, with Strudel's own message.
+    for (const [, text] of code.matchAll(/"([^"\\\n]*)"/g)) {
+      const entry = parsed.get(text);
+      if (entry) { entry.play = parsePlay; continue; }
+      try { parsed.set(text, { pattern: mini(text), play: parsePlay }); } catch (error) {}
+      if (performance.now() - slice > PARSE_SLICE_MS) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        slice = performance.now();
+      }
+    }
+  }
+  for (const [text, entry] of parsed) if (entry.play <= parsePlay - PARSES_KEPT) parsed.delete(text);
 }
 
 // Strudel's sampler starts a sample `nudge` seconds late; its oscillators and soundfonts ignore
@@ -802,6 +1208,11 @@ function limitTheMaster() {
   duckGain = new GainNode(ctx, { gain: 1 });
   gain.disconnect();
   gain.connect(duckGain).connect(glue).connect(into).connect(clip).connect(ctx.destination);
+  // A rendered voice joins the music at the glue, after the duck: through the same master stage,
+  // at the reading's own level.
+  voiceBus?.disconnect();
+  voiceBus = new GainNode(ctx, { gain: readingSettings.level });
+  voiceBus.connect(glue);
   limited = gain;
 }
 
@@ -813,7 +1224,8 @@ async function warmUp(code) {
   const wanted = [];
   for (const line of code.split('\n')) {
     const pattern = (name) => (line.match(new RegExp(`(?:^|[.\\s])${name}\\("([^"]*)"\\)`)) || [])[1];
-    const tokens = (text) => text.replace(/[<>\[\],]/g, ' ').split(/\s+/).filter((t) => t && t !== '~');
+    const tokens = (text) => text.replace(/[<>\[\],]/g, ' ').split(/\s+/)
+      .map((t) => t.split('@')[0]).filter((t) => t && t !== '~');
     const notes = pattern('note');
     if (notes !== undefined) {
       const sound = pattern('sound');
@@ -840,108 +1252,1119 @@ async function warmUp(code) {
 // Strudel's own `speak`, `duck` and `silence` on the global scope, over any page function of
 // that name: a `speak` here was silently replaced by Strudel's pattern function and said nothing.
 //
-// Each cue is an event of the reading's own pattern, `n("<0@3 1@4 ~@3 2@4 …>").cpm(…)`, one element
-// per bar, each as long as the music's bar (under the elastic pulse, `<0 1 ~ 2 …>`, a cycle a
-// bar), at the music's cycles per minute, so Strudel's scheduler fires it as the bar begins. Its
-// callback is attached with `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the
-// `true` makes it the cue's only output, so the default webaudio output never tries to sound an
-// event with no `s`). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
-// audio-context seconds — so the speech waits out the difference, as Strudel's own
-// `onTriggerTime` does.
-let voices = [];
-const pendingSpeech = new Set();
-// Which cue pattern is current. Every play() starts a new generation; a cue from an older one —
+// Where a line is read comes from two cue patterns (`prosody_emit::reading`), both stacked with
+// the music so a change of pace needs no new pattern: `pattern`, the fitted pace, a line a bar;
+// and `natural`, the natural pace, whose cues are the earliest bar a line — a stanza's first,
+// under `breath` — may begin in. Each is `n("<0@3 1@4 ~@3 2@4 …>").cpm(…)`, one element per bar,
+// each as long as the music's bar (under the elastic pulse, a cycle a bar), at the music's cycles
+// per minute, so Strudel's scheduler fires a cue as its bar begins. Its callback is attached with
+// `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the `true` makes it the cue's
+// only output). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
+// audio-context seconds — and `targetTime` is when the bar begins on the audio clock: a rendered
+// line is started then, exactly, by an AudioBufferSourceNode; the browser's voice, which cannot be
+// scheduled, by a timer that waits out the difference, as Strudel's own `onTriggerTime` does.
+//
+// Who speaks is an engine, the listener's choice (a page setting, not a style key — the CLI never
+// reads aloud): `browser`, the speech synthesiser, instant and the fallback for everything else;
+// and three neural voices, each in a worker of its own (speech-worker.mjs), downloaded only once
+// chosen: `kokoro` (the default), `piper` (many languages, Slovenian among them) and `kitten`.
+// Every engine answers the same three calls: `load(onProgress)`, `voices(language)` and
+// `render(text, { voice, speed })`, which gives an AudioBuffer. A neural engine renders every line
+// ahead of time, after each compile, and keeps what it made by engine, voice, speed and text, so a
+// recompile reuses every line it did not change. A fifth, `recorded`, answers the same calls from
+// files made ahead of time (scripts/readings/): its `render` fetches and decodes a line's
+// recording, and a line it has none of — an edited line, a poem of the writer's own — is read by a
+// live engine instead, and said (speakerOf).
+// What the reading is doing, after whatever the status bar says about the music.
+let readingNote = '', readingNoteBad = false, statusText = 'ready', statusBad = false;
+let voices = [];   // the browser's speech voices
+// Which cue patterns are current. Every play() starts a new generation; a cue from an older one —
 // a hap Strudel had already scheduled from the previous pattern, or its pending timer — is
 // dropped, so a line of the previous poem or setting is never read over the new music.
 let readingGeneration = 0;
 let generations = 0;   // handed out one per play(), so two overlapping plays never share one
-let duckGain = null;
-const DUCK = 0.6;   // the music under a spoken line, as a fraction of its level
+let duckGain = null;   // the music, before the master stage
+let voiceBus = null;   // the reading's level, into the master stage
+const DUCK = 0.6;      // the music under a spoken line, as a fraction of its level
+const LEAD = 0.05;     // the least ahead of now a late line is started, in seconds
+const SCHEDULER_CPS = 1;   // reading::SCHEDULER_CPS, and the page's repl.setCps(1)
 
-function listVoices() {
-  if (!('speechSynthesis' in window)) return;
-  voices = speechSynthesis.getVoices();
-  const chosen = $('voice').value || (() => { try { return localStorage.getItem('prosody.voice') || ''; } catch (e) { return ''; } })();
-  $('voice').innerHTML = '<option value="">browser default</option>'
-    + voices.map((v) => `<option value="${v.name.replace(/"/g, '&quot;')}">${v.name} (${v.lang})</option>`).join('');
-  if (voices.some((v) => v.name === chosen)) $('voice').value = chosen;
+// The reading's own settings, remembered per browser like the voice picker.
+const READING_DEFAULTS = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };
+let readingSettings = { ...READING_DEFAULTS };
+try {
+  const saved = JSON.parse(localStorage.getItem('prosody.reading') || 'null');
+  if (saved && typeof saved === 'object') {
+    readingSettings = {
+      engine: ['browser', 'kokoro', 'piper', 'kitten', 'recorded'].includes(saved.engine) ? saved.engine : READING_DEFAULTS.engine,
+      pace: ['natural', 'fitted'].includes(saved.pace) ? saved.pace : READING_DEFAULTS.pace,
+      level: Number(saved.level) >= 0 && Number(saved.level) <= 2 ? Number(saved.level) : 1,
+      voices: saved.voices && typeof saved.voices === 'object' ? saved.voices : {},
+    };
+  }
+  // The voice picker before there were engines: a browser voice.
+  const old = localStorage.getItem('prosody.voice');
+  if (old && !readingSettings.voices.browser) readingSettings.voices.browser = { en: old };
+} catch (error) { /* no storage: the defaults */ }
+function saveReading() {
+  try { localStorage.setItem('prosody.reading', JSON.stringify(readingSettings)); } catch (error) {}
+}
+// The language the poem is read in: a preset's own (Prešeren is Slovenian), otherwise the
+// writer's choice, English to begin with.
+let language = 'en';
+const LANGUAGES = { en: 'English', sl: 'Slovenian' };
+
+// ---- Engines ----
+
+// What each neural engine offers before it has loaded — its default voice per language — and,
+// once it has, everything it lists. Kokoro and Kitten speak English only; Piper reads its
+// catalogue (rhasspy/piper-voices) and offers every language there.
+const ENGINE_INFO = {
+  browser: { label: 'browser voice', defaults: {} },
+  kokoro: { label: 'Kokoro-82M', defaults: { en: 'af_heart' } },
+  piper: { label: 'Piper', defaults: { en: 'en_GB-cori-medium', sl: 'sl_SI-artur-medium' } },
+  kitten: { label: 'Kitten TTS (nano)', defaults: { en: 'Bella' } },
+  // The recorded readings' voices are named `engine:voice`, after the live voice that made them.
+  recorded: { label: 'recorded readings', defaults: { en: 'kokoro:af_heart', sl: 'piper:sl_SI-artur-medium' } },
+};
+const engines = {};
+const sameLanguage = (lang, wanted) => (lang || '').toLowerCase().replace('_', '-').split('-')[0] === wanted;
+
+engines.browser = {
+  name: 'browser',
+  state: 'ready',
+  load: async () => {},
+  voices: (lang) => voices.filter((v) => sameLanguage(v.lang, lang)).map((v) => ({ id: v.name, name: `${v.name} (${v.lang})`, lang: v.lang })),
+  // The browser's voice cannot be rendered ahead: it is spoken, not made.
+  render: null,
+};
+
+function workerEngine(name) {
+  let worker = null, asked = 0;
+  const waiting = new Map();
+  const engine = {
+    name,
+    state: 'idle',     // idle → loading → ready, or failed (and then idle again on a retry)
+    device: null,
+    listed: null,      // the voices it lists once loaded
+    error: null,
+    progress: '',
+    crashed(error) {
+      engine.state = 'failed';
+      engine.error = error.message;
+      for (const pending of waiting.values()) pending.reject(error);
+      waiting.clear();
+      worker?.terminate();
+      worker = null;
+      engineFailed(engine, error);
+    },
+    ask(message, transfer) {
+      return new Promise((resolve, reject) => {
+        if (!worker) { reject(new Error('the engine is not loaded')); return; }
+        asked += 1;
+        waiting.set(asked, { resolve, reject });
+        worker.postMessage({ id: asked, ...message }, transfer || []);
+      });
+    },
+    async load(onProgress) {
+      if (engine.state === 'ready') return;
+      if (engine.loading) return engine.loading;
+      engine.state = 'loading';
+      engine.error = null;
+      engine.loading = (async () => {
+        try {
+          // `?device=wasm` on the page keeps every engine off WebGPU (see speech-worker.mjs).
+          const device = new URLSearchParams(location.search).get('device') === 'wasm' ? '&device=wasm' : '';
+          worker ??= new Worker(new URL(`./speech-worker.mjs?engine=${name}${device}`, document.baseURI), { type: 'module' });
+          worker.onmessage = ({ data }) => {
+            if (data.progress) { engine.progress = data.progress.text; onProgress?.(data.progress); return; }
+            const pending = waiting.get(data.id);
+            waiting.delete(data.id);
+            if (!pending) return;
+            if (data.ok) pending.resolve(data); else pending.reject(new Error(data.error));
+          };
+          worker.onerror = (event) => {
+            const error = new Error(event.message || 'the worker failed');
+            for (const pending of waiting.values()) pending.reject(error);
+            waiting.clear();
+            // A worker that dies after it has loaded would leave every later request posted to
+            // nothing: the engine is failed instead, so the browser voice reads and it is said.
+            if (engine.state === 'ready') engine.crashed(error);
+          };
+          const info = await engine.ask({ op: 'load' });
+          engine.device = info.device;
+          engine.listed = info.voices;
+          engine.state = 'ready';
+        } catch (error) {
+          // Cancelled by the listener (cancel(), below): not a failure, just not loaded.
+          engine.state = engine.cancelling ? 'idle' : 'failed';
+          engine.error = engine.cancelling ? null : error.message;
+          engine.cancelling = false;
+          // A worker that failed to load is let go, so choosing the engine again starts afresh.
+          worker?.terminate();
+          worker = null;
+          throw error;
+        } finally {
+          engine.loading = null;
+        }
+      })();
+      return engine.loading;
+    },
+    // Stops a download the listener no longer wants: the worker is let go at once, so the network
+    // and the CPU are freed, and every request waiting on it is told so. The engine is idle again,
+    // to be chosen afresh.
+    cancel() {
+      engine.cancelling = engine.state === 'loading';
+      const error = new Error('cancelled');
+      error.cancelled = true;
+      for (const pending of waiting.values()) pending.reject(error);
+      waiting.clear();
+      worker?.terminate();
+      worker = null;
+      if (!engine.cancelling) { engine.state = 'idle'; engine.listed = null; }
+    },
+    voices(lang) {
+      const listed = engine.listed || Object.entries(ENGINE_INFO[name].defaults)
+        .map(([code, id]) => ({ id, name: id, lang: code }));
+      return listed.filter((v) => sameLanguage(v.lang, lang));
+    },
+    async render(text, { voice, speed }) {
+      const answer = await engine.ask({ op: 'render', text, voice, speed });
+      const buffer = new AudioBuffer({ numberOfChannels: 1, length: Math.max(1, answer.pcm.length), sampleRate: answer.rate });
+      buffer.copyToChannel(answer.pcm, 0);
+      buffer.took = answer.took;
+      buffer.lead = answer.lead || 0;   // the quiet margin before the speech: started that much early
+      return buffer;
+    },
+  };
+  return engine;
+}
+for (const name of ['kokoro', 'piper', 'kitten']) engines[name] = workerEngine(name);
+
+// ---- The recorded readings ----
+//
+// SPEC.md §4.7, `recorded`. Every line of every example poem, spoken ahead of time on the
+// maintainer's machine by the page's own engines (scripts/readings/), at the line's natural pace
+// — baked in, so the file plays as it is — one MP3 a line and voice, beside the page in
+// `readings/`, with a manifest. The manifest is keyed by voice and by a hash of the line's exact
+// text, and carries the text: a line is looked up by its text, so an edited line simply has none.
+// A voice is named `engine:voice` after the live voice that made it; where a line has no
+// recording, that live voice reads it if its engine is already loaded, and otherwise the browser's
+// voice does — never a model downloaded unasked — and the status bar says which (speakerOf).
+// Loading is fetching the manifest (a few tens of kB); a line's file is fetched when it is
+// rendered ahead, as any engine's line is.
+const READINGS = './readings/';
+engines.recorded = {
+  name: 'recorded',
+  state: 'idle',
+  device: 'files',
+  error: null,
+  progress: '',
+  manifest: null,
+  byText: new Map(),   // a line's exact text → { key, pace, recordings: { voice id → { file, seconds } } }
+  load() {
+    const engine = engines.recorded;
+    if (engine.state === 'ready') return Promise.resolve();
+    if (engine.loading) return engine.loading;
+    engine.state = 'loading';
+    engine.error = null;
+    engine.loading = (async () => {
+      try {
+        const response = await fetch(new URL(READINGS + 'manifest.json', document.baseURI));
+        if (!response.ok) throw new Error(`no recordings here (${response.status} for readings/manifest.json)`);
+        const manifest = await response.json();
+        engine.manifest = manifest;
+        engine.byText = new Map(Object.entries(manifest.lines).map(([key, line]) => [line.text, { key, ...line }]));
+        engine.state = 'ready';
+        console.log(`[reading] recorded: ${engine.byText.size} lines in ${Object.keys(manifest.voices).length} voices`);
+      } catch (error) {
+        engine.state = 'failed';
+        engine.error = error.message;
+        throw error;
+      } finally {
+        engine.loading = null;
+      }
+    })();
+    return engine.loading;
+  },
+  // The recorded voices of `lang` that have recordings of the poem heard, most lines first, each
+  // saying how many of its lines it has; every voice of the language if none has any (a poem of
+  // the writer's own), so the menu is never empty and every line is read live, and said.
+  voices(lang) {
+    const engine = engines.recorded;
+    // Before the manifest is here: the voice saved for the language, else the default, by id.
+    if (!engine.manifest) {
+      const id = readingSettings.voices.recorded?.[lang] ?? ENGINE_INFO.recorded.defaults[lang];
+      return id ? [{ id, name: id, lang }] : [];
+    }
+    const texts = recordedTexts(readings[hearing]);
+    const listed = Object.entries(engine.manifest.voices)
+      .filter(([, v]) => sameLanguage(v.lang, lang))
+      .map(([id, v]) => {
+        const have = texts.filter((text) => engine.byText.get(text)?.recordings[id]).length;
+        // A side whose reading is off reads nothing: said so, not as 0 of 0 recorded.
+        const count = texts.length ? `${have} of ${texts.length} lines recorded` : 'this side reads nothing';
+        return { id, name: `${v.name} (${count})`, lang: v.lang, have };
+      });
+    const some = listed.filter((v) => v.have > 0).sort((a, b) => b.have - a.have);
+    return some.length ? some : listed;
+  },
+  has(voice, text) {
+    return !!engines.recorded.byText.get(text)?.recordings[voice];
+  },
+  // The recording of `text` in `voice`, decoded and trimmed of its silence (an MP3 adds an
+  // encoder's delay before it), as an AudioBuffer. At the speed it was recorded at — the line's
+  // pace — it is the file as it is; asked for another (the fitted pace's refit, or a pace rule
+  // changed since the recording), it is resampled to it, which shifts its pitch as well.
+  async render(text, { voice, speed }) {
+    const began = performance.now();
+    const line = engines.recorded.byText.get(text);
+    const recording = line?.recordings[voice];
+    if (!recording) throw new Error(`no recording of this line in ${voice}`);
+    const response = await fetch(new URL(READINGS + recording.file, document.baseURI));
+    if (!response.ok) throw new Error(`${response.status} for readings/${recording.file}`);
+    let buffer = await decoder().decodeAudioData(await response.arrayBuffer());
+    const rate = speed / line.pace;
+    if (Math.abs(rate - 1) > 0.0005) buffer = await resampled(buffer, rate);
+    buffer = trimmedBuffer(buffer);
+    buffer.took = performance.now() - began;
+    return buffer;
+  },
+};
+
+// What decodes a recording: a context of the page's own, so a line can be fetched ahead before
+// Strudel has made the audio context it plays in (which resamples a 48 kHz buffer as it plays it).
+let decoding = null;
+function decoder() {
+  decoding ??= new OfflineAudioContext(1, 1, 48000);
+  return decoding;
 }
 
-function cuesOf(reading, generation) {
-  const byLine = new Map(reading.cues.map((cue) => [cue.line, cue]));
-  return (0, eval)(reading.pattern).onTrigger((hap, currentTime, cps, targetTime) => {
-    if (generation !== readingGeneration) return;
-    const cue = byLine.get(Number(hap.value?.n));
-    if (!cue) return;
-    const wait = Math.max(0, targetTime - currentTime);
-    // The trace: which line, from which bytes, at which cycle of Strudel's clock.
-    console.log(`[reading] cycle ${hap.whole.begin.valueOf()} (bar ${cue.slot + 1}): line ${cue.line + 1}`
-      + ` bytes ${cue.start}..${cue.end}, rate ${cue.rate}, in ${wait.toFixed(3)} s: ${cue.text}`);
-    const timer = setTimeout(() => {
-      pendingSpeech.delete(timer);
-      if (generation === readingGeneration) readLine(cue);
-    }, wait * 1000);
-    pendingSpeech.add(timer);
-  }, true);
+// The lines a reading may speak, by text.
+function recordedTexts(reading) {
+  if (!reading) return [];
+  return [...new Set([...reading.lines, ...reading.cues].map((line) => line.text).filter((text) => text.trim()))];
 }
 
-function readLine(cue) {
-  if (!('speechSynthesis' in window)) return;
+// `buffer` played `rate` times as fast, as a new buffer.
+async function resampled(buffer, rate) {
+  const offline = new OfflineAudioContext(1, Math.max(1, Math.ceil(buffer.length / rate)), buffer.sampleRate);
+  const source = new AudioBufferSourceNode(offline, { buffer, playbackRate: rate });
+  source.connect(offline.destination);
+  source.start();
+  return offline.startRendering();
+}
+
+// A decoded recording without the silence before and after its speech, keeping 10 ms either side
+// and saying how long the margin before is (`lead`), as speech-worker.mjs does for a rendered line:
+// the page starts it that much early, so the speech itself begins on the time.
+const SILENCE = 10 ** (-50 / 20);
+function trimmedBuffer(buffer) {
+  const pcm = buffer.getChannelData(0);
+  let first = 0;
+  while (first < pcm.length && Math.abs(pcm[first]) < SILENCE) first += 1;
+  let last = pcm.length - 1;
+  while (last > first && Math.abs(pcm[last]) < SILENCE) last -= 1;
+  const margin = Math.round(0.01 * buffer.sampleRate);
+  const from = first >= pcm.length ? 0 : Math.max(0, first - margin);
+  const to = first >= pcm.length ? 1 : Math.min(pcm.length, last + 1 + margin);
+  const kept = new AudioBuffer({ numberOfChannels: 1, length: Math.max(1, to - from), sampleRate: buffer.sampleRate });
+  kept.copyToChannel(pcm.subarray(from, to), 0);
+  kept.lead = first >= pcm.length ? 0 : (first - from) / buffer.sampleRate;
+  return kept;
+}
+
+// The voice the setting asks `engine` to read `language` with: the saved one if it still lists
+// it, otherwise its default, otherwise its first.
+function voiceOf(engine, lang = language) {
+  const offered = engines[engine].voices(lang);
+  const saved = readingSettings.voices[engine]?.[lang];
+  if (offered.some((v) => v.id === saved)) return saved;
+  // The browser's voice has a default of its own, the system's (`null`: no voice set on the
+  // utterance, only its language), which is what nothing, or 'browser default', chosen means.
+  if (engine === 'browser') return null;
+  const fallback = ENGINE_INFO[engine].defaults[lang];
+  if (offered.some((v) => v.id === fallback)) return fallback;
+  return offered[0]?.id ?? null;
+}
+
+// Who reads now, and why not the chosen one when it is not: the chosen engine once it has
+// loaded and has a voice in the poem's language; the browser's voice meanwhile, and instead.
+function speaker() {
+  const chosen = readingSettings.engine;
+  const engine = engines[chosen];
+  if (chosen === 'browser') return { engine: 'browser', why: '' };
+  const name = ENGINE_INFO[chosen].label;
+  if (engine.state === 'failed') return { engine: 'browser', why: `${name} could not load (${engine.error}); reading with the browser voice`, bad: true };
+  if (engine.state !== 'ready') return { engine: 'browser', why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; reading with the browser voice meanwhile` };
+  if (!voiceOf(chosen)) return { engine: 'browser', why: `${name} has no ${LANGUAGES[language] || language} voice; reading with the browser voice${language === 'sl' ? ' (Piper has one)' : ''}`, bad: true };
+  return { engine: chosen, why: '' };
+}
+
+// Who reads the line `text`, in which voice, and why not the chosen one when it is not. As
+// speaker(), and for the recorded readings line by line: a line recorded in the chosen voice is
+// read from its file; one that is not is read by the live voice that made the recordings, if its
+// engine has loaded, and otherwise by the browser's voice (`fallback`, with the reason, which the
+// caller says with the line's number).
+function speakerOf(text) {
+  const who = speaker();
+  if (who.engine !== 'recorded') return { ...who, voice: who.engine === 'browser' ? null : voiceOf(who.engine) };
+  const voice = voiceOf('recorded');
+  if (engines.recorded.has(voice, text)) return { ...who, voice };
+  const [live, liveVoice] = voice.split(':');
+  const engine = engines[live];
+  if (engine?.render && engine.state === 'ready' && engine.voices(language).some((v) => v.id === liveVoice)) {
+    return { engine: live, voice: liveVoice, why: `no recording of it; read live by ${ENGINE_INFO[live].label} ${liveVoice}`, fallback: true };
+  }
+  return { engine: 'browser', voice: null, why: 'no recording of it; read by the browser voice', fallback: true };
+}
+// The speed a line is rendered at by `engine`: a recording's own (the line's pace, at which it was
+// recorded) at either pace; a live engine's, the line's pace or its fitted rate.
+function baseSpeed(engine, item) {
+  return engine === 'recorded' ? item.pace : item.speed;
+}
+
+// Loads the chosen engine if it is not loaded, showing its progress in the status bar. A failure
+// is said and the reading carries on with the browser's voice; choosing the engine again (`retry`)
+// retries — any other change of setting leaves a failed engine failed. What an engine says while
+// it loads, renders or fails is shown only while it is the one chosen, and its progress while it
+// renders only for the voice now chosen: a voice or engine let go must not hold the status bar.
+let progressShown = false;   // the reading's note is an engine's progress, cleared when it is done
+const chosenEngine = (engine) => readingSettings.engine === engine.name;
+function ensureEngine(retry = false) {
+  const engine = engines[readingSettings.engine];
+  if (engine.state === 'ready' || engine.state === 'loading' || !engine.render) return;
+  if (engine.state === 'failed' && !retry) return;
+  const name = ENGINE_INFO[engine.name].label;
+  let shown = '';
+  engine.load((progress) => {
+    if (!chosenEngine(engine)) return;
+    if (engine.state === 'ready' && renderingJob && (renderingJob.engine !== engine.name || renderingJob.voice !== voiceOf(engine.name))) return;
+    // Said in the status bar as it moves, a whole percent at a time; logged only when it is done.
+    const said = `${name}: ${progress.text}${progress.fraction != null ? ' (' + Math.round(progress.fraction * 100) + '%)' : ''}`;
+    if (said !== shown) { noteReading(shown = said, false, true); progressShown = true; }
+    loaderProgress(engine.name, progress);
+  }).then(() => {
+    console.log(`[reading] ${engine.name} loaded on ${engine.device}`);
+    try { localStorage.setItem('prosody.fetched.' + engine.name, '1'); } catch (e) {}
+    showVoices();
+    if (!chosenEngine(engine)) return;
+    noteReading(`${name} ready (${engine.device === 'files' ? 'from files' : engine.device === 'webgpu' ? 'WebGPU' : 'WebAssembly'})`);
+    prerender();
+  }, (error) => {
+    if (error.cancelled) { showVoices(); return; }
+    console.warn(`[reading] ${engine.name} failed to load:`, error);
+    loaderFailed(engine.name, error);
+    showVoices();
+    if (!chosenEngine(engine)) return;
+    noteReading(`${name} could not load: ${error.message} — reading with the browser voice`, true);
+  });
+}
+
+// An engine that failed after it had loaded (its worker died): said if it is the one chosen, and
+// the reading carries on with the browser's voice — a line waiting for it gives up (its render is
+// rejected) and the next is read by the browser.
+function engineFailed(engine, error) {
+  console.warn(`[reading] ${engine.name} failed:`, error);
+  showVoices();
+  if (!chosenEngine(engine)) return;
+  noteReading(`${ENGINE_INFO[engine.name].label} failed: ${error.message} — reading with the browser voice; choose it again to retry`, true);
+}
+
+// ---- Rendering ahead ----
+
+const renders = new Map();   // engine|voice|speed|text → { buffer, promise }
+const RENDERS_KEPT = 600;
+let renderQueue = [], rendering = false;
+let renderingJob = null;     // the job the engine is rendering now
+// A pending line is in `renders` exactly while its job is queued or rendering: a job dropped from
+// the queue (no longer to be read: the poem, engine, voice or pace changed) takes its entry with it
+// and rejects its promise as `dropped`, so asking for that line again queues it afresh rather than
+// waiting on a render that will never come.
+function dropJob(job) {
+  if (renders.get(job.key) === job.entry) renders.delete(job.key);
+  const error = new Error('dropped: no longer to be read (the poem, engine, voice or pace changed)');
+  error.dropped = true;
+  job.entry.reject(error);
+}
+const renderKey = (engine, voice, speed, text) => `${engine}|${voice}|${Number(speed).toFixed(3)}|${text}`;
+
+// The buffer for a line, if it has been rendered; and otherwise asks for it, first in the queue
+// when `urgent` (a line due now), and gives the promise of it.
+function rendered(engine, voice, speed, text) {
+  return renders.get(renderKey(engine, voice, speed, text))?.buffer ?? null;
+}
+function whenRendered(engine, voice, speed, text, urgent = false, room = null) {
+  const key = renderKey(engine, voice, speed, text);
+  let entry = renders.get(key);
+  // A line asked for with its bar's `room` is fitted to it even if it was first asked for without
+  // one: a recording has one key at both paces (its own speed), so one fetched at the natural pace
+  // would otherwise be read at the fitted pace unfitted, run past its bar and be cut off.
+  if (room) fitWhenRendered(key, entry, { key, engine, voice, speed, text, room });
+  if (entry?.buffer) return Promise.resolve(entry.buffer);
+  if (entry?.direct) return entry.promise;   // a recording being fetched (below)
+  // An entry neither queued nor rendering has lost its job (it cannot, by `dropJob`, but a line
+  // waiting on it would wait for good): it is asked for afresh.
+  if (entry && renderingJob?.key !== key && !renderQueue.some((job) => job.key === key)) {
+    renders.delete(key);
+    entry = null;
+  }
+  if (!entry) {
+    entry = {};
+    entry.promise = new Promise((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; });
+    entry.promise.catch(() => {});
+    renders.set(key, entry);
+    const job = { key, engine, voice, speed, text, entry, room };
+    // A recording is a fetch, not a computation: it uses no worker, so it is not queued behind a
+    // live engine's render (a slow one would hold it up for seconds), and it is never dropped —
+    // it takes milliseconds, and its buffer is wanted again whenever the line comes round.
+    if (engine === 'recorded') {
+      entry.direct = true;
+      engines.recorded.render(text, { voice, speed }).then((buffer) => {
+        entry.buffer = buffer;
+        entry.resolve(buffer);
+        afterRender(job, buffer);
+        while (renders.size > RENDERS_KEPT) renders.delete(renders.keys().next().value);
+        console.log(`[reading] fetched from the recording, ${voice} at ${Number(speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${(buffer.took / 1000).toFixed(2)} s: ${text}`);
+      }, (error) => {
+        if (renders.get(key) === entry) renders.delete(key);
+        entry.reject(error);
+        console.warn(`[reading] recorded could not fetch "${text}":`, error);
+      });
+      return entry.promise;
+    }
+    if (urgent) renderQueue.unshift(job); else renderQueue.push(job);
+  } else if (urgent) {
+    const at = renderQueue.findIndex((job) => job.key === key);
+    if (at > 0) renderQueue.unshift(...renderQueue.splice(at, 1));
+  }
+  pumpRenders();
+  return entry.promise;
+}
+async function pumpRenders() {
+  if (rendering) return;
+  rendering = true;
+  try {
+    while (renderQueue.length) {
+      const job = renderQueue.shift();
+      if (engines[job.engine].state !== 'ready') { renders.delete(job.key); job.entry.reject(new Error('not loaded')); continue; }
+      renderingJob = job;
+      try {
+        const buffer = await engines[job.engine].render(job.text, { voice: job.voice, speed: job.speed });
+        job.entry.buffer = buffer;
+        job.entry.resolve(buffer);
+        // A voice's download shown while it rendered has done its work.
+        if (progressShown) { progressShown = false; noteReading(speaker().why, speaker().bad); }
+        afterRender(job, buffer);
+        console.log(`[reading] rendered with ${job.engine} ${job.voice} at ${Number(job.speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${(buffer.took / 1000).toFixed(2)} s: ${job.text}`);
+      } catch (error) {
+        renders.delete(job.key);
+        job.entry.reject(error);
+        console.warn(`[reading] ${job.engine} could not render "${job.text}":`, error);
+      } finally {
+        renderingJob = null;
+      }
+    }
+  } finally {
+    rendering = false;
+  }
+  // Oldest first out: insertion order is the order lines were first asked for.
+  while (renders.size > RENDERS_KEPT) renders.delete(renders.keys().next().value);
+}
+
+// Every line of a reading in reading order: what this pace reads at the speed it reads it — the
+// line's pace, or its fitted rate (and the faster one it was refitted to, if it was).
+function linesToRead(reading) {
+  if (!reading) return [];
+  return readingSettings.pace === 'fitted'
+    ? reading.cues.map((cue) => ({ text: cue.text, speed: cue.rate, pace: cue.pace, room: slotLength(reading, cue.slot) * reading.fill, cue }))
+    : reading.lines.map((line) => ({ text: line.text, speed: line.pace, pace: line.pace }));
+}
+// The same, from the line the reading of the playing piece is at round to the one before it: the
+// order the lines will be wanted in. Any other reading from its first line.
+let fittedAt = null;   // { reading, index }: the fitted cue after the one last cued
+function upcoming(reading) {
+  const lines = linesToRead(reading);
+  let at = 0;
+  if (readingSettings.pace === 'natural' && chain?.reading === reading) at = chain.next;
+  if (readingSettings.pace === 'fitted' && fittedAt?.reading === reading) at = fittedAt.index;
+  at = Math.min(Math.max(0, at), lines.length);
+  return lines.slice(at).concat(lines.slice(0, at));
+}
+
+// ---- Fitting a rendered line to its bar ----
+//
+// A fitted cue's `rate` is fitted for a voice that says SYLLABLES_PER_SECOND at rate 1 (reading.rs);
+// a neural voice has a speed of its own, so a line rendered at that rate can still run past its
+// bar and be cut off at the next cue. Such a line is rendered once more, faster by just as much
+// as it ran over `fill` of its bar (reading.rs FILL, sent in /reading), no faster than
+// REFIT_FASTEST, and that render is the one read once it is ready; until then the first is, and
+// a line that runs past its bar is said. Only ever faster: a line that ends early leaves the rest
+// of its bar silent, as the browser's voice does.
+const REFIT_FASTEST = 2.0;    // past this a voice is gabbling; the line is cut off instead
+const refits = new Map();     // renderKey at the cue's rate → the speed that fits it to its bar
+const speechOf = (buffer) => buffer.duration - 2 * (buffer.lead || 0);   // the trim margin each side
+function slotLength(reading, slot) {
+  const bars = barSeconds(reading);
+  return (bars[slot + 1] ?? bars[slot]) - bars[slot];
+}
+function afterRender(job, buffer) {
+  if (!job.room || speechOf(buffer) <= job.room + 0.02) return;
+  const speed = Math.min(REFIT_FASTEST, job.speed * speechOf(buffer) / job.room);
+  if (speed <= job.speed + 0.0005) return;
+  refits.set(job.key, speed);
+  console.log(`[reading] fitted: ${speechOf(buffer).toFixed(3)} s of speech for ${job.room.toFixed(3)} s of bar; rendering again at ${speed.toFixed(3)}: ${job.text}`);
+  whenRendered(job.engine, job.voice, speed, job.text, true);
+}
+// For a line asked for with its bar's room (`job`) that is already rendered, being fetched, or
+// queued without a room: fitted once its buffer is there, unless it has been already.
+function fitWhenRendered(key, entry, job) {
+  if (!entry || refits.has(key)) return;
+  if (entry.buffer) { afterRender(job, entry.buffer); return; }
+  if (entry.direct) { entry.promise.then((buffer) => { if (!refits.has(key)) afterRender(job, buffer); }, () => {}); return; }
+  const queued = renderingJob?.key === key ? renderingJob : renderQueue.find((queuedJob) => queuedJob.key === key);
+  if (queued && !queued.room) queued.room = job.room;
+}
+// The speed a fitted cue is rendered at for this engine and voice: refitted if it was too long.
+function fittedSpeed(engine, voice, cue, base = cue.rate) {
+  const refit = refits.get(renderKey(engine, voice, base, cue.text));
+  return refit !== undefined && rendered(engine, voice, refit, cue.text) ? refit : base;
+}
+// Asks for every line the reading may want, in the order it will want them: the playing piece's
+// from where its reading is, then the side heard, then the other. The queue then holds exactly
+// those, in that order — a queued line nobody will read (of a poem no longer loaded, or another
+// engine, voice or pace) is dropped — so a line due next is never stuck behind one of the top of
+// the poem, or of the last poem. Called again whenever the reading moves on (advance, fittedCue).
+// Each line is asked of whoever reads it (speakerOf): under the recorded readings, a line with no
+// recording is rendered ahead by the live voice standing in for it, if that has loaded.
+function prerender() {
+  const other = hearing === 'A' ? 'B' : 'A';
+  const wanted = [], keys = new Set();
+  for (const reading of [playingReading, readings[hearing], readings[other]]) {
+    for (const item of upcoming(reading)) {
+      const { text, room, cue } = item;
+      if (!text.trim()) continue;
+      const { engine, voice } = speakerOf(text);
+      if (!voice) continue;
+      const speed = baseSpeed(engine, item);
+      const refit = cue && refits.get(renderKey(engine, voice, speed, text));
+      for (const [s, r] of refit !== undefined && refit !== null ? [[speed, room], [refit, null]] : [[speed, room]]) {
+        const key = renderKey(engine, voice, s, text);
+        if (keys.has(key)) continue;
+        keys.add(key);
+        wanted.push({ key, engine, voice, text, speed: s, room: r });
+      }
+    }
+  }
+  renderQueue = renderQueue.filter((job) => {
+    const kept = keys.has(job.key);
+    if (!kept) dropJob(job);
+    return kept;
+  });
+  for (const { engine, voice, text, speed, room } of wanted) whenRendered(engine, voice, speed, text, false, room);
+  const rank = new Map(wanted.map(({ key }, i) => [key, i]));
+  renderQueue.sort((a, b) => rank.get(a.key) - rank.get(b.key));
+}
+
+// ---- Playing a line ----
+
+const sources = new Set();   // every AudioBufferSourceNode scheduled and not yet ended
+const readingTimers = new Set();
+function later(seconds, fn) {
+  const timer = setTimeout(() => { readingTimers.delete(timer); fn(); }, Math.max(0, seconds) * 1000);
+  readingTimers.add(timer);
+  return timer;
+}
+
+// Starts `buffer` so its speech begins at `start` on the audio clock — the buffer itself its quiet
+// margin earlier — through the reading's level into the master stage, and shows the line from
+// then until it ends. Returns its source, to cut it off.
+function playBuffer(buffer, start, line, last) {
+  const ctx = getAudioContext();
+  const source = new AudioBufferSourceNode(ctx, { buffer });
+  source.connect(voiceBus || ctx.destination);
+  const at = start - (buffer.lead || 0);
+  if (at >= ctx.currentTime) source.start(at); else source.start(ctx.currentTime, ctx.currentTime - at);
+  sources.add(source);
+  source.onended = () => { sources.delete(source); source.disconnect(); };
+  const end = spokenEnd(buffer, start);
+  duckSpan(start, end, last ? 0 : line.pause);
+  const shown = { line, start, duration: end - start, source };
+  later(start - ctx.currentTime, () => { speaking = shown; showReading(); followWords(shown); });
+  later(end - ctx.currentTime, () => { if (speaking === shown) { speaking = null; showReading(); } });
+  return source;
+}
+
+// Where a line whose speech begins at `start` stops sounding.
+function spokenEnd(buffer, start) {
+  return start - (buffer.lead || 0) + buffer.duration;
+}
+
+// The music ducked from `start` to `end`, on the audio clock, and kept down through a pause of
+// `hold` seconds after it, so the lines of one stanza duck it once rather than pumping: the next
+// line's own duck, starting within the hold, cancels the release.
+function duckSpan(start, end, hold) {
+  if (!duckGain) return;
+  const gain = duckGain.gain;
+  const level = $('duck').checked ? DUCK : 1;
+  gain.cancelScheduledValues(start);
+  gain.setTargetAtTime(level, start, 0.08);
+  gain.setTargetAtTime(1, end + hold + 0.05, 0.15);
+}
+
+// The browser's voice, at `rate`, from now. `onEnd` is called when it has finished (or failed).
+function readLine(line, rate, onEnd) {
+  if (!('speechSynthesis' in window)) { onEnd?.(); return; }
   // A line still being read when the next is due is cut off, so the reading stays on the bar.
   speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(cue.text);
-  utterance.rate = cue.rate;
-  const voice = voices.find((v) => v.name === $('voice').value);
-  if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
+  const utterance = new SpeechSynthesisUtterance(line.text);
+  utterance.rate = rate;
+  utterance.volume = Math.min(1, readingSettings.level);
+  const voice = voices.find((v) => v.name === voiceOf('browser'));
+  if (voice) { utterance.voice = voice; utterance.lang = voice.lang; } else utterance.lang = language;
   // `cancel()` above ends the previous utterance asynchronously; its `end` must not clear the line
   // that has started since, so each handler checks it is still the one speaking.
-  speaking = { utterance, cue };
-  utterance.onstart = () => { readingDuck(true); if (speaking?.utterance === utterance) showReading(); };
+  const shown = { line, utterance };
+  speaking = shown;
+  utterance.onstart = () => { readingDuck(true); if (speaking === shown) showReading(); };
   utterance.onboundary = (event) => {
-    if (speaking?.utterance === utterance && event.name !== 'sentence') showSpoken(event);
+    if (speaking === shown && event.name !== 'sentence') showSpoken(event);
   };
+  let ended = false;
   const done = () => {
-    readingDuck(false);
-    if (speaking?.utterance === utterance) { speaking = null; showReading(); }
+    if (ended) return;
+    ended = true;
+    readingDuck(false, line.stanzaLast ? 0 : line.pause);
+    if (speaking === shown) { speaking = null; showReading(); }
+    onEnd?.();
   };
   utterance.onend = done;
   utterance.onerror = done;
   speechSynthesis.speak(utterance);
 }
 
-function readingDuck(down) {
+function readingDuck(down, hold = 0) {
   if (!duckGain) return;
   const now = getAudioContext().currentTime;
-  const level = down && $('duck').checked ? DUCK : 1;
-  duckGain.gain.cancelScheduledValues(now);
-  duckGain.gain.setTargetAtTime(level, now, 0.08);
+  if (down) duckSpan(now, now + 3600, 0);
+  else { duckGain.gain.cancelScheduledValues(now); duckGain.gain.setTargetAtTime(1, now + hold, 0.15); }
 }
 
 function quietReading() {
-  for (const timer of pendingSpeech) clearTimeout(timer);
-  pendingSpeech.clear();
+  for (const timer of readingTimers) clearTimeout(timer);
+  readingTimers.clear();
+  for (const source of sources) { try { source.stop(); } catch (error) {} }
+  sources.clear();
   if ('speechSynthesis' in window) speechSynthesis.cancel();
-  readingDuck(false);
+  chain = null;
+  fittedLast = null;
+  fittedAt = null;
+  if (duckGain) {
+    const now = getAudioContext().currentTime;
+    duckGain.gain.cancelScheduledValues(now);
+    duckGain.gain.setTargetAtTime(1, now, 0.08);
+  }
   speaking = null;
   showReading();
 }
 
+// ---- The fitted pace: a line a bar ----
+
+let fittedLast = null;   // the source of the line last started, to cut off at the next cue
+function fittedCue(cue, time, generation) {
+  if (generation !== readingGeneration || readingSettings.pace !== 'fitted') return;
+  const ctx = getAudioContext();
+  const who = speakerOf(cue.text);
+  const voice = who.voice;
+  const base = baseSpeed(who.engine, { speed: cue.rate, pace: cue.pace });
+  const speed = voice ? fittedSpeed(who.engine, voice, cue, base) : cue.rate;
+  const buffer = voice && rendered(who.engine, voice, speed, cue.text);
+  if (who.fallback) noteReading(`line ${cue.line + 1}: ${who.why}`);
+  if (playingReading) {
+    fittedAt = { reading: playingReading, index: playingReading.cues.indexOf(cue) + 1 };
+    prerender();
+  }
+  console.log(`[reading] fitted: bar ${cue.slot + 1} line ${cue.line + 1} at ${time.toFixed(3)} s`
+    + ` (bytes ${cue.start}..${cue.end}), rate ${cue.rate}${speed !== base ? ', refitted to ' + speed.toFixed(3) : ''}, ${buffer ? who.engine + ' ' + voice : 'browser'}: ${cue.text}`);
+  if (buffer) {
+    // A line still sounding when the next is due is cut off at the bar, as the browser's is.
+    try { fittedLast?.stop(time); } catch (error) {}
+    fittedLast = playBuffer(buffer, time, cue, true);
+    const bar = playingReading ? slotLength(playingReading, cue.slot) : Infinity;
+    const over = speechOf(buffer) - bar;
+    if (over > 0.02) noteReading(`line ${cue.line + 1} runs ${over.toFixed(2)} s past its bar and may be cut off at the next cue`);
+    return;
+  }
+  if (voice) {
+    whenRendered(who.engine, voice, base, cue.text, true, playingReading ? slotLength(playingReading, cue.slot) * playingReading.fill : null);
+    noteReading(`line ${cue.line + 1} not rendered in time; read by the browser voice`);
+  } else if (who.why && !who.fallback) noteReading(who.why, who.bad);
+  later(time - ctx.currentTime, () => { if (generation === readingGeneration) readLine(cue, cue.rate); });
+}
+
+// ---- The natural pace: a line after the last ----
+//
+// SPEC.md §4.7. A line is read at the voice's own speed times its pace, and the next begins when
+// it has finished plus its pause; a stanza begins where its cue says the music has reached it —
+// and, under `breath`, not before a whole silent bar has passed since the previous stanza's last
+// line ended, nor before that line's stanza-end pause: on the first bar that satisfies all three.
+// All of it is timed on the audio clock from the cue's `targetTime`. A rendered line's end is known
+// the moment it is scheduled, so a stanza is scheduled line after line ahead of time; the
+// browser's voice reports its end only when it gets there, so its lines are chained on `onend`.
+let chain = null;
+let playingReading = null, playingCues = null;   // the reading of the pattern now playing, and its cues
+function newChain(reading, generation) {
+  return {
+    reading, generation,
+    next: 0,             // the index into reading.lines of the line to read next
+    round: null,         // which pass of the looping piece the anchors below belong to
+    wrapTo: null,        // the line the new round starts at, when it came round mid-line
+    origin: null,        // the audio time this round's bar 1 began
+    anchors: new Map(),  // index into reading.lines → the audio time its cue fired for, this round
+    prevEnd: null, prevPause: 0,
+    busy: false,
+  };
+}
+// The music's bars, in seconds from the piece's start, and its length last.
+function barSeconds(reading) {
+  return reading.bars.map((cycles) => cycles * 60 / reading.cpm / SCHEDULER_CPS);
+}
+// Bar `k` of the looping piece (negative or past the end: the rounds before and after) on the
+// audio clock, and the bar playing at audio time `t`.
+function barTime(c, k) {
+  const bars = c.seconds, slots = bars.length - 1, piece = bars[slots];
+  const round = Math.floor(k / slots);
+  return c.origin + round * piece + bars[k - round * slots];
+}
+function barAt(c, t) {
+  const bars = c.seconds, slots = bars.length - 1, piece = bars[slots];
+  const round = Math.floor((t - c.origin) / piece);
+  const within = t - c.origin - round * piece;
+  let k = 0;
+  while (k + 1 < slots && bars[k + 1] <= within + 1e-9) k += 1;
+  return k + round * slots;
+}
+
+function naturalCue(index, hap, time, cps, generation) {
+  if (generation !== readingGeneration || readingSettings.pace !== 'natural') return;
+  const reading = playingReading;
+  if (!reading) return;
+  if (!chain || chain.generation !== generation) {
+    chain = newChain(reading, generation);
+    chain.seconds = barSeconds(reading);
+  }
+  const line = reading.lines[index];
+  const piece = chain.seconds[chain.seconds.length - 1];
+  const at = hap.whole.begin.valueOf() / cps / SCHEDULER_CPS;   // seconds since the scheduler's cycle 0
+  const round = Math.round((at - chain.seconds[line.slot]) / piece);
+  chain.origin = time - chain.seconds[line.slot];
+  if (round !== chain.round) {
+    // The piece has come round: this round's cues begin afresh, from this one. While a line is
+    // still being read (the browser's voice until its `onend`, a neural line until it is rendered)
+    // the move waits for it to finish (`wrapTo`, taken in advance()), or its `after()` would step
+    // past the last line and leave this round unread. The last line's end is kept, so a first
+    // stanza still waits for its breath after a last one that ran over the loop's seam.
+    if (chain.round !== null && !chain.busy) wrapRound(chain, index);
+    else if (chain.round !== null) chain.wrapTo = index;
+    else chain.next = index;
+    chain.round = round;
+    chain.anchors.clear();
+  }
+  chain.anchors.set(index, time);
+  // Nothing being read, and the line waited for is not this one: either the clock was joined
+  // part-way through (a live edit) or the reading had finished this round. Start here.
+  if (!chain.busy && chain.next !== index && !chain.anchors.has(chain.next)) chain.next = index;
+  console.log(`[reading] natural: cue for line ${line.line + 1} (${line.onset}) in bar ${line.slot + 1} at ${time.toFixed(3)} s`);
+  advance();
+}
+
+// The chain moves to the new round's line `index`. A line of the old round not yet read will not
+// be — its round's cues are gone — and is said, not dropped in silence (CLAUDE.md §6).
+function wrapRound(c, index) {
+  const lines = c.reading.lines;
+  if (c.next < lines.length) {
+    const lost = lines.slice(c.next).map((l) => l.line + 1);
+    noteLoss(`not read last time round: line ${lost.join(', ')}, the piece came round before its turn`);
+  }
+  c.next = index;
+  c.wrapTo = null;
+}
+
+// Reads on, then puts the lines it will want next at the head of the render queue.
+function advance() {
+  advanceChain();
+  if (chain && chain.generation === readingGeneration) prerender();
+}
+function advanceChain() {
+  const c = chain;
+  if (!c || c.busy || c.generation !== readingGeneration) return;
+  if (c.wrapTo !== null) wrapRound(c, c.wrapTo);
+  const lines = c.reading.lines;
+  while (c.next < lines.length) {
+    const line = lines[c.next];
+    let earliest = -Infinity;
+    if (line.onset !== 'follows') {
+      const anchor = c.anchors.get(c.next);
+      if (anchor === undefined) {
+        // Waiting for its bar. If a later line's cue has already fired this round, this one's
+        // will not (the clock was joined after it): move on to that one.
+        const later = [...c.anchors.keys()].filter((k) => k > c.next).sort((a, b) => a - b)[0];
+        if (later === undefined) return;
+        c.next = later;
+        continue;
+      }
+      earliest = anchor;
+    } else if (c.prevEnd === null) {
+      // Joined in the middle of a stanza: there is no line before to follow, so this one waits for
+      // the piece to come round, as a line before the clock's bar does at the fitted pace.
+      c.next += 1;
+      continue;
+    }
+    if (c.prevEnd !== null) {
+      earliest = Math.max(earliest, c.prevEnd + c.prevPause);
+      if (line.onset === 'breath') {
+        // On a bar, and at least two bars after the one the last line ended in, so one whole bar
+        // between is silent: the first bar from there that begins no earlier than `earliest`.
+        let bar = Math.max(barAt(c, c.prevEnd) + 2, barAt(c, earliest));
+        if (barTime(c, bar) < earliest - 1e-6) bar += 1;
+        earliest = barTime(c, bar);
+      }
+    }
+    const pieceEnd = c.origin + c.seconds[c.seconds.length - 1];
+    if (earliest >= pieceEnd - 1e-6) {
+      const lost = lines.slice(c.next).filter((l) => l.stanza >= line.stanza).map((l) => l.line + 1);
+      noteReading(`not read this time round: line ${lost.join(', ')}, the piece ends before its turn`);
+      console.log(`[reading] natural: the piece ends before line ${line.line + 1}`);
+      c.next = lines.length;
+      return;
+    }
+    speakNatural(c, line, earliest);
+    if (c.busy) return;
+  }
+}
+
+function speakNatural(c, line, earliest) {
+  const ctx = getAudioContext();
+  const who = speakerOf(line.text);
+  const last = c.next + 1 >= c.reading.lines.length || c.reading.lines[c.next + 1].stanza !== line.stanza;
+  const after = () => { c.prevPause = line.pause; c.next += 1; };
+  if (who.fallback) noteReading(`line ${line.line + 1}: ${who.why}`);
+  if (who.engine === 'browser') {
+    if (who.why && !who.fallback) noteReading(who.why, who.bad);
+    c.busy = true;
+    later(earliest - ctx.currentTime, () => {
+      if (chain !== c) return;
+      console.log(`[reading] natural: line ${line.line + 1} with the browser voice at ${ctx.currentTime.toFixed(3)} s (due ${earliest.toFixed(3)}), pace ${line.pace}: ${line.text}`);
+      readLine({ ...line, stanzaLast: last }, line.pace, () => {
+        if (chain !== c) return;
+        c.prevEnd = getAudioContext().currentTime;
+        after();
+        c.busy = false;
+        advance();
+      });
+    });
+    return;
+  }
+  const voice = who.voice;
+  const buffer = rendered(who.engine, voice, line.pace, line.text);
+  if (!buffer) {
+    c.busy = true;
+    noteReading(`waiting for ${ENGINE_INFO[who.engine].label} to ${who.engine === 'recorded' ? 'fetch' : 'render'} line ${line.line + 1}`);
+    whenRendered(who.engine, voice, line.pace, line.text, true).then(() => {
+      if (chain !== c) return;
+      c.busy = false;
+      advance();
+    }, (error) => {
+      if (chain !== c) return;
+      // Dropped for a change of engine or voice: the line is asked for again by whoever reads now.
+      if (error.dropped) { c.busy = false; advance(); return; }
+      noteReading(`${ENGINE_INFO[who.engine].label} could not render line ${line.line + 1}: ${error.message}`, true);
+      after();
+      c.busy = false;
+      advance();
+    });
+    return;
+  }
+  const start = Math.max(earliest, ctx.currentTime + LEAD);
+  const late = start - earliest;
+  console.log(`[reading] natural: line ${line.line + 1} with ${who.engine} ${voice} at ${start.toFixed(3)} s`
+    + (late > 0.001 ? ` (${late.toFixed(3)} s late)` : '') + `, ${buffer.duration.toFixed(3)} s, pace ${line.pace}, then ${line.pause} s: ${line.text}`);
+  playBuffer(buffer, start, line, last);
+  c.prevEnd = spokenEnd(buffer, start);
+  if (readingNote.startsWith('waiting for')) noteReading('');
+  after();
+}
+
+function cuesOf(reading, generation) {
+  const byLine = new Map(reading.cues.map((cue) => [cue.line, cue]));
+  const fitted = (0, eval)(reading.pattern).onTrigger((hap, currentTime, cps, targetTime) => {
+    const cue = byLine.get(Number(hap.value?.n));
+    if (cue) fittedCue(cue, targetTime, generation);
+  }, true);
+  const indexOf = new Map(reading.lines.map((line, index) => [line.line, index]));
+  const natural = (0, eval)(reading.natural).onTrigger((hap, currentTime, cps, targetTime) => {
+    const index = indexOf.get(Number(hap.value?.n));
+    if (index !== undefined) naturalCue(index, hap, targetTime, cps, generation);
+  }, true);
+  return { fitted, natural, both: stack(fitted, natural) };
+}
+
+let lossNote = '', lossUntil = 0;
+function noteReading(text, bad = false, quiet = false) {
+  if (text && !quiet) console.log('[reading] ' + text);
+  // A line lost at the seam is reported once, in the same pass that goes on to read the next round —
+  // which may at once say why the browser voice is standing in, or that a line is still rendering.
+  // So a loss stays beside whatever note follows it for a few seconds rather than being replaced
+  // before anyone could read it (CLAUDE.md §6: a loss must be visible).
+  const loss = performance.now() < lossUntil ? lossNote : '';
+  readingNote = loss && text !== loss ? (text ? `${text} · ${loss}` : loss) : text;
+  readingNoteBad = bad;
+  status(statusText, statusBad);
+}
+
+function noteLoss(text) {
+  lossNote = text;
+  lossUntil = performance.now() + 8000;
+  noteReading(text);
+}
+
 listVoices();
 if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', listVoices);
+
+function listVoices() {
+  if (!('speechSynthesis' in window)) return;
+  voices = speechSynthesis.getVoices();
+  showVoices();
+}
+
+// The reading panel's menus, from the settings and what each engine offers.
+function showVoices() {
+  for (const option of $('engine').options) {
+    const engine = engines[option.value];
+    const state = engine.state === 'failed' ? ' — could not load' : engine.state === 'loading' ? ' — loading…' : '';
+    option.textContent = ENGINE_INFO[option.value].label + state;
+  }
+  $('engine').value = readingSettings.engine;
+  $('pace').value = readingSettings.pace;
+  const known = { ...LANGUAGES };
+  for (const v of engines.piper.listed || []) {
+    const code = v.lang.split('-')[0];
+    known[code] ??= code;
+  }
+  $('language').innerHTML = Object.entries(known).map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
+  $('language').value = language;
+  const engine = readingSettings.engine;
+  const offered = engines[engine].voices(language);
+  const chosen = voiceOf(engine);
+  $('voice').innerHTML = (engine === 'browser' ? '<option value="">browser default</option>' : '')
+    + offered.map((v) => `<option value="${v.id.replace(/"/g, '&quot;')}">${v.name}</option>`).join('');
+  $('voice').value = chosen ?? '';
+  $('voice').disabled = !offered.length && engine !== 'browser';
+  $('readingLevel').value = readingSettings.level;
+  $('readingLevelOut').textContent = Number(readingSettings.level).toFixed(2);
+}
+
+// A change of who reads, how fast, or in what language, while it plays: what is scheduled is
+// dropped and the reading picks up at the next cue, in the new voice.
+function readingChanged(retry = false) {
+  saveReading();
+  showVoices();
+  ensureEngine(retry);
+  prerender();
+  if (playing) {
+    quietReading();
+    showPattern();
+    if (behind) behind.cues = playingCues?.[readingSettings.pace === 'fitted' ? 'fitted' : 'natural'] ?? null;
+  }
+  noteReading(speaker().why, speaker().bad);
+}
+$('engine').addEventListener('change', () => chooseEngine($('engine').value));
+$('pace').addEventListener('change', () => { readingSettings.pace = $('pace').value; readingChanged(); });
+$('language').addEventListener('change', () => { language = $('language').value; readingChanged(); });
 $('voice').addEventListener('change', () => {
-  try { localStorage.setItem('prosody.voice', $('voice').value); } catch (e) {}
+  const engine = readingSettings.engine;
+  readingSettings.voices[engine] = { ...(readingSettings.voices[engine] || {}), [language]: $('voice').value };
+  readingChanged();
 });
+$('readingLevel').addEventListener('input', () => {
+  readingSettings.level = Number($('readingLevel').value);
+  $('readingLevelOut').textContent = readingSettings.level.toFixed(2);
+  if (voiceBus) voiceBus.gain.setTargetAtTime(readingSettings.level, getAudioContext().currentTime, 0.02);
+  saveReading();
+});
+showVoices();
+// A returning reader whose engine is the recorded readings: the manifest is fetched now — a few
+// tens of kB, no model — so the voice saved is listed and the first line of the first play is
+// read from its file, not by the browser while the manifest is still on its way. A live engine
+// still loads only when chosen or played, its model being hundreds of MB.
+if (readingSettings.engine === 'recorded') ensureEngine();
+
+// What the scheduler dropped. Strudel's scheduler (the cyclist bundled in @strudel/web 1.3.0)
+// queries the pattern a tick at a time; a tick it reaches too late it skips whole, saying only
+// `console.log("skip query: too late")` — every note and every reading cue in that tick is lost,
+// and nothing on the page would know. It has set `lastBegin`/`lastEnd` to the skipped span just
+// before it logs, so the watcher asks the cue pattern which lines fell in it. Both are said in the
+// status line (CLAUDE.md §6: a fallback is visible), once a second at most.
+let behind = null;   // { ticks, lines: Set, cues, said, timer } for the pattern now playing
+const pageLog = console.log.bind(console);
+console.log = (...args) => {
+  if (args[0] === 'skip query: too late' && behind) fellBehind(behind);
+  pageLog(...args);
+};
+function fellBehind(record) {
+  record.ticks += 1;
+  const scheduler = strudelRepl?.scheduler;
+  if (record.cues && scheduler) {
+    try {
+      for (const hap of record.cues.queryArc(scheduler.lastBegin, scheduler.lastEnd)) {
+        if (hap.hasOnset()) record.lines.add(Number(hap.value?.n) + 1);
+      }
+    } catch (error) {}
+  }
+  reportSoon(record);
+}
+// A new pattern's record takes over what the old one had not yet said — ticks skipped while the
+// new pattern was being prepared still count against the old record, and its report would
+// otherwise be dropped with it.
+function behindFrom(previous, cues) {
+  const record = { ticks: 0, lines: new Set(), cues, said: '', timer: null };
+  if (previous?.timer) {
+    clearTimeout(previous.timer);
+    record.ticks = previous.ticks;
+    record.lines = previous.lines;
+    reportSoon(record);
+  }
+  return record;
+}
+function reportSoon(record) {
+  record.timer ??= setTimeout(() => {
+    record.timer = null;
+    if (record !== behind) return;
+    const lines = [...record.lines].sort((a, b) => a - b);
+    const lost = ' · Strudel fell behind: ' + record.ticks + ' tick(s) not played, their notes unheard'
+      + (lines.length ? '; not read: line ' + lines.join(', ') : '');
+    console.warn('[scheduler]' + lost);
+    status(record.said + lost, true);
+  }, 1000);
+}
 
 async function play() {
   if (!latestPattern) return;
   if (!strudelReady) {
     status('loading Strudel, drum machines and soundfonts…');
+    openLoader({
+      title: 'Getting the instruments ready',
+      text: 'Strudel, the drum machines and the soundfonts: a few MB, once. Then it plays.',
+    });
     try {
       await startStrudel();
       strudelReady = true;
     } catch (error) {
       status('could not start Strudel: ' + error.message, true);
+      closeLoader();
       return;
+    } finally {
+      if (loading?.engine === null) closeLoader();
     }
   }
   try {
@@ -949,19 +2372,22 @@ async function play() {
     // `initStrudel` puts in global scope. Mini-notation inside `s("…")` and `note("…")` is parsed
     // by those functions, so no transpiler step is needed.
     const code = latestPattern;
-    const music = (0, eval)(code);
     const reading = readings[hearing];
+    if (code.length > 100000) status('preparing the pattern…' + (playing ? ' · playing' : ''));
+    await parseAhead(code, reading?.pattern ?? '', reading?.natural ?? '', traces[hearing]?.pattern ?? '');
+    if (code !== latestPattern) return;   // a newer version arrived while parsing; it plays itself
+    const music = (0, eval)(code);
     const generation = ++generations;
     // The reading is evaluated apart from the music: a cue pattern Strudel refuses costs the
     // reading, never the piece.
     let cues = null, unread = '';
-    if (reading && reading.cues.length) {
+    if (reading && (reading.cues.length || reading.lines.length)) {
       try { cues = cuesOf(reading, generation); } catch (error) {
         unread = ' · the reading could not be cued: ' + error.message;
         console.warn('[reading] cue pattern refused:', error);
       }
     }
-    const pattern = cues ? stack(music, cues) : music;
+    const pattern = cues ? stack(music, cues.both) : music;
     // The trace is evaluated but never played: the drawing queries it for which syllable sounds.
     let nextTrace = null;
     const nextBars = barsOf(traces[hearing]);
@@ -975,8 +2401,15 @@ async function play() {
     // From here the old pattern's cues are stale: drop the queued ones and the line being read.
     readingGeneration = generation;
     quietReading();
+    playingReading = reading;
+    playingCues = cues;
+    // The chosen engine loads now if it has not (the default, Kokoro, is never downloaded before
+    // the first play); until it has, the browser's voice reads.
+    ensureEngine();
+    prerender();
     if (fromTheTop && playing && typeof hush === 'function') hush();   // restart at cycle 0
     fromTheTop = false;
+    behind = behindFrom(behind, cues?.[readingSettings.pace === 'fitted' ? 'fitted' : 'natural'] ?? null);
     pattern.play();
     tracePattern = nextTrace;
     heardBars = nextBars;
@@ -991,14 +2424,18 @@ async function play() {
     $('editor').classList.add('playing');
     fitRoll();
     playing = true;
+    showBeat();
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
     // A line the reading leaves out is said, not left for the listener to miss (SPEC.md §4.7).
-    const lost = reading?.unread?.length
-      ? ' · not read: ' + reading.unread.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ')
+    const missing = readingSettings.pace === 'fitted' ? reading?.unread : reading?.natural_unread;
+    const lost = missing?.length
+      ? ' · not read: ' + missing.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ')
       : '';
     if (lost) console.log('[reading]' + lost);
-    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread + lost, !!unread);
+    const said = hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread + lost;
+    status(said, !!unread);
+    if (behind) behind.said = said;
   } catch (error) {
     status('Strudel refused the pattern: ' + error.message, true);
   }
@@ -1008,6 +2445,10 @@ function stop() {
   if (typeof hush === 'function') hush();
   readingGeneration = ++generations;   // nothing the stopped pattern cued is read
   quietReading();
+  playingReading = null;
+  playingCues = null;
+  readingNote = '';
+  behind = null;
   drawer?.stop();
   drawing = false;
   tracePattern = null;
@@ -1016,6 +2457,7 @@ function stop() {
   clearRoll();
   $('editor').classList.remove('playing');
   playing = false;
+  showBeat();
   $('stop').disabled = true;
   $('play').textContent = '▶ Play';
   status('stopped');
@@ -1119,7 +2561,7 @@ function rollContext() {
 }
 
 function paintRoll(haps, time) {
-  if (!drawRoll || !$('panelRoll').open) return;
+  if (!drawRoll || $('folderRoll').hidden) return;
   const span = rollWindow();
   const ctx = rollContext();
   // Only the music: every layer of it carries a colour, and the reading's cues carry none.
@@ -1169,8 +2611,12 @@ function buildLit() {
   }
   // The reading's lines too, so a line being read is a run of whole pieces.
   if (readings.poem === poem) {
-    for (const cue of readings[hearing]?.cues || []) {
-      if (cue.to > cue.from) { cuts.add(cue.from); cuts.add(cue.to); }
+    // and its words, so the word being said is a run of whole pieces too.
+    const reading = readings[hearing];
+    for (const line of [...(reading?.cues || []), ...(reading?.lines || [])]) {
+      for (const at of [line, ...(line.words || [])]) {
+        if (at.to > at.from) { cuts.add(at.from); cuts.add(at.to); }
+      }
     }
   }
   const edges = [...cuts].filter((at) => at <= poem.length).sort((a, b) => a - b);
@@ -1197,23 +2643,45 @@ function buildLit() {
 
 // The reading, shown behind the words: the line being read, and the word being said when the
 // voice reports its words (`boundary` events; some voices send none, and then only the line shows).
-let speaking = null;       // { utterance, cue } while a line is being read
+// The reading, shown behind the words: the line being read, and the word being said. The browser's
+// voice reports its words as it says them (`boundary` events; some voices send none, and then only
+// the line shows). A rendered line reports nothing, so its words are spread over its length by
+// how many syllables each sounds — the cue carries them — which is where a reader's time goes.
+let speaking = null;       // { line, utterance } or { line, start, duration } while a line is read
+let wordFrame = null;
 function showReading() {
   for (const piece of lit.pieces || []) {
-    const inLine = !!speaking && piece.start < speaking.cue.to && piece.end > speaking.cue.from;
+    const inLine = !!speaking && piece.start < speaking.line.to && piece.end > speaking.line.from;
     piece.element.classList.toggle('reading', inLine);
     if (!inLine) piece.element.classList.remove('spoken');
   }
 }
-function showSpoken(event) {
-  const { cue } = speaking;
-  const text = cue.text;
-  const at = event.charIndex;
-  const length = event.charLength || (text.slice(at).match(/^\S+/) || [''])[0].length;
-  const [from, to] = [cue.from + at, cue.from + at + Math.max(1, length)];
+function markSpoken(from, to) {
   for (const piece of lit.pieces || []) {
     piece.element.classList.toggle('spoken', piece.start < to && piece.end > from);
   }
+}
+function showSpoken(event) {
+  const { line } = speaking;
+  const text = line.text;
+  const at = event.charIndex;
+  const length = event.charLength || (text.slice(at).match(/^\S+/) || [''])[0].length;
+  markSpoken(line.from + at, line.from + at + Math.max(1, length));
+}
+function followWords(shown) {
+  cancelAnimationFrame(wordFrame);
+  const words = shown.line.words || [];
+  const total = words.reduce((sum, word) => sum + word.syllables, 0);
+  if (!total) return;
+  const step = () => {
+    if (speaking !== shown) return;
+    const into = (getAudioContext().currentTime - shown.start) / shown.duration;
+    let reached = 0;
+    const word = words.find((w) => (reached += w.syllables) / total > into) || words[words.length - 1];
+    markSpoken(word.from, word.to);
+    wordFrame = requestAnimationFrame(step);
+  };
+  step();
 }
 
 let shining = new Map();   // element → the mark lighting it
@@ -1270,15 +2738,203 @@ try {
   if (bars && [...$('rollBars').options].some((o) => o.value === bars)) $('rollBars').value = bars;
 } catch (e) {}
 
-// Which panels are folded away, remembered per browser.
-for (const panel of document.querySelectorAll('details.panel')) {
-  try {
-    const saved = localStorage.getItem('prosody.panel.' + panel.id);
-    if (saved !== null) panel.open = saved === 'open';
-  } catch (e) {}
-  panel.addEventListener('toggle', () => {
-    try { localStorage.setItem('prosody.panel.' + panel.id, panel.open ? 'open' : 'closed'); } catch (e) {}
+// ---- Light and dark ----
+// As the system says (auto), or always light, or always dark: the reader's choice, remembered.
+const THEMES = ['auto', 'light', 'dark'];
+function setTheme(theme) {
+  if (theme === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  $('theme').textContent = { auto: '◐ auto', light: '☀ light', dark: '☾ dark' }[theme];
+  $('theme').setAttribute('aria-label', `Theme: ${theme}. Change it`);
+  try { localStorage.setItem('prosody.theme', theme); } catch (e) {}
+}
+$('theme').addEventListener('click', () => {
+  const now = document.documentElement.dataset.theme || 'auto';
+  setTheme(THEMES[(THEMES.indexOf(now) + 1) % THEMES.length]);
+});
+try { const saved = localStorage.getItem('prosody.theme'); setTheme(THEMES.includes(saved) ? saved : 'auto'); } catch (e) { setTheme('auto'); }
+
+// ---- Folders ----
+//
+// One open at a time, or none: a tab opens its folder, another tab swaps it, the open one's tab
+// closes it. Which is open is remembered per browser.
+const TABS = [...document.querySelectorAll('.tabs [role=tab]')];
+function openFolder(id) {
+  for (const tab of TABS) {
+    const mine = tab.dataset.folder === id;
+    tab.setAttribute('aria-selected', mine);
+    $(tab.dataset.folder).hidden = !mine;
+  }
+  $('sheet').hidden = !id;
+  try { localStorage.setItem('prosody.folder', id || ''); } catch (e) {}
+}
+for (const tab of TABS) {
+  tab.addEventListener('click', () => openFolder(tab.getAttribute('aria-selected') === 'true' ? null : tab.dataset.folder));
+}
+try {
+  const saved = localStorage.getItem('prosody.folder');
+  if (saved && $(saved)?.classList.contains('folder')) openFolder(saved);
+} catch (e) {}
+
+// ---- Dialogs ----
+
+// A dialog's ✕ and its other closing buttons; a click on the dimmed page around it closes it too.
+for (const dialog of document.querySelectorAll('dialog')) {
+  for (const button of dialog.querySelectorAll('[data-close]')) button.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', (event) => { if (event.target === dialog && dialog.id !== 'loader') dialog.close(); });
+}
+
+// The welcome: open on a first visit; once closed it stays closed, and "about" opens it again.
+$('about').addEventListener('click', () => $('welcome').showModal());
+$('welcome').addEventListener('close', () => {
+  try { localStorage.setItem('prosody.welcomed', '1'); } catch (e) {}
+  $('poem').focus({ preventScroll: true });
+});
+// The line under the bar saying what this is, until dismissed.
+$('noticeClose').addEventListener('click', () => {
+  $('notice').hidden = true;
+  try { localStorage.setItem('prosody.notice', 'dismissed'); } catch (e) {}
+});
+try {
+  if (localStorage.getItem('prosody.notice') !== 'dismissed') $('notice').hidden = false;
+  if (!localStorage.getItem('prosody.welcomed')) $('welcome').showModal();
+} catch (e) { $('notice').hidden = false; $('welcome').showModal(); }
+
+// ---- Choosing a voice that has to be downloaded ----
+//
+// A neural voice is a download of tens or hundreds of MB, so the first time one is chosen the page
+// says what it costs and asks; until it is ready the browser's own voice reads, and the music never
+// waits. The sizes are what each engine fetched when measured here, rounded and said as "about".
+const DOWNLOADS = {
+  // Kokoro fetches its full model where it runs on WebGPU, its compact one on WebAssembly — which
+  // `?device=wasm` forces, as the worker does (speech-worker.mjs).
+  kokoro: () => navigator.gpu && new URLSearchParams(location.search).get('device') !== 'wasm'
+    ? 'about 330 MB (the full model, since this browser has WebGPU)'
+    : 'about 90 MB (the compact model)',
+  piper: () => 'about 60 MB for each voice, fetched when the voice first reads',
+  kitten: () => 'about 25 MB',
+};
+let previousEngine = readingSettings.engine;
+function chooseEngine(name) {
+  const engine = engines[name];
+  let asked = false;
+  try { asked = !!localStorage.getItem('prosody.fetched.' + name); } catch (e) {}
+  if (DOWNLOADS[name] && engine.state !== 'ready' && engine.state !== 'loading' && !asked) {
+    const label = ENGINE_INFO[name].label;
+    $('downloadTitle').textContent = `${label} needs a one-time download of ${DOWNLOADS[name]()}.`;
+    $('downloadText').textContent = `It runs entirely in your browser and is kept after this, so it won't download again. `
+      + `Until it's ready, the poem is read by your browser's own voice, and the music plays on.`;
+    $('downloadYes').textContent = `Download ${label}`;
+    const dialog = $('download');
+    const answer = (yes) => () => {
+      $('downloadYes').onclick = $('downloadNo').onclick = null;
+      dialog.onclose = null;
+      dialog.close();
+      if (yes) useEngine(name, true);
+      else $('engine').value = previousEngine;
+    };
+    $('downloadYes').onclick = answer(true);
+    $('downloadNo').onclick = answer(false);
+    dialog.onclose = () => { dialog.onclose = null; $('engine').value = previousEngine; };
+    dialog.showModal();
+    return;
+  }
+  useEngine(name, false);
+}
+function useEngine(name, show) {
+  const before = previousEngine;   // what Cancel goes back to
+  previousEngine = name;
+  $('engine').value = name;
+  readingSettings.engine = name;
+  readingChanged(true);   // starts the download (ensureEngine)
+  const engine = engines[name];
+  if (!show || !engine.render) return;
+  openLoader({
+    engine: name,
+    back: before === name ? 'recorded' : before,
+    title: `Downloading ${ENGINE_INFO[name].label}`,
+    text: `${DOWNLOADS[name]?.() ?? 'A download'}, once. Your browser's voice reads meanwhile; Hide lets it carry on in the background.`,
   });
+  warmVoice(name);
+}
+
+// ---- The loader ----
+//
+// For the instruments on the first Play, and for a voice once chosen: what is loading, how far it
+// has got (a bar when the size is known, a sweep when not), Hide to let it carry on behind the
+// page, and — for a voice — Cancel, which stops the download and keeps the voice there was.
+let loading = null;   // { engine } while the loader is open; engine null for the instruments
+function openLoader({ title, text, engine = null, back = null }) {
+  loading = { engine, back };
+  $('loaderTitle').textContent = title;
+  $('loaderText').textContent = text;
+  $('loaderProgress').textContent = '';
+  $('loaderBar').classList.add('unknown');
+  $('loaderBar').style.width = '';
+  $('loaderCancel').hidden = engine === null;
+  if (!$('loader').open) $('loader').showModal();
+}
+function closeLoader() {
+  loading = null;
+  if ($('loader').open) $('loader').close();
+}
+function loaderProgress(name, progress) {
+  if (loading?.engine !== name) return;
+  $('loaderProgress').textContent = progress.text;
+  const bar = $('loaderBar');
+  if (progress.fraction != null) { bar.classList.remove('unknown'); bar.style.width = Math.round(progress.fraction * 100) + '%'; }
+  else { bar.classList.add('unknown'); bar.style.width = ''; }
+}
+function loaderFailed(name, error) {
+  if (loading?.engine !== name) return;
+  $('loaderTitle').textContent = `${ENGINE_INFO[name].label} could not load`;
+  $('loaderProgress').textContent = `${error.message}. The browser's voice reads instead; choose it again to try again.`;
+  $('loaderBar').classList.remove('unknown');
+  $('loaderBar').style.width = '0';
+  $('loaderCancel').hidden = true;
+  $('loaderHide').textContent = 'Close';
+}
+// A voice's model may come with its first line (Piper fetches each voice then), so the loader
+// stays until the voice has read something: the first line of the poem in front of the reader,
+// rendered now — which also means that line is ready before Play.
+async function warmVoice(name) {
+  const engine = engines[name];
+  try {
+    if (engine.loading) await engine.loading;
+    if (engine.state !== 'ready') return;
+    const line = (readings[hearing]?.lines || []).find((l) => l.text.trim());
+    if (line && engine.render) {
+      $('loaderProgress').textContent = 'preparing the voice…';
+      await whenRendered(name, voiceOf(name), line.pace, line.text, true);
+    }
+    if (loading?.engine === name) closeLoader();
+  } catch (error) {
+    if (!error.cancelled && !error.dropped) loaderFailed(name, error);
+  }
+}
+$('loaderHide').addEventListener('click', () => {
+  closeLoader();
+  $('loaderHide').textContent = 'Hide — keep loading';
+});
+$('loaderCancel').addEventListener('click', () => {
+  const name = loading?.engine;
+  const back = loading?.back || 'recorded';
+  closeLoader();
+  if (!name) return;
+  engines[name].cancel?.();
+  useEngine(back, false);
+  noteReading(`${ENGINE_INFO[name].label} download cancelled; reading with ${ENGINE_INFO[back].label}`);
+});
+
+// ---- The beat on the Play button ----
+// Under the steady pulse a cycle is a beat, so the trace's cycles a minute are the tempo; under
+// the elastic one there is no single beat to show, and the button stays still.
+function showBeat() {
+  const trace = traces[hearing];
+  const steady = (settings?.[hearing]?.pulse ?? 'steady') !== 'elastic';
+  const beat = playing && steady && trace?.cpm > 0 ? 60 / trace.cpm : null;
+  $('play').classList.toggle('beating', !!beat);
+  if (beat) $('play').style.setProperty('--beat', beat.toFixed(3) + 's');
 }
 
 compile();

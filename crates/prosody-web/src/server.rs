@@ -23,6 +23,40 @@ use std::net::{TcpListener, TcpStream};
 
 use prosody_web::{Request, Response};
 
+/// What is sent back: the page's [`Response`], or a file's bytes (a recorded reading).
+pub(crate) struct Reply {
+    /// The HTTP status code.
+    pub(crate) status: u16,
+    content_type: &'static str,
+    body: Vec<u8>,
+}
+
+impl Reply {
+    /// A file, found.
+    pub(crate) const fn ok(content_type: &'static str, body: Vec<u8>) -> Self {
+        Self {
+            status: 200,
+            content_type,
+            body,
+        }
+    }
+
+    /// No such file.
+    pub(crate) fn not_found() -> Self {
+        Response::problem(404, "no such thing here\n".to_owned()).into()
+    }
+}
+
+impl From<Response> for Reply {
+    fn from(response: Response) -> Self {
+        Self {
+            status: response.status,
+            content_type: response.content_type,
+            body: response.body.into_bytes(),
+        }
+    }
+}
+
 /// Serves until interrupted, calling `handle` for every request.
 ///
 /// # Errors
@@ -30,7 +64,7 @@ use prosody_web::{Request, Response};
 /// If the port cannot be bound.
 pub(crate) fn serve(
     port: u16,
-    handle: impl Fn(&Request) -> Response + Send + Sync + 'static,
+    handle: impl Fn(&Request) -> Reply + Send + Sync + 'static,
 ) -> std::io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", port))?;
     let bound = listener.local_addr()?;
@@ -58,7 +92,7 @@ pub(crate) fn serve(
                 Err(_) => {
                     let _ = write_response(
                         &mut stream,
-                        &Response::problem(400, "could not read the request".to_owned()),
+                        &Response::problem(400, "could not read the request".to_owned()).into(),
                     );
                 }
             }
@@ -114,7 +148,7 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
     )))
 }
 
-fn write_response(stream: &mut TcpStream, response: &Response) -> std::io::Result<()> {
+fn write_response(stream: &mut TcpStream, response: &Reply) -> std::io::Result<()> {
     let reason = match response.status {
         200 => "OK",
         400 => "Bad Request",
@@ -132,6 +166,6 @@ fn write_response(stream: &mut TcpStream, response: &Response) -> std::io::Resul
         response.content_type,
         response.body.len()
     )?;
-    stream.write_all(response.body.as_bytes())?;
+    stream.write_all(&response.body)?;
     stream.flush()
 }

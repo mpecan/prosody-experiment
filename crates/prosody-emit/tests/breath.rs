@@ -195,6 +195,75 @@ fn check_with(poem: &Poem, score: &Score, style: &Style, mappings: &Mappings) {
     }
     let said = breath.pattern().contains("lines not read:");
     assert_eq!(said, !unread.is_empty(), "{}", breath.pattern());
+    check_natural(poem, &breath, &heard);
+}
+
+/// The natural pace (`SPEC.md` §4.7) of a `breath` reading, against where `heard` says each line
+/// is first heard: every stanza the music begins is read whole, in order, its first line waiting
+/// for the music and the rest following; a stanza the music never begins is said, and only that.
+/// Each line's pace and pause are its own: the pace its seed's, the pause its ending's.
+fn check_natural(poem: &Poem, breath: &reading::Reading, heard: &BTreeMap<usize, usize>) {
+    let mut expected = Vec::new();
+    let mut never = Vec::new();
+    let mut first = 0;
+    for stanza in poem.stanzas() {
+        let lines = first..first + stanza.lines().len();
+        first = lines.end;
+        let start = heard.get(&lines.start).copied().or_else(|| {
+            lines
+                .clone()
+                .filter_map(|line| heard.get(&line))
+                .min()
+                .copied()
+        });
+        match start {
+            Some(slot) => {
+                for line in lines.clone() {
+                    let onset = if line == lines.start {
+                        reading::Onset::Breath { slot }
+                    } else {
+                        reading::Onset::Follows
+                    };
+                    expected.push((onset, line));
+                }
+            }
+            None => never.extend(lines),
+        }
+    }
+    let got: Vec<(reading::Onset, usize)> = breath
+        .natural()
+        .iter()
+        .map(|n| (n.onset(), n.spoken().line()))
+        .collect();
+    assert_eq!(got, expected);
+    let unread: Vec<usize> = breath
+        .natural_unread()
+        .iter()
+        .map(reading::Unread::line)
+        .collect();
+    assert_eq!(unread, never);
+    assert!(
+        breath
+            .natural_unread()
+            .iter()
+            .all(|line| line.why() == reading::Why::NeverArrives)
+    );
+    for natural in breath.natural() {
+        let spoken = natural.spoken();
+        // I4: the line's own bytes.
+        assert_eq!(spoken.span().text(poem.source()), Some(spoken.text()));
+        assert_eq!(
+            Some(spoken.pace()),
+            reading::Pace::of(spoken.span(), poem.source())
+        );
+        let closes = stanza_of(poem, spoken.line()).end == spoken.line() + 1;
+        assert_eq!(spoken.pause(), reading::Pause::after(spoken.text(), closes));
+        for word in spoken.words() {
+            assert!(word.span().start() >= spoken.span().start());
+            assert!(word.span().end() <= spoken.span().end());
+            assert!(word.syllables() >= 1);
+        }
+    }
 }
 
 /// The lines of the stanza `line` is in.
@@ -257,6 +326,93 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn an_edit_to_one_stanza_moves_no_other_lines_pace_or_pause(
+        source in poem(),
+        replacement in prop::collection::vec(line(), 1..=4),
+        which in 0_usize..4,
+    ) {
+        // I2 for the natural pace: replace one stanza; every line of every other stanza keeps
+        // its text, and with it its pace and its pause.
+        let poem = Poem::parse(source.clone()).unwrap();
+        let stanzas: Vec<&str> = source.trim_end().split("\n\n").collect();
+        let which = which % stanzas.len();
+        let mut edited: Vec<String> = stanzas.iter().map(|s| (*s).to_owned()).collect();
+        edited[which] = replacement.join("\n");
+        let edited = Poem::parse(edited.join("\n\n") + "\n").unwrap();
+        let style = Style::parse("+++\ntempo_range = [120, 120]\n+++").unwrap();
+        let read = |poem: &Poem| {
+            let score = lowered(poem, &Spelled, &Flat);
+            reading::plan(poem, &score, &style, &Mappings::all()).unwrap()
+        };
+        let (before, after) = (read(&poem), read(&edited));
+        let by_line = |reading: &reading::Reading| -> BTreeMap<(usize, usize), (String, u8, reading::Pause)> {
+            reading
+                .natural()
+                .iter()
+                .map(|n| {
+                    let s = n.spoken();
+                    ((s.stanza(), s.line()), (s.text().to_owned(), s.pace().hundredths(), s.pause()))
+                })
+                .collect()
+        };
+        let (before, after) = (by_line(&before), by_line(&after));
+        // Lines are numbered through the poem, so compare by stanza and place within it.
+        let within = |map: &BTreeMap<(usize, usize), (String, u8, reading::Pause)>| {
+            let mut out: BTreeMap<(usize, usize), (String, u8, reading::Pause)> = BTreeMap::new();
+            let mut first: BTreeMap<usize, usize> = BTreeMap::new();
+            for ((stanza, line), value) in map {
+                let start = *first.entry(*stanza).or_insert(*line);
+                out.insert((*stanza, line - start), value.clone());
+            }
+            out
+        };
+        let (before_lines, after_lines) = (within(&before), within(&after));
+        // A stanza the music never begins has no natural lines, and must be said to be unread —
+        // never skipped silently. Every other stanza is compared line for line, all of it.
+        let unread = |reading: &reading::Reading, lines: &[usize]| -> std::collections::BTreeSet<usize> {
+            reading
+                .natural_unread()
+                .iter()
+                .map(|u| lines.iter().scan(0, |end, n| { *end += n; Some(*end) }).position(|end| u.line() < end).unwrap())
+                .collect()
+        };
+        let sizes = |source: &str| -> Vec<usize> {
+            source.trim_end().split("\n\n").map(|s| s.lines().count()).collect()
+        };
+        let (sizes_before, sizes_after) = (sizes(&source), sizes(edited.source()));
+        let (unread_before, unread_after) = (unread(&read(&poem), &sizes_before), unread(&read(&edited), &sizes_after));
+        let mut compared = 0_usize;
+        for (stanza, &size) in sizes_before.iter().enumerate() {
+            if stanza == which {
+                continue;
+            }
+            let heard_before = before_lines.contains_key(&(stanza, 0));
+            let heard_after = after_lines.contains_key(&(stanza, 0));
+            prop_assert_eq!(heard_before, !unread_before.contains(&stanza), "stanza {} before", stanza);
+            prop_assert_eq!(heard_after, !unread_after.contains(&stanza), "stanza {} after", stanza);
+            if !(heard_before && heard_after) {
+                continue;
+            }
+            for place in 0..size {
+                let (one, two) = (before_lines.get(&(stanza, place)), after_lines.get(&(stanza, place)));
+                prop_assert!(one.is_some() && two.is_some(), "stanza {} line {} missing", stanza, place);
+                prop_assert_eq!(one, two);
+                compared += 1;
+            }
+        }
+        // Each case compares every line of every stanza heard on both sides, and says so.
+        let both = (0..sizes_before.len())
+            .filter(|&s| s != which && !unread_before.contains(&s) && !unread_after.contains(&s))
+            .map(|s| sizes_before[s])
+            .sum::<usize>();
+        prop_assert_eq!(compared, both);
+    }
+}
+
 #[test]
 fn every_example_poem_breathes() {
     let examples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
@@ -282,7 +438,7 @@ fn every_example_poem_breathes() {
         assert_eq!(read, lines, "{}", path.display());
         checked += 1;
     }
-    assert_eq!(checked, 9);
+    assert_eq!(checked, 18);
 }
 
 #[test]

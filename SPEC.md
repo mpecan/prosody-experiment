@@ -245,6 +245,59 @@ A stanza, once stated, **keeps looping** until something stops it. One loop per 
   harmony layer below now exists as a candidate, but it does not overrule anything — its chords
   follow the foundation's loops.
 
+**Long stanzas erode** (*the user's decision, 2026-10-24: "for longer pieces, can we introduce
+loss?"*). The line-by-line transformation makes a stanza of *n* lines take about *n* passes of
+about *n* bars, so the piece grows with the square of its stanzas' length: Lowell's "Patterns"
+(107 lines, stanzas of 9 to 22) arranged into 1,331 bars and an 8.6 MB pattern. So where **either
+stanza is long — more than eight lines** (`arrange::LONG_STANZA`, a fixed constant: structure, not
+palette) — an arrival is a loss instead, in the manner of Basinski's *Disintegration Loops*:
+
+- The arriving stanza is **stated whole, once through and then looping**, for **three passes**
+  (`arrange::EROSION_PASSES`), each pass one statement of it — `3n` bars for a stanza of *n* lines,
+  so the piece grows linearly ("Patterns": 284 bars, a 0.9 MB pattern). Its lines are `Arriving`,
+  with the pass.
+- The old loop **keeps looping under it**, from its own first line, one line a bar
+  (`Cause::Eroding`, with the pass), and **thins out**: on pass *p* an eroding line of *k* syllables
+  sounds ⌈k·(4−p)/4⌉ of them — three quarters, a half, a quarter — and after the third pass it is
+  silent and gone. Which syllables go is decided by what each is *in its own line*: **unstressed
+  syllables first, then secondary, then primary stresses, and the rhyme word last** — the line's
+  last pronounceable word, where its rhyme rests and its note sounds (§4.5); within each kind, the
+  earlier syllable first, so what remains of a line is its end. How hard a syllable is struck is
+  what counts, so a light function word (§4.2) goes with the secondary stresses. Nothing is random.
+  An eroding line keeps its own beats: what is left of it sounds exactly where it always did.
+  An eroding line still counts as its line sounding in that slot, so the call, held and refrain
+  lanes (above) do not add a second copy of it there — even where the eroding copy has already
+  lost the syllables the lane would play (a call is the half-line *before* the caesura, which
+  erodes first). The cases found in "Patterns" (its call lane, at slots 33 and 79) are first
+  passes, where the line keeps three quarters of itself. Chosen over the alternative, sounding both, because that would strike the syllables
+  the eroding copy keeps twice at once; under `gradual` the line that suppressed a lane was a whole
+  `Yielding` one, so nothing was lost.
+- Stanzas of eight lines or fewer, arriving into loops of eight lines or fewer, are transformed
+  line by line as before — so every other example is byte-for-byte the piece it was.
+
+It is a selector, `Mapping::LongStanzas` (`long-stanzas`): **`erode`** (the default) and
+**`gradual`**, the line-by-line transformation everywhere — what preceded it, and its first
+variant; there is no `off`, since an arriving stanza always takes the loop's place somehow. The
+pattern header, the OSC schedule and the explain view count the bars over an eroding loop; the
+explain view shows each eroding line's thinning (`erodes pass 1 keeps 6 of 7 · pass 2 keeps 4 ·
+pass 3 keeps 2: figured`). Every consumer reads what a placement sounds through one rule
+(`Score::placed`, `Score::sounds`): an eroded syllable is absent from the drums, the melody, the
+bass, the trace (so it is not lit), the OSC schedule and the scorer's timeline and edit test, and
+every syllable that sounds keeps its span (I4). The reading (§4.7) reads the arriving stanza where
+it is stated, and an eroding line is never a host, so it is never read again.
+
+**Disclosed against I2.** *What* a line loses on each pass reads only that line's own syllables —
+their order and their force — so it is the same wherever the line erodes, whatever any other stanza
+says. "The rhyme word" is the line's last word rather than "a word with a note" for exactly that
+reason: whether a word is pitched depends on whether anything elsewhere in the poem rhymes with it,
+so a note-based rule would let an edit to another stanza change what this line loses. Two things
+are not local: *which* of an eroding loop's lines sound under which pass depends on the arriving
+stanza's length (a pass is one statement of it, and the old loop runs on line after line beneath),
+and *whether* a stanza erodes at all depends on whether the stanza arriving after it is long —
+both §4.6's "duration is poem-wide", as before. The I2 property for erosion is scoped to exactly
+that: an edit to another stanza leaves every line that erodes in both versions eroding the same
+way, pass for pass (`prosody-core/tests/erosion.rs`).
+
 Bar-locked: each bar of the piece takes its length from the stanza of the line arriving in it — the
 stanza's *period*, its longest line — so a stanza is a loop of one length and the meter changes only
 where the stanza does (*machine cycle 2, pending review*; before, a bar took its own line's length).
@@ -411,15 +464,21 @@ of named variants, always including `off` (the pulse and the stack excepted, bel
 per mapping, and only a variant the mapping lists can be chosen. Today the held and refrain
 lanes, the stanza period and the outro are `off`/`on`, default `on`; the bass is
 `off`/`height`/`syllables`/`feet`, default `height`; the harmony is `off`/`rhyme`/`cadence`/`both`,
-default `off`; the reading is `off`/`arrives`/`stanza`, default `arrives`; the pulse (§4.2) is
+default `off`; the reading is `off`/`arrives`/`stanza`/`breath`, default `breath`; the pulse (§4.2) is
 `elastic`/`steady`, default `steady` — a mapping without `off`, because a piece cannot be
 without a pulse: its first variant is what preceded it, `elastic`, and leaving it out means that;
 the stack (§4.2) is `crossing`/`straight`, default `crossing`, likewise without `off` — leaving it
-out means `crossing`.
+out means `crossing`; the function words (§4.2) are `full`/`light`, default `full`, without `off`;
+the long stanzas (above) are `gradual`/`erode`, default `erode`, without `off` — leaving them out
+means `gradual`.
 They are
 chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
 `set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
-page's A/B table, so the piece can be heard and measured under each choice. This is a separate
+page's A/B table, so the piece can be heard and measured under each choice (B starts at each
+first variant, except the long stanzas, which it starts at `erode` like A: `gradual` makes a long
+poem quadratic again, too heavy to compile, score and parse behind every edit of every A/B
+comparison — "Patterns" under it takes the static page about 5 s to compile and 8 s to score, off
+the music's thread but still before the edit can be heard). This is a separate
 argument to the lowering, not part of the style: it changes structure, and I3 keeps the style out
 of structure. Every invariant holds within one choice. Every default is the piece as specified,
 and the default everywhere — except the harmony, a candidate whose default is `off`, so a piece
@@ -431,16 +490,18 @@ proposes it, so the comparison stays available as long as the question is open.
 
 This is structure, read from the poem, not a style parameter — which answers §9's "looping as an
 explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
-poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.
+poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives — and,
+with the erosion, how long the arrival is.
 
 ### 4.7 The reading — the poem spoken over the music, a stanza at a time
 
 *Candidate, page-side, pending review (sound and voice, step 2).* A prototype to learn whether
 spoken lines over the music work. Under every variant each line is spoken at most once, by the
-browser's speech synthesiser, and only from where the music has begun its stanza. The reading as
+engine the listener chooses (below), and only from where the music has begun its stanza. The reading as
 it shipped (now the `arrives` variant; the default is `breath`, below) speaks each line in the slot
 where it is **first heard as a host** — `Stated`, `Arriving` or `Overruling` (§4.6) —
-and never where it loops, yields, calls, holds, refrains in its lane or repeats in the outro. So
+and never where it loops, yields, erodes, calls, holds, refrains in its lane or repeats in the
+outro. So
 the reading follows the poem in order, and every utterance is the source text under one line's
 span (I4). A refrain stanza is new lines of the poem, so it is read again where it drops in.
 
@@ -504,15 +565,140 @@ made the default, 2026-10-23*):
 - **`off`** — no cues.
 
 The cue pattern's first comment names the variant (`reading = breath`); the explain view lists it
-when it is not the default (`reading=arrives`). *How fast* a line is read is a
-parameter, fitted from the palette's tempo: the rate at which the line's syllables, at four a
-second at rate 1, fill 85% of its bar, bounded to 0.6–1.6. The voice is the listener's choice. A
-light duck (the music to 0.6 while a line is spoken) is page-side and optional.
+when it is not the default (`reading=arrives`).
 
-Two things it does not promise. The audio of the speech is the browser's, so it is not
-bit-identical across machines — the *cues* are (I1). And speech is not on the grid: it starts on
-the bar's first beat and runs at its own pace; a line still speaking when the next is due is cut
-off rather than allowed to drift.
+**Two paces** (*the user's decision, 2026-10-24: squeezing every line into its bar sounds forced
+and unnatural*). The variants say which lines are read and from where; the page reads them at a
+pace of its own setting — `natural` (the default) or `fitted` — remembered per browser like the
+voice. Not a style key: the CLI never reads aloud, and no palette moves a cue (I3).
+
+- **`natural`.** Each line is spoken at the voice's own speed times its **pace**, 0.92 to 1.08 in
+  hundredths, drawn from the line's *own* seed (`Seed::for_unit(Domain::Line, line span)`, child
+  `"reading pace"`): an edit to one line moves only its own pace (I2), and a refrain returns at
+  the pace it left at. After it comes a **pause**, from how it ends — the last character that is
+  not space or a closing quote or bracket: **0.25 s** after a line that runs on, **0.45 s** after
+  a comma, semicolon, colon or dash, **0.80 s** after a full stop, question or exclamation mark or
+  ellipsis, **1.5 s** after a stanza's last line whatever it ends on. The values are estimates of a
+  reader's pauses, not measurements. Lines are no longer given bars; each has an **onset**:
+  - under `breath`, a stanza's first line starts at the later of its **arrival** — the bar the
+    music begins the stanza in (its first line's first arrival as a host, or its earliest line's)
+    — and the breath, measured against the previous stanza's *actual spoken end*, not its bars: on
+    the first bar that begins at least two bars after the bar that end fell in (one whole silent
+    bar between) and no sooner than the end plus its stanza-end pause. Under `stanza` a stanza's
+    first line waits only for its first hosting bar and the line before; under `arrives` every line
+    waits for its own arrival bar and the line before.
+  - every other line follows the one before: it starts when that one has finished plus its pause.
+
+  The pace, the pause and the onset are decided in `prosody_emit::reading` (`Pace`, `Pause`,
+  `Onset`), deterministic and hand-tested, and travel in the `/reading` answer per line (`lines`,
+  with `pace`, `pause`, `ends`, `onset`, `slot`, `stanza` and each word's syllables) and in the
+  header comments of a second cue pattern (`natural`), whose cues are the onset bars. The rest is
+  timed by the page on the audio clock, from the time Strudel's `onTrigger` gives for each onset
+  bar, because only it knows how long a voice takes. **Past the end** at this pace: a line that
+  would start at or after the piece's end is not read that time round, and the page says so in its
+  status (`not read this time round: line …`); a stanza the music never begins is listed in the
+  answer's `natural_unread`. **Disclosed against I2:** a stanza's start can depend on how long the
+  previous stanza took to say, which depends on its text and the voice — cues are not voices, and
+  the music, every voice and every seed are untouched.
+- **`fitted`.** Each line is read in its bar from the fitted cue pattern (`pattern`), as it
+  shipped: the rate at which the line's syllables, at four a second at rate 1, fill 85% of its bar,
+  bounded to 0.6–1.6, from the palette's tempo; a line still speaking when the next is due is cut
+  off rather than allowed to drift. That rate assumes four syllables a second at rate 1, which a
+  neural voice need not say: a rendered line whose speech runs past 85% of its bar (the `fill` the
+  `/reading` answer carries) is rendered once more, faster by just as much (no faster than 2.0),
+  and that render is read once it is ready; a line that still runs past its bar is said in the
+  status bar. Only ever faster — a line that ends early leaves its bar's rest silent, as the
+  browser's voice does.
+
+**Engines** (*the same decision*; `recorded` *the user's decision, 2026-10-24*). One interface on
+the page — `load(onProgress)`, `voices(language)`, `render(text, { voice, speed })` → an
+`AudioBuffer` — and five engines, the listener's choice, remembered:
+
+- **`browser`** — the browser's speech synthesiser: instant, the only one that reports word
+  boundaries, and the fallback for the others. It cannot be scheduled, so it is started by a timer
+  at its line's time and, at the natural pace, chained on its `end` event.
+- **`kokoro`** — Kokoro-82M through kokoro-js, on WebGPU where the browser offers it (the
+  full-precision model) and WebAssembly otherwise (the 8-bit one, 92 MB). The default, once it has
+  loaded. English (US and UK voices; the kokoro-js release lists no others).
+- **`piper`** — Piper voices on onnxruntime-web (WebAssembly), with piper's espeak-ng phonemiser:
+  every voice of rhasspy/piper-voices at a fixed revision, Slovenian (`sl_SI-artur-medium`) among
+  them. The speed is piper's own length scale.
+- **`kitten`** — Kitten TTS nano through kitten-tts-webgpu: the lightest, WebGPU only.
+- **`recorded`** — the example poems' readings, made ahead of time on the maintainer's machine and
+  served beside the page (`readings/`: a manifest and one MP3 a line and voice, mono, 32 kbit/s),
+  for the browsers the live engines fail in or are too slow on. `scripts/readings/` renders every
+  line any variant of each example's reading can speak (under `breath`, `arrives`, `stanza`, and
+  without the outro) with the page's own `speech-worker.mjs` in Chromium — the same engines,
+  models and phonemisers as live — in each voice of the poem's language: Kokoro `af_heart` and
+  `bm_george` and Piper `en_GB-cori-medium` for English, Piper `sl_SI-artur-medium` for
+  Prešeren. Each line is rendered **at its natural pace**, the speed baked in, so at the natural
+  pace the file plays as it is, with no resampling. The manifest is keyed by voice (named
+  `engine:voice`, after the live voice that made it) and by a hash of the line's exact text (the
+  first 64 bits of its SHA-256), and carries the text; the page looks a line up by its text, so
+  an **edited line simply has no recording**. A file is named by voice, key **and the pace it was
+  spoken at** (`<key>-<pace>.mp3`): the pace is in the audio, so a changed pace rule wants new
+  files — the old ones are left over and removed, the new ones rendered — and the tool can never
+  relabel audio spoken at one speed as another. Such a line — or any line of a poem of the writer's
+  own — is read by the live voice that made the recordings if its engine has already loaded, and
+  otherwise by the browser's voice, never by a model downloaded unasked; the status bar says so
+  with the line's number (`line 3: no recording of it; read by the browser voice`). The voice menu
+  lists the recorded voices of the language that have recordings of the poem heard, each with how
+  many of its lines it has, so a preset offers its own alternatives. A recording is fetched,
+  decoded and trimmed of its silence (an MP3 encoder's delay included) when it is rendered ahead —
+  at once, not in the render queue, which a slow live render would otherwise hold it behind — and
+  then scheduled exactly as a neural line is. At the fitted pace it is read at its natural
+  speed too — its pace, not the fitted rate, which assumes a syllable rate no recording has — and
+  a line too long for its bar is refitted as any rendered line is, by resampling, which shifts its
+  pitch as well. (A pace rule changed after the recordings were made leaves the committed set
+  failing its test until it is rendered again; it is never papered over by resampling.) The
+  recordings are fixed files, so unlike a live render they are the same on every machine; that
+  the committed set matches what the compiler reads now — every line of every example, at its
+  pace, in every voice of its language — is a test (`prosody-web`,
+  `every_line_of_every_example_is_recorded_in_every_voice_of_its_language`), so a change to a
+  line's text or its pace fails until they are rendered again.
+
+The neural engines each run in a module worker of their own (`speech-worker.mjs`), so their
+computing never blocks the thread Strudel's scheduler ticks on. A model downloads only once its
+engine is chosen (the default on the first play), with its progress in the status bar, and is kept
+by the browser. After each compile every line is **rendered ahead**, at the speed the pace asks for
+— the line's pace (render-time speed, so no pitch shift), or under `fitted` its rate — and kept by
+engine, voice, speed and text, so a recompile reuses every line it did not change. A rendered line
+is trimmed of the model's silence, keeping 10 ms either side, and is **started exactly on the
+audio clock** by an `AudioBufferSourceNode`, its speech beginning at the time the cue's bar begins
+(or the chain gives) — never by a timer. A line not rendered by its turn: at the natural pace the
+chain waits for it and the status says so; at the fitted pace the browser's voice reads it. The
+voice goes through the page's master stage at its own **reading level**, and the music is ducked
+while any line of a stanza is read (kept down through the pauses between them). The word marker
+follows the voice's word boundaries where it reports them, and otherwise spreads a rendered line's
+words over its length by their syllable counts.
+
+**Language** is per poem: an example poem carries its own (Prešeren is Slovenian; every other
+example English — Ball's sound poem has none of its own), set when it is loaded, and the writer can
+choose another for their own poem. Each engine lists only its voices for the language; an engine
+with none (Kokoro and Kitten for Slovenian) gives way to the browser's voice, and says so.
+
+**Failure is visible and recoverable:** an engine that cannot load — no WebGPU for Kitten, a
+network error — is said in the status bar and its menu, the reading carries on with the browser's
+voice, and choosing it again retries (no other change of setting retries it). An engine whose
+worker dies after it has loaded is failed the same way: what it was rendering is given up, and the
+browser's voice reads on. Only the chosen engine speaks in the status bar, and a voice's download
+progress only while that voice is the one chosen. The render queue holds only lines still to be
+read — of the poems loaded (the piece playing, A and B), at the pace, engine and voice chosen —
+in the order they will be wanted: the playing piece's from the line its reading has reached, round
+to the one before, then the rest. It is re-ordered every time the reading moves on, so a slow engine
+renders the line due next rather than one from the top of the poem. A line dropped from it (a
+change of poem, engine, voice or pace) is asked for afresh if it is wanted again, rather than
+waited on for a render that will never come. A preset in another language first lets go of
+the old poem's reading, so neither poem is rendered in the other's voice. The browser's voice menu's "browser default" means the system's own voice for
+the language. `?device=wasm` on the page keeps every engine off WebGPU.
+
+Two things it does not promise. The audio of the speech is the engine's, so it is not
+bit-identical across machines — the *cues*, paces and pauses are (I1); a neural line is the same
+wherever its model computes the same, which nothing here checks. And at the natural pace when a
+stanza starts depends on how long the voice took over the last one. When the piece comes round while a line
+is still being read (the browser's voice runs past the seam, or a neural line is still rendering),
+the new round starts once that line has finished, from its first cue, after its breath; a line of
+the old round it leaves unread is said in the status bar, never dropped in silence.
 
 "In order" holds from the first bar. Strudel's scheduler keeps its cycle count when it is handed a
 new pattern, so a change while playing would start the new piece partway through. The page

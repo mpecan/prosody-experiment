@@ -58,10 +58,16 @@ impl Transport {
 /// The module the page's import map answers Strudel's own imports from (see the file).
 pub const STRUDEL_GLOBALS: &str = include_str!("strudel-globals.mjs");
 
+/// The module worker the page's neural reading engines run in (see the file): Kokoro, Piper and
+/// Kitten, each loaded from a CDN at an exact version only when the listener chooses it, and kept
+/// off the page's own thread, which is the one Strudel's scheduler ticks on.
+pub const SPEECH_WORKER: &str = include_str!("speech-worker.mjs");
+
 /// The page, and the answer to everything it asks.
 #[derive(Debug, Clone)]
 pub struct Site {
     page: String,
+    presets: String,
 }
 
 impl Site {
@@ -73,6 +79,7 @@ impl Site {
     pub fn new(transport: Transport) -> Result<Self> {
         Ok(Self {
             page: page(transport)?,
+            presets: presets_json()?,
         })
     }
 
@@ -82,12 +89,20 @@ impl Site {
         &self.page
     }
 
-    /// Answers one request: the page, its helper module, or one of the four compiled views.
+    /// Answers one request: the page, its helper modules, the presets, or one of the compiled
+    /// views.
+    ///
+    /// `/presets.json` is the example poems as the preset menu has them — name, label, language,
+    /// poem and palette — for the tool that records their readings (`scripts/readings/`), so that
+    /// a preset's language has one source. It answers a `POST` as well as a `GET` because the
+    /// WebAssembly build's binding only ever posts.
     #[must_use]
     pub fn respond(&self, request: &Request) -> Response {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/") => Response::html(self.page.clone()),
+            ("GET" | "POST", "/presets.json") => Response::json(self.presets.clone()),
             ("GET", "/strudel-globals.mjs") => Response::javascript(STRUDEL_GLOBALS.to_owned()),
+            ("GET", "/speech-worker.mjs") => Response::javascript(SPEECH_WORKER.to_owned()),
             ("POST", "/pattern") => compile(request, &Output::Pattern),
             ("POST", "/explain") => compile(request, &Output::Explain),
             ("POST", "/score") => compile(request, &Output::Score),
@@ -164,54 +179,124 @@ fn page(transport: Transport) -> Result<String> {
         .replace("__TRANSPORT__", &json_string(transport.name())))
 }
 
-/// The example poems, for the preset menu: a file name and a label, then the file itself.
+/// The example poems, for the preset menu: a file name, a label and the language the poem is in,
+/// then the file itself.
 ///
 /// Embedded rather than read at run time so the binary works from any directory; a test checks
 /// that every file in `examples/` is here, so a new example cannot be missing from the menu.
-const PRESETS: &[(&str, &str, &str)] = &[
+///
+/// The language is a BCP 47 tag, for the reading (`SPEC.md` §4.7): the page reads a preset in its
+/// own language, with a voice that speaks it — Prešeren in Slovenian. It is not part of the
+/// poem's header: the style is palette (I3), the reading is the page's, and the CLI, which never
+/// reads aloud, has no use for it. Ball's *Karawane* is sound poetry with no language of its own;
+/// it is read with English voices.
+const PRESETS: &[(&str, &str, &str, &str)] = &[
+    (
+        "ball-karawane",
+        "Ball — Karawane",
+        "en",
+        include_str!("../../../examples/ball-karawane.poem"),
+    ),
     (
         "blake-tyger",
         "Blake — The Tyger",
+        "en",
         include_str!("../../../examples/blake-tyger.poem"),
     ),
     (
         "carroll-jabberwocky",
         "Carroll — Jabberwocky",
+        "en",
         include_str!("../../../examples/carroll-jabberwocky.poem"),
+    ),
+    (
+        "crane-in-the-desert",
+        "Crane — In the desert",
+        "en",
+        include_str!("../../../examples/crane-in-the-desert.poem"),
     ),
     (
         "dickinson-because",
         "Dickinson — Because I could not stop for Death",
+        "en",
         include_str!("../../../examples/dickinson-because.poem"),
+    ),
+    (
+        "dunbar-we-wear-the-mask",
+        "Dunbar — We Wear the Mask",
+        "en",
+        include_str!("../../../examples/dunbar-we-wear-the-mask.poem"),
     ),
     (
         "hopkins-pied-beauty",
         "Hopkins — Pied Beauty",
+        "en",
         include_str!("../../../examples/hopkins-pied-beauty.poem"),
+    ),
+    (
+        "kjv-psalm-23",
+        "Psalm 23 (King James)",
+        "en",
+        include_str!("../../../examples/kjv-psalm-23.poem"),
+    ),
+    (
+        "lowell-night-clouds",
+        "Lowell — Night Clouds",
+        "en",
+        include_str!("../../../examples/lowell-night-clouds.poem"),
+    ),
+    (
+        "lowell-patterns",
+        "Lowell — Patterns",
+        "en",
+        include_str!("../../../examples/lowell-patterns.poem"),
+    ),
+    (
+        "naidu-bazaars-of-hyderabad",
+        "Naidu — In the Bazaars of Hyderabad",
+        "en",
+        include_str!("../../../examples/naidu-bazaars-of-hyderabad.poem"),
     ),
     (
         "poe-annabel-lee",
         "Poe — Annabel Lee",
+        "en",
         include_str!("../../../examples/poe-annabel-lee.poem"),
     ),
     (
         "preseren-zdravljica",
         "Prešeren — Zdravljica",
+        "sl",
         include_str!("../../../examples/preseren-zdravljica.poem"),
     ),
     (
         "shakespeare-sonnet-18",
         "Shakespeare — Sonnet 18",
+        "en",
         include_str!("../../../examples/shakespeare-sonnet-18.poem"),
+    ),
+    (
+        "stein-tender-buttons",
+        "Stein — Tender Buttons",
+        "en",
+        include_str!("../../../examples/stein-tender-buttons.poem"),
+    ),
+    (
+        "tagore-gitanjali-35",
+        "Tagore — Gitanjali 35",
+        "en",
+        include_str!("../../../examples/tagore-gitanjali-35.poem"),
     ),
     (
         "whitman-song-of-myself",
         "Whitman — Song of Myself",
+        "en",
         include_str!("../../../examples/whitman-song-of-myself.poem"),
     ),
     (
         "wilde-theocritus",
         "Wilde — Theocritus",
+        "en",
         include_str!("../../../examples/wilde-theocritus.poem"),
     ),
 ];
@@ -223,14 +308,15 @@ const PRESETS: &[(&str, &str, &str)] = &[
 /// one source of truth for it (see [`body_of`]).
 fn presets_json() -> Result<String> {
     let mut presets = Vec::new();
-    for (name, label, text) in PRESETS {
+    for (name, label, language, text) in PRESETS {
         let poem = Poem::parse((*text).to_owned()).with_context(|| format!("preset {name}"))?;
         let style = Style::parse_optional(poem.frontmatter().and_then(|s| s.text(poem.source())))
             .with_context(|| format!("preset {name}'s palette"))?;
         presets.push(format!(
-            "{{\"name\":{},\"label\":{},\"poem\":{},\"palette\":{}}}",
+            "{{\"name\":{},\"label\":{},\"language\":{},\"poem\":{},\"palette\":{}}}",
             json_string(name),
             json_string(label),
+            json_string(language),
             json_string(body_of(text)),
             palette_json(&style),
         ));
@@ -542,53 +628,111 @@ fn render(
     }
 }
 
-/// A reading as JSON: the cue pattern to evaluate, and each cue — the line it speaks, by index
-/// and by span, its text and its rate — for the page to look up when the cue fires; then each
-/// line left unread, and why, for the page to say.
+/// A reading as JSON, for the page to speak at either pace (`SPEC.md` §4.7).
 ///
-/// `start` and `end` are the line's bytes in the source, for the log; `from` and `to` are where it
-/// is in the text box, for the page to show the line being read (see [`text_box`]).
+/// - `pattern` and `cues`: the fitted pace — the cue pattern to evaluate, and each cue, the line
+///   it speaks in its slot at its fitted `rate`.
+/// - `natural` and `lines`: the natural pace — its cue pattern, whose cues are the earliest bars
+///   lines may begin in, and every line it reads in reading order with its `onset` (`breath`,
+///   `at` with its `slot`, or `follows`).
+/// - every spoken line, at either pace, carries its `stanza`, its `pace` (the speed the natural
+///   pace asks a voice for), the `pause` after it in seconds and what it `ends` on, and its
+///   `words`, each with the syllables it sounds, for the page's word marker.
+/// - `bars` (the cycle each slot begins on, then the piece's length) and `cpm`: the music's clock,
+///   for the page to find a bar on the audio clock.
+/// - `fill`: the share of its bar a fitted line is fitted to fill ([`reading::FILL`]), so the page
+///   can fit a neural voice's rendered line to the same room.
+/// - `unread` and `natural_unread`: each line left unread, and why, for the page to say.
+///
+/// `start` and `end` are bytes in the source, for the log; `from` and `to` are where a line or a
+/// word is in the text box, for the page to show it (see [`text_box`]).
 fn reading_json(reading: &Reading, source: &str, typed: &str) -> String {
     let at = text_box(source, typed);
+    let place =
+        |span: prosody_core::span::Span| at(span.start()).zip(at(span.end())).unwrap_or((0, 0));
+    let spoken = |line: &reading::Spoken| {
+        let (from, to) = place(line.span());
+        let words: Vec<String> = line
+            .words()
+            .iter()
+            .map(|word| {
+                let (from, to) = place(word.span());
+                format!(
+                    "{{\"from\":{from},\"to\":{to},\"syllables\":{}}}",
+                    word.syllables()
+                )
+            })
+            .collect();
+        format!(
+            "\"line\":{},\"stanza\":{},\"start\":{},\"end\":{},\"from\":{from},\"to\":{to},\"syllables\":{},\"pace\":{},\"pause\":{},\"ends\":{},\"words\":[{}],\"text\":{}",
+            line.line(),
+            line.stanza(),
+            line.span().start(),
+            line.span().end(),
+            line.syllables(),
+            prosody_emit::fmt_param(line.pace().speed()),
+            prosody_emit::fmt_param(line.pause().seconds()),
+            json_string(line.pause().says()),
+            words.join(","),
+            json_string(line.text()),
+        )
+    };
     let cues: Vec<String> = reading
         .cues()
         .iter()
         .map(|cue| {
-            let (from, to) = at(cue.span().start())
-                .zip(at(cue.span().end()))
-                .unwrap_or((0, 0));
             format!(
-                "{{\"slot\":{},\"line\":{},\"start\":{},\"end\":{},\"from\":{from},\"to\":{to},\"syllables\":{},\"rate\":{},\"text\":{}}}",
+                "{{\"slot\":{},\"rate\":{},{}}}",
                 cue.slot(),
-                cue.line(),
-                cue.span().start(),
-                cue.span().end(),
-                cue.syllables(),
                 prosody_emit::fmt_param(cue.rate()),
-                json_string(cue.text()),
+                spoken(cue.spoken()),
+            )
+        })
+        .collect();
+    let lines: Vec<String> = reading
+        .natural()
+        .iter()
+        .map(|natural| {
+            let slot = natural
+                .onset()
+                .slot()
+                .map_or_else(|| "null".to_owned(), |slot| slot.to_string());
+            format!(
+                "{{\"onset\":{},\"slot\":{slot},{}}}",
+                json_string(natural.onset().name()),
+                spoken(natural.spoken()),
             )
         })
         .collect();
     // The lines the reading leaves out, so the page can say so (CLAUDE.md §6: a loss is visible).
-    let unread: Vec<String> = reading
-        .unread()
-        .iter()
-        .map(|line| {
-            format!(
-                "{{\"line\":{},\"start\":{},\"end\":{},\"why\":{},\"text\":{}}}",
-                line.line(),
-                line.span().start(),
-                line.span().end(),
-                json_string(line.why().says()),
-                json_string(line.text()),
-            )
-        })
-        .collect();
+    let unread = |unread: &[reading::Unread]| -> String {
+        unread
+            .iter()
+            .map(|line| {
+                format!(
+                    "{{\"line\":{},\"start\":{},\"end\":{},\"why\":{},\"text\":{}}}",
+                    line.line(),
+                    line.span().start(),
+                    line.span().end(),
+                    json_string(line.why().says()),
+                    json_string(line.text()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let bars: Vec<String> = reading.bars().iter().map(ToString::to_string).collect();
     format!(
-        "{{\"pattern\":{},\"cues\":[{}],\"unread\":[{}]}}\n",
+        "{{\"pattern\":{},\"natural\":{},\"bars\":[{}],\"cpm\":{},\"fill\":{},\"cues\":[{}],\"lines\":[{}],\"unread\":[{}],\"natural_unread\":[{}]}}\n",
         json_string(&reading.pattern()),
+        json_string(&reading.natural_pattern()),
+        bars.join(","),
+        prosody_emit::fmt_param(reading.cpm()),
+        prosody_emit::fmt_param(reading::FILL),
         cues.join(","),
-        unread.join(",")
+        lines.join(","),
+        unread(reading.unread()),
+        unread(reading.natural_unread()),
     )
 }
 
@@ -802,6 +946,166 @@ mod tests {
         );
         // Relative too: the bindings `scripts/build-site.sh` generates sit beside the page.
         assert!(static_.contains("import('./prosody.js')"), "the bindings");
+        // The compiler answers from workers, off the thread Strudel's scheduler ticks on; a worker
+        // made from a blob is handed the bindings' absolute address, and scores go to a worker of
+        // their own so a new pattern never waits behind them.
+        assert!(static_.contains("new URL('./prosody.js', document.baseURI).href"));
+        assert!(static_.contains("{ type: 'module' }"));
+        assert!(
+            static_.contains("threads = { compile: compilerThread(), measure: compilerThread() };")
+        );
+        assert!(static_.contains("return path === '/score' ? threads.measure : threads.compile;"));
+    }
+
+    #[test]
+    fn the_page_parses_a_pattern_without_stopping_the_music() {
+        let html = page(super::Transport::Server).unwrap();
+        // Strudel parses every string through the parser `setStringParser` names; the page's
+        // remembers, and parses what is new in slices before evaluating.
+        assert!(html.contains("setStringParser((text) => {"));
+        assert!(html.contains(
+            "await parseAhead(code, reading?.pattern ?? '', reading?.natural ?? '', traces[hearing]?.pattern ?? '');"
+        ));
+        assert!(html.contains("rememberParses();"));
+        // A skip reported against the pattern being replaced is carried to the new one.
+        assert!(html.contains(
+            "behind = behindFrom(behind, cues?.[readingSettings.pace === 'fitted' ? 'fitted' : 'natural'] ?? null);"
+        ));
+    }
+
+    #[test]
+    fn the_page_reads_with_five_engines_at_two_paces() {
+        let html = page(super::Transport::Wasm).unwrap();
+        // One menu of engines — the browser's voice the fallback, Kokoro the default — and the
+        // pace, natural by default; both page settings, remembered, never style keys.
+        for engine in ["kokoro", "piper", "kitten", "recorded", "browser"] {
+            assert!(
+                html.contains(&format!("<option value=\"{engine}\">")),
+                "{engine}"
+            );
+        }
+        // The recorded readings by default: a first visit downloads no model it was not asked about.
+        assert!(html.contains(
+            "const READING_DEFAULTS = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };"
+        ));
+        assert!(
+            html.contains(
+                "localStorage.setItem('prosody.reading', JSON.stringify(readingSettings))"
+            )
+        );
+        // The worker is the page's neighbour on either transport, so a static host serves it.
+        assert!(
+            html.contains(
+                "new URL(`./speech-worker.mjs?engine=${name}${device}`, document.baseURI)"
+            )
+        );
+        // A rendered line starts on the audio clock, at the time Strudel gives for its bar.
+        assert!(html.contains("if (at >= ctx.currentTime) source.start(at);"));
+        assert!(html.contains("fittedCue(cue, targetTime, generation)"));
+        assert!(html.contains("naturalCue(index, hap, targetTime, cps, generation)"));
+        // Both cue patterns are stacked with the music, so a change of pace needs no new pattern.
+        assert!(html.contains("return { fitted, natural, both: stack(fitted, natural) };"));
+        // The voice goes through the master stage, at its own level.
+        assert!(html.contains("voiceBus.connect(glue);"));
+        // A queued line dropped for a change of engine or voice takes its entry with it, so asking
+        // for it again renders it rather than waiting on a promise that never settles; and an
+        // engine whose worker dies after loading is failed, so the browser voice reads.
+        assert!(html.contains("if (!kept) dropJob(job);"));
+        assert!(html.contains("if (engine.state === 'ready') engine.crashed(error);"));
+        // A failed engine is retried only when it is chosen again, and only the chosen engine
+        // speaks in the status bar.
+        assert!(html.contains("if (engine.state === 'failed' && !retry) return;"));
+        assert!(html.contains("readingChanged(true);   // starts the download (ensureEngine)"));
+        // At the fitted pace a rendered line that overruns its bar is rendered again to fit.
+        assert!(html.contains("room: slotLength(reading, cue.slot) * reading.fill"));
+        // The queue holds only lines still to be read — of the poems loaded, at this pace, in this
+        // voice — in the order they will be wanted, from where the reading is; it is re-ordered as
+        // the reading moves on, so a line due next waits for no other.
+        assert!(html.contains("const kept = keys.has(job.key);"));
+        assert!(html.contains(
+            "for (const reading of [playingReading, readings[hearing], readings[other]]) {"
+        ));
+        assert!(html.contains("return lines.slice(at).concat(lines.slice(0, at));"));
+        assert!(html.contains("renderQueue.sort((a, b) => rank.get(a.key) - rank.get(b.key));"));
+        assert!(html.contains(
+            "  advanceChain();\n  if (chain && chain.generation === readingGeneration) prerender();"
+        ));
+        // A round that comes round while a line is still being read starts once it has finished,
+        // and a line it leaves unread is said.
+        assert!(html.contains("else if (chain.round !== null) chain.wrapTo = index;"));
+        assert!(html.contains("if (c.wrapTo !== null) wrapRound(c, c.wrapTo);"));
+        assert!(html.contains("noteLoss(`not read last time round: line ${lost.join(', ')}"));
+        // The recorded readings are the page's neighbours too, on either transport: a manifest,
+        // then a file a line, looked up by the line's exact text and the voice chosen.
+        assert!(html.contains("const READINGS = './readings/';"));
+        assert!(html.contains("fetch(new URL(READINGS + 'manifest.json', document.baseURI))"));
+        assert!(html.contains("fetch(new URL(READINGS + recording.file, document.baseURI))"));
+        assert!(html.contains("engines.recorded.byText.get(text)?.recordings[voice]"));
+        // Recorded at the line's pace, so at the natural pace a file plays as it is; asked for
+        // another speed (the fitted pace's refit) it is resampled.
+        assert!(html.contains("return engine === 'recorded' ? item.pace : item.speed;"));
+        assert!(html.contains("const rate = speed / line.pace;"));
+        // A line with no recording is read live — the recording's own voice if its engine has
+        // loaded, otherwise the browser's — and that is said, with the line's number.
+        assert!(html.contains("read live by ${ENGINE_INFO[live].label} ${liveVoice}"));
+        assert!(html.contains("'no recording of it; read by the browser voice'"));
+        assert!(
+            html.contains("if (who.fallback) noteReading(`line ${line.line + 1}: ${who.why}`);")
+        );
+        assert!(
+            html.contains("if (who.fallback) noteReading(`line ${cue.line + 1}: ${who.why}`);")
+        );
+        // A recording is fetched at once, never queued behind a live engine's render.
+        assert!(html.contains("if (engine === 'recorded') {\n      entry.direct = true;"));
+        assert!(html.contains("if (entry?.direct) return entry.promise;"));
+        // A recording has one key at both paces, so one fetched at the natural pace is fitted to
+        // its bar when the fitted pace asks for it, before the cached buffer is handed back.
+        assert!(html.contains(
+            "  if (room) fitWhenRendered(key, entry, { key, engine, voice, speed, text, room });\n  if (entry?.buffer) return Promise.resolve(entry.buffer);"
+        ));
+        assert!(html.contains("if (entry.buffer) { afterRender(job, entry.buffer); return; }"));
+        // Every line is asked of whoever reads it, so the render queue mixes engines.
+        assert!(html.contains("const { engine, voice } = speakerOf(text);"));
+        // The voices are listed per poem, with how many of its lines each has recorded.
+        assert!(html.contains("`${have} of ${texts.length} lines recorded`"));
+        assert!(html.contains("'this side reads nothing'"));
+        // A returning reader of the recordings has the manifest at once, not at the first Play.
+        assert!(html.contains("\nif (readingSettings.engine === 'recorded') ensureEngine();\n"));
+        assert!(html.contains("if (readingSettings.engine === 'recorded') showVoices();"));
+        // Every CDN package the worker loads is pinned to an exact version.
+        for pinned in [
+            "kokoro-js@1.2.1/",
+            "onnxruntime-web@1.18.0/",
+            "@mintplex-labs/piper-tts-web@1.0.5/",
+            "@diffusionstudio/piper-wasm@1.0.0/",
+            "kitten-tts-webgpu@0.1.1/",
+            "piper-voices/resolve/5041a7a49ae5b3a0f30e6837769eb03fdbb231bd",
+        ] {
+            assert!(super::SPEECH_WORKER.contains(pinned), "{pinned}");
+        }
+    }
+
+    #[test]
+    fn a_preset_is_read_in_its_own_language() {
+        // Prešeren is Slovenian; every other example is read in English (Ball's sound poem has no
+        // language of its own).
+        let presets = super::presets_json().unwrap();
+        assert!(
+            presets.contains(
+                "{\"name\":\"preseren-zdravljica\",\"label\":\"Prešeren — Zdravljica\",\"language\":\"sl\","
+            ),
+            "{presets}"
+        );
+        assert_eq!(presets.matches("\"language\":\"en\"").count(), 17);
+        assert_eq!(
+            presets.matches("\"language\":").count(),
+            super::PRESETS.len()
+        );
+        let html = page(super::Transport::Server).unwrap();
+        // The old poem's reading is let go before the language changes, so neither poem is rendered
+        // in the other's voice.
+        assert!(html.contains("    readings = { A: null, B: null };\n    language = preset.language;\n    readingChanged();"));
+        assert!(html.contains("sl: 'sl_SI-artur-medium'"));
     }
 
     #[test]
@@ -813,6 +1117,10 @@ mod tests {
             get("/strudel-globals.mjs").content_type,
             "text/javascript; charset=utf-8"
         );
+        // The reading's neural voices run in a worker the page loads beside itself.
+        let worker = get("/speech-worker.mjs");
+        assert_eq!(worker.content_type, "text/javascript; charset=utf-8");
+        assert_eq!(worker.body, super::SPEECH_WORKER);
         assert_eq!(get("/pattern").status, 404, "a view is a POST");
         let pattern = site.respond(&super::Request::new("POST", "/pattern", SEED.to_owned()));
         assert_eq!(pattern.status, 200);
@@ -821,6 +1129,45 @@ mod tests {
                 .body
                 .starts_with("// compiled from a poem by prosody\n")
         );
+    }
+
+    #[test]
+    fn the_page_says_what_it_is_and_keeps_its_settings_in_folders() {
+        let html = page(super::Transport::Wasm).unwrap();
+        // An experiment, said at the top, defined in the welcome, with the source and a contact.
+        assert!(html.contains("<span class=\"tag\">an experiment</span>"));
+        assert!(html.contains("<dialog id=\"welcome\""));
+        assert!(html.contains("the patterns of rhythm and sound in poetry"));
+        assert!(html.contains("href=\"https://github.com/mpecan/prosody-experiment\""));
+        assert!(html.contains("href=\"mailto:me@prosody.rocks\""));
+        // Five folders, each a tab controlling its panel, and no panel outside them.
+        for folder in [
+            "folderRoll",
+            "folderSound",
+            "folderMappings",
+            "folderReading",
+            "folderViews",
+        ] {
+            assert!(
+                html.contains(&format!(
+                    "data-folder=\"{folder}\" aria-controls=\"{folder}\""
+                )),
+                "{folder}"
+            );
+            assert!(
+                html.contains(&format!("id=\"{folder}\" role=\"tabpanel\"")),
+                "{folder}"
+            );
+        }
+        assert!(
+            !html.contains("<details"),
+            "the old folding panels are gone"
+        );
+        // A neural voice is asked about before it downloads, and its download can be cancelled.
+        assert!(html.contains("<dialog id=\"download\""));
+        assert!(html.contains("needs a one-time download of"));
+        assert!(html.contains("<dialog id=\"loader\""));
+        assert!(html.contains("engines[name].cancel?.();"));
     }
 
     #[test]
@@ -878,9 +1225,23 @@ mod tests {
             html.contains("[\"full\",\"light\"],\"full\"]"),
             "the function words' selector"
         );
+        assert!(
+            html.contains("[\"long-stanzas\","),
+            "the long stanzas' selector, by name"
+        );
+        assert!(
+            html.contains("[\"gradual\",\"erode\"],\"erode\"]"),
+            "the long stanzas' selector"
+        );
         // B starts at each mapping's first variant — what preceded it — not at `off`, which the
         // pulse does not have: so B is elastic and A steady until the writer chooses.
-        assert!(html.contains("B: defaults((m) => m[2][0])"), "B's defaults");
+        // Except the long stanzas, whose first variant is the quadratic arrangement: B starts
+        // eroding, as A does.
+        assert!(
+            html.contains("B: defaults((m) => (B_STARTS_AS_A.includes(m[0]) ? m[3] : m[2][0]))"),
+            "B's defaults"
+        );
+        assert!(html.contains("const B_STARTS_AS_A = ['long-stanzas'];"));
         assert!(!html.contains("__MAPPINGS__"));
     }
 
@@ -1166,40 +1527,70 @@ mod tests {
 
     #[test]
     fn the_reading_speaks_every_line_once_in_order() {
-        // The seed poem has eight lines; the reading speaks each once, in reading order, and the
-        // first cue is the first line, with the bytes it came from (I4).
+        // The seed poem has eight lines; the reading speaks each once, in reading order, at either
+        // pace, and the first is the first line, with the bytes it came from (I4).
         let response = super::compile(&request(&[], SEED), &Output::Reading);
         assert_eq!(response.status, 200, "{}", response.body);
         let body = &response.body;
         assert!(body.starts_with("{\"pattern\":\"// the reading"), "{body}");
-        for line in 0..8 {
-            assert!(
-                body.contains(&format!("\"line\":{line},")),
-                "line {line}: {body}"
-            );
-        }
-        assert!(!body.contains("\"line\":8,"), "{body}");
+        // The share of its bar a fitted line fills, reading.rs FILL (0.85), for the page to fit a
+        // neural voice's rendered line to the same room.
+        assert!(body.contains(",\"fill\":0.850,\"cues\":["), "{body}");
+        assert!(
+            body.contains(",\"natural\":\"// the reading at the natural pace"),
+            "{body}"
+        );
+        let (fitted, rest) = body.split_once("\"lines\":[").unwrap();
+        let (natural, unread) = rest.split_once("\"unread\":").unwrap();
+        let lines = |part: &str| -> Vec<usize> {
+            part.split("\"line\":")
+                .skip(1)
+                .filter_map(|rest| rest.split(',').next()?.parse().ok())
+                .collect()
+        };
+        assert_eq!(
+            lines(fitted),
+            (0..8).collect::<Vec<_>>(),
+            "in reading order"
+        );
+        assert_eq!(
+            lines(natural),
+            (0..8).collect::<Vec<_>>(),
+            "in reading order"
+        );
         // Spans are in the compiled source, after the 41-byte header the controls write
         // (`+++`, `[style]`, `tempo_range = [110, 130]`, `+++`, each with its newline). The line is
         // 28 bytes and seven syllables: Ty-ger Ty-ger burn-ing bright. In the text box it is the
-        // first 28 units.
+        // first 28 units, and it ends on a comma, so the natural pace pauses 0.45 s after it. Its
+        // words, by hand: "Tyger" 0..5 and 6..11, "burning" 13..20, "bright" 21..27.
+        let first = "\"line\":0,\"stanza\":0,\"start\":41,\"end\":69,\"from\":0,\"to\":28,\"syllables\":7,\"pace\":";
+        assert!(fitted.contains(first), "{fitted}");
+        assert!(natural.contains(first), "{natural}");
+        let words = "\"pause\":0.450,\"ends\":\"comma\",\"words\":[{\"from\":0,\"to\":5,\"syllables\":2},\
+                     {\"from\":6,\"to\":11,\"syllables\":2},{\"from\":13,\"to\":20,\"syllables\":2},\
+                     {\"from\":21,\"to\":27,\"syllables\":1}],\"text\":\"Tyger Tyger, burning bright,\"}";
+        assert!(fitted.contains(words), "{fitted}");
+        assert!(natural.contains(words), "{natural}");
+        // Its pace is one of the seventeen hundredths 0.920..=1.080, the same at both paces.
+        let pace = |part: &str| -> f64 {
+            part.split_once(first)
+                .and_then(|(_, rest)| rest.split(',').next()?.parse().ok())
+                .unwrap()
+        };
+        assert!((0.92..=1.08).contains(&pace(fitted)), "{fitted}");
+        assert_eq!(pace(fitted).to_bits(), pace(natural).to_bits());
+        // The first stanza starts with the music, in bar 1, under the default `breath`.
         assert!(
-            body.contains(
-                "\"line\":0,\"start\":41,\"end\":69,\"from\":0,\"to\":28,\"syllables\":7,"
-            ),
-            "{body}"
+            natural.starts_with("{\"onset\":\"breath\",\"slot\":0,\"line\":0,"),
+            "{natural}"
         );
         assert!(
-            body.contains("\"text\":\"Tyger Tyger, burning bright,\"}"),
-            "{body}"
+            natural.contains("{\"onset\":\"follows\",\"slot\":null,\"line\":1,"),
+            "{natural}"
         );
-        let lines: Vec<usize> = body
-            .split("\"line\":")
-            .skip(1)
-            .filter_map(|rest| rest.split(',').next()?.parse().ok())
-            .collect();
-        assert_eq!(lines, (0..8).collect::<Vec<_>>(), "in reading order");
-        assert!(body.ends_with("\"unread\":[]}\n"), "nothing lost: {body}");
+        assert_eq!(unread, "[],\"natural_unread\":[]}\n", "nothing lost");
+        // The music's clock, for the page to find a bar on: the bars start at cycle 0.
+        assert!(body.contains(",\"bars\":[0,"), "{body}");
     }
 
     #[test]
@@ -1222,10 +1613,15 @@ mod tests {
         assert!(
             unread.starts_with("[{\"line\":10,")
                 && unread.contains("\"why\":\"the piece ends before its turn\"")
-                && unread.ends_with("Praise him.\"}]}\n"),
+                // The natural pace loses no line here by plan: whether the voice reaches the
+                // last one is for the page to find out, and say.
+                && unread.ends_with("Praise him.\"}],\"natural_unread\":[]}\n"),
             "{unread}"
         );
-        assert!(!cues.contains("\"line\":10,"), "{cues}");
+        // Not among the fitted cues; the natural pace's lines still list it.
+        let (fitted, natural) = cues.split_once("\"lines\":[").unwrap();
+        assert!(!fitted.contains("\"line\":10,"), "{fitted}");
+        assert!(natural.contains("\"line\":10,"), "{natural}");
         assert!(cues.contains("// 1 of 11 lines not read:"), "{cues}");
         // The same piece under `arrives` loses nothing.
         let arrives = super::compile(
@@ -1233,10 +1629,173 @@ mod tests {
             &Output::Reading,
         );
         assert!(
-            arrives.body.ends_with("\"unread\":[]}\n"),
+            arrives
+                .body
+                .ends_with("\"unread\":[],\"natural_unread\":[]}\n"),
             "{}",
             arrives.body
         );
+    }
+
+    #[test]
+    fn the_presets_are_answered_as_json_for_the_recording_tool() {
+        let site = super::Site::new(super::Transport::Wasm).unwrap();
+        for method in ["GET", "POST"] {
+            let answer = site.respond(&super::Request::new(method, "/presets.json", String::new()));
+            assert_eq!(answer.status, 200, "{method}");
+            assert_eq!(answer.content_type, "application/json; charset=utf-8");
+            assert!(
+                answer
+                    .body
+                    .starts_with("[{\"name\":\"ball-karawane\",\"label\":")
+            );
+            assert!(answer.body.contains(
+                "{\"name\":\"preseren-zdravljica\",\"label\":\"Prešeren — Zdravljica\",\"language\":\"sl\","
+            ));
+            assert_eq!(
+                answer.body.matches("\"language\":").count(),
+                super::PRESETS.len()
+            );
+        }
+    }
+
+    /// The settings the recording tool asks each reading under (`scripts/readings/lib.mjs`
+    /// `SETTINGS`), as query pairs: every line any of them can speak is recorded.
+    const RECORDED_SETTINGS: &[&[(&str, &str)]] = &[
+        &[],
+        &[("set", "reading:arrives")],
+        &[("set", "reading:stanza")],
+        &[("off", "outro")],
+        &[("off", "outro"), ("set", "reading:arrives")],
+    ];
+
+    /// Every line a reading of `text` under `query` speaks, with its natural pace as the page is
+    /// sent it.
+    fn spoken_lines(text: &str, query: &[(&str, &str)]) -> Vec<(String, String)> {
+        let request = request(query, text);
+        let source = format!("{}{}", super::header(&request), super::body_of(text));
+        let mappings = super::mappings(&request).unwrap();
+        let poem = super::Poem::parse(source).unwrap();
+        let style =
+            super::Style::parse_optional(poem.frontmatter().and_then(|s| s.text(poem.source())))
+                .unwrap();
+        let phonemiser =
+            super::Fallback::new(super::CmuDict::new(), super::LetterToSound::new()).unwrap();
+        let lexicon = super::EnglishLexicon::new();
+        let (score, _) = super::lower_poem(&poem, &phonemiser, &lexicon, &mappings).unwrap();
+        let reading = super::reading::plan(&poem, &score, &style, &mappings).unwrap();
+        reading
+            .natural()
+            .iter()
+            .map(prosody_emit::reading::Natural::spoken)
+            .chain(
+                reading
+                    .cues()
+                    .iter()
+                    .map(prosody_emit::reading::Cue::spoken),
+            )
+            .filter(|line| !line.text().trim().is_empty())
+            .map(|line| {
+                (
+                    line.text().to_owned(),
+                    prosody_emit::fmt_param(line.pace().speed()),
+                )
+            })
+            .collect()
+    }
+
+    /// A string as JavaScript's `JSON.stringify` writes it, which is how the manifest has it.
+    fn js_string(text: &str) -> String {
+        let mut out = String::from("\"");
+        for character in text.chars() {
+            match character {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\u{8}' => out.push_str("\\b"),
+                '\u{c}' => out.push_str("\\f"),
+                other if u32::from(other) < 0x20 => {
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut out,
+                        format_args!("\\u{:04x}", u32::from(other)),
+                    );
+                }
+                other => out.push(other),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    #[test]
+    fn every_line_of_every_example_is_recorded_in_every_voice_of_its_language() {
+        // `examples/readings/manifest.json`, made by `scripts/readings/render.mjs`: a line of the
+        // file per voice and per recorded line. This checks it against the compiler as it is now,
+        // so a change that alters a line's text or its pace — and so leaves the recordings stale —
+        // fails here until they are rendered again. (That each key is its text's hash, the tool's
+        // own `--check` verifies.)
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/readings");
+        let manifest = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
+        let voices: Vec<(String, String)> = manifest
+            .lines()
+            .filter(|line| line.contains("{\"engine\":"))
+            .map(|line| {
+                let id = line.trim().split('"').nth(1).unwrap().to_owned();
+                let lang = line.split("\"lang\":\"").nth(1).unwrap();
+                (id, lang.split('"').next().unwrap().to_owned())
+            })
+            .collect();
+        let speaking = |language: &str| -> Vec<&str> {
+            voices
+                .iter()
+                .filter(|(_, lang)| lang == language)
+                .map(|(id, _)| id.as_str())
+                .collect()
+        };
+        assert!(speaking("en").len() >= 3, "{voices:?}");
+        assert_eq!(speaking("sl"), ["piper:sl_SI-artur-medium"]);
+
+        let mut crane = 0;
+        for (name, _, language, text) in super::PRESETS {
+            let mut lines = std::collections::BTreeMap::new();
+            for query in RECORDED_SETTINGS {
+                lines.extend(spoken_lines(text, query));
+            }
+            assert!(!lines.is_empty(), "{name}");
+            if *name == "crane-in-the-desert" {
+                crane = lines.len();
+            }
+            for (line, pace) in &lines {
+                let entry = format!(
+                    "{{\"text\":{},\"pace\":{pace},\"recordings\":{{",
+                    js_string(line)
+                );
+                let found = manifest.lines().find(|row| row.contains(&entry));
+                assert!(
+                    found.is_some(),
+                    "{name}: no recording of {line:?} at pace {pace}"
+                );
+                let found = found.unwrap();
+                for voice in speaking(language) {
+                    let after = found.split(&format!("\"{voice}\":{{\"file\":\"")).nth(1);
+                    assert!(after.is_some(), "{name}: {line:?} has no {voice}");
+                    let file = after.unwrap().split('"').next().unwrap();
+                    // The file is named for the pace it was spoken at, so audio rendered at an
+                    // older pace can never be listed as this one (scripts/readings `fileOf`).
+                    assert!(
+                        file.ends_with(&format!("-{pace}.mp3")),
+                        "{name}: {file} is not at pace {pace}"
+                    );
+                    let bytes = std::fs::metadata(dir.join(file)).map_or(0, |m| m.len());
+                    assert!(bytes > 0, "{name}: {file} is missing or empty");
+                }
+            }
+        }
+        // Counted by hand from examples/crane-in-the-desert.poem: ten lines in two stanzas, each
+        // spoken by some setting, none repeated — so ten recordings in each English voice.
+        assert_eq!(crane, 10);
     }
 
     #[test]
@@ -1250,7 +1809,7 @@ mod tests {
             })
             .collect();
         files.sort();
-        let presets: Vec<&str> = super::PRESETS.iter().map(|(name, _, _)| *name).collect();
+        let presets: Vec<&str> = super::PRESETS.iter().map(|(name, _, _, _)| *name).collect();
         assert_eq!(files, presets);
     }
 
@@ -1357,8 +1916,11 @@ mod tests {
         assert_eq!(response.status, 200, "{}", response.body);
         let body = &response.body;
         assert!(body.contains(".bank(\"RolandR8\")"), "{body}");
+        // A drum lane of ride strokes. Not "the first bar is a ride bar": 24 bars are more than
+        // a level holds, so the first element may be a group of bars (`strudel::nested`).
         assert!(
-            body.contains("s(\"<[[rd rd]"),
+            body.lines()
+                .any(|l| l.trim_start().starts_with("s(\"<") && l.contains("[rd rd]")),
             "the ride keeps time: {body}"
         );
         assert!(body.contains(".swingBy(0.330,"), "triplet swing: {body}");
@@ -1451,7 +2013,7 @@ mod tests {
 
     #[test]
     fn every_preset_compiles() {
-        for (name, _, text) in super::PRESETS {
+        for (name, _, _, text) in super::PRESETS {
             let response = super::compile(&request(&[], body_of(text)), &Output::Pattern);
             assert_eq!(response.status, 200, "{name}: {}", response.body);
         }
@@ -1535,7 +2097,7 @@ mod tests {
         let wilde = super::PRESETS
             .iter()
             .find(|(name, ..)| *name == "wilde-theocritus")
-            .map(|(_, _, text)| body_of(text))
+            .map(|(_, _, _, text)| body_of(text))
             .unwrap();
         let bars_and_cpm = |query: &[(&str, &str)]| -> (Vec<u64>, f64) {
             let response = super::compile(&request(query, wilde), &Output::Trace);
@@ -1592,7 +2154,7 @@ mod tests {
         let tyger = super::PRESETS
             .iter()
             .find(|(name, ..)| *name == "blake-tyger")
-            .map(|(_, _, text)| body_of(text))
+            .map(|(_, _, _, text)| body_of(text))
             .unwrap();
         let light = &[("set", "function-words:light")];
         let pattern = super::compile(&request(light, tyger), &Output::Pattern);
@@ -1648,6 +2210,61 @@ mod tests {
     }
 
     #[test]
+    fn long_stanzas_erode_in_the_pattern_the_explain_view_and_the_score() {
+        // Lowell's "Patterns", the preset, under the default: the pattern header and the explain
+        // view count the same 240 bars over an eroding loop, and the score measures the eroded
+        // piece. `set=long-stanzas:gradual` is the old handover — named in the explain view's
+        // list of choices — and a short poem is the same under both. `off` is refused.
+        let patterns = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "lowell-patterns")
+            .map(|(_, _, _, text)| body_of(text))
+            .unwrap();
+        let pattern = super::compile(&request(&[], patterns), &Output::Pattern);
+        let explain = super::compile(&request(&[], patterns), &Output::Explain);
+        let score = super::compile(&request(&[], patterns), &Output::Score);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(explain.status, 200, "{}", explain.body);
+        assert_eq!(score.status, 200, "{}", score.body);
+        assert!(
+            pattern
+                .body
+                .contains("//   long-stanzas = erode: 240 bar(s) over an eroding loop"),
+            "{}",
+            &pattern.body[..1500]
+        );
+        assert!(
+            explain
+                .body
+                .contains("240 bar(s) over an eroding loop (§4.6)"),
+            "{}",
+            explain.body
+        );
+        assert!(explain.body.contains("  erodes pass 1 keeps"));
+        assert!(score.body.contains("overall"), "{}", score.body);
+        let gradual = &[("set", "long-stanzas:gradual")];
+        let seed = super::compile(&request(gradual, SEED), &Output::Pattern);
+        assert_eq!(
+            seed.body,
+            super::compile(&request(&[], SEED), &Output::Pattern).body
+        );
+        let named = super::compile(&request(gradual, SEED), &Output::Explain);
+        assert!(
+            named.body.contains("long-stanzas=gradual"),
+            "{}",
+            named.body
+        );
+        assert!(
+            super::compile(
+                &request(&[("set", "long-stanzas:off")], patterns),
+                &Output::Pattern
+            )
+            .status
+                >= 400
+        );
+    }
+
+    #[test]
     fn the_straight_stack_reaches_the_pattern_the_trace_and_the_score() {
         // Wilde's Theocritus, whose bars are of three and four beats, so a `@2` inside a bar is
         // only ever a fitted long syllable. Asked for with `set=stack:straight`, the music's drum
@@ -1656,7 +2273,7 @@ mod tests {
         let wilde = super::PRESETS
             .iter()
             .find(|(name, ..)| *name == "wilde-theocritus")
-            .map(|(_, _, text)| body_of(text))
+            .map(|(_, _, _, text)| body_of(text))
             .unwrap();
         // How many syllables hold two parts, in every `call("<…>")` sequence of `text`.
         let held = |text: &str, call: &str| -> usize {

@@ -807,8 +807,10 @@ impl Score {
             .unwrap_or(0)
     }
 
-    /// What a placement sounds: its line's events — or, for a call, only those inside the call —
-    /// and the beats they span.
+    /// What a placement sounds: its line's events — or, for a call, only those inside the call;
+    /// for a line eroding under a long arrival, only those its pass keeps
+    /// ([`Cause::Eroding`](crate::arrange::Cause::Eroding)) — and the beats they span. An eroding
+    /// line keeps its whole line's beats, so what is left of it sounds where it always did.
     ///
     /// Every consumer of the arrangement goes through this, so a backend never has to know a call
     /// from a line: it renders [`Placed::events`] with each beat counted from
@@ -816,11 +818,14 @@ impl Score {
     #[must_use]
     pub fn placed(&self, placement: Placement) -> Placed<'_> {
         let bar = placement.bar().get();
-        let events: Vec<&Event> = self
+        let mut events: Vec<&Event> = self
             .events
             .iter()
             .filter(|event| event.bar.0 == bar && placement.part().covers(event.span))
             .collect();
+        if let crate::arrange::Cause::Eroding { pass } = placement.cause() {
+            crate::arrange::erode(&mut events, pass);
+        }
         let (first_beat, beats) = match placement.part() {
             Part::Line => (0, self.beats_in(bar)),
             Part::Call(_) => {
@@ -844,6 +849,17 @@ impl Score {
             beats,
             straightened: Vec::new(),
         }
+    }
+
+    /// Whether `placement` sounds `event`: its line's, inside its part, and — on a line eroding
+    /// under a long arrival — one its pass keeps. [`Placed::sounds`] without building the
+    /// placement where nothing erodes.
+    #[must_use]
+    pub fn sounds(&self, placement: Placement, event: &Event) -> bool {
+        event.bar == placement.bar()
+            && placement.part().covers(event.span)
+            && (!matches!(placement.cause(), crate::arrange::Cause::Eroding { .. })
+                || self.placed(placement).sounds(event))
     }
 
     /// What a placement sounds *in this slot*: [`Score::placed`], with each event's position in
@@ -982,6 +998,14 @@ impl<'a> Placed<'a> {
                     && own.span == event.span
             })
             .map_or(event.subdivision, |(_, fitted)| *fitted)
+    }
+
+    /// Whether the placement sounds `event` — the one test of membership every consumer uses, so
+    /// a syllable an eroding line has lost is absent from the pattern, the trace and the schedule
+    /// alike.
+    #[must_use]
+    pub fn sounds(&self, event: &Event) -> bool {
+        self.events.contains(&event)
     }
 
     /// Every event with its position here, in playing order.

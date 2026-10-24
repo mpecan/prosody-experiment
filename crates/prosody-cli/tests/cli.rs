@@ -1024,3 +1024,89 @@ fn the_stack_crosses_unless_set_straight_and_has_no_off() {
         );
     }
 }
+
+#[test]
+fn long_stanzas_erode_unless_set_gradual_and_have_no_off() {
+    // Lowell's "Patterns" (stanzas of 9 to 22 lines) erodes under the default: the pattern, the
+    // OSC schedule and the explain view all count the same 240 bars over an eroding loop (its
+    // five flourish stanzas after the second each arrive into a long loop: 3 × (15 + 16 + 22 +
+    // 10 + 17)). `long-stanzas=gradual` — or `--without long-stanzas` — is the old handover;
+    // a poem of short stanzas is the same piece under both, and says nothing new.
+    let patterns = std::fs::read_to_string(examples().join("lowell-patterns.poem")).unwrap();
+    let (erode, err, code) = run(&[], &patterns);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        erode.contains("// 284 bars from 107 lines"),
+        "{}",
+        &erode[..400]
+    );
+    assert!(
+        erode.contains(
+            "//   long-stanzas = erode: 240 bar(s) over an eroding loop — where a stanza of more \
+             than 8 lines arrives or is replaced, the old loop sounds fewer of its syllables each \
+             of 3 passes until silent, unstressed first, rhyme words last (SPEC.md §4.6)"
+        ),
+        "{}",
+        &erode[..2000]
+    );
+    // Under `gradual` the same poem is 1,331 bars and 8.6 MB, too slow for a debug test; the
+    // emitter's erosion test checks its arrangement (`prosody-emit/tests/erosion.rs`).
+    let (_, err, code) = run(&["--set", "long-stanzas=off"], &patterns);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `long-stanzas` (it has gradual, erode)"),
+        "{err}"
+    );
+
+    let (schedule, err, code) = run(&["--osc"], &patterns);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        schedule.contains(
+            "# long-stanzas = erode: 240 bar(s) over an eroding loop, whose lost syllables are \
+             not sent"
+        ),
+        "{}",
+        &schedule[..400]
+    );
+    let (view, err, code) = run(&["--explain"], &patterns);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        view.contains("240 bar(s) over an eroding loop (§4.6)"),
+        "{view}"
+    );
+    // "My dress is richly figured," — stanza 2's first line, eroding under stanza 3. By hand,
+    // from its rows: My, dress, is, rich- stressed; -ly unstressed; fig- stressed and -ured
+    // unstressed, the rhyme word. Seven syllables keep ⌈7·3/4⌉ = 6, ⌈7/2⌉ = 4, ⌈7/4⌉ = 2. Pass 1
+    // loses -ly (the one unstressed syllable outside the rhyme word); pass 2 also My and dress
+    // (the earliest stresses); pass 3 also is and rich-, leaving "figured", whole.
+    assert!(
+        view.contains(
+            "  erodes pass 1 keeps 6 of 7 · pass 2 keeps 4 · pass 3 keeps 2: figured \
+             (unstressed first, rhyme words last, §4.6)"
+        ),
+        "{view}"
+    );
+
+    let tyger = std::fs::read_to_string(examples().join("blake-tyger.poem")).unwrap();
+    let (default, _, _) = run(&[], &tyger);
+    let (old, _, _) = run(&["--set", "long-stanzas=gradual"], &tyger);
+    assert_eq!(default, old);
+    let (without, _, _) = run(&["--without", "long-stanzas"], &tyger);
+    assert_eq!(without, old);
+    assert!(!default.contains("long-stanzas"));
+    // And the eroded pattern is JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-long-stanzas-erode.js");
+        std::fs::write(&file, &erode).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}

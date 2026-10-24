@@ -267,6 +267,7 @@ pub struct AnnotatedLine {
     harmony: Option<Harmony>,
     bass: Vec<(Syllable, BassNote)>,
     straightened: Vec<(usize, Straightened)>,
+    erosion: Vec<Vec<Span>>,
     tokens: Vec<Annotation>,
 }
 
@@ -342,6 +343,14 @@ impl AnnotatedLine {
         &self.straightened
     }
 
+    /// What the line keeps on each pass of an erosion, from pass 1 — the spans of the syllables
+    /// still sounding, in playing order (`crate::arrange`'s erosion, `SPEC.md` §4.6) — or nothing
+    /// when the line never erodes: only a stanza whose loop a long arrival wore away does.
+    #[must_use]
+    pub fn erosion(&self) -> &[Vec<Span>] {
+        &self.erosion
+    }
+
     /// Its tokens, in source order.
     #[must_use]
     pub fn tokens(&self) -> &[Annotation] {
@@ -363,6 +372,9 @@ pub struct Annotated {
     function: Variant,
     /// [`Score::lightened`]: the syllables the light function words struck lightly.
     lightened: usize,
+    /// [`Arrangement::eroding`](crate::arrange::Arrangement::eroding): the bars played over an
+    /// eroding loop.
+    eroding: usize,
     lengths: Vec<usize>,
 }
 
@@ -402,6 +414,12 @@ impl Annotated {
     #[must_use]
     pub const fn lightened(&self) -> usize {
         self.lightened
+    }
+
+    /// How many bars play over a loop eroding under a long stanza's arrival (`SPEC.md` §4.6).
+    #[must_use]
+    pub const fn eroding(&self) -> usize {
+        self.eroding
     }
 
     /// Every bar length of the piece, in beats, smallest first, once each: what the pulse
@@ -530,6 +548,7 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
                             .filter_map(|event| Some((syllable(event), event.bass()?)))
                             .collect(),
                         straightened: straightened_of(score, index),
+                        erosion: erosion_of(score, index),
                         tokens,
                     }
                 })
@@ -550,18 +569,22 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         straightened_beats: score.straightened_beats(),
         function: score.function(),
         lightened: score.lightened(),
-        lengths: {
-            let mut lengths: Vec<usize> = score
-                .arrangement()
-                .slots()
-                .iter()
-                .map(|slot| slot.beats().max(1))
-                .collect();
-            lengths.sort_unstable();
-            lengths.dedup();
-            lengths
-        },
+        eroding: score.arrangement().eroding(),
+        lengths: bar_lengths(score),
     }
+}
+
+/// Every bar length of the piece, in beats, smallest first, once each.
+fn bar_lengths(score: &Score) -> Vec<usize> {
+    let mut lengths: Vec<usize> = score
+        .arrangement()
+        .slots()
+        .iter()
+        .map(|slot| slot.beats().max(1))
+        .collect();
+    lengths.sort_unstable();
+    lengths.dedup();
+    lengths
 }
 
 /// Where an event sounds, as the view shows it.
@@ -678,6 +701,18 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             annotated.lightened()
         );
     }
+    // The erosion of long stanzas (§4.6), named only where it happened: a piece whose stanzas
+    // are all eight lines or fewer is transformed a line a pass under either variant.
+    if annotated.eroding() > 0 {
+        let _ = writeln!(
+            out,
+            "long-stanzas erode · a long stanza's arrival thins the old loop out over {} passes \
+             until silent, unstressed syllables first, rhyme words last: {} bar(s) over an eroding \
+             loop (§4.6)",
+            crate::arrange::EROSION_PASSES,
+            annotated.eroding()
+        );
+    }
     let _ = writeln!(out);
 
     for (index, stanza) in annotated.stanzas().iter().enumerate() {
@@ -712,6 +747,9 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             );
             if !line.sounds().is_empty() {
                 let _ = writeln!(out, "  sounds {}", describe_sounds(line.sounds()));
+            }
+            if !line.erosion().is_empty() {
+                let _ = writeln!(out, "  erodes {}", describe_erosion(source, line));
             }
             if let Some(harmony) = line.harmony() {
                 for row in describe_harmony(harmony) {
@@ -970,6 +1008,64 @@ fn sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
         .collect()
 }
 
+/// What a source bar keeps on each pass of an erosion, if it erodes anywhere in the piece: the
+/// spans of its surviving syllables, pass by pass — the arrangement's own rule, applied to the
+/// line's own events, so the view and the music cannot disagree.
+fn erosion_of(score: &Score, bar: usize) -> Vec<Vec<Span>> {
+    let erodes = score.arrangement().slots().iter().any(|slot| {
+        slot.placements().iter().any(|placement| {
+            placement.bar().get() == bar && matches!(placement.cause(), Cause::Eroding { .. })
+        })
+    });
+    if !erodes {
+        return Vec::new();
+    }
+    let events: Vec<&Event> = score
+        .events()
+        .iter()
+        .filter(|event| event.bar().get() == bar)
+        .collect();
+    (1..=crate::arrange::EROSION_PASSES)
+        .map(|pass| {
+            let mut kept = events.clone();
+            crate::arrange::erode(&mut kept, pass);
+            kept.iter().map(|event| event.span()).collect()
+        })
+        .collect()
+}
+
+/// `pass 1 keeps 6 of 8 · pass 2 keeps 4 · pass 3 keeps 2: stop, Death`: how a line thins out,
+/// and the words that are the last of it.
+fn describe_erosion(source: &str, line: &AnnotatedLine) -> String {
+    let total = line
+        .tokens()
+        .iter()
+        .map(|token| token.syllables().len())
+        .sum::<usize>();
+    let mut parts = Vec::new();
+    for (index, kept) in line.erosion().iter().enumerate() {
+        let pass = index + 1;
+        parts.push(if index == 0 {
+            format!("pass {pass} keeps {} of {total}", kept.len())
+        } else {
+            format!("pass {pass} keeps {}", kept.len())
+        });
+    }
+    let mut last: Vec<&str> = Vec::new();
+    let mut previous = None;
+    for span in line.erosion().last().into_iter().flatten() {
+        if previous != Some(*span) {
+            last.push(span.text(source).unwrap_or("<lost>"));
+        }
+        previous = Some(*span);
+    }
+    format!(
+        "{}: {} (unstressed first, rhyme words last, §4.6)",
+        parts.join(" · "),
+        last.join(", ")
+    )
+}
+
 /// Every beat of a source bar the straight stack fitted to a host, by slot ([`Score::placed_in`]).
 fn straightened_of(score: &Score, bar: usize) -> Vec<(usize, Straightened)> {
     score
@@ -1035,7 +1131,7 @@ fn bass_sounds_of(score: &Score, bar: usize) -> Vec<(usize, Cause)> {
 fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
     // Each cause's name, and whether a cause is that one — with its pass, where it has one.
     type Select = fn(Cause) -> Option<Option<usize>>;
-    let kinds: [(&str, Select); 9] = [
+    let kinds: [(&str, Select); 10] = [
         ("stated", |c| matches!(c, Cause::Stated).then_some(None)),
         ("overruling", |c| {
             matches!(c, Cause::Overruling).then_some(None)
@@ -1046,6 +1142,10 @@ fn describe_sounds(sounds: &[(usize, Cause)]) -> String {
         }),
         ("yielding", |c| match c {
             Cause::Yielding { pass } => Some(Some(pass)),
+            _ => None,
+        }),
+        ("eroding", |c| match c {
+            Cause::Eroding { pass } => Some(Some(pass)),
             _ => None,
         }),
         ("looping", |c| matches!(c, Cause::Looping).then_some(None)),

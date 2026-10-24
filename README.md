@@ -80,10 +80,17 @@ the browser's voice reports its words), so the voice and the music stay legible 
 the music colours the letters, the voice lights what lies behind them. Keep typing while it plays:
 the verse goes plain for the moment it takes to recompile, then lights again.
 
-Beside it, every panel folds away and the page remembers which: the **roll** (Strudel's own piano
-roll, `@strudel/draw`, showing a set number of bars — poem lines — with faint lines where one bar
-hands over to the next), the **palette**, the **mappings** A and B, the **reading**, and the
-pattern, annotation and score views.
+Everything you set lives in **folders along the bottom edge**, the same on a phone and on a desk:
+the **Roll** (Strudel's own piano roll, `@strudel/draw`, showing a set number of bars — poem lines —
+with faint lines where one bar hands over to the next), **Sound** (the palette), **Mappings** (A and
+B), **Reading** and **Under the hood** (the pattern, what each word became, and the score). A tab
+opens its folder over the lower part of the page, another tab swaps it, the open one's tab closes
+it; the page remembers which was open. The page opens with a welcome — what *prosody* means and what
+this experiment does — which stays closed once closed (**about** reopens it); it follows the
+system's light or dark setting, or the reader's choice (the ◐ button). A neural voice is never
+downloaded unasked: the first time one is chosen the page says how big it is and asks, then shows
+its download with a progress bar, Hide and Cancel. Until then, and by default, the recorded
+readings read.
 
 The lighting is `SPEC.md` §8's traceability made visible: every lit syllable is the span the sound
 came from. The page gets it from `/trace` (`prosody_emit::trace`), a silent pattern of syllable ids
@@ -122,8 +129,9 @@ header asks for (the defaults when it has none).
 
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
 review (the held and refrain lanes, the bass, the stanza period, the outro, the harmony, the
-reading, the pulse, the stack, the function words), each a selector of named variants — always
-including `off`, except the pulse, the stack and the function words, which no piece can be without
+reading, the pulse, the stack, the function words, the long stanzas), each a selector of named
+variants — always including `off`, except the pulse, the stack, the function words and the long
+stanzas, which no piece can be without
 — with one menu per setting,
 A and B. The held and refrain lanes, the stanza period and the outro are `off`/`on`; the bass is
 `off`, `height` (its default), `syllables` or `feet` (see [the walking bass](#the-walking-bass));
@@ -131,20 +139,25 @@ the harmony is `off` (its default), `rhyme`, `cadence` or `both` (see
 [the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives`, `stanza` or `breath` (its default); the pulse
 is `elastic` or `steady` (its default; see [the pulse](#the-pulse)); the stack is `crossing` (its
 default) or `straight` (see [stacked lines](#stacked-lines-crossing-or-straight)); the function
-words are `full` (their default) or `light` (see [function words](#function-words-full-or-light)).
+words are `full` (their default) or `light` (see [function words](#function-words-full-or-light));
+the long stanzas are `gradual` or `erode` (their default; see
+[long stanzas erode](#long-stanzas-erode)).
 A starts with every mapping at its default (marked "(default)" in the menu), B with every one at its
-first variant — `off`, for the pulse `elastic`, for the stack `crossing` and for the function words
-`full`, the way the page played
-before; a menu not at its default
+first variant — `off`, for the pulse `elastic`, for the stack `crossing` and for the function
+words `full`, the way the page played before — except the long stanzas, which B starts at `erode`
+as A does: `gradual` is the quadratic arrangement erosion replaced ("Patterns" under it is 1,314
+bars and a 4 MB pattern, which costs every edit seconds more to compile, score and prepare), so
+choose it when you want to hear it; a menu not at its default
 has a bold border. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
 adds. The **Score A vs B** tab measures both settings side by side (see [Measuring it](#measuring-it))
 with the difference between them, under the machine, jazz or interest profile. The page remembers
 your two settings.
 
-Under the mappings is **Reading — the poem spoken over the music**: the voice and the duck. Whether
-and when lines are read is the `reading` mapping above. Under `breath`, the default, each stanza
-is read through in your browser's own voice (`speechSynthesis`), one line a bar, in order; it
+Under the mappings is **Reading — the poem spoken over the music**: who reads, in what language and
+voice, at what pace and level, and the duck. Whether and when lines are read is the `reading`
+mapping above. Under `breath`, the default, each stanza is read through, in order; at the fitted
+pace one line a bar (at the natural pace, below, a line after the last); it
 starts in the bar where the music first plays its first line — or one silent bar after the previous
 stanza's last line, if that is later — so lines within a stanza are always a bar apart, two stanzas
 always have at least one silent bar between them, and a stanza is never read before the music has
@@ -162,11 +175,37 @@ pass, five bars apart in The Tyger under `arrives`) is read straight through whi
 still turning into it, with no pause after the stanza before it. Under `off`, nothing is read.
 Strudel's own clock fires each line, so it stays on the bar; a line still being spoken when the
 next is due is cut off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
-0.6–1.6. Pick a voice from the menu (the page remembers it), and untick **duck** to stop the music
-dipping while a line is read. The Pattern tab shows the cue pattern under the music's, and the
-browser console logs every line as it is cued: which bar, which bytes, which rate. Picking a
+0.6–1.6 — at the **fitted** pace. The default pace is **natural**: each line at the voice's own
+speed, a little faster or slower line by line (0.92–1.08, from the line's own seed), the next after
+a pause from how the line ends (0.25 s running on, 0.45 s at a comma, 0.8 s at a full stop, 1.5 s
+at a stanza's end), and a stanza starting where the music begins it — or, if the last stanza's
+voice ran on, on the first bar after one whole silent bar. Switch **Pace** to compare by ear. Pick
+an **engine**: Kokoro-82M (the default — 92 MB, downloaded on your first play, on WebGPU where your
+browser has it, WebAssembly otherwise), Piper (many languages, Slovenian among them; about 60 MB a
+voice), Kitten TTS nano (24 MB, WebGPU only), **recorded readings** (the example poems spoken
+ahead of time, a few kB a line, in four voices — see [Recorded readings](#recorded-readings); a line
+you edit has no recording and is read live, which the status bar says) or your browser's own voice (instant, and what reads
+while a model downloads, or if one fails to load or stops working — the status bar says so in red;
+choose the engine again to retry). Each download shows its progress in the status bar
+and is kept by the browser; every line is rendered ahead after each compile, the line due next
+first, and started exactly on the music's clock. A line the reading leaves out — the piece came
+round, or ended, before its turn — is said in the status bar. At the fitted pace a rendered line too long for its bar is rendered again,
+faster, to fit. An example poem sets its own **language** — Prešeren's Zdravljica is read in
+Slovenian, which only Piper (`sl_SI-artur-medium`) and perhaps your browser can speak. The page
+remembers the engine, pace, level and a voice per engine and language; untick **duck** to stop the
+music dipping while a stanza is read. Add `?device=wasm` to the page's address to keep every
+engine off WebGPU. The Pattern tab shows the cue pattern under the music's, and the
+browser console logs every line as it is cued and started: which bar, which bytes, which rate or
+pace, which engine, and how late if a render was. Picking a
 preset or switching A/B while playing starts the piece again from bar 1, so the reading begins at
 the first line. A live edit keeps playing from where it is, and the reading carries on from there.
+If Strudel's scheduler ever falls behind — it skips a tick it reaches too late, and every note and
+cue in that tick is lost, saying so only on the console — the status bar says so in red:
+`Strudel fell behind: 58 tick(s) not played, their notes unheard; not read: line 10`.
+Nothing the page does should cause that: it parses a new pattern's mini-notation ahead, a few
+milliseconds at a time between the scheduler's ticks, and remembers what it has parsed, so a live
+edit to "Patterns" while it plays — about 1,200 strings, a second to parse — swaps in the new
+version without a gap (an edit changes only the strings of the voices it touches).
 It is a
 candidate mapping and a page-only one — the CLI's pattern and strudel.cc know nothing of it
 (`SPEC.md` §4.7).
@@ -189,12 +228,16 @@ python3 -m http.server -d target/site    # or any static host; then open http://
 
 It is the same page with the same controls, and it answers itself: every request the served page
 sends to `prosody-web` goes to `prosody_bg.wasm` instead (`crates/prosody-wasm`, bound to the
-page by `wasm-bindgen`). It can be put on any
+page by `wasm-bindgen`), running in two Web Workers — one for what plays, one for the scores — so
+compiling and scoring never hold up the music. It can be put on any
 static host (GitHub Pages, a bucket), and since it compiles in the visitor's browser, nothing on
 the host runs arbitrary input. The compiler is about 5 MB, about 1 MB compressed — nearly all of
 it the pronouncing dictionary — and the first compile takes a moment while the dictionary loads.
 Opening `index.html` straight from disk does not work: browsers refuse to fetch a file beside a
-`file://` page.
+`file://` page. The reading's neural voices run from `speech-worker.mjs` beside the page, a
+module worker that loads each engine from a CDN, so they work the same on a static host
+(Cloudflare Pages included); the host needs no special headers. The recorded readings are copied in too, as
+`readings/` beside the page.
 
 `./scripts/check-wasm.sh` builds both and checks that the browser build answers every view of every
 example, under several palettes and mapping choices, byte for byte as the native server does —
@@ -202,6 +245,53 @@ invariant I1 across targets. It needs node. Building needs the `wasm32-unknown-u
 the `llvm-tools` component, which `rust-toolchain.toml` asks rustup for, and the `wasm-bindgen`
 CLI at exactly the crate's version, which the script installs into `target/tools` the first time
 (leaving any other `wasm-bindgen` on your PATH alone).
+
+**Deploying it.** The static page is published at [prosody.rocks](https://prosody.rocks) as an
+assets-only Cloudflare Worker (`wrangler.jsonc`): no server code, since every request is answered in
+the visitor's browser. `./scripts/deploy.sh` checks that the browser build answers as the native one
+(`check-wasm.sh`), rebuilds `target/site` from empty and runs `wrangler deploy`; `--dry-run` does
+everything but the upload. Wrangler comes from mise (`mise.toml`) and must be logged in to the
+account that holds the `prosody.rocks` zone (`mise exec -- wrangler login`). The custom domain makes
+its own DNS record and certificate on the first deploy. `www.prosody.rocks` is a second custom domain that
+only ever redirects: a tiny worker in front of the files (`deploy/worker.js`) sends `http://` and
+`www` to `https://prosody.rocks` for good (301), path kept, and every https answer carries a
+one-year HSTS header; `deploy/check-worker.mjs` checks this before each deploy.
+`mise exec -- wrangler dev` serves the built site locally through the same runtime.
+
+### Recorded readings
+
+`examples/readings/` holds every line of every example poem spoken ahead of time — each line any
+variant of the reading can speak, at its own natural pace — in four voices: Kokoro `af_heart`
+(American, female), Kokoro `bm_george` (British, male) and Piper `en_GB-cori-medium` (British,
+female) for the English poems, Piper `sl_SI-artur-medium` for Prešeren. One MP3 a line and voice
+(mono, 32 kbit/s), named by the voice, a hash of the line's exact text and the pace it was
+spoken at (`kokoro-af_heart/<key>-0.950.mp3`), and `manifest.json`
+listing them; choose **recorded readings** as the engine, and the voice menu lists the voices that
+have recordings of the poem in front of you. `prosody-web` serves them from the checkout
+(`--readings DIR` for another place), and `./scripts/build-site.sh` copies them into the site.
+
+They are made on your own machine by `scripts/readings/`, a small Node package kept out of the
+Rust workspace, which runs the page's own `speech-worker.mjs` in headless Chromium — so a
+recording is the same voice, model and phonemiser as the live engine — and encodes with ffmpeg:
+
+```sh
+./scripts/build-site.sh                       # the compiler as WebAssembly, which the tool asks
+cd scripts/readings && npm ci                 # playwright-core 1.64.0, the only dependency
+npx playwright-core install chromium          # once, if Chromium 1248 is not already there
+node render.mjs                               # renders what is missing, removes what nothing wants
+node render.mjs --poem blake-tyger --voice kokoro:bm_george --force   # just those, again
+node render.mjs --check                       # renders nothing; fails if anything is missing or stale
+npm test                                      # the tool's own tests
+```
+
+It needs node 20 or later, ffmpeg built with libmp3lame (`brew install ffmpeg`), and the network
+(the engines' code from jsDelivr, the models from Hugging Face; Kokoro's full-precision model is
+326 MB, kept in `scripts/readings/.profile/`). Re-render after changing an example poem, or anything
+that changes which lines the reading speaks or their pace: `cargo test` checks the committed set
+against the compiler and fails until you do. A pace changed with no text changed is a new file
+name, so `node render.mjs` renders the lines again at their new pace and removes the old audio,
+rather than keeping it under the new pace. Adding a voice is a line in `scripts/readings/lib.mjs`
+`VOICES` — check its licence first (below).
 
 ### Path B — Strudel, by hand
 
@@ -332,12 +422,14 @@ machine profile's.
 (default `height`), `harmony` takes `off`, `rhyme`, `cadence` or `both` (default `off`), `reading`
 takes `off`, `arrives`, `stanza` or `breath` (default `breath`), `pulse` takes `elastic` or `steady`
 (default `steady`), `stack` takes `crossing` or `straight` (default `crossing`), `function-words`
-takes `full` or `light` (default `full`) — for the pattern
+takes `full` or `light` (default `full`), `long-stanzas` takes `gradual` or `erode` (default
+`erode`) — for the pattern
 and for `--score` alike;
 an unknown name or variant
 is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`
-(`--without pulse` is `pulse=elastic`, `--without stack` is `stack=crossing` and
-`--without function-words` is `function-words=full`: none of them has an `off`).
+(`--without pulse` is `pulse=elastic`, `--without stack` is `stack=crossing`,
+`--without function-words` is `function-words=full` and `--without long-stanzas` is
+`long-stanzas=gradual`: none of them has an `off`).
 `--explain` lists every choice that is not a default. The reading is not in the CLI's pattern, so
 `reading=…` changes only that list. `./scripts/cycle.sh machine bass` scores every example without
 the bass, and `./scripts/cycle.sh machine bass=off,period=off` passes its list to `--set` (any list
@@ -436,6 +528,39 @@ schedule name `light` and count the syllables (The Tyger 24, the Sonnet 24, Whit
 15, Poe 13, Hopkins 9, Jabberwocky 7, Wilde 4, Prešeren 0 — Slovenian matches no English function
 word); `--explain` marks each light row `function-words`.
 
+### Long stanzas erode
+
+*Decided by the user: `erode` is the default; `gradual` is what preceded it* (`SPEC.md` §4.6,
+`--set long-stanzas=…`, or the `long-stanzas` menu on the page). A stanza arriving into a running
+loop replaces it one line a pass, so a stanza of *n* lines takes about *n* passes of *n* bars —
+Lowell's "Patterns" (stanzas of 9 to 22 lines) arranged into 1,331 bars and an 8.6 MB pattern.
+
+- **`erode`** — where either stanza has **more than eight lines**, the old loop is not replaced: it
+  keeps looping under the arriving stanza, from its first line, and thins out over **three passes**
+  (each pass one statement of the arriving stanza) until it is silent. On pass *p* an eroding line
+  of *k* syllables keeps ⌈k·(4−p)/4⌉ of them — three quarters, a half, a quarter. Unstressed
+  syllables go first, then secondary and then primary stresses, and the rhyme word — the line's
+  last word — last; within each, the earlier syllable first, so what is left of a line is its end.
+  The rule reads only the line's own syllables. Stanzas of eight lines or fewer are transformed a
+  line a pass, as before, so every other example is the piece it was. "Patterns" is now 284 bars
+  and a 0.9 MB pattern.
+- **`gradual`** — every arrival is a line-by-line transformation, however long.
+
+A lost syllable is simply absent — from the drums, the melody, the bass, the trace's lit poem, the
+OSC schedule and the scorer alike — and every syllable that still sounds keeps its span. The
+pattern's header, the OSC schedule and `--explain` count the bars over an eroding loop
+(`long-stanzas = erode: 240 bar(s) over an eroding loop` in "Patterns"), and `--explain` shows each
+eroding line's thinning (`erodes pass 1 keeps 6 of 7 · pass 2 keeps 4 · pass 3 keeps 2: figured`).
+The reading reads the arriving stanza where it is stated, and never reads an eroding line again.
+
+A piece of more than 16 bars is written in groups (`strudel::nested`): runs of rests joined into
+one rest as long, then bars bracketed sixteen at a time (`<[a@3 b@4 …]@58 …>`). The same notes at
+the same times — every hap of every example's whole loop compared under the page's Strudel — but
+Strudel visits every element of a sequence on every query, and the flat 284-bar sequence cost more
+per scheduler tick than a tick lasts: the page played about a sixth of "Patterns". Grouped, it
+plays all of it (a query costs 3.9 ms instead of 49 ms). The text of the 13 examples over 16 bars
+changed with it; nothing they play did.
+
 ### The harmony layer
 
 *A candidate, off by default* (`SPEC.md` §4.6, `--set harmony=…`, or the `harmony` menu on the
@@ -529,6 +654,7 @@ The rest of the header, every key optional:
 |---|---|---|
 | Per-stanza metrical regularity | foundation layer (pulse) vs flourish (ornament) | §4.1 |
 | A stanza, once stated | keeps looping until the next stanza of its layer transforms it, bar by bar | §4.6 |
+| A stanza of more than eight lines arriving, or being replaced | the old loop erodes under the new stanza: fewer of its syllables each of three passes, unstressed first, rhyme words last, then silence | §4.6 |
 | A stanza's longest line | the length of every bar the stanza plays in; shorter lines rest | §4.6 |
 | The end of the poem | the loops play one more pass — an outro — and stop | §4.6 |
 | A stanza made only of refrains | stops every loop and drops in alone, like a chorus | §4.6 |
@@ -615,6 +741,31 @@ design, not a bug fix.
 
 ---
 
+## Voices and their licences
+
+The reading's neural voices are not part of this repository: the page loads each from a CDN at an
+exact version, and its model from Hugging Face, only when you choose it.
+
+| Engine | Code (version, licence) | Model and voices (licence) |
+|---|---|---|
+| Kokoro | kokoro-js 1.2.1 (Apache-2.0), bundling Transformers.js 3.5.1 (Apache-2.0) and phonemizer.js (Apache-2.0, around espeak-ng, GPL-3.0) | Kokoro-82M v1.0, `onnx-community/Kokoro-82M-v1.0-ONNX` (Apache-2.0), voices included |
+| Piper | onnxruntime-web 1.18.0 (MIT); the espeak-ng phonemiser module of @mintplex-labs/piper-tts-web 1.0.5 (MIT) with @diffusionstudio/piper-wasm 1.0.0 (MIT; espeak-ng data, GPL-3.0) | `rhasspy/piper-voices` at revision `5041a7a`; each voice's licence is its `MODEL_CARD`: `en_GB-cori-medium` (the English default) is trained on public-domain LibriVox readings, `sl_SI-artur-medium` (Slovenian) on the ARTUR corpus under CC BY 4.0; several others are non-commercial (`en_US-lessac-*`, Blizzard 2013 licence; `en_US-ryan-*` and `en_US-hfc_*`, CC BY-NC-SA 4.0) — check a voice's card before using what it reads |
+| Kitten | kitten-tts-webgpu 0.1.1 (MIT; its phonemiser carries espeak-ng data, GPL-3.0) | Kitten TTS nano 0.8 int8, `KittenML/kitten-tts-nano-0.8-int8` (Apache-2.0) |
+| browser | your browser's `speechSynthesis` | your operating system's voices, under its terms |
+
+The **recorded readings** in `examples/readings/` *are* in this repository: speech made with the
+voices above from the public-domain example poems, and shipped with the site. Each was chosen for a
+licence that allows it:
+
+| Recorded voice | Made with | Licence of the voice |
+|---|---|---|
+| `kokoro:af_heart`, `kokoro:bm_george` | kokoro-js 1.2.1, Kokoro-82M v1.0 full precision (fp32) on WebGPU | Apache-2.0 (the model and its voices) |
+| `piper:en_GB-cori-medium` | onnxruntime-web 1.18.0, `rhasspy/piper-voices` at `5041a7a` | the voices repository is MIT; the voice's `MODEL_CARD` gives its dataset as LibriVox, public domain |
+| `piper:sl_SI-artur-medium` | the same | the voices repository is MIT; trained on the ARTUR corpus (`ppisljar/artur_studio_tts`), CC BY 4.0 — attribution: the ARTUR speech corpus, voice trained by ppisljar |
+
+`manifest.json` repeats each voice's licence. The tool's one dependency, playwright-core 1.64.0,
+is Apache-2.0, and is used only on the machine that renders.
+
 ## Development
 
 ```sh
@@ -626,3 +777,14 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 All four must pass. Check the exit code, not the summary text —
 [`CLAUDE.md`](CLAUDE.md) §3 explains why that warning is there.
+
+## Contact
+
+Questions, poems that should be in it, ideas: [me@prosody.rocks](mailto:me@prosody.rocks).
+
+## Licence
+
+The code is under the [MIT licence](LICENSE). What it bundles keeps its own terms: the CMU
+Pronouncing Dictionary (`crates/prosody-cmudict/data/LICENSE`), the example poems (public domain;
+each file names its source), and the voices and models listed under
+[Voices and their licences](#voices-and-their-licences).

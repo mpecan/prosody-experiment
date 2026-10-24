@@ -406,6 +406,493 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The page for everyone: folders, a welcome, light and dark, downloads asked about
+
+Before publishing at prosody.rocks, the page was reworked to work on a phone as on a desk, to say
+plainly that it is an experiment, and to be more playful. Nothing the compiler does changed.
+
+- **Folders along the bottom edge** replace the right-hand column of panels: Roll, Sound, Mappings,
+  Reading, Under the hood, each a paper folder whose tab sticks up in one of the five layer colours.
+  One open at a time; it slides up over the lower part of the page; remembered. The poem has the
+  page. Checked at 1280–1440 and 390 px: no sideways scroll (the page grid's column is pinned to
+  the viewport — it had sized itself to the row of tabs), the poem keeps ~180 px with a folder open
+  on a phone.
+- **What it is:** "prosody" set in the lit poem's colours, syllable by syllable, with an "an
+  experiment" tag; a dismissible line under the bar; and a **welcome** dialog on a first visit — the
+  dictionary entry for *prosody*, what the experiment does, the source on GitHub and
+  me@prosody.rocks — reopened by "about".
+- **Light and dark**: the system's choice by default, or the reader's (◐ cycles auto, light, dark),
+  applied in the head so it never flashes. Every colour is a token; in light mode the lit syllables
+  are the layer colours mixed toward black (`--lit-strength`), since the tints are made for a dark
+  ground; the roll stays a dark screen in both.
+- **No download unasked:** the default reading engine is now the recorded readings (no model). The
+  first time Kokoro, Piper or Kitten is chosen, a dialog says the size (Kokoro's by the device it
+  will use: about 90 MB compact, 330 MB on WebGPU) and asks; accepting opens a loader with the
+  engine's own progress, Hide and Cancel — Cancel terminates the worker (a new `cancel()` on the
+  worker engines), keeps the voice there was, and says so. The loader stays until the voice has
+  rendered the poem's first line, so that line is ready before Play (Piper fetches each voice with
+  its first line). The instruments get the same loader on the first Play.
+- **The Play button beats** with the piece under the steady pulse (the trace's cycles a minute are
+  its beats a minute); still under elastic and with reduced motion.
+- The "stanza 1 never read" seen on the deploy branch's engines commit does not reproduce on this
+  branch (the render queue was reworked by the recordings step): on Naidu with Piper cold, line 1
+  read 7 s late (its voice's download), the rest in time.
+- Zdravljica's recordings re-rendered for the full poem (52 lines, Piper Slovenian); 1,025
+  recordings, 9.3 MB.
+
+### Recorded readings — review: a recording fetched at the natural pace is fitted at the fitted pace
+
+A second review of the uncommitted recordings. `SPEC.md` §4.7 ("Engines", `recorded`; the fitted
+pace's refit).
+
+- **The bug.** A recording plays at its own speed (the line's pace) under both paces, so its render
+  key, `recorded|voice|pace|text`, is the same at natural and at fitted. A line fetched at the
+  natural pace was cached with no bar `room`. When the fitted pace asked for it, `whenRendered`
+  returned the cached buffer and never called `afterRender` with the cue's room, so no refit was
+  made. Dunbar's line 10 (3.140 s of speech for a 2.267 s bar) ran 0.47 s past its bar and lost
+  "our cries" at the line 11 cue. Live engines did not hit this, because their fitted speed is
+  the cue's rate, which gives a different key.
+- **The fix.** When `whenRendered` is asked with a room, it calls `fitWhenRendered` before it
+  returns. For a buffer already cached, that runs `afterRender` at once. For a fetch still in
+  flight, it runs `afterRender` when the fetch resolves. For a live job still queued without a
+  room, it gives the job the room. A key that has already been refitted is skipped.
+- **Checked in a browser,** on the served page and on the static site. With recorded George at
+  natural, Dunbar's 23 recordings were fetched first; then the pace was switched to fitted and
+  the poem played. The page logged "rendering again" for lines 7, 10 and 11 (refitted to 1.135,
+  1.274 and 1.071), played the refitted buffers, and said "past its bar" for no line. The earlier
+  checks still pass: the edited line falls back, switching voices works, and there are no
+  console errors.
+
+### Recorded readings — review: a file is named for its pace, the manifest at startup
+
+A review of the uncommitted recordings. `SPEC.md` §4.7 ("Engines", `recorded`).
+
+- **A changed pace rule no longer relabels old audio.** A file was named by voice and text only, and
+  only missing files were rendered, so after a pace rule changed (no text changed) `node render.mjs`
+  — as the README said to run — rendered nothing and rewrote the manifest with the new paces: the
+  test, `--check` and the page were all satisfied, and the page played old-pace audio as if at the
+  new pace (rate = speed / pace = 1), with no resampling and no warning. Now a file is
+  `<key>-<pace>.mp3` (`lib.mjs` `fileOf`, pace to the manifest's three places): a new pace wants new
+  files, the old are left over (removed; `--check` fails on both), and the Rust test asserts each
+  listed file's name carries its line's pace. The 976 committed files were renamed from the
+  manifest's paces (which the test had already checked against the compiler); `node render.mjs` then
+  had 0 to render and `--check` passes. Checked by moving one file to another pace: `--check` names
+  it missing and left over; a manifest naming a file at another pace fails the Rust test
+  ("kokoro-af_heart/027269a22bdb16b2-0.950.mp3 is not at pace 0.990").
+- **The Rust test's total is gone.** `323 * voices + 7` was the tool's own count, not worked by hand;
+  in its place, Crane's "In the desert" is counted by hand (ten lines, each spoken).
+- **A returning reader of the recordings has the manifest at once.** With `recorded` saved, the
+  manifest (121 kB, no model) is fetched at startup rather than at the first Play, so the saved
+  voice is listed and line 1 of the first play is read from its file, not by the browser voice.
+  Before it loads, the menu lists the saved voice (or the default) by id.
+- **A side that reads nothing says so** in the recorded voice menu ("this side reads nothing")
+  instead of "(0 of 0 lines recorded)".
+
+### Recorded readings — the examples spoken ahead of time, a fifth engine
+
+The user decided: make pre-recorded versions of the readings on this machine and ship them with the
+site (to be hosted on Cloudflare), above all for browsers where the in-browser engines do not work,
+with a set of alternative voices. `SPEC.md` §4.7 ("Engines", `recorded`).
+
+- **The tool, `scripts/readings/`** — a Node package (one dependency, playwright-core 1.64.0,
+  Apache-2.0, published 2026-10-07, zero dependencies of its own; lockfile committed; kept out of the
+  Rust workspace). Node rather than Python because the point is that a recording is the *same voice*
+  as the live engine: it runs the page's own `speech-worker.mjs` in headless Chromium (1248, the
+  revision playwright-core 1.64.0 names), so Kokoro, Piper, their models and their phonemisers are
+  exactly the page's; a Python port (kokoro's misaki G2P, piper-tts's native phonemiser) would be
+  another pronunciation. playwright-core replaces nothing — driving a browser's WebGPU and module
+  workers by hand over the DevTools protocol is not reasonable. It asks the site's WebAssembly
+  compiler (as `check-wasm.mjs` does) for `/presets.json` (new: the presets with their language, one
+  source for it) and for each preset's `/reading` under `breath`, `arrives`, `stanza`, outro off,
+  and outro off + `arrives`, takes every line any of them speaks with its natural pace (a pace that
+  differs between settings throws), renders it in each voice of the poem's language at that pace
+  (baked in), and encodes MP3 with ffmpeg (mono, 32 kbit/s, the voice's rate, bit-exact flags, no
+  tags). Files are `<engine>-<voice>/<key>.mp3`, key = first 16 hex of SHA-256 of the line's UTF-8
+  text; the manifest (deterministic, sorted, a line of the file per voice and per line) carries
+  each line's text, pace and each voice's file and length, and each voice's licence and what it was
+  rendered on. Incremental (only missing files unless `--force`), prunes files nothing wants,
+  `--check` renders nothing and fails on anything missing, left over or a stale manifest. A per-line
+  timeout restarts the browser: on the first full run Kokoro on WebGPU stopped answering after 385
+  lines; in a fresh browser the same line rendered at once, and the rerun had no stalls.
+- **Voices** (`lib.mjs` `VOICES`): Kokoro `af_heart` and `bm_george` (Apache-2.0, fp32 on WebGPU),
+  Piper `en_GB-cori-medium` (piper-voices MIT, LibriVox public-domain data) for English; Piper
+  `sl_SI-artur-medium` (ARTUR corpus, CC BY 4.0, attribution in README) for Prešeren. Chosen for
+  licences that allow publishing the audio; the non-commercial Piper voices are left out.
+- **What it made.** 18 poems, 330 distinct lines (323 English, 7 Slovenian), 976 recordings
+  (323 × 3 + 7), **8,994,308 bytes** with the manifest (121 kB): Heart 3.0 MB, George 3.8 MB, Cori
+  3.4 MB, Artur 48 kB (du). Committed size well under the 25 MB line. Kokoro on WebGPU ~0.3 s a line,
+  Piper ~0.3 s.
+- **Serving.** `prosody-web` serves `/readings/…` from disk (`--readings DIR`, the checkout's
+  `examples/readings` by default) in the binary, not the library, so the WebAssembly build never
+  carries the audio: `readings.rs` answers only `manifest.json` or `*.mp3` by a path of plain names
+  (no `..`, no hidden files), 404 otherwise; the server now writes bytes (`Reply`). `build-site.sh`
+  copies the directory into the site whole.
+- **The page.** A fifth engine, `recorded`: `load` fetches the manifest, `voices(language)` lists the
+  recorded voices of the language that have recordings of the poem heard, each "(n of m lines
+  recorded)", refreshed on each compile and A/B switch; `render` fetches, decodes (an
+  `OfflineAudioContext` of its own, so it works before Strudel's context exists), resamples only if
+  asked for another speed than it was recorded at, and trims the silence (an MP3's encoder delay
+  included) to the worker's 10 ms margin and `lead`. Scheduling is the neural engines' own. Per line
+  (`speakerOf`): a recorded line from its file; one without (edited, or a poem of the writer's own)
+  by the recording's live voice if its engine has loaded, otherwise the browser voice — no model is
+  downloaded unasked — and the status says `line N: no recording of it; read …`. Recordings are
+  fetched at once, outside the serial render queue: a browser check found line 1 started 5.9 s late
+  behind a Piper render left over from a moment before; after the change it starts on its cue. At
+  the fitted pace a recording plays at its own speed (its pace, not the fitted rate) and is only
+  resampled faster if it overruns its bar, through the existing refit.
+- **Tests.** Rust: `/presets.json` by GET and POST (Prešeren `sl`, one language per preset); the
+  page has the fifth engine, the manifest and file URLs relative to the page, the per-line fallback
+  and its notes, the per-poem voice counts, the direct fetch; `readings.rs` refuses `..`, hidden,
+  empty segments, absolute paths, other extensions; and
+  `every_line_of_every_example_is_recorded_in_every_voice_of_its_language` checks the committed
+  manifest against the compiler — every line every setting speaks, at its pace, with a non-empty
+  file in each voice of its language, 976 in all (mutation-checked: a pace changed in the manifest
+  fails it, a deleted Artur file fails it). Node (`npm test`, 5): SHA-256 keys by hand from FIPS
+  180-2 and known digests ("abc", "", "a", "b"), file naming, lines and the pace conflict, voices
+  per language, the manifest's exact bytes for a hand-built case.
+- **In the browser** (headless Chromium via Playwright, port 4923). Served page: Crane, recorded
+  Heart: every line from its file, each source started its 10 ms lead before its scheduled time
+  (line 1 cue 0.257 s, start 0.2500); line 3 edited → "(9 of 10 lines recorded)" in all three voices,
+  read by the browser voice, chained on its end, said in the status; George chosen while playing →
+  the next round all George; Prešeren at the fitted pace: language `sl`, the menu lists only Artur
+  (7 of 7), lines 2–7 from files on their cues (line 1, cued 30 ms before its fetch finished at the
+  preset change, read by the browser voice, said); Piper loaded then recorded Cori: the edited line
+  read live by Piper `en_GB-cori-medium`. Static site (WASM compiler, `python3 -m http.server`):
+  The Tyger with line 5 edited, "(22 of 23 lines recorded)", Heart then Cori mid-piece, 22 files
+  each fetched from `readings/`, the edited line by the browser voice. 0 console errors and 0
+  warnings after the decoder fix (before it, 12 warnings: `getAudioContext is not defined`, a fetch
+  before Strudel started, retried). Nothing was listened to; WebKit/Safari, where MP3 was chosen
+  for, was not run.
+- **Raised, not done** (in the report): whether `recorded` should be the default engine on the
+  static site, or the fallback when a live engine fails, instead of the browser voice; whether a
+  line with no recording should load the recording's live engine; the fitted pace's line 1 race at
+  a preset change (shared with the neural engines).
+
+### Reading engines — second review: the seam, a stale queue, a slow engine's order
+
+A second review of the uncommitted engines work. `SPEC.md` §4.7 ("Engines", "Two paces").
+
+- **A reading that runs over the loop's seam no longer loses the next round's first stanza.** When
+  the round changed while the chain was busy (the browser voice still saying the last line, or a
+  neural line still rendering), the chain's position was not moved and the anchors were cleared,
+  so the line's `after()` stepped past the end and the next stanza's cue jumped there: stanza 1
+  went unread, with no note. Now the move waits (`wrapTo`) and is taken when the line ends
+  (`wrapRound`), and a line of the old round left unread is said. Checked by running the page's
+  own chain code in node with a virtual clock (two stanzas of two lines, 16 s piece, 3 s browser
+  lines): before, round 2 read lines 3, 4 only; after, it reads 1 (at 20 s, its breath after the
+  last line's 16.3 s end), 2, 3, and says line 4 was not read when round 3 came round mid-line 3.
+- **The render queue holds only lines still to be read.** `prerender()` dropped jobs only for a
+  change of engine or voice, so an old poem's unrendered lines (and, after a pace change, fitted
+  jobs) stayed ahead of the new poem's. It now keeps exactly the lines of the playing piece and
+  of A and B at the chosen pace, engine and voice, and drops the rest. A preset in another
+  language first lets go of the old poem's reading (stopped, its readings cleared, so its lines
+  leave the queue) and then switches the language, so neither poem is rendered in the other's
+  voice; a compile whose text was already replaced no longer asks for its lines.
+- **The line due next is rendered next.** The chain asked for line n+1 only once line n had
+  rendered, by which time the queue had started the next job in poem order from the top, so on
+  Kokoro/WebAssembly every line waited for an unrelated render (4–6 s late). The queue is now in
+  wanted order — the playing piece from the line its reading is at, round to the one before — and
+  re-ordered every time the reading moves on (`advance`, `fittedCue`).
+- Comments on `dropJob`/`prerender` now say what they drop.
+
+### Reading engines — review fixes: no stalled reading, honest status, fitted lines fit
+
+A review of the uncommitted engines work found the reading could stop for good. `SPEC.md` §4.7
+("Engines", "Two paces").
+
+- **A change of engine or voice no longer strands lines.** `prerender()` dropped queued jobs for the
+  old engine/voice but left their `renders` entries pending for ever, so going back to that engine
+  or voice found an entry, queued nothing, and the natural chain waited with `busy = true` until
+  the next play (reproduced by the reviewer: Kokoro → Piper → Kokoro, and cori → ryan → cori →
+  ryan). A dropped job now takes its entry with it and rejects it as `dropped` (`dropJob`); the
+  natural chain, on `dropped`, asks again for the line from whoever reads now instead of skipping
+  it; and `whenRendered` re-queues any entry that is neither queued nor rendering.
+- **A worker that dies after loading fails its engine** (`engine.crashed`): waiting requests are
+  rejected, the worker let go, the status says so in red, the browser voice reads, and choosing the
+  engine again retries. `ask()` on an engine with no worker rejects rather than throwing.
+- **Only the chosen engine speaks in the status bar.** A failed engine is retried only when it is
+  chosen again (`ensureEngine(retry)`, true only from the engine menu), not on every change of
+  pace or language; load, ready and failure messages of an engine no longer chosen are not shown;
+  a render's download progress is shown only while its voice is the chosen one, and cleared when
+  the render finishes.
+- **"browser default" works again**: `voiceOf('browser')` is `null` (the system's voice for the
+  language) unless a listed voice is saved.
+- **Fitted lines fit.** The fitted rate assumes 4 syllables a second at rate 1; a neural render that
+  runs past `fill` (85%, now sent in `/reading` as `fill`, from `reading::FILL`) of its bar is
+  rendered once more at `rate × speech / room` (at most 2.0) and that render is read once ready; a
+  line still running past its bar is said. Measured on Piper ryan: "In what distant deeps or
+  skies." 1.861 s of speech for a 1.686 s room was re-rendered at 1.158 (1.803 s — VITS speed is not
+  linear in its length scale), inside its 1.98 s bar, so nothing was cut.
+- **The I2 proptest cannot pass vacuously.** It no longer skips lines missing on one side: a stanza
+  must be heard on a side exactly when that side's `natural_unread` does not list it, every line of
+  a stanza heard on both sides is compared, and the count compared must equal the lines of the
+  stanzas heard on both sides. Mutation-checked again (pace seeded from the whole source fails it).
+- **Tests.** `/reading` carries `"fill":0.850`; the page drops a job with its entry, fails a crashed
+  engine, retries a failed one only on being chosen, and refits a fitted line.
+- **Browser (headless Chromium, `?device=wasm`).** The reviewer's stub reproduction (5 queued
+  Kokoro lines, switch to Piper, ask again) now resolves all five (it left four hanging). Real
+  runs: Kokoro WASM ready with 7 queued → Piper → Kokoro: the next round read all 8 lines by Kokoro,
+  heard exactly when scheduled, nothing pending; Piper cori → ryan → cori → ryan: next round read by
+  ryan, heard within 0.1 ms; on the static site cori → ryan → cori mid-stanza: stanza 2 and the
+  next round read, heard within 0.1 ms. Kitten fails, pace change does not retry it, choosing Piper
+  leaves a clean status. A simulated crash (`engines.piper.crashed`) rejects the render in flight,
+  shows the red status, reads with the browser voice; choosing Piper again reloads it.
+
+### Reading engines in the page — four voices, and a natural pace
+
+The user decided: one engine interface on the page with four engines to choose between, a page
+setting remembered like the voice picker (not a style key — the CLI never reads aloud); and, added
+after the plan, a **natural pace** as the default, since squeezing every line into its bar sounds
+forced. `SPEC.md` §4.7 ("Two paces", "Engines", "Language").
+
+- **Rust, the natural pace** (`prosody_emit::reading`). Per line: a `Pace` in hundredths, 92..=108,
+  `Seed::for_unit(Domain::Line, line span)` child `"reading pace"`, one draw modulo 17 — local to
+  the line (I2), integer everywhere but the speed handed to a voice; a `Pause` from the line's last
+  character that is not space or a closing quote/bracket — run-on 250 ms, comma/semicolon/colon/
+  dash 450, full stop/?/!/… 800, a stanza's last line 1500 (estimates, documented); per-word
+  syllable counts (`Word`); its stanza. An `Onset` per line: under `breath` a stanza's first line
+  `Breath { slot }` at its **arrival** (not the fitted breath slot — the breath is measured on the
+  page against the previous stanza's actual spoken end), the rest `Follows`; under `stanza`
+  `At { slot }` then `Follows`; under `arrives` every line `At` its arrival. A second cue pattern,
+  `Reading::natural_pattern`, carries the onset bars, its header every line's onset, pace and
+  pause; `natural_unread` lists stanzas never begun. `bars()`/`cpm()` give the page the clock. The
+  fitted pattern and every existing cue are unchanged (`Cue` now wraps a `Spoken`).
+- **Web.** `/reading` gains `natural`, `bars`, `cpm`, `lines` (each with `onset`, `slot`) and on
+  every spoken line `stanza`, `pace`, `pause`, `ends`, `words`; `natural_unread`. Presets carry a
+  language (`PRESETS` 4-tuples; Prešeren `sl`, the rest `en`). `GET /speech-worker.mjs`, written by
+  `--site`, so the static site has it too.
+- **The page.** Engines `browser` (speechSynthesis; instant, the fallback, word boundaries),
+  `kokoro` (default), `piper`, `kitten`, each neural one in its own module worker
+  (`speech-worker.mjs`): `load(onProgress)`, `voices(language)`, `render(text, {voice, speed})` →
+  `AudioBuffer`. Loaded on choice or on the first play; progress in the status bar; until ready,
+  or on failure (said in the status and the engine menu; choosing it again retries), the browser
+  voice reads. Every line rendered ahead after each compile, cached by engine|voice|speed|text, at
+  the natural pace's speed (or the fitted rate), trimmed of silence with a 10 ms margin whose length
+  (`lead`) the page starts early, so the speech lands on the time. Both cue patterns are stacked
+  with the music; the fitted trigger starts a buffer at `targetTime` and cuts the last at it; the
+  natural trigger anchors a chain that schedules each line at max(anchor, previous end + pause) —
+  for a `breath` onset on the first bar ≥ that and ≥ two bars after the bar the last line ended in
+  — on the audio clock, a stanza at a time; the browser voice is chained on `onend`. A line that
+  would start at or after the piece's end is not read that round, and said. Voice through a
+  `voiceBus` (the reading level, 0–2) into the master's glue; the music ducked per stanza on the
+  audio clock (held through pauses). Word marker: spread by syllables for rendered lines. Language
+  menu; a preset sets it; an engine without a voice in it gives way to the browser voice and says
+  so. `?device=wasm` keeps every engine off WebGPU.
+- **Dependencies (CDN, exact versions, each checked against its npm tarball, sha-256 identical on
+  jsDelivr):** kokoro-js 1.2.1 (`dist/kokoro.web.js`, bundles Transformers.js 3.5.1; English
+  voices only, 20 en-us + 8 en-gb; Apache-2.0) — replaces nothing, hand-rolling Kokoro's
+  phonemiser and tokenizer is not reasonable; onnxruntime-web 1.18.0 (`dist/esm/ort.wasm.min.js`)
+  and the espeak-ng phonemiser ES module of @mintplex-labs/piper-tts-web 1.0.5 (published
+  2026-08, the maintained fork of @diffusionstudio/vits-web, last 2024; piper-tts-web 1.1.2 ships a
+  46 MB bundle) with its binary/data from @diffusionstudio/piper-wasm 1.0.0 — the package's own
+  `TtsSession` was not used because it is a singleton that keeps its first voice and has no speed
+  control, so the ~30 lines of inference are here (phoneme ids → `scales` with `length_scale /
+  speed`); voices from `rhasspy/piper-voices` pinned at `5041a7a…`; kitten-tts-webgpu 0.1.1
+  (WebGPU compute shaders only; no WebAssembly path). Licences in README "Voices and their licences".
+- **Tests.** Hand-worked (`reading.rs`): the pause table on twelve endings; the pace's draw onto
+  seventeen steps (0→92, 16→108, 17→92, 25→100, 2³²−1→92 because 2⁸ ≡ 1 mod 17) and its locality;
+  the natural onsets of TRANSFORMING under all four variants and of THREE (stanza 2 at its arrival,
+  slot 3, where the fitted pace has 4), their cue patterns, header lines and bars; per-word
+  syllables; I3 (another palette moves no onset, pace or pause). Properties (`tests/breath.rs`):
+  the natural plan against the `arrives` plan on random poems, all 18 examples and all 18 without
+  the outro; I2 — replacing one stanza leaves every other stanza's lines' pace and pause unchanged
+  (mutation-checked: seeding from the whole source fails it). Web: the JSON by hand for the seed's
+  first line (bytes, words 0..5, 6..11, 13..20, 21..27 with 2, 2, 2, 1 syllables, pause 0.450
+  comma); Pied Beauty outro off (fitted loses line 11, natural lists it); the worker route; the
+  engines, pins and master routing in the page; Prešeren's language.
+- **In the browser** (headless Chromium via Playwright, port 4922; a test-only AudioWorklet tap on
+  the voice bus, recording the first sample above −50 dBFS after 0.3 s of quiet). Served page,
+  `?device=wasm`: Kokoro q8 on WebAssembly loaded (92 MB) in 12.7 s, 3.6 s to render a 1.66 s line;
+  Piper loaded in 1.0 s, `en_GB-cori-medium` and `sl_SI-artur-medium` (63 MB) rendered, speed 1.08
+  shortening a line 2.150 → 1.927 s, two sentences in one line both voiced (3.86 s). Natural pace,
+  seed poem, Piper: line 1 scheduled at its bar-1 cue (0.2007 s) and heard at 0.2007; every line
+  heard within 0.1 ms of its scheduled start; stanza 2's cue at 8.135 s, stanza 1's voice ended
+  8.46 s inside that bar, so it started at 12.1015 = two bars later, as the rule says. Switching
+  to Kokoro while playing: status "Kokoro-82M loading; reading with the browser voice meanwhile",
+  the next round read by Kokoro from its bar-1 cue exactly (47.804). Kitten under `?device=wasm`:
+  "could not load: Kitten runs only on WebGPU…", red, the menu says so, and the browser voice read
+  the next stanza, chained on `onend` (line 2 at line 1's end + 0.45 s). Fitted pace with Piper:
+  all eight lines started at their cue times exactly. Prešeren preset: language `sl`, voice
+  `sl_SI-artur-medium`, read from its cue at 280.419 s. Static site (WASM compiler), The Tyger,
+  Kokoro on WebAssembly: lines heard within 0.3 ms of schedule, 0 skipped ticks while the worker
+  rendered. Headless Chromium on this Mac *does* offer WebGPU (Metal): Kitten nano loaded in 4.4 s
+  and rendered a line in 0.30 s; Kokoro fp32 on WebGPU loaded in 31 s and rendered a line in 0.31 s
+  (ORT logs two benign node-placement warnings as errors). Nothing was listened to.
+- **Raised, not done.** Kitten has no WebAssembly path (an ONNX port on onnxruntime-web would
+  need the voices' NPZ parsed and Kitten's symbol table); WebAssembly Kokoro renders at about half
+  real time, so a first play waits for lines (said: "waiting for Kokoro-82M to render line N"); the
+  stanza-end pause is mostly a floor under the one-silent-bar rule; Piper's VITS noise makes a
+  re-render not bit-identical, so a stanza's start can differ by a few ms between machines.
+
+### Erosion, second review — editing "Patterns" while it plays
+
+Review found that a live edit to "Patterns" while it played stopped the music: on the static page
+the compiler (pattern and trace for A and B, then both scores) ran on the page's own thread, one
+7.2 s block and 170 skipped ticks; on the served page Strudel evaluating the 0.9 MB pattern blocked
+about 0.9 s (16–17 ticks, sometimes a reading line). Fixed:
+
+- **The static page's compiler runs in two Web Workers** (`index.html`, `ask` → `threadFor`): one
+  answers what plays, one only scores, so a new pattern never waits behind the last one's scores.
+  Each loads its own copy of `prosody_bg.wasm` from a blob-made module worker, given the bindings'
+  absolute address. Without module workers it falls back to compiling in-process, as before.
+  Compilations and measurements are each one at a time and of the newest poem only, so typing into
+  a long poem never queues one per keystroke and answers never arrive out of order.
+- **The page parses ahead and remembers.** Evaluating a pattern is almost all Strudel parsing its
+  mini-notation (Node, @strudel 1.2.6: "Patterns" 1,206 ms plain; 1,111 of 1,119 ms parsing). The
+  page sets Strudel's string parser (`setStringParser`) to one that remembers each string's
+  pattern, and before each evaluation parses the strings it has not seen in 8 ms slices between
+  ticks. After the "Christ!" → "Lord!" edit 9 of the evaluation's 1,189 string lookups miss, and it takes
+  47 ms. Remembered and plain evaluations give identical haps: 216 evaluations (18 examples × 4
+  settings × pattern, trace, reading), 942,040 haps. Entries no play has used in the last 3 are let
+  go.
+- **A skip is never left unreported.** Ticks skipped while a new pattern was being prepared counted
+  against the old pattern's record, whose report was then dropped; the new record now takes over
+  what the old had not yet said (`behindFrom`). A 1.5 s stall followed by a replay at once reported
+  all 26 skipped ticks.
+- B still starts `long-stanzas` at `erode`: with the freeze gone, the reason is now cost —
+  `gradual` adds about 5 s of compiling and 8 s of scoring to every edit of "Patterns", and A waits
+  for B's pattern. Still a spec question.
+
+In the browser (headless Chromium, 20 ms probe, blocks over 100 ms recorded): on both pages,
+loading "Patterns" while Tyger plays, 25 s of play, the edit, and A→B→A switches gave 0 skipped
+ticks and no block over 100 ms; audio starts 196 for 98 onsets over 10 s. Static page: the edit
+reached the scheduler in 2.1 s, its scores in 8.5 s; served page: 1.1 s. B set to `gradual` by
+hand: 3.6 s to compile, 12.5 s to score, 7.2 s to switch to, with blocks of 113–158 ms and 0 skips.
+
+### Erosion, review fixes — "Patterns" plays whole on the page
+
+Review of the erosion step found the page played about a sixth of "Patterns" (Strudel skipping
+~12 ticks a second), lost most reading lines with it unsaid, and froze for seconds on an A/B
+switch. Fixed:
+
+- **The pattern is grouped** (`strudel::nested`, `GROUP` = 16; the steady `<…>`, the elastic one
+  via `one_a_cycle`, and the reading's cues). A sequence of more than 16 elements joins its runs of
+  rests into one rest as long, then brackets elements 16 at a time, recursively. Cause, read in
+  `@strudel/core` 1.2.6: a weighted sequence is a `stack` of every element `_compress`ed, visited on
+  every query; the flat elastic `<a b …>` measured as slow. Effect under Node with the page's
+  `@strudel/core`/`@strudel/mini` 1.2.6: "Patterns" 48.6 → 3.9 ms a 0.1 s tick, eval 2.0 → 1.4 s,
+  1,856,772 → 898,178 bytes; elastic B 55 → 4.8 ms. **Same music:** every hap (whole, part, value)
+  of a whole loop compared old vs new for 18 examples × 6 settings × pattern, trace and reading:
+  324 answers, 223 of the 322 compared with changed text, 319,091 haps identical — all but "Patterns" under `gradual`
+  (pattern and trace), whose old 8.6 MB text runs Node out of memory, so it was not compared; and
+  the two changed villanelle snapshots (2,695 haps identical). Text changed for the 13 examples over 16
+  bars and the two `corpus__pattern-villanelle*` snapshots (read: rests joined, e.g.
+  `~@5 ×8` → `~@40`; 24 bars, so ≤16 elements after joining, no groups). OSC, explain and every
+  score are byte-identical before/after for all 18 (90 files); `cycle.sh` means unchanged (0.703
+  machine, 0.729 jazz over 18; 0.711/0.733 over the 17).
+- **Lost ticks are said.** The page wraps `console.log` for Strudel's `skip query: too late`
+  (verified in the published @strudel/web 1.3.0 bundle: the cyclist sets `lastBegin`/`lastEnd`
+  before logging), asks the cue pattern which lines fell in the skipped span, and puts
+  `Strudel fell behind: N tick(s) not played, their notes unheard; not read: line …` in the status
+  bar in red (forced with a 3 s main-thread stall: 58 ticks, line 10 named).
+- **B starts eroding** (`B_STARTS_AS_A = ['long-stanzas']` in the page): `gradual` is still the
+  first variant and still selectable, but B no longer loads the quadratic piece behind every long
+  poem.
+- **Lanes over an eroding line** documented in `SPEC.md` §4.6 rather than changed (an eroding line
+  counts as sounding, so call/held/refrain do not double it).
+- Also: the page's warm-up no longer asks for sounds named `~@5` (weights now stripped).
+
+Browser (headless Chromium, port 4921), "Patterns" A over 40 s: native 0 skips, 650 starts for
+317 onsets (2.05 — Tyger 1.98), reading lines 2–9 and 11–13 all cued; load 0.75 s, scores 3.6 s,
+A→B 0.63 s, B→A 1.1 s. WASM site: 0 skips, ratio 2.06, same lines; load 8.0 s (a 6.3 s main-thread
+block — compiling and scoring both sides synchronously), A→B 0.69 s, B→A 1.1 s (were 21.6 s and
+26.3 s). B set to `gradual` by hand on the WASM site: 12.1 s to compile and score (8.6 s block),
+A→B 2.3 s, then it plays with 0 skips.
+
+### Erosion for long stanzas — loss, and "Patterns" back as the 18th example
+
+The user decided: for long pieces, *loss*, as erosion (Basinski). The line-by-line handover makes
+a stanza of *n* lines take ~*n* passes of ~*n* bars, so "Patterns" was 1,331 bars and 8.6 MB.
+
+- **The rule** (`prosody_core::arrange`, `SPEC.md` §4.6). Where a stanza arrives into a running
+  loop and either has more than `LONG_STANZA` = 8 lines, the arriving stanza is stated whole for
+  `EROSION_PASSES` = 3 passes (each one statement of it: `Arriving { pass }`), and the old loop
+  loops under it from its first line, a line a bar (`Cause::Eroding { pass }`). On pass *p* an
+  eroding line of *k* syllables keeps ⌈k·(4−p)/4⌉ (¾, ½, ¼), then the loop is gone. Order
+  (`arrange::erode`, documented at the mapping site): unstressed, then secondary, then primary
+  stress, the rhyme word last; within each, earlier first. **Decided here:** the rhyme word is the
+  line's *last word*, not "a pitched word" — pitch depends on rhymes elsewhere in the poem, which
+  would have made a line's erosion depend on other stanzas (I2). **Decided here:** a pass is one
+  statement of the *arriving* stanza (so host and loop share pass numbers and the arrival ends on
+  its own last bar); the alternative, a pass of the old loop's own length, is in the open
+  questions below.
+- **Selector** `Mapping::LongStanzas` (`long-stanzas`): `gradual` (first, what preceded it; no
+  `off`) and `erode` (default). It reaches the page's A/B table, the CLI `--set`/usage and the web
+  `set=` through `Mapping::variants` (tested: page JSON `["gradual","erode"],"erode"]`, CLI refusal
+  of `long-stanzas=off`, web `set=long-stanzas:gradual` named in the explain view).
+  `Mappings::every` grows 8192 → 16384.
+- **One rule for every consumer.** `Score::placed` drops what an `Eroding` pass loses, an eroding
+  line keeps its whole line's beats; `Score::sounds` / `Placed::sounds` replace the span-only
+  `Part::covers` filter in the Strudel walk (`grid_by_slot`, `Lane::all`) and the trace. The OSC
+  schedule, the scorer's timeline and its edit test already read `placed_in`. The reading reads
+  hosts only, so an eroding line is never read again. Header lines: pattern
+  `//   long-stanzas = erode: N bar(s) over an eroding loop …`, OSC `# long-stanzas = erode: …`,
+  explain `long-stanzas erode · …` and, per eroding line, `erodes pass 1 keeps 6 of 7 · pass 2
+  keeps 4 · pass 3 keeps 2: figured`; all from `Arrangement::eroding`. Nothing is printed where
+  nothing erodes.
+- **"Patterns" restored** (`examples/lowell-patterns.poem`, PG #841, verbatim except: 3-space
+  indent removed, "…and the buckles / on his shoes." rejoined, "--" as an em dash; palette E minor,
+  tr707, 92–100 bpm). Stanzas 9, 18, 15, 16, 22, 10, 17. **284 bars** (was 1,331), **1,856,772
+  bytes** (was 8,602,140), compile 0.79 s, `--score` 2.8 s native release (was 5.7 s; gradual still
+  5.7 s). Stanza 1 is foundation and stanzas 2–7 flourish, so stanza 1 loops under the whole piece
+  unchanged (nothing competes with it) and 240 bars play over an eroding loop. A preset, a corpus
+  entry (3 snapshots, new: machine 0.577, jazz 0.667, interest 0.764; edit test 646/646 audible,
+  511 local, 598 explained), an `examples/README.md` row (and its stale "nine" counts fixed), the
+  breath test's example count 17 → 18, `check-wasm.mjs` gains `set=long-stanzas:gradual`.
+- **Unchanged, proven.** Every existing snapshot untouched. The 17 other examples' CLI pattern,
+  OSC, explain and two alternative-mapping patterns byte-identical before/after (85 files).
+  `cycle.sh` rows for the 17 byte-identical: machine **0.711**, jazz **0.733** over the 17; with
+  "Patterns", 0.703 and 0.729 over 18. `check-wasm.sh`: 1,170 answers byte-identical.
+- **Tests.** Hand-worked (`prosody-core/tests/arrange.rs`): the full arrangement of a 9-then-2 and
+  a 2-then-9 poem under erode and gradual (15 vs 20 slots; 29 slots), what `ba bA ba bA` and
+  `ga gA gAga` keep on each pass (the rhyme word whole outlasting a stress on pass 2), the 8/8
+  boundary (identical under both) and 8/9 (erodes). Properties (`tests/erosion.rs`, 128 cases):
+  the count, monotone subset and rank order of what each eroding placement keeps (I4 spans
+  resolve); I1; poems with no stanza over 8 lines are equal `Score`s under both variants for any
+  other choice; each erosion takes exactly 3·n bars hosted `Arriving { pass }`; I2 — an edit to
+  another stanza leaves what every line keeps on each pass unchanged; a generator-reach check
+  (14 of 64 generated poems erode). Emit (`tests/erosion.rs`, real dictionary, "Patterns"): per
+  slot, Strudel drum strokes, trace marks (by span) and OSC messages equal the arrangement's
+  placed events — mutation-checked by restoring the span filter in `grid_by_slot`; the reading
+  reads all 107 lines once, never in a slot where the line erodes. Scorer: timeline hits per slot
+  equal placed events; a hand-worked edit test (22 edits: 22 audible, 18 local and explained — the
+  4 not are stanza-2 edits that flip it to flourish, so nothing erodes). CLI and web tests above.
+- **In the browser** (headless Chromium, port 4921). Native server: the preset compiles A and B in
+  1.8 s (A's pattern 0.73 s, B — gradual with every other mapping at its first variant — 1.7 s,
+  4.0 MB); the Score tab's two `/score` requests took 2.7 s (A) and 4.7 s (B). It plays, no
+  console errors, but Strudel logs **"skip query: too late"** ~11 times a second (87 in 8 s; 0 for
+  The Tyger, Whitman, Ball): querying the 1.86 MB pattern costs 73 ms per 0.1-cycle tick in the
+  page (Tyger 9.6 ms), so the scheduler falls behind — dropouts are likely. Every drum onset in
+  all 284 slots has its trace onset (15,133 each). Static site (WASM): the preset takes 11.8 s
+  to compile and score (8.4 s with B set to A's choices), plays with 161 late queries in 8 s and a
+  few "cannot schedule sounds in the past" warnings, scores 0.577 vs 0.434. Nothing was heard.
+- **Raised, not done.** (1) A pass as the *old* loop's length instead of the arriving stanza's
+  (fully local erosion, but a short stanza arriving into a long loop would host ~3·m bars).
+  (2) "Patterns" is still too heavy for Strudel's scheduler in the page; the pattern's size, not
+  the bar count, is now the limit — e.g. a stanza-1 loop under 284 bars, or a shorter mini-notation.
+  (3) Whether stanza 1's foundation loop, never competed with, should also erode over a long
+  piece (today it loops whole to the end).
+
+### Eight more poems
+
+Eight public-domain poems join the examples (each also a preset on the page and a scored corpus
+entry): Ball's *Karawane* (a Dada sound poem — no dictionary word at all), Stein's *Tender Buttons*
+(prose lineated a sentence a line, noted in its header), Crane's "In the desert", Dunbar's "We Wear
+the Mask" (a rondeau), Naidu's "In the Bazaars of Hyderabad" (call and response), Tagore's
+*Gitanjali* 35 (anaphora), Psalm 23 (KJV) and Lowell's "Night Clouds". All published before 1931 by
+authors who died before 1956, so public domain in the US and the EU; each file's header names its
+source (Wikisource or Project Gutenberg), and each text was taken from that source, not from memory,
+with any editorial change stated there.
+
+- **Lowell's "Patterns" was tried first and dropped**: 107 lines in stanzas of up to 23 arrange into
+  1,331 bars and an 8.6 MB pattern (6 s to score natively), because a transforming stanza replaces
+  one line a pass — growth with the square of stanza length. The user chose a short Lowell poem
+  instead, and asked about introducing *loss* for long pieces; that is a structural question, open.
+- Machine profile over 17 poems: mean overall 0.711 (the original nine unchanged, 0.743 among
+  themselves). Highest: Naidu 0.954, Dunbar 0.949; lowest: Stein 0.502, Prešeren 0.503, Tagore 0.539
+  — prose poems and unmetred verse have the least pulse and steadiness to give the machine bands.
+  Jazz: 0.733. `check-wasm.sh` now compares 1,020 answers.
+
 ### The breath says what it leaves unread — a lost line is listed, not silent
 
 Review of the breath step: with `outro` off, Pied Beauty (eleven bars) lost its closing line,

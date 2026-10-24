@@ -1,0 +1,18 @@
+---
+source: crates/prosody-score/tests/corpus.rs
+expression: "Report::profiled(&score, edits, Profile::Machine).to_text()"
+---
+metric             value  band             fit
+layering           2.356  3.000..5.000   0.572
+recurrence         0.919  0.850..0.970   1.000
+pitched            0.248  0.350..0.700   0.601
+pitch_entropy      1.689  1.000..2.300   1.000
+syncopation        0.118  0.100..0.400   1.000
+pulse              0.536  0.900..1.000   0.046
+steadiness         0.772  0.800..1.000   0.769
+interest           0.533
+audible            1.000  171 of 171 edits
+local              0.696  119 of 171 edits
+explained          0.942  161 of 171 edits
+legibility         0.942
+overall            0.502

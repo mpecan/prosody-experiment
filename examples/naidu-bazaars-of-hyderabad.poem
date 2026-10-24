@@ -1,0 +1,44 @@
++++
+# Sarojini Naidu, "In the Bazaars of Hyderabad", The Bird of Time (1912). Text from
+# en.wikisource.org/wiki/The_Bird_of_Time/Indian_Folk-Songs/Songs_of_my_City_2. Five stanzas of six
+# lines, "to a tune of the Bazaars"; the blank lines the scan puts at its page breaks are removed.
+[style]
+scale       = "harmonic_minor"
+root        = "B"
+tempo_range = [112, 120]
+bank        = "casio"
++++
+What do you sell, O ye merchants?
+Richly your wares are displayed.
+Turbans of crimson and silver,
+Tunics of purple brocade,
+Mirrors with panels of amber,
+Daggers with handles of jade.
+
+What do you weigh, O ye vendors?
+Saffron and lentil and rice.
+What do you grind, O ye maidens?
+Sandalwood, henna, and spice.
+What do you call, O ye pedlars?
+Chessmen and ivory dice.
+
+What do you make, O ye goldsmiths?
+Wristlet and anklet and ring,
+Bells for the feet of blue pigeons,
+Frail as a dragon-fly's wing,
+Girdles of gold for the dancers,
+Scabbards of gold for the king.
+
+What do you cry, O ye fruitmen?
+Citron, pomegranate, and plum.
+What do you play, O musicians?
+Cithār, sarangī, and drum.
+What do you chant, O magicians?
+Spells for the æons to come.
+
+What do you weave, O ye flower-girls
+With tassels of azure and red?
+Crowns for the brow of a bridegroom,
+Chaplets to garland his bed,
+Sheets of white blossoms new-gathered
+To perfume the sleep of the dead.
