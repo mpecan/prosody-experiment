@@ -719,3 +719,10 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 All four must pass. Check the exit code, not the summary text —
 [`CLAUDE.md`](CLAUDE.md) §3 explains why that warning is there.
+
+## Licence
+
+The code is under the [MIT licence](LICENSE). What it bundles keeps its own terms: the CMU
+Pronouncing Dictionary (`crates/prosody-cmudict/data/LICENSE`), the example poems (public domain;
+each file names its source), and the voices and models listed under
+[Voices and their licences](#voices-and-their-licences).
