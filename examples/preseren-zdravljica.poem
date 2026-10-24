@@ -1,14 +1,74 @@
 +++
+# France Prešeren, "Zdravljica" (written 1844), all eight stanzas, in the version beginning "Spet trte so
+# rodile", as supplied by the project's author; one backtick ("`z oblakov") is set as an apostrophe,
+# like the poem's other elisions. Public domain. Slovenian, read through an English dictionary
+# (SPEC.md §9): most words are letter-to-sound guesses.
 [style]
 scale       = "harmonic_minor"
 root        = "E"
 tempo_range = [104, 112]
 bank        = "tr707"
 +++
-Prijat'lji! odrodile
-so trte vince nam sladkó,
+Spet trte so rodile,
+prijat'lji, vince nam sladko,
 ki nam oživlja žile,
 srce razjasni in oko,
 ki utopi
 vse skrbi,
-v potrtih prsih up budi!
+v potrtih prsih up budi.
+
+Komu najpred veselo
+zdravljico, bratje, č'mo zapet'?
+Bog našo nam deželo,
+Bog živi ves slovenski svet,
+brate vse,
+kar nas je
+sinov sloveče matere!
+
+V sovražnike 'z oblakov
+rodu naj naš'ga trešči grom!
+Prost, ko je bil očakov,
+naprej naj bo Slovencev dom;
+naj zdrobe
+njih roke
+si spone, ki jim še teže!
+
+Edinost, sreča, sprava
+k nam naj nazaj se vrnejo!
+Otrok, kar ima Slava,
+vsi naj si v roke sežejo,
+da oblast
+in z njo čast,
+ko pred, spet naša bosta last!
+
+Bog živi vas, Slovenke,
+prelepe, žlahtne rožice!
+Ni take je mladenke,
+ko naše je krvi dekle;
+naj sinov
+zarod nov
+iz vas bo strah sovražnikov!
+
+Mladen'či, zdaj se pije
+zdravljica vaša, vi naš up!
+Ljubezni domačije
+noben naj vam ne usmrti strup;
+ker po nas
+bode vas
+jo srčno branit' klical čas!
+
+Žive naj vsi narodi
+ki hrepene dočakat' dan,
+da koder sonce hodi,
+prepir iz sveta bo pregnan,
+da rojak
+prost bo vsak,
+ne vrag, le sosed bo mejak!
+
+Nazadnje še, prijat'lji,
+kozarec zase vzdignimo,
+ki smo zato se zbrat'li,
+ker dobro v srcu mislimo.
+Dokaj dni
+naj živi
+Bog, kar nas dobrih je ljudi!
