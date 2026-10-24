@@ -230,6 +230,7 @@ pub struct Schedule {
     elastic_unapplied: bool,
     straightened: Option<usize>,
     lightened: Option<usize>,
+    eroding: usize,
 }
 
 /// The palette keys that shape a number this schedule sends — the pitch and the velocity — but
@@ -321,6 +322,13 @@ impl Schedule {
         self.lightened
     }
 
+    /// How many bars play over a loop eroding under a long stanza's arrival (`SPEC.md` §4.6) —
+    /// whose lost syllables are not sent; zero where nothing erodes.
+    #[must_use]
+    pub const fn eroding(&self) -> usize {
+        self.eroding
+    }
+
     /// How long the piece lasts, in beats.
     #[must_use]
     pub fn beats(&self) -> f64 {
@@ -386,6 +394,14 @@ impl Schedule {
                 out,
                 "# function-words = light: a one-syllable function word off the metre's strong \
                  positions sent at 2/3 velocity, in {syllables} syllable(s)"
+            );
+        }
+        if self.eroding > 0 {
+            let _ = writeln!(
+                out,
+                "# long-stanzas = erode: {} bar(s) over an eroding loop, whose lost syllables are \
+                 not sent",
+                self.eroding
             );
         }
         if self.unsent_chords > 0 {
@@ -510,6 +526,7 @@ impl Backend for Osc {
                 .then(|| crate::strudel::straightened(score)),
             lightened: (score.function() == prosody_core::Variant::Light)
                 .then(|| score.lightened()),
+            eroding: score.arrangement().eroding(),
         })
     }
 }

@@ -35,7 +35,14 @@
 //!   at 121.
 //!
 //! Either way the bars, beats and subdivisions inside each bar are the same strings: only how long
-//! a bar lasts differs. Every consumer that must land on the music's clock — this pattern, the
+//! a bar lasts differs.
+//!
+//! A piece of more than `GROUP` (16) bars is written in groups (`nested`): runs of rests joined
+//! into one rest as long, then bars bracketed sixteen at a time, `<[a@3 b@4 …]@58 …>`. The same
+//! haps to the fraction — every hap of every example's whole loop compared under the page's
+//! `@strudel/core` and `@strudel/mini` 1.2.6 — but Strudel visits every element of a level on
+//! every query, so a flat `<…>` of "Patterns"' 284 bars cost more per scheduler tick than a tick
+//! lasts, and the page played about a sixth of the piece. Every consumer that must land on the music's clock — this pattern, the
 //! page's trace ([`crate::trace`]), the reading's cues ([`crate::reading`]) — asks the same
 //! functions here (`weights`, `cycles_per_minute`, `clock`).
 //!
@@ -235,7 +242,8 @@ pub(crate) fn starts(score: &Score) -> Vec<u64> {
 /// pattern's bars become a sequence, so the music, the trace and the reading's cues all last
 /// exactly as long, bar for bar.
 ///
-/// Elastic: `<a [b c]>`, one element per cycle (`<…>` takes one a cycle), or a single bar bare.
+/// Elastic: `<a [b c]>`, one element per cycle (`<…>` takes one a cycle), or a single bar bare;
+/// a long piece's grouped as the steady one's are ([`one_a_cycle`]).
 /// Steady: `<a@3 [b c]@4>` — in `@strudel/mini` 1.2.6 the angle brackets are a
 /// `polymeter_slowcat` whose sequence is a `timeCat` of its weighted elements, slowed by their
 /// weights' sum, so an element of weight *w* lasts exactly *w* cycles: *w* beats.
@@ -253,19 +261,93 @@ pub(crate) fn sequence(score: &Score, bars: &[String]) -> String {
     match (score.pulse(), bars) {
         (_, []) => "~".to_owned(),
         (Variant::Elastic, [bar]) => bar.clone(),
-        (Variant::Elastic, _) => format!(
-            "<{}>",
-            bars.iter().map(element).collect::<Vec<_>>().join(" ")
-        ),
+        (Variant::Elastic, _) => format!("<{}>", one_a_cycle(bars.iter().map(element).collect())),
         (_, _) => format!(
             "<{}>",
-            bars.iter()
-                .zip(weights(score))
-                .map(|(bar, weight)| format!("{}@{weight}", element(bar)))
-                .collect::<Vec<_>>()
-                .join(" ")
+            nested(
+                bars.iter()
+                    .map(element)
+                    .zip(weights(score))
+                    .collect::<Vec<_>>()
+            )
         ),
     }
+}
+
+/// How many weighted elements one level of a steady sequence holds before [`nested`] groups them.
+///
+/// Encoding, not structure: it changes how Strudel finds a bar, never when the bar falls or what
+/// it plays. In `@strudel/core` 1.2.6 a weighted sequence (`stepcat`, which `timeCat` is) is a
+/// `stack` of every element `_compress`ed into its share of the cycle, so *every* query visits
+/// every element, sounding or not — a 284-bar piece cost each of its ~1,100 parameter strings
+/// 284 visits per scheduler tick, far more than the tick lasts, and Strudel skipped the queries it
+/// was late for ("skip query: too late"): most of the piece went unheard. A compressed element
+/// whose span a query misses answers nothing without being asked (`fastGap`'s span function
+/// returns `undefined`), so a group of bars costs one visit unless the query falls inside it.
+pub(crate) const GROUP: usize = 16;
+
+/// Weighted elements, `element@weight`, laid end to end — grouped `GROUP` at a time into
+/// bracketed sub-sequences, each weighted by its elements' sum, and the groups again, until one
+/// level holds at most `GROUP` elements.
+///
+/// The same time to the cycle: a group of weight *W* holding an element of weight *w* gives it
+/// *w*/*W* of the group's *W* cycles — *w* cycles, as at the top level, in exact fractions. A
+/// sequence of `GROUP` or fewer elements is written as it always was. A longer one first joins
+/// its runs of rests, then groups: a query costs about `GROUP` visits a level rather than one per
+/// bar.
+pub(crate) fn nested(elements: Vec<(String, u64)>) -> String {
+    if elements.len() <= GROUP {
+        return weighted(&elements);
+    }
+    // Rests next to each other are one rest as long as both: nothing sounds in either, and an
+    // element Strudel never has to parse or visit costs nothing. Over nine in ten of a long
+    // piece's elements are rests — a lane is one line of the poem, silent in most bars.
+    let mut level: Vec<(String, u64)> = Vec::with_capacity(elements.len());
+    for (element, weight) in elements {
+        match level.last_mut() {
+            Some((last, total)) if last == "~" && element == "~" => *total += weight,
+            _ => level.push((element, weight)),
+        }
+    }
+    while level.len() > GROUP {
+        level = level
+            .chunks(GROUP)
+            .map(|group| match group {
+                [only] => only.clone(),
+                _ => (
+                    format!("[{}]", weighted(group)),
+                    group.iter().map(|(_, weight)| weight).sum(),
+                ),
+            })
+            .collect();
+    }
+    weighted(&level)
+}
+
+/// Elements of a cycle each, the elastic pulse's `<a b c>` — as it always was up to `GROUP` of
+/// them, and beyond that [`nested`], each weighted 1, which lasts exactly as long: a weighted
+/// `<…>` slowed by its weights' sum gives an element of weight 1 one cycle, as `<…>` does.
+///
+/// Measured, not reasoned: in the page's Strudel an unweighted `<…>` of a long piece's bars costs
+/// a query about as much as the flat weighted one did — "Patterns" elastic, 267 bars, 55 ms a
+/// scheduler tick written `<a b …>` against 4.8 ms written in groups (`@strudel/core` and
+/// `@strudel/mini` 1.2.6 under Node, every hap of a whole loop identical) — and the page skipped
+/// most of its ticks.
+pub(crate) fn one_a_cycle(elements: Vec<String>) -> String {
+    if elements.len() <= GROUP {
+        elements.join(" ")
+    } else {
+        nested(elements.into_iter().map(|element| (element, 1)).collect())
+    }
+}
+
+/// `a@3 b@4`: one level of a weighted sequence.
+fn weighted(elements: &[(String, u64)]) -> String {
+    elements
+        .iter()
+        .map(|(element, weight)| format!("{element}@{weight}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A layer's colour, for Strudel's drawing (`.color`): the page's piano roll, or `pianoroll()` on
@@ -651,6 +733,24 @@ fn stack_header(out: &mut String, score: &Score) {
     );
 }
 
+/// The header's line for the erosion of long stanzas, where it happened: how many bars play over
+/// an eroding loop. A piece with no long stanza arriving into a loop erodes nothing and says
+/// nothing new, under either variant.
+fn erosion_header(out: &mut String, score: &Score) {
+    let bars = score.arrangement().eroding();
+    if bars == 0 {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   long-stanzas = erode: {bars} bar(s) over an eroding loop — where a stanza of more \
+         than {} lines arrives or is replaced, the old loop sounds fewer of its syllables each of \
+         {} passes until silent, unstressed first, rhyme words last (SPEC.md §4.6)",
+        prosody_core::arrange::LONG_STANZA,
+        prosody_core::arrange::EROSION_PASSES,
+    );
+}
+
 /// The header's line for the light function words, which names the variant and how many
 /// syllables it struck lightly. Full — every syllable at its dictionary stress — is the piece as it
 /// shipped, and says nothing new.
@@ -828,6 +928,7 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     pulse_header(out, score, style);
     stack_header(out, score);
     function_header(out, score);
+    erosion_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
         let _ = writeln!(
@@ -1097,10 +1198,7 @@ impl<'a> Lane<'a> {
                     .filter(|placement| {
                         (!is_bass || score.sounds_bass(slot, placement))
                             && bars.contains(&placement.bar().get())
-                            && events.iter().any(|event| {
-                                event.bar() == placement.bar()
-                                    && placement.part().covers(event.span())
-                            })
+                            && events.iter().any(|event| score.sounds(**placement, event))
                     })
                     .count()
             })
@@ -1194,7 +1292,9 @@ pub(crate) fn grid_by_slot(
                         let covered: Vec<(&Event, Subdivision)> = syllables
                             .iter()
                             .copied()
-                            .filter(|event| placement.part().covers(event.span()))
+                            // What the placement sounds here: inside its part and, on a
+                            // line eroding under a long arrival, what its pass keeps.
+                            .filter(|event| placed.sounds(event))
                             .map(|event| (event, placed.subdivision(event)))
                             .collect();
                         (!covered.is_empty())
@@ -4111,5 +4211,66 @@ swing = 0.33
                 elastic
             );
         }
+    }
+
+    /// `count` bars named `b0`, `b1`, … of `weight` beats each, rests where `rest` says.
+    fn bars(count: usize, weight: u64, rest: impl Fn(usize) -> bool) -> Vec<(String, u64)> {
+        (0..count)
+            .map(|i| {
+                let bar = if rest(i) {
+                    "~".to_owned()
+                } else {
+                    format!("b{i}")
+                };
+                (bar, weight)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sequence_of_sixteen_bars_is_written_as_it_always_was() {
+        // Sixteen is `GROUP`: one level, every bar its own element, neighbouring rests kept apart.
+        let sixteen = super::nested(bars(16, 3, |i| i % 4 != 0));
+        assert_eq!(
+            sixteen,
+            "b0@3 ~@3 ~@3 ~@3 b4@3 ~@3 ~@3 ~@3 b8@3 ~@3 ~@3 ~@3 b12@3 ~@3 ~@3 ~@3"
+        );
+    }
+
+    #[test]
+    fn a_longer_sequence_joins_its_rests_then_groups_sixteen_at_a_time() {
+        // Seventeen bars, none resting: sixteen in a group of 16 × 2 = 32 beats, and the
+        // seventeenth alone, not bracketed — a group of one would be the bar itself.
+        let seventeen = super::nested(bars(17, 2, |_| false));
+        let first: Vec<String> = (0..16).map(|i| format!("b{i}@2")).collect();
+        assert_eq!(seventeen, format!("[{}]@32 b16@2", first.join(" ")));
+
+        // Twenty bars of 4, sounding only at 0, 9 and 19: the rests join to 1–8 (32 beats) and
+        // 10–18 (36), five elements, which fit one level.
+        let sparse = super::nested(bars(20, 4, |i| ![0, 9, 19].contains(&i)));
+        assert_eq!(sparse, "b0@4 ~@32 b9@4 ~@36 b19@4");
+
+        // 257 bars of 1: sixteen groups of sixteen are one group of 256 at the next level, and
+        // the last bar stays bare at both.
+        let deep = super::nested(bars(257, 1, |_| false));
+        let group = |from: usize| {
+            let bars: Vec<String> = (from..from + 16).map(|i| format!("b{i}@1")).collect();
+            format!("[{}]@16", bars.join(" "))
+        };
+        let groups: Vec<String> = (0..16).map(|g| group(g * 16)).collect();
+        assert_eq!(deep, format!("[{}]@256 b256@1", groups.join(" ")));
+    }
+
+    #[test]
+    fn a_long_elastic_sequence_is_grouped_with_each_bar_a_cycle() {
+        let names = |count: usize| (0..count).map(|i| format!("b{i}")).collect::<Vec<_>>();
+        // Up to sixteen, `<a b …>` as before.
+        assert_eq!(super::one_a_cycle(names(3)), "b0 b1 b2");
+        // Seventeen: each bar weight 1, sixteen in a group of 16 cycles, the last bare.
+        let first: Vec<String> = (0..16).map(|i| format!("b{i}@1")).collect();
+        assert_eq!(
+            super::one_a_cycle(names(17)),
+            format!("[{}]@16 b16@1", first.join(" "))
+        );
     }
 }

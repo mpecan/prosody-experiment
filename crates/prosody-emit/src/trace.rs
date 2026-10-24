@@ -182,9 +182,9 @@ fn fresh(score: &Score, slot: usize, event: &Event) -> bool {
         .slots()
         .get(slot)
         .and_then(|slot| {
-            slot.placements().iter().find(|placement| {
-                placement.bar() == event.bar() && placement.part().covers(event.span())
-            })
+            slot.placements()
+                .iter()
+                .find(|placement| score.sounds(**placement, event))
         })
         .is_some_and(|placement| {
             matches!(

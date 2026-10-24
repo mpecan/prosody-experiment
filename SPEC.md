@@ -245,6 +245,59 @@ A stanza, once stated, **keeps looping** until something stops it. One loop per 
   harmony layer below now exists as a candidate, but it does not overrule anything — its chords
   follow the foundation's loops.
 
+**Long stanzas erode** (*the user's decision, 2026-10-24: "for longer pieces, can we introduce
+loss?"*). The line-by-line transformation makes a stanza of *n* lines take about *n* passes of
+about *n* bars, so the piece grows with the square of its stanzas' length: Lowell's "Patterns"
+(107 lines, stanzas of 9 to 22) arranged into 1,331 bars and an 8.6 MB pattern. So where **either
+stanza is long — more than eight lines** (`arrange::LONG_STANZA`, a fixed constant: structure, not
+palette) — an arrival is a loss instead, in the manner of Basinski's *Disintegration Loops*:
+
+- The arriving stanza is **stated whole, once through and then looping**, for **three passes**
+  (`arrange::EROSION_PASSES`), each pass one statement of it — `3n` bars for a stanza of *n* lines,
+  so the piece grows linearly ("Patterns": 284 bars, a 0.9 MB pattern). Its lines are `Arriving`,
+  with the pass.
+- The old loop **keeps looping under it**, from its own first line, one line a bar
+  (`Cause::Eroding`, with the pass), and **thins out**: on pass *p* an eroding line of *k* syllables
+  sounds ⌈k·(4−p)/4⌉ of them — three quarters, a half, a quarter — and after the third pass it is
+  silent and gone. Which syllables go is decided by what each is *in its own line*: **unstressed
+  syllables first, then secondary, then primary stresses, and the rhyme word last** — the line's
+  last pronounceable word, where its rhyme rests and its note sounds (§4.5); within each kind, the
+  earlier syllable first, so what remains of a line is its end. How hard a syllable is struck is
+  what counts, so a light function word (§4.2) goes with the secondary stresses. Nothing is random.
+  An eroding line keeps its own beats: what is left of it sounds exactly where it always did.
+  An eroding line still counts as its line sounding in that slot, so the call, held and refrain
+  lanes (above) do not add a second copy of it there — even where the eroding copy has already
+  lost the syllables the lane would play (a call is the half-line *before* the caesura, which
+  erodes first). The cases found in "Patterns" (its call lane, at slots 33 and 79) are first
+  passes, where the line keeps three quarters of itself. Chosen over the alternative, sounding both, because that would strike the syllables
+  the eroding copy keeps twice at once; under `gradual` the line that suppressed a lane was a whole
+  `Yielding` one, so nothing was lost.
+- Stanzas of eight lines or fewer, arriving into loops of eight lines or fewer, are transformed
+  line by line as before — so every other example is byte-for-byte the piece it was.
+
+It is a selector, `Mapping::LongStanzas` (`long-stanzas`): **`erode`** (the default) and
+**`gradual`**, the line-by-line transformation everywhere — what preceded it, and its first
+variant; there is no `off`, since an arriving stanza always takes the loop's place somehow. The
+pattern header, the OSC schedule and the explain view count the bars over an eroding loop; the
+explain view shows each eroding line's thinning (`erodes pass 1 keeps 6 of 7 · pass 2 keeps 4 ·
+pass 3 keeps 2: figured`). Every consumer reads what a placement sounds through one rule
+(`Score::placed`, `Score::sounds`): an eroded syllable is absent from the drums, the melody, the
+bass, the trace (so it is not lit), the OSC schedule and the scorer's timeline and edit test, and
+every syllable that sounds keeps its span (I4). The reading (§4.7) reads the arriving stanza where
+it is stated, and an eroding line is never a host, so it is never read again.
+
+**Disclosed against I2.** *What* a line loses on each pass reads only that line's own syllables —
+their order and their force — so it is the same wherever the line erodes, whatever any other stanza
+says. "The rhyme word" is the line's last word rather than "a word with a note" for exactly that
+reason: whether a word is pitched depends on whether anything elsewhere in the poem rhymes with it,
+so a note-based rule would let an edit to another stanza change what this line loses. Two things
+are not local: *which* of an eroding loop's lines sound under which pass depends on the arriving
+stanza's length (a pass is one statement of it, and the old loop runs on line after line beneath),
+and *whether* a stanza erodes at all depends on whether the stanza arriving after it is long —
+both §4.6's "duration is poem-wide", as before. The I2 property for erosion is scoped to exactly
+that: an edit to another stanza leaves every line that erodes in both versions eroding the same
+way, pass for pass (`prosody-core/tests/erosion.rs`).
+
 Bar-locked: each bar of the piece takes its length from the stanza of the line arriving in it — the
 stanza's *period*, its longest line — so a stanza is a loop of one length and the meter changes only
 where the stanza does (*machine cycle 2, pending review*; before, a bar took its own line's length).
@@ -411,15 +464,21 @@ of named variants, always including `off` (the pulse and the stack excepted, bel
 per mapping, and only a variant the mapping lists can be chosen. Today the held and refrain
 lanes, the stanza period and the outro are `off`/`on`, default `on`; the bass is
 `off`/`height`/`syllables`/`feet`, default `height`; the harmony is `off`/`rhyme`/`cadence`/`both`,
-default `off`; the reading is `off`/`arrives`/`stanza`, default `arrives`; the pulse (§4.2) is
+default `off`; the reading is `off`/`arrives`/`stanza`/`breath`, default `breath`; the pulse (§4.2) is
 `elastic`/`steady`, default `steady` — a mapping without `off`, because a piece cannot be
 without a pulse: its first variant is what preceded it, `elastic`, and leaving it out means that;
 the stack (§4.2) is `crossing`/`straight`, default `crossing`, likewise without `off` — leaving it
-out means `crossing`.
+out means `crossing`; the function words (§4.2) are `full`/`light`, default `full`, without `off`;
+the long stanzas (above) are `gradual`/`erode`, default `erode`, without `off` — leaving them out
+means `gradual`.
 They are
 chosen with `--set name=variant,…` on the CLI (`--without LIST` is shorthand for `name=off`),
 `set=name:variant,…` (and `off=`) on the web endpoints, and one menu per mapping per side in the
-page's A/B table, so the piece can be heard and measured under each choice. This is a separate
+page's A/B table, so the piece can be heard and measured under each choice (B starts at each
+first variant, except the long stanzas, which it starts at `erode` like A: `gradual` makes a long
+poem quadratic again, too heavy to compile, score and parse behind every edit of every A/B
+comparison — "Patterns" under it takes the static page about 5 s to compile and 8 s to score, off
+the music's thread but still before the edit can be heard). This is a separate
 argument to the lowering, not part of the style: it changes structure, and I3 keeps the style out
 of structure. Every invariant holds within one choice. Every default is the piece as specified,
 and the default everywhere — except the harmony, a candidate whose default is `off`, so a piece
@@ -431,7 +490,8 @@ proposes it, so the comparison stays available as long as the question is open.
 
 This is structure, read from the poem, not a style parameter — which answers §9's "looping as an
 explicit style parameter" question: it is not one, and I3 is untouched. It does make *duration*
-poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives.
+poem-wide: how long a stanza sounds depends on when the next stanza of its layer arrives — and,
+with the erosion, how long the arrival is.
 
 ### 4.7 The reading — the poem spoken over the music, a stanza at a time
 
@@ -440,7 +500,8 @@ spoken lines over the music work. Under every variant each line is spoken at mos
 browser's speech synthesiser, and only from where the music has begun its stanza. The reading as
 it shipped (now the `arrives` variant; the default is `breath`, below) speaks each line in the slot
 where it is **first heard as a host** — `Stated`, `Arriving` or `Overruling` (§4.6) —
-and never where it loops, yields, calls, holds, refrains in its lane or repeats in the outro. So
+and never where it loops, yields, erodes, calls, holds, refrains in its lane or repeats in the
+outro. So
 the reading follows the poem in order, and every utterance is the source text under one line's
 span (I4). A refrain stanza is new lines of the poem, so it is read again where it drops in.
 

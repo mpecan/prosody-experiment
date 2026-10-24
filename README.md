@@ -122,8 +122,9 @@ header asks for (the defaults when it has none).
 
 Under the palette is **Mappings — changes what happens**: the candidate mappings still under
 review (the held and refrain lanes, the bass, the stanza period, the outro, the harmony, the
-reading, the pulse, the stack, the function words), each a selector of named variants — always
-including `off`, except the pulse, the stack and the function words, which no piece can be without
+reading, the pulse, the stack, the function words, the long stanzas), each a selector of named
+variants — always including `off`, except the pulse, the stack, the function words and the long
+stanzas, which no piece can be without
 — with one menu per setting,
 A and B. The held and refrain lanes, the stanza period and the outro are `off`/`on`; the bass is
 `off`, `height` (its default), `syllables` or `feet` (see [the walking bass](#the-walking-bass));
@@ -131,11 +132,15 @@ the harmony is `off` (its default), `rhyme`, `cadence` or `both` (see
 [the harmony layer](#the-harmony-layer)); the reading is `off`, `arrives`, `stanza` or `breath` (its default); the pulse
 is `elastic` or `steady` (its default; see [the pulse](#the-pulse)); the stack is `crossing` (its
 default) or `straight` (see [stacked lines](#stacked-lines-crossing-or-straight)); the function
-words are `full` (their default) or `light` (see [function words](#function-words-full-or-light)).
+words are `full` (their default) or `light` (see [function words](#function-words-full-or-light));
+the long stanzas are `gradual` or `erode` (their default; see
+[long stanzas erode](#long-stanzas-erode)).
 A starts with every mapping at its default (marked "(default)" in the menu), B with every one at its
-first variant — `off`, for the pulse `elastic`, for the stack `crossing` and for the function words
-`full`, the way the page played
-before; a menu not at its default
+first variant — `off`, for the pulse `elastic`, for the stack `crossing` and for the function
+words `full`, the way the page played before — except the long stanzas, which B starts at `erode`
+as A does: `gradual` is the quadratic arrangement erosion replaced ("Patterns" under it is 1,314
+bars and a 4 MB pattern, which costs every edit seconds more to compile, score and prepare), so
+choose it when you want to hear it; a menu not at its default
 has a bold border. The **hearing A | B**
 switch at the top swaps which one plays, without stopping, so you can hear exactly what a mapping
 adds. The **Score A vs B** tab measures both settings side by side (see [Measuring it](#measuring-it))
@@ -167,6 +172,13 @@ dipping while a line is read. The Pattern tab shows the cue pattern under the mu
 browser console logs every line as it is cued: which bar, which bytes, which rate. Picking a
 preset or switching A/B while playing starts the piece again from bar 1, so the reading begins at
 the first line. A live edit keeps playing from where it is, and the reading carries on from there.
+If Strudel's scheduler ever falls behind — it skips a tick it reaches too late, and every note and
+cue in that tick is lost, saying so only on the console — the status bar says so in red:
+`Strudel fell behind: 58 tick(s) not played, their notes unheard; not read: line 10`.
+Nothing the page does should cause that: it parses a new pattern's mini-notation ahead, a few
+milliseconds at a time between the scheduler's ticks, and remembers what it has parsed, so a live
+edit to "Patterns" while it plays — about 1,200 strings, a second to parse — swaps in the new
+version without a gap (an edit changes only the strings of the voices it touches).
 It is a
 candidate mapping and a page-only one — the CLI's pattern and strudel.cc know nothing of it
 (`SPEC.md` §4.7).
@@ -189,7 +201,8 @@ python3 -m http.server -d target/site    # or any static host; then open http://
 
 It is the same page with the same controls, and it answers itself: every request the served page
 sends to `prosody-web` goes to `prosody_bg.wasm` instead (`crates/prosody-wasm`, bound to the
-page by `wasm-bindgen`). It can be put on any
+page by `wasm-bindgen`), running in two Web Workers — one for what plays, one for the scores — so
+compiling and scoring never hold up the music. It can be put on any
 static host (GitHub Pages, a bucket), and since it compiles in the visitor's browser, nothing on
 the host runs arbitrary input. The compiler is about 5 MB, about 1 MB compressed — nearly all of
 it the pronouncing dictionary — and the first compile takes a moment while the dictionary loads.
@@ -332,12 +345,14 @@ machine profile's.
 (default `height`), `harmony` takes `off`, `rhyme`, `cadence` or `both` (default `off`), `reading`
 takes `off`, `arrives`, `stanza` or `breath` (default `breath`), `pulse` takes `elastic` or `steady`
 (default `steady`), `stack` takes `crossing` or `straight` (default `crossing`), `function-words`
-takes `full` or `light` (default `full`) — for the pattern
+takes `full` or `light` (default `full`), `long-stanzas` takes `gradual` or `erode` (default
+`erode`) — for the pattern
 and for `--score` alike;
 an unknown name or variant
 is an error that names it. `--without held,refrain,…` is shorthand for setting those to `off`
-(`--without pulse` is `pulse=elastic`, `--without stack` is `stack=crossing` and
-`--without function-words` is `function-words=full`: none of them has an `off`).
+(`--without pulse` is `pulse=elastic`, `--without stack` is `stack=crossing`,
+`--without function-words` is `function-words=full` and `--without long-stanzas` is
+`long-stanzas=gradual`: none of them has an `off`).
 `--explain` lists every choice that is not a default. The reading is not in the CLI's pattern, so
 `reading=…` changes only that list. `./scripts/cycle.sh machine bass` scores every example without
 the bass, and `./scripts/cycle.sh machine bass=off,period=off` passes its list to `--set` (any list
@@ -436,6 +451,39 @@ schedule name `light` and count the syllables (The Tyger 24, the Sonnet 24, Whit
 15, Poe 13, Hopkins 9, Jabberwocky 7, Wilde 4, Prešeren 0 — Slovenian matches no English function
 word); `--explain` marks each light row `function-words`.
 
+### Long stanzas erode
+
+*Decided by the user: `erode` is the default; `gradual` is what preceded it* (`SPEC.md` §4.6,
+`--set long-stanzas=…`, or the `long-stanzas` menu on the page). A stanza arriving into a running
+loop replaces it one line a pass, so a stanza of *n* lines takes about *n* passes of *n* bars —
+Lowell's "Patterns" (stanzas of 9 to 22 lines) arranged into 1,331 bars and an 8.6 MB pattern.
+
+- **`erode`** — where either stanza has **more than eight lines**, the old loop is not replaced: it
+  keeps looping under the arriving stanza, from its first line, and thins out over **three passes**
+  (each pass one statement of the arriving stanza) until it is silent. On pass *p* an eroding line
+  of *k* syllables keeps ⌈k·(4−p)/4⌉ of them — three quarters, a half, a quarter. Unstressed
+  syllables go first, then secondary and then primary stresses, and the rhyme word — the line's
+  last word — last; within each, the earlier syllable first, so what is left of a line is its end.
+  The rule reads only the line's own syllables. Stanzas of eight lines or fewer are transformed a
+  line a pass, as before, so every other example is the piece it was. "Patterns" is now 284 bars
+  and a 0.9 MB pattern.
+- **`gradual`** — every arrival is a line-by-line transformation, however long.
+
+A lost syllable is simply absent — from the drums, the melody, the bass, the trace's lit poem, the
+OSC schedule and the scorer alike — and every syllable that still sounds keeps its span. The
+pattern's header, the OSC schedule and `--explain` count the bars over an eroding loop
+(`long-stanzas = erode: 240 bar(s) over an eroding loop` in "Patterns"), and `--explain` shows each
+eroding line's thinning (`erodes pass 1 keeps 6 of 7 · pass 2 keeps 4 · pass 3 keeps 2: figured`).
+The reading reads the arriving stanza where it is stated, and never reads an eroding line again.
+
+A piece of more than 16 bars is written in groups (`strudel::nested`): runs of rests joined into
+one rest as long, then bars bracketed sixteen at a time (`<[a@3 b@4 …]@58 …>`). The same notes at
+the same times — every hap of every example's whole loop compared under the page's Strudel — but
+Strudel visits every element of a sequence on every query, and the flat 284-bar sequence cost more
+per scheduler tick than a tick lasts: the page played about a sixth of "Patterns". Grouped, it
+plays all of it (a query costs 3.9 ms instead of 49 ms). The text of the 13 examples over 16 bars
+changed with it; nothing they play did.
+
 ### The harmony layer
 
 *A candidate, off by default* (`SPEC.md` §4.6, `--set harmony=…`, or the `harmony` menu on the
@@ -529,6 +577,7 @@ The rest of the header, every key optional:
 |---|---|---|
 | Per-stanza metrical regularity | foundation layer (pulse) vs flourish (ornament) | §4.1 |
 | A stanza, once stated | keeps looping until the next stanza of its layer transforms it, bar by bar | §4.6 |
+| A stanza of more than eight lines arriving, or being replaced | the old loop erodes under the new stanza: fewer of its syllables each of three passes, unstressed first, rhyme words last, then silence | §4.6 |
 | A stanza's longest line | the length of every bar the stanza plays in; shorter lines rest | §4.6 |
 | The end of the poem | the loops play one more pass — an outro — and stop | §4.6 |
 | A stanza made only of refrains | stops every loop and drops in alone, like a chorus | §4.6 |

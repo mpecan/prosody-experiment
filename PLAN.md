@@ -406,6 +406,155 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Erosion, second review — editing "Patterns" while it plays
+
+Review found that a live edit to "Patterns" while it played stopped the music: on the static page
+the compiler (pattern and trace for A and B, then both scores) ran on the page's own thread, one
+7.2 s block and 170 skipped ticks; on the served page Strudel evaluating the 0.9 MB pattern blocked
+about 0.9 s (16–17 ticks, sometimes a reading line). Fixed:
+
+- **The static page's compiler runs in two Web Workers** (`index.html`, `ask` → `threadFor`): one
+  answers what plays, one only scores, so a new pattern never waits behind the last one's scores.
+  Each loads its own copy of `prosody_bg.wasm` from a blob-made module worker, given the bindings'
+  absolute address. Without module workers it falls back to compiling in-process, as before.
+  Compilations and measurements are each one at a time and of the newest poem only, so typing into
+  a long poem never queues one per keystroke and answers never arrive out of order.
+- **The page parses ahead and remembers.** Evaluating a pattern is almost all Strudel parsing its
+  mini-notation (Node, @strudel 1.2.6: "Patterns" 1,206 ms plain; 1,111 of 1,119 ms parsing). The
+  page sets Strudel's string parser (`setStringParser`) to one that remembers each string's
+  pattern, and before each evaluation parses the strings it has not seen in 8 ms slices between
+  ticks. After the "Christ!" → "Lord!" edit 9 of the evaluation's 1,189 string lookups miss, and it takes
+  47 ms. Remembered and plain evaluations give identical haps: 216 evaluations (18 examples × 4
+  settings × pattern, trace, reading), 942,040 haps. Entries no play has used in the last 3 are let
+  go.
+- **A skip is never left unreported.** Ticks skipped while a new pattern was being prepared counted
+  against the old pattern's record, whose report was then dropped; the new record now takes over
+  what the old had not yet said (`behindFrom`). A 1.5 s stall followed by a replay at once reported
+  all 26 skipped ticks.
+- B still starts `long-stanzas` at `erode`: with the freeze gone, the reason is now cost —
+  `gradual` adds about 5 s of compiling and 8 s of scoring to every edit of "Patterns", and A waits
+  for B's pattern. Still a spec question.
+
+In the browser (headless Chromium, 20 ms probe, blocks over 100 ms recorded): on both pages,
+loading "Patterns" while Tyger plays, 25 s of play, the edit, and A→B→A switches gave 0 skipped
+ticks and no block over 100 ms; audio starts 196 for 98 onsets over 10 s. Static page: the edit
+reached the scheduler in 2.1 s, its scores in 8.5 s; served page: 1.1 s. B set to `gradual` by
+hand: 3.6 s to compile, 12.5 s to score, 7.2 s to switch to, with blocks of 113–158 ms and 0 skips.
+
+### Erosion, review fixes — "Patterns" plays whole on the page
+
+Review of the erosion step found the page played about a sixth of "Patterns" (Strudel skipping
+~12 ticks a second), lost most reading lines with it unsaid, and froze for seconds on an A/B
+switch. Fixed:
+
+- **The pattern is grouped** (`strudel::nested`, `GROUP` = 16; the steady `<…>`, the elastic one
+  via `one_a_cycle`, and the reading's cues). A sequence of more than 16 elements joins its runs of
+  rests into one rest as long, then brackets elements 16 at a time, recursively. Cause, read in
+  `@strudel/core` 1.2.6: a weighted sequence is a `stack` of every element `_compress`ed, visited on
+  every query; the flat elastic `<a b …>` measured as slow. Effect under Node with the page's
+  `@strudel/core`/`@strudel/mini` 1.2.6: "Patterns" 48.6 → 3.9 ms a 0.1 s tick, eval 2.0 → 1.4 s,
+  1,856,772 → 898,178 bytes; elastic B 55 → 4.8 ms. **Same music:** every hap (whole, part, value)
+  of a whole loop compared old vs new for 18 examples × 6 settings × pattern, trace and reading:
+  324 answers, 223 of the 322 compared with changed text, 319,091 haps identical — all but "Patterns" under `gradual`
+  (pattern and trace), whose old 8.6 MB text runs Node out of memory, so it was not compared; and
+  the two changed villanelle snapshots (2,695 haps identical). Text changed for the 13 examples over 16
+  bars and the two `corpus__pattern-villanelle*` snapshots (read: rests joined, e.g.
+  `~@5 ×8` → `~@40`; 24 bars, so ≤16 elements after joining, no groups). OSC, explain and every
+  score are byte-identical before/after for all 18 (90 files); `cycle.sh` means unchanged (0.703
+  machine, 0.729 jazz over 18; 0.711/0.733 over the 17).
+- **Lost ticks are said.** The page wraps `console.log` for Strudel's `skip query: too late`
+  (verified in the published @strudel/web 1.3.0 bundle: the cyclist sets `lastBegin`/`lastEnd`
+  before logging), asks the cue pattern which lines fell in the skipped span, and puts
+  `Strudel fell behind: N tick(s) not played, their notes unheard; not read: line …` in the status
+  bar in red (forced with a 3 s main-thread stall: 58 ticks, line 10 named).
+- **B starts eroding** (`B_STARTS_AS_A = ['long-stanzas']` in the page): `gradual` is still the
+  first variant and still selectable, but B no longer loads the quadratic piece behind every long
+  poem.
+- **Lanes over an eroding line** documented in `SPEC.md` §4.6 rather than changed (an eroding line
+  counts as sounding, so call/held/refrain do not double it).
+- Also: the page's warm-up no longer asks for sounds named `~@5` (weights now stripped).
+
+Browser (headless Chromium, port 4921), "Patterns" A over 40 s: native 0 skips, 650 starts for
+317 onsets (2.05 — Tyger 1.98), reading lines 2–9 and 11–13 all cued; load 0.75 s, scores 3.6 s,
+A→B 0.63 s, B→A 1.1 s. WASM site: 0 skips, ratio 2.06, same lines; load 8.0 s (a 6.3 s main-thread
+block — compiling and scoring both sides synchronously), A→B 0.69 s, B→A 1.1 s (were 21.6 s and
+26.3 s). B set to `gradual` by hand on the WASM site: 12.1 s to compile and score (8.6 s block),
+A→B 2.3 s, then it plays with 0 skips.
+
+### Erosion for long stanzas — loss, and "Patterns" back as the 18th example
+
+The user decided: for long pieces, *loss*, as erosion (Basinski). The line-by-line handover makes
+a stanza of *n* lines take ~*n* passes of ~*n* bars, so "Patterns" was 1,331 bars and 8.6 MB.
+
+- **The rule** (`prosody_core::arrange`, `SPEC.md` §4.6). Where a stanza arrives into a running
+  loop and either has more than `LONG_STANZA` = 8 lines, the arriving stanza is stated whole for
+  `EROSION_PASSES` = 3 passes (each one statement of it: `Arriving { pass }`), and the old loop
+  loops under it from its first line, a line a bar (`Cause::Eroding { pass }`). On pass *p* an
+  eroding line of *k* syllables keeps ⌈k·(4−p)/4⌉ (¾, ½, ¼), then the loop is gone. Order
+  (`arrange::erode`, documented at the mapping site): unstressed, then secondary, then primary
+  stress, the rhyme word last; within each, earlier first. **Decided here:** the rhyme word is the
+  line's *last word*, not "a pitched word" — pitch depends on rhymes elsewhere in the poem, which
+  would have made a line's erosion depend on other stanzas (I2). **Decided here:** a pass is one
+  statement of the *arriving* stanza (so host and loop share pass numbers and the arrival ends on
+  its own last bar); the alternative, a pass of the old loop's own length, is in the open
+  questions below.
+- **Selector** `Mapping::LongStanzas` (`long-stanzas`): `gradual` (first, what preceded it; no
+  `off`) and `erode` (default). It reaches the page's A/B table, the CLI `--set`/usage and the web
+  `set=` through `Mapping::variants` (tested: page JSON `["gradual","erode"],"erode"]`, CLI refusal
+  of `long-stanzas=off`, web `set=long-stanzas:gradual` named in the explain view).
+  `Mappings::every` grows 8192 → 16384.
+- **One rule for every consumer.** `Score::placed` drops what an `Eroding` pass loses, an eroding
+  line keeps its whole line's beats; `Score::sounds` / `Placed::sounds` replace the span-only
+  `Part::covers` filter in the Strudel walk (`grid_by_slot`, `Lane::all`) and the trace. The OSC
+  schedule, the scorer's timeline and its edit test already read `placed_in`. The reading reads
+  hosts only, so an eroding line is never read again. Header lines: pattern
+  `//   long-stanzas = erode: N bar(s) over an eroding loop …`, OSC `# long-stanzas = erode: …`,
+  explain `long-stanzas erode · …` and, per eroding line, `erodes pass 1 keeps 6 of 7 · pass 2
+  keeps 4 · pass 3 keeps 2: figured`; all from `Arrangement::eroding`. Nothing is printed where
+  nothing erodes.
+- **"Patterns" restored** (`examples/lowell-patterns.poem`, PG #841, verbatim except: 3-space
+  indent removed, "…and the buckles / on his shoes." rejoined, "--" as an em dash; palette E minor,
+  tr707, 92–100 bpm). Stanzas 9, 18, 15, 16, 22, 10, 17. **284 bars** (was 1,331), **1,856,772
+  bytes** (was 8,602,140), compile 0.79 s, `--score` 2.8 s native release (was 5.7 s; gradual still
+  5.7 s). Stanza 1 is foundation and stanzas 2–7 flourish, so stanza 1 loops under the whole piece
+  unchanged (nothing competes with it) and 240 bars play over an eroding loop. A preset, a corpus
+  entry (3 snapshots, new: machine 0.577, jazz 0.667, interest 0.764; edit test 646/646 audible,
+  511 local, 598 explained), an `examples/README.md` row (and its stale "nine" counts fixed), the
+  breath test's example count 17 → 18, `check-wasm.mjs` gains `set=long-stanzas:gradual`.
+- **Unchanged, proven.** Every existing snapshot untouched. The 17 other examples' CLI pattern,
+  OSC, explain and two alternative-mapping patterns byte-identical before/after (85 files).
+  `cycle.sh` rows for the 17 byte-identical: machine **0.711**, jazz **0.733** over the 17; with
+  "Patterns", 0.703 and 0.729 over 18. `check-wasm.sh`: 1,170 answers byte-identical.
+- **Tests.** Hand-worked (`prosody-core/tests/arrange.rs`): the full arrangement of a 9-then-2 and
+  a 2-then-9 poem under erode and gradual (15 vs 20 slots; 29 slots), what `ba bA ba bA` and
+  `ga gA gAga` keep on each pass (the rhyme word whole outlasting a stress on pass 2), the 8/8
+  boundary (identical under both) and 8/9 (erodes). Properties (`tests/erosion.rs`, 128 cases):
+  the count, monotone subset and rank order of what each eroding placement keeps (I4 spans
+  resolve); I1; poems with no stanza over 8 lines are equal `Score`s under both variants for any
+  other choice; each erosion takes exactly 3·n bars hosted `Arriving { pass }`; I2 — an edit to
+  another stanza leaves what every line keeps on each pass unchanged; a generator-reach check
+  (14 of 64 generated poems erode). Emit (`tests/erosion.rs`, real dictionary, "Patterns"): per
+  slot, Strudel drum strokes, trace marks (by span) and OSC messages equal the arrangement's
+  placed events — mutation-checked by restoring the span filter in `grid_by_slot`; the reading
+  reads all 107 lines once, never in a slot where the line erodes. Scorer: timeline hits per slot
+  equal placed events; a hand-worked edit test (22 edits: 22 audible, 18 local and explained — the
+  4 not are stanza-2 edits that flip it to flourish, so nothing erodes). CLI and web tests above.
+- **In the browser** (headless Chromium, port 4921). Native server: the preset compiles A and B in
+  1.8 s (A's pattern 0.73 s, B — gradual with every other mapping at its first variant — 1.7 s,
+  4.0 MB); the Score tab's two `/score` requests took 2.7 s (A) and 4.7 s (B). It plays, no
+  console errors, but Strudel logs **"skip query: too late"** ~11 times a second (87 in 8 s; 0 for
+  The Tyger, Whitman, Ball): querying the 1.86 MB pattern costs 73 ms per 0.1-cycle tick in the
+  page (Tyger 9.6 ms), so the scheduler falls behind — dropouts are likely. Every drum onset in
+  all 284 slots has its trace onset (15,133 each). Static site (WASM): the preset takes 11.8 s
+  to compile and score (8.4 s with B set to A's choices), plays with 161 late queries in 8 s and a
+  few "cannot schedule sounds in the past" warnings, scores 0.577 vs 0.434. Nothing was heard.
+- **Raised, not done.** (1) A pass as the *old* loop's length instead of the arriving stanza's
+  (fully local erosion, but a short stanza arriving into a long loop would host ~3·m bars).
+  (2) "Patterns" is still too heavy for Strudel's scheduler in the page; the pattern's size, not
+  the bar count, is now the limit — e.g. a stanza-1 loop under 284 bars, or a shorter mini-notation.
+  (3) Whether stanza 1's foundation loop, never competed with, should also erode over a long
+  piece (today it loops whole to the end).
+
 ### Eight more poems
 
 Eight public-domain poems join the examples (each also a preset on the page and a scored corpus

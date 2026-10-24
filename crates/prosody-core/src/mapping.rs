@@ -6,7 +6,9 @@
 //! a first variant that is what preceded the mapping ([`Variant::Off`] for every mapping but the
 //! pulse, which cannot be left out and goes back to [`Variant::Elastic`], the stack, whose
 //! lines always sound somehow and which goes back to [`Variant::Crossing`], and the function
-//! words, which are always struck somehow and go back to [`Variant::Full`]) — and one of them is
+//! words, which are always struck somehow and go back to [`Variant::Full`], and the long stanzas,
+//! whose arrivals always take the loop's place somehow and which go back to
+//! [`Variant::Gradual`]) — and one of them is
 //! its default. A [`Mappings`] value picks one variant per
 //! mapping, so the same poem can be heard under each choice, side by side.
 //!
@@ -71,6 +73,14 @@ pub enum Mapping {
     /// event is struck is structure, not palette (I3): it decides which syllables are accents,
     /// and so where the bass plays and what the scorer counts as syncopation.
     Function,
+    /// §4.6's long stanzas: what happens when a stanza arrives into a running loop and either
+    /// stanza is long — more than [`LONG_STANZA`](crate::arrange::LONG_STANZA) lines.
+    /// [`Variant::Erode`] (the default): the old loop keeps looping under the arriving stanza and
+    /// thins out over [`EROSION_PASSES`](crate::arrange::EROSION_PASSES) passes until it is silent
+    /// (`crate::arrange`). [`Variant::Gradual`]: the old loop is replaced line by line, as it is
+    /// for short stanzas under either variant — which made a stanza of *n* lines take about *n*
+    /// passes of *n* bars. Stanzas of eight lines or fewer arrange the same under both.
+    LongStanzas,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -123,6 +133,12 @@ pub enum Variant {
     /// The function words lightened: a one-syllable function word off the meter's strong
     /// positions is struck at secondary force, so it no longer reads as an accent.
     Light,
+    /// The long stanzas as they were: an arriving stanza replaces the running loop one line a
+    /// pass, however long either stanza is.
+    Gradual,
+    /// The long stanzas' default: where either stanza is long, the running loop erodes under the
+    /// arriving stanza — fewer of its syllables each pass, until it is silent.
+    Erode,
 }
 
 impl Variant {
@@ -147,6 +163,8 @@ impl Variant {
             Self::Straight => "straight",
             Self::Full => "full",
             Self::Light => "light",
+            Self::Gradual => "gradual",
+            Self::Erode => "erode",
         }
     }
 }
@@ -193,9 +211,14 @@ const STACK: &[Variant] = &[Variant::Crossing, Variant::Straight];
 /// always struck somehow, so there is no [`Variant::Off`] — then light.
 const FUNCTION: &[Variant] = &[Variant::Full, Variant::Light];
 
+/// The long stanzas' variants: gradual first, because it is what preceded the mapping — a stanza
+/// arriving into a loop always takes its place somehow, so there is no [`Variant::Off`] — then
+/// erode.
+const LONG_STANZAS: &[Variant] = &[Variant::Gradual, Variant::Erode];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -206,6 +229,7 @@ impl Mapping {
         Self::Pulse,
         Self::Stack,
         Self::Function,
+        Self::LongStanzas,
     ];
 
     /// Its name on a command line or in a query string.
@@ -222,6 +246,7 @@ impl Mapping {
             Self::Pulse => "pulse",
             Self::Stack => "stack",
             Self::Function => "function-words",
+            Self::LongStanzas => "long-stanzas",
         }
     }
 
@@ -267,13 +292,18 @@ impl Mapping {
                  stress like any word (full), or lightly unless the metre puts it on a strong \
                  position (light)"
             }
+            Self::LongStanzas => {
+                "a stanza arriving into a loop where either has more than eight lines: the old \
+                 loop thins out under it over three passes until silent (erode), or is replaced \
+                 a line a pass (gradual); shorter stanzas are replaced a line a pass under both"
+            }
         }
     }
 
     /// Its variants, in a fixed order that starts with what preceded the mapping:
     /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`], the
-    /// stack, which starts with [`Variant::Crossing`], and the function words, which start with
-    /// [`Variant::Full`].
+    /// stack, which starts with [`Variant::Crossing`], the function words, which start with
+    /// [`Variant::Full`], and the long stanzas, which start with [`Variant::Gradual`].
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
@@ -284,6 +314,7 @@ impl Mapping {
             Self::Pulse => PULSE,
             Self::Stack => STACK,
             Self::Function => FUNCTION,
+            Self::LongStanzas => LONG_STANZAS,
         }
     }
 
@@ -316,6 +347,11 @@ impl Mapping {
             // dictionary's stress on "or" is lexical, not the line's; light lets the meter's
             // scansion overrule it where the meter calls the position weak.
             Self::Function => Variant::Full,
+            // The user decided (PLAN.md, "erosion for long stanzas"): a long stanza's arrival
+            // erodes the old loop instead of replacing it a line a pass, which grew the piece
+            // with the square of stanza length (Lowell's "Patterns": 1,331 bars). Only above the
+            // threshold, so every shorter stanza is arranged as before (SPEC.md §4.6).
+            Self::LongStanzas => Variant::Erode,
         }
     }
 
@@ -339,8 +375,9 @@ impl Mapping {
 
     /// This mapping left out: its first variant, what preceded it — [`Variant::Off`] for every
     /// mapping but the pulse, which a piece cannot be without, and which goes back to
-    /// [`Variant::Elastic`], the stack, which goes back to [`Variant::Crossing`], and the
-    /// function words, which go back to [`Variant::Full`].
+    /// [`Variant::Elastic`], the stack, which goes back to [`Variant::Crossing`], the function
+    /// words, which go back to [`Variant::Full`], and the long stanzas, which go back to
+    /// [`Variant::Gradual`].
     #[must_use]
     pub const fn off(self) -> Choice {
         let variant = match self.variants() {
@@ -419,7 +456,7 @@ impl Mappings {
     }
 
     /// Whether `mapping` applies at all: any variant but [`Variant::Off`]. Always true of the
-    /// pulse, the stack and the function words, which have no off.
+    /// pulse, the stack, the function words and the long stanzas, which have no off.
     #[must_use]
     pub fn has(&self, mapping: Mapping) -> bool {
         self.get(mapping) != Variant::Off
@@ -475,6 +512,7 @@ mod tests {
                 Mapping::Pulse => Variant::Elastic,
                 Mapping::Stack => Variant::Crossing,
                 Mapping::Function => Variant::Full,
+                Mapping::LongStanzas => Variant::Gradual,
                 _ => Variant::Off,
             };
             assert_eq!(mapping.variants().first(), Some(&preceded), "{mapping:?}");
@@ -541,6 +579,33 @@ mod tests {
     }
 
     #[test]
+    fn long_stanzas_erode_unless_gradual_is_chosen() {
+        assert_eq!(
+            Mapping::LongStanzas.variants(),
+            &[Variant::Gradual, Variant::Erode]
+        );
+        assert_eq!(Mapping::named("long-stanzas"), Some(Mapping::LongStanzas));
+        assert_eq!(Mappings::all().get(Mapping::LongStanzas), Variant::Erode);
+        assert!(Mapping::LongStanzas.choose(Variant::Off).is_none());
+        assert!(Mapping::LongStanzas.choose_named("off").is_none());
+        assert!(Mapping::LongStanzas.choose_named("light").is_none());
+        assert!(Mapping::Stack.choose_named("erode").is_none());
+        let gradual = Mappings::all().with(Mapping::LongStanzas.choose_named("gradual").unwrap());
+        assert_eq!(gradual.get(Mapping::LongStanzas), Variant::Gradual);
+        assert_eq!(gradual.changed().count(), 1);
+        // Left out, it is what preceded it: gradual, a change from the default.
+        assert_eq!(
+            Mappings::all().without(Mapping::LongStanzas),
+            gradual.clone()
+        );
+        assert!(gradual.has(Mapping::LongStanzas));
+        assert_eq!(
+            gradual.with(Mapping::LongStanzas.choose_named("erode").unwrap()),
+            Mappings::all()
+        );
+    }
+
+    #[test]
     fn the_defaults_are_todays_piece() {
         // The four machine-cycle switches are on, the bass is by vowel height, the reading reads
         // a stanza at a time with a breath between, and the harmony — a candidate not yet in the
@@ -555,6 +620,7 @@ mod tests {
         assert_eq!(all.get(Mapping::Harmony), Variant::Off);
         assert_eq!(all.get(Mapping::Stack), Variant::Crossing);
         assert_eq!(all.get(Mapping::Function), Variant::Full);
+        assert_eq!(all.get(Mapping::LongStanzas), Variant::Erode);
         assert_eq!(all.changed().count(), 0);
     }
 
@@ -651,10 +717,10 @@ mod tests {
     #[test]
     fn every_combination_is_listed_once() {
         // Four on/off switches, a four-way bass, a four-way harmony, a four-way reading, a
-        // two-way pulse, a two-way stack and two-way function words:
-        // 2^4 × 4 × 4 × 4 × 2 × 2 × 2 = 8192.
+        // two-way pulse, a two-way stack, two-way function words and two-way long stanzas:
+        // 2^4 × 4 × 4 × 4 × 2 × 2 × 2 × 2 = 16384.
         let every = Mappings::every();
-        assert_eq!(every.len(), 8192);
+        assert_eq!(every.len(), 16384);
         for (index, one) in every.iter().enumerate() {
             assert!(!every[index + 1..].contains(one), "{one:?} twice");
         }

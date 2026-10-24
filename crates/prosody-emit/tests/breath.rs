@@ -282,7 +282,7 @@ fn every_example_poem_breathes() {
         assert_eq!(read, lines, "{}", path.display());
         checked += 1;
     }
-    assert_eq!(checked, 17);
+    assert_eq!(checked, 18);
 }
 
 #[test]

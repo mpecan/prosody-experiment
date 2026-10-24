@@ -55,7 +55,7 @@ use prosody_core::voice::Score;
 use prosody_core::{Cause, Lane};
 
 use crate::fmt_param;
-use crate::strudel::{cycles_per_minute, weights};
+use crate::strudel::{cycles_per_minute, nested, one_a_cycle, weights};
 use crate::style::Style;
 
 /// How many syllables a speech synthesiser says a second at rate 1.
@@ -268,7 +268,9 @@ impl Reading {
             | Variant::Crossing
             | Variant::Straight
             | Variant::Full
-            | Variant::Light => "each line spoken in the bar it is first heard",
+            | Variant::Light
+            | Variant::Gradual
+            | Variant::Erode => "each line spoken in the bar it is first heard",
         };
         let mut out = format!(
             "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
@@ -327,17 +329,17 @@ impl Reading {
         // The music's bars, as long as the music's: under the steady pulse a slot lasts its
         // beats in cycles, and a cue is weighted exactly as the music's bar is
         // (`strudel::sequence`), so it fires on that bar's first beat.
-        if let Some(weights) = &self.weights {
-            for (step, weight) in steps.iter_mut().zip(weights) {
-                let _ = write!(step, "@{weight}");
+        // Grouped as the music's bars are (`strudel::nested`), so a long piece's cues cost the
+        // scheduler as little as its music does.
+        let sequence = match &self.weights {
+            // A piece of no slots still has its one rest, unweighted.
+            Some(weights) if weights.len() == steps.len() => {
+                nested(steps.into_iter().zip(weights.iter().copied()).collect())
             }
-        }
-        let _ = writeln!(
-            out,
-            "n(\"<{}>\").cpm({})",
-            steps.join(" "),
-            fmt_param(self.cpm)
-        );
+            Some(_) => steps.join(" "),
+            None => one_a_cycle(steps),
+        };
+        let _ = writeln!(out, "n(\"<{sequence}>\").cpm({})", fmt_param(self.cpm));
         out
     }
 }
@@ -397,7 +399,9 @@ pub fn plan(
         | Variant::Crossing
         | Variant::Straight
         | Variant::Full
-        | Variant::Light => arrivals.clone(),
+        | Variant::Light
+        | Variant::Gradual
+        | Variant::Erode => arrivals.clone(),
     };
 
     let mut cues = Vec::new();
@@ -999,13 +1003,15 @@ mod tests {
                 (14, 8)
             ]
         );
+        // 24 slots of 2 beats, more than `strudel::GROUP`, so the rests between the cues are
+        // joined (`strudel::nested`): five after slot 6 (7–11, ten beats), nine after slot 14
+        // (15–23, eighteen). Twelve elements remain, so nothing is grouped.
         let pattern = plan(&poem, &score, &at_120(), &Mappings::all())
             .unwrap()
             .pattern();
         assert!(
             pattern.ends_with(
-                "n(\"<0@2 1@2 2@2 ~@2 3@2 4@2 5@2 ~@2 ~@2 ~@2 ~@2 ~@2 6@2 7@2 8@2 ~@2 ~@2 ~@2 ~@2 \
-                 ~@2 ~@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"
+                "n(\"<0@2 1@2 2@2 ~@2 3@2 4@2 5@2 ~@10 6@2 7@2 8@2 ~@18>\").cpm(120.000)\n"
             ),
             "{pattern}"
         );

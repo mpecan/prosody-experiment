@@ -503,3 +503,35 @@ fn a_light_function_word_is_no_accent_to_the_scorer() {
     assert!((jazz(&full, "pitched") - 5.0 / 8.0).abs() < 1e-9);
     assert!((jazz(&light, "pitched") - 0.5).abs() < 1e-9);
 }
+
+#[test]
+fn the_edit_test_hears_what_an_eroding_loop_plays() {
+    // Nine lines (a long stanza, `SPEC.md` §4.6), then two, all foundation: the second stanza's
+    // arrival erodes the first's loop — 9 stated bars, 3 × 2 over the eroding loop, 2 of outro.
+    // Silencing any word (`q`) removes a syllable from the bar it is stated in: all 22 heard.
+    //
+    // The 18 edits to stanza 1 stay in stanza 1: its lines erode the same way wherever they
+    // erode, by their own events, and an edit to one line changes only that line's erosion (and
+    // the held lane inside the stanza). Local, and so explained.
+    //
+    // The 4 edits to stanza 2 each leave one of its lines a single syllable beside a line of two:
+    // the stanza turns irregular, so flourish (§4.1), and no longer arrives into stanza 1's loop —
+    // nothing erodes, and stanza 1 loops under it instead (13 slots, not 17). Stanza 1's lines
+    // 1, 3 and 5, which eroded under stanza 2's *other* line, change for a reason the edit test
+    // does not trace — a layer flip, §4.6's disclosed "duration is poem-wide" — so these four are
+    // neither local nor explained, as a layer flip already is under the gradual handover.
+    let source = "da dA\nsa dA\nma dA\nta dA\nda sA\nsa sA\nma sA\nta sA\nda mA\n\nso mO\nto mO\n";
+    let score = compile(source).unwrap();
+    assert!(score.arrangement().slots().iter().any(|slot| {
+        slot.placements()
+            .iter()
+            .any(|p| matches!(p.cause(), prosody_core::Cause::Eroding { .. }))
+    }));
+    let result = sensitivity::measure(source, &["q"], compile).unwrap();
+    assert_eq!(result.edits(), 22);
+    assert_eq!(result.audible(), 22);
+    assert_eq!(result.failed(), 0);
+    assert_eq!(result.local(), 18);
+    assert_eq!(result.explained(), 18);
+    assert_eq!(score.arrangement().slots().len(), 17);
+}

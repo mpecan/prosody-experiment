@@ -259,6 +259,60 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_eroded_syllable_is_not_a_hit() {
+        // Lowell's "Patterns": its long stanzas erode the loops they arrive into (`SPEC.md`
+        // §4.6). The scorer hears what the arrangement plays in each slot — the same count the
+        // Strudel lanes, the trace and the OSC schedule have (`prosody-emit/tests/erosion.rs`) —
+        // and so fewer hits than the placed lines' whole material.
+        use prosody_core::lower::{self, Analyses};
+        use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
+        let poem =
+            Poem::parse(include_str!("../../../examples/lowell-patterns.poem").to_owned()).unwrap();
+        let phonemiser = Fallback::new(
+            prosody_cmudict::CmuDict::new(),
+            prosody_lts::LetterToSound::new(),
+        )
+        .unwrap();
+        let meter = meter::scan(&poem, &phonemiser);
+        let repetition = repetition::analyse(&poem);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        let score = lower::run(Analyses {
+            poem: &poem,
+            meter: &meter,
+            rhyme: &rhyme::analyse(&poem, &phonemiser),
+            repetition: &repetition,
+            sound: &sound::analyse(&poem, &phonemiser),
+            surprisal: &surprisal::analyse(
+                &poem,
+                &phonemiser,
+                &prosody_lexicon::EnglishLexicon::new(),
+            ),
+            roles: &roles,
+        })
+        .unwrap();
+        let slots = score.arrangement().slots();
+        let mut played = vec![0_usize; slots.len()];
+        let mut whole = 0;
+        for (index, slot) in slots.iter().enumerate() {
+            for placement in slot.placements() {
+                played[index] += score.placed_in(slot, *placement).events().len();
+                whole += score
+                    .events()
+                    .iter()
+                    .filter(|event| event.bar() == placement.bar())
+                    .count();
+            }
+        }
+        let timeline = Timeline::of(&score);
+        let mut hits = vec![0_usize; slots.len()];
+        for hit in timeline.hits.iter().filter(|hit| !hit.chord) {
+            hits[hit.bar] += 1;
+        }
+        assert_eq!(hits, played);
+        assert!(played.iter().sum::<usize>() < whole);
+    }
+
+    #[test]
     fn the_grid_has_every_beat_and_merges_equal_instants() {
         // One bar of two beats; a hit on beat 0 (written 0/2) and one halfway through beat 1.
         let timeline = Timeline {

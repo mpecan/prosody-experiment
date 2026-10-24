@@ -86,6 +86,10 @@ const POEMS: &[(&str, &str)] = &[
         include_str!("../../../examples/lowell-night-clouds.poem"),
     ),
     (
+        "example-lowell-patterns",
+        include_str!("../../../examples/lowell-patterns.poem"),
+    ),
+    (
         "example-naidu-bazaars-of-hyderabad",
         include_str!("../../../examples/naidu-bazaars-of-hyderabad.poem"),
     ),

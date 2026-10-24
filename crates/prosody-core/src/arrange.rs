@@ -15,6 +15,20 @@
 //!   everything: every loop stops, and it is stated alone — a chorus dropping in. It then loops
 //!   like any other stanza.
 //!
+//! # Long stanzas erode
+//!
+//! Replacing a loop one line a pass makes a stanza of *n* lines take about *n* passes of *n* bars:
+//! the piece grows with the square of its stanzas' length (Lowell's "Patterns", stanzas of 9 to
+//! 22 lines, arranged into 1,331 bars). So where either stanza is **long** — more than
+//! [`LONG_STANZA`] lines — the arrival is a loss instead (`SPEC.md` §4.6, *erosion*, the user's
+//! decision): the arriving stanza is stated whole, once through and then looping, for
+//! [`EROSION_PASSES`] passes of its own length, and the old loop keeps looping under it from its
+//! first line ([`Cause::Eroding`]), sounding fewer of its syllables each pass until, after the
+//! last, it is silent. Which syllables go when is `erode`'s rule. A stanza of *n* lines arriving
+//! this way takes `EROSION_PASSES · n` bars, so the piece grows linearly. Stanzas of eight lines or
+//! fewer are transformed line by line as before, and [`Mapping::LongStanzas`]'s `gradual` variant
+//! transforms every stanza that way.
+//!
 //! When the poem runs out, nothing has stopped the loops, so they play **one more pass**: the last
 //! stanza again, with the other layer's loop and every lane under it — an outro. Then the piece
 //! ends. (*Machine cycle 3b, pending review*: before, the piece ended as the last stanza arrived,
@@ -78,7 +92,14 @@
 //!
 //! - **I4 holds.** A slot holds nothing but [`Placement`]s of whole lines the lowering already
 //!   produced, and every event of those carries its span. A looped syllable is attributable to the
-//!   same word its first statement was.
+//!   same word its first statement was. An eroded syllable is simply absent: what an eroding
+//!   placement sounds is a subset of its line's events, each with its own span.
+//! - **Erosion is local, but its pace is not.** *Which* syllables of a line go on which pass
+//!   reads nothing but that line's own events (`erode`). *Which* of an eroding loop's lines sound
+//!   under which pass depends on the arriving stanza's length — a pass is one statement of it, and
+//!   the old loop runs on under it line after line — and *whether* a stanza erodes at all depends
+//!   on whether the stanza arriving after it is long. Both are disclosed in `SPEC.md` §4.6; the I2
+//!   property for erosion is scoped to them.
 //! - **I2 holds for material, not for duration.** Each line's events are exactly what lowering
 //!   made of that line alone. But *how long a stanza keeps sounding* depends on when the next
 //!   stanza of its layer arrives, so an edit that moves a later stanza between layers re-times an
@@ -94,13 +115,30 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::mapping::Variant;
 use crate::mapping::{Mapping, Mappings};
 use crate::parse::Poem;
 use crate::repetition::VoiceId;
 use crate::rhyme::PoemRhyme;
 use crate::role::{Layer, LineBasis, PoemRoles};
 use crate::span::Span;
-use crate::voice::{Bar, Score};
+use crate::voice::{Bar, Event, Score, Velocity};
+
+/// A stanza is *long* when it has more than this many lines, and a long stanza's arrival into a
+/// running loop — or any arrival into a long stanza's loop — erodes the loop rather than replacing
+/// it a line a pass (`SPEC.md` §4.6). Structure, not palette: it decides what sounds in which bar,
+/// so it is a fixed constant here and nowhere in the style (I3). Eight because a transformation
+/// of eight lines already takes some 64 bars, and because every shipped poem but "Patterns" whose
+/// stanzas meet at all meets in stanzas of eight lines or fewer — the longer ones (the Sonnet's
+/// fourteen, Ball's seventeen, "Night Clouds"' nine) are each a poem's only stanza, which no
+/// arrival reaches — so the threshold changes no piece but the one it was set for.
+pub const LONG_STANZA: usize = 8;
+
+/// How many passes an eroding loop takes to fall silent (`SPEC.md` §4.6). Each pass is one
+/// statement of the arriving stanza; on pass *p* an eroding line keeps `⌈k · (4 − p) / 4⌉` of its
+/// *k* syllables (`erode`) — three quarters, a half, a quarter — and after the third it is gone.
+/// Fixed, like [`LONG_STANZA`], because it is structure.
+pub const EROSION_PASSES: usize = 3;
 
 /// Why a line sounds in a slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -110,7 +148,8 @@ pub enum Cause {
     /// Its stanza's statement as a refrain stanza, which stopped every loop.
     Overruling,
     /// Its stanza arriving into a layer that was already looping: this line has replaced the old
-    /// loop's bar at its position. `pass` counts from 1.
+    /// loop's bar at its position — or, where either stanza is long, this is the stanza's `pass`th
+    /// statement over the eroding loop ([`Cause::Eroding`]). `pass` counts from 1.
     Arriving {
         /// Which pass of the transformation, from 1.
         pass: usize,
@@ -118,6 +157,12 @@ pub enum Cause {
     /// Part of the old loop, not yet replaced on this pass of a transformation.
     Yielding {
         /// Which pass of the transformation, from 1.
+        pass: usize,
+    },
+    /// Part of the old loop, looping under a long arrival while it thins out: on this pass only
+    /// what `erode` keeps of its line sounds. `pass` counts from 1 to [`EROSION_PASSES`].
+    Eroding {
+        /// Which pass of the erosion, from 1.
         pass: usize,
     },
     /// A loop carrying on in its layer under another layer's arrival.
@@ -276,6 +321,21 @@ impl Arrangement {
     pub fn slots(&self) -> &[Slot] {
         &self.slots
     }
+
+    /// How many bars of the piece play over an eroding loop ([`Cause::Eroding`]): zero unless a
+    /// long stanza's arrival eroded one. The one count the pattern header, the OSC schedule and
+    /// the explain view print, so the debug surfaces cannot disagree about it.
+    #[must_use]
+    pub fn eroding(&self) -> usize {
+        self.slots
+            .iter()
+            .filter(|slot| {
+                slot.placements
+                    .iter()
+                    .any(|placement| matches!(placement.cause, Cause::Eroding { .. }))
+            })
+            .count()
+    }
 }
 
 /// A layer's loop: its lines, and how far through them it has played.
@@ -385,14 +445,33 @@ pub fn run(
                 piece.push(placement(bar, layer, Cause::Overruling), Company::Alone);
             }
         } else if let Some(old) = piece.loops.of(layer).take() {
-            for (pass, line_up) in transformation(&old.bars, &bars) {
-                for (bar, arriving) in line_up {
-                    let cause = if arriving {
-                        Cause::Arriving { pass }
-                    } else {
-                        Cause::Yielding { pass }
-                    };
-                    piece.push(placement(bar, layer, cause), Company::Loops);
+            let long = old.bars.len() > LONG_STANZA || bars.len() > LONG_STANZA;
+            if long && mappings.get(Mapping::LongStanzas) == Variant::Erode {
+                // The old loop runs on under the arriving stanza from its own first line, a line
+                // a bar, losing more of each line every pass (`SPEC.md` §4.6, erosion).
+                let mut under = Loop::new(old.bars);
+                for pass in 1..=EROSION_PASSES {
+                    for &bar in &bars {
+                        let eroding = under
+                            .next()
+                            .map(|old| placement(old, layer, Cause::Eroding { pass }));
+                        piece.push_over(
+                            placement(bar, layer, Cause::Arriving { pass }),
+                            eroding,
+                            Company::Loops,
+                        );
+                    }
+                }
+            } else {
+                for (pass, line_up) in transformation(&old.bars, &bars) {
+                    for (bar, arriving) in line_up {
+                        let cause = if arriving {
+                            Cause::Arriving { pass }
+                        } else {
+                            Cause::Yielding { pass }
+                        };
+                        piece.push(placement(bar, layer, cause), Company::Loops);
+                    }
                 }
             }
         } else {
@@ -532,6 +611,12 @@ impl Piece<'_> {
 
     /// Adds a slot for `host`, with whatever loops under it.
     fn push(&mut self, host: Placement, company: Company) {
+        self.push_over(host, None, company);
+    }
+
+    /// Adds a slot for `host` over `eroding` — its layer's old loop, thinning out under a long
+    /// arrival — with whatever else loops under them.
+    fn push_over(&mut self, host: Placement, eroding: Option<Placement>, company: Company) {
         let bar = host.bar.get();
         let first = !self.heard.contains(&bar);
         if first {
@@ -541,6 +626,7 @@ impl Piece<'_> {
         }
 
         let mut placements = vec![host];
+        placements.extend(eroding);
         if company == Company::Loops {
             if let Lane::Layer(layer) = host.lane
                 && let Some(running) = self.loops.of(other(layer))
@@ -608,6 +694,55 @@ fn transformation(old: &[usize], new: &[usize]) -> Vec<(usize, Vec<(usize, bool)
             (pass, line_up)
         })
         .collect()
+}
+
+/// What an eroding line still sounds on erosion pass `pass`: `events` — one line's, in playing
+/// order — with the first to go removed (`SPEC.md` §4.6, erosion).
+///
+/// On pass *p* a line of *k* syllables keeps `⌈k · (4 − p) / 4⌉` of them — with
+/// [`EROSION_PASSES`] = 3, three quarters, a half, a quarter, and from pass 4 none — so every line
+/// keeps sounding until the loop is gone, and a line of four or more loses some every pass. Which
+/// go first is decided by what each syllable is in its own line, and nothing else:
+///
+/// 1. **unstressed syllables** — the line's connective tissue, the softest strokes;
+/// 2. then **secondary**, then **primary** stress — the line's accents, its rhythm, outlast the
+///    syllables between them (a light function word, struck at secondary force, goes with the
+///    secondary stresses: what decides is how hard it is struck, §4.2);
+/// 3. **the rhyme word** last — the line's last pronounceable word, where a rhyme rests and its
+///    note sounds (§4.5), so the melody is the last thing left of a fading loop, as the held lane
+///    leaves an open rhyme sounding.
+///
+/// Within one kind, the earlier syllable goes first, so what remains of a line is its end, where
+/// its cadence and rhyme fall. Nothing here is random: a dropped syllable is chosen by the poem.
+///
+/// The rhyme word is the line's last word, not "a word with a note": whether a word is pitched
+/// depends on whether anything *else in the poem* rhymes with it (a class of one has no note), and
+/// an edit to another stanza would then change what this line loses (I2). So the rule reads only
+/// the line's own events — their order and their force — and a line erodes the same wherever it
+/// erodes and whatever the rest of the poem says. A kept syllable is the event itself, span and
+/// all (I4).
+pub(crate) fn erode(events: &mut Vec<&Event>, pass: usize) {
+    let total = events.len();
+    let parts = EROSION_PASSES + 1;
+    let keep = (total * parts.saturating_sub(pass)).div_ceil(parts);
+    let rhyme_word = events.last().map(|event| event.span());
+    let mut order: Vec<(bool, Velocity, usize)> = events
+        .iter()
+        .enumerate()
+        .map(|(position, event)| (Some(event.span()) == rhyme_word, event.velocity(), position))
+        .collect();
+    order.sort_unstable();
+    let gone: BTreeSet<usize> = order
+        .into_iter()
+        .take(total - keep)
+        .map(|(_, _, position)| position)
+        .collect();
+    let mut position = 0;
+    events.retain(|_| {
+        let kept = !gone.contains(&position);
+        position += 1;
+        kept
+    });
 }
 
 const fn placement(bar: usize, layer: Layer, cause: Cause) -> Placement {

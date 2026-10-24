@@ -215,6 +215,11 @@ const PRESETS: &[(&str, &str, &str)] = &[
         include_str!("../../../examples/lowell-night-clouds.poem"),
     ),
     (
+        "lowell-patterns",
+        "Lowell — Patterns",
+        include_str!("../../../examples/lowell-patterns.poem"),
+    ),
+    (
         "naidu-bazaars-of-hyderabad",
         "Naidu — In the Bazaars of Hyderabad",
         include_str!("../../../examples/naidu-bazaars-of-hyderabad.poem"),
@@ -842,6 +847,29 @@ mod tests {
         );
         // Relative too: the bindings `scripts/build-site.sh` generates sit beside the page.
         assert!(static_.contains("import('./prosody.js')"), "the bindings");
+        // The compiler answers from workers, off the thread Strudel's scheduler ticks on; a worker
+        // made from a blob is handed the bindings' absolute address, and scores go to a worker of
+        // their own so a new pattern never waits behind them.
+        assert!(static_.contains("new URL('./prosody.js', document.baseURI).href"));
+        assert!(static_.contains("{ type: 'module' }"));
+        assert!(
+            static_.contains("threads = { compile: compilerThread(), measure: compilerThread() };")
+        );
+        assert!(static_.contains("return path === '/score' ? threads.measure : threads.compile;"));
+    }
+
+    #[test]
+    fn the_page_parses_a_pattern_without_stopping_the_music() {
+        let html = page(super::Transport::Server).unwrap();
+        // Strudel parses every string through the parser `setStringParser` names; the page's
+        // remembers, and parses what is new in slices before evaluating.
+        assert!(html.contains("setStringParser((text) => {"));
+        assert!(html.contains(
+            "await parseAhead(code, reading?.pattern ?? '', traces[hearing]?.pattern ?? '');"
+        ));
+        assert!(html.contains("rememberParses();"));
+        // A skip reported against the pattern being replaced is carried to the new one.
+        assert!(html.contains("behind = behindFrom(behind, cues);"));
     }
 
     #[test]
@@ -918,9 +946,23 @@ mod tests {
             html.contains("[\"full\",\"light\"],\"full\"]"),
             "the function words' selector"
         );
+        assert!(
+            html.contains("[\"long-stanzas\","),
+            "the long stanzas' selector, by name"
+        );
+        assert!(
+            html.contains("[\"gradual\",\"erode\"],\"erode\"]"),
+            "the long stanzas' selector"
+        );
         // B starts at each mapping's first variant — what preceded it — not at `off`, which the
         // pulse does not have: so B is elastic and A steady until the writer chooses.
-        assert!(html.contains("B: defaults((m) => m[2][0])"), "B's defaults");
+        // Except the long stanzas, whose first variant is the quadratic arrangement: B starts
+        // eroding, as A does.
+        assert!(
+            html.contains("B: defaults((m) => (B_STARTS_AS_A.includes(m[0]) ? m[3] : m[2][0]))"),
+            "B's defaults"
+        );
+        assert!(html.contains("const B_STARTS_AS_A = ['long-stanzas'];"));
         assert!(!html.contains("__MAPPINGS__"));
     }
 
@@ -1397,8 +1439,11 @@ mod tests {
         assert_eq!(response.status, 200, "{}", response.body);
         let body = &response.body;
         assert!(body.contains(".bank(\"RolandR8\")"), "{body}");
+        // A drum lane of ride strokes. Not "the first bar is a ride bar": 24 bars are more than
+        // a level holds, so the first element may be a group of bars (`strudel::nested`).
         assert!(
-            body.contains("s(\"<[[rd rd]"),
+            body.lines()
+                .any(|l| l.trim_start().starts_with("s(\"<") && l.contains("[rd rd]")),
             "the ride keeps time: {body}"
         );
         assert!(body.contains(".swingBy(0.330,"), "triplet swing: {body}");
@@ -1680,6 +1725,61 @@ mod tests {
         assert!(
             super::compile(
                 &request(&[("set", "function-words:off")], tyger),
+                &Output::Pattern
+            )
+            .status
+                >= 400
+        );
+    }
+
+    #[test]
+    fn long_stanzas_erode_in_the_pattern_the_explain_view_and_the_score() {
+        // Lowell's "Patterns", the preset, under the default: the pattern header and the explain
+        // view count the same 240 bars over an eroding loop, and the score measures the eroded
+        // piece. `set=long-stanzas:gradual` is the old handover — named in the explain view's
+        // list of choices — and a short poem is the same under both. `off` is refused.
+        let patterns = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "lowell-patterns")
+            .map(|(_, _, text)| body_of(text))
+            .unwrap();
+        let pattern = super::compile(&request(&[], patterns), &Output::Pattern);
+        let explain = super::compile(&request(&[], patterns), &Output::Explain);
+        let score = super::compile(&request(&[], patterns), &Output::Score);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(explain.status, 200, "{}", explain.body);
+        assert_eq!(score.status, 200, "{}", score.body);
+        assert!(
+            pattern
+                .body
+                .contains("//   long-stanzas = erode: 240 bar(s) over an eroding loop"),
+            "{}",
+            &pattern.body[..1500]
+        );
+        assert!(
+            explain
+                .body
+                .contains("240 bar(s) over an eroding loop (§4.6)"),
+            "{}",
+            explain.body
+        );
+        assert!(explain.body.contains("  erodes pass 1 keeps"));
+        assert!(score.body.contains("overall"), "{}", score.body);
+        let gradual = &[("set", "long-stanzas:gradual")];
+        let seed = super::compile(&request(gradual, SEED), &Output::Pattern);
+        assert_eq!(
+            seed.body,
+            super::compile(&request(&[], SEED), &Output::Pattern).body
+        );
+        let named = super::compile(&request(gradual, SEED), &Output::Explain);
+        assert!(
+            named.body.contains("long-stanzas=gradual"),
+            "{}",
+            named.body
+        );
+        assert!(
+            super::compile(
+                &request(&[("set", "long-stanzas:off")], patterns),
                 &Output::Pattern
             )
             .status

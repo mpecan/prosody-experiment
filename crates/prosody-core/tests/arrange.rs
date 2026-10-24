@@ -485,3 +485,186 @@ fn without_the_outro_the_piece_ends_with_the_poem() {
             .all(|(_, cause)| *cause != Cause::Repeating)
     );
 }
+
+/// Stanza 1: two regular lines. Stanza 2: nine — a long stanza (more than
+/// [`prosody_core::arrange::LONG_STANZA`] lines). Every line is four syllables; line 1 (bar 1)
+/// ends in the two-syllable word `gAga`, so its rhyme word outlasts a stressed syllable before it.
+const SHORT_THEN_LONG: &str = "ba bA ba bA\nga gA gAga\n\n\
+    ca cA ca cA\nda dA da dA\nfa fA fa fA\nha hA ha hA\nja jA ja jA\n\
+    ka kA ka kA\nla lA la lA\nma mA ma mA\nna nA na nA\n";
+
+/// Nine regular lines, then two.
+const LONG_THEN_SHORT: &str = "ba bA ba bA\nca cA ca cA\nda dA da dA\nfa fA fa fA\n\
+    ga gA gAga\nha hA ha hA\nja jA ja jA\nka kA ka kA\nla lA la lA\n\nma mA ma mA\nna nA na nA\n";
+
+/// The lanes and the outro left out, so a slot is only its layer's lines: the erosion alone.
+fn layers_only(long_stanzas: &str) -> Mappings {
+    Mappings::all()
+        .without(Mapping::HeldLane)
+        .without(Mapping::RefrainLane)
+        .without(Mapping::Outro)
+        .with(Mapping::LongStanzas.choose_named(long_stanzas).unwrap())
+}
+
+/// Which of its line's syllables a placement sounds, counted from 0 in playing order.
+fn kept(score: &Score, slot: usize, bar: usize) -> Vec<usize> {
+    let slot = &score.arrangement().slots()[slot];
+    let placement = slot
+        .placements()
+        .iter()
+        .find(|placement| placement.bar().get() == bar)
+        .unwrap();
+    let line: Vec<_> = score
+        .events()
+        .iter()
+        .filter(|event| event.bar().get() == bar)
+        .collect();
+    score
+        .placed_in(slot, *placement)
+        .events()
+        .iter()
+        .map(|event| line.iter().position(|own| own == event).unwrap())
+        .collect()
+}
+
+#[test]
+fn the_erosion_fixtures_are_one_layer() {
+    // Both stanzas of each fixture must compete for one layer, or nothing arrives into a loop.
+    for source in [SHORT_THEN_LONG, LONG_THEN_SHORT] {
+        let score = compile(source);
+        for event in score.events() {
+            assert_eq!(
+                score.voice(event.voice()).unwrap().layer(),
+                Layer::Foundation
+            );
+        }
+    }
+}
+
+#[test]
+fn a_long_loop_erodes_under_a_short_arrival() {
+    use Cause::{Arriving, Eroding, Stated};
+    // The nine-line loop is long, so stanza 2 does not replace it a line a pass: it is stated
+    // whole three times, and the old loop runs on under it from its first line, one line a bar,
+    // pass 1 under the first statement, 2 under the second, 3 under the third — then it is gone.
+    let score = compile_with(LONG_THEN_SHORT, &layers_only("erode"));
+    let mut expected: Vec<Vec<(usize, Cause)>> = (0..9).map(|bar| vec![(bar, Stated)]).collect();
+    expected.extend([
+        vec![(9, Arriving { pass: 1 }), (0, Eroding { pass: 1 })],
+        vec![(10, Arriving { pass: 1 }), (1, Eroding { pass: 1 })],
+        vec![(9, Arriving { pass: 2 }), (2, Eroding { pass: 2 })],
+        vec![(10, Arriving { pass: 2 }), (3, Eroding { pass: 2 })],
+        vec![(9, Arriving { pass: 3 }), (4, Eroding { pass: 3 })],
+        vec![(10, Arriving { pass: 3 }), (5, Eroding { pass: 3 })],
+    ]);
+    assert_eq!(slots(&score), expected);
+}
+
+#[test]
+fn gradual_replaces_even_a_long_loop_a_line_a_pass() {
+    use Cause::{Arriving, Stated, Yielding};
+    // Today's rule: pass 1 is stanza 2's first line and the old loop's lines 2–9; pass 2 is
+    // stanza 2 alone. 9 + 9 + 2 = 20 bars where erosion takes 9 + 6 = 15.
+    let score = compile_with(LONG_THEN_SHORT, &layers_only("gradual"));
+    let mut expected: Vec<Vec<(usize, Cause)>> = (0..9).map(|bar| vec![(bar, Stated)]).collect();
+    expected.push(vec![(9, Arriving { pass: 1 })]);
+    expected.extend((1..9).map(|bar| vec![(bar, Yielding { pass: 1 })]));
+    expected.push(vec![(9, Arriving { pass: 2 })]);
+    expected.push(vec![(10, Arriving { pass: 2 })]);
+    assert_eq!(slots(&score), expected);
+}
+
+#[test]
+fn a_short_loop_erodes_under_a_long_arrival() {
+    use Cause::{Arriving, Eroding, Stated};
+    // Stanza 2 is long, so the two-line loop erodes under it: 3 × 9 = 27 bars, the old loop
+    // alternating its two lines all the way through, line 0 under the first bar of each odd
+    // statement, line 1 under the first bar of the second.
+    let score = compile_with(SHORT_THEN_LONG, &layers_only("erode"));
+    let got = slots(&score);
+    assert_eq!(got.len(), 2 + 27);
+    assert_eq!(got[0], vec![(0, Stated)]);
+    assert_eq!(got[1], vec![(1, Stated)]);
+    for (index, slot) in got[2..].iter().enumerate() {
+        let pass = index / 9 + 1;
+        assert_eq!(
+            slot,
+            &vec![
+                (2 + index % 9, Arriving { pass }),
+                (index % 2, Eroding { pass })
+            ],
+            "slot {}",
+            index + 2
+        );
+    }
+}
+
+#[test]
+fn an_eroding_line_loses_unstressed_syllables_first_and_its_rhyme_word_last() {
+    // Worked by hand, with k syllables kept to ⌈k · (4 − p) / 4⌉ on pass p.
+    //
+    // `ba bA ba bA` — unstressed, stressed, unstressed, stressed rhyme word. Four syllables:
+    // pass 1 keeps 3 (drops the first unstressed), pass 2 keeps 2 (both unstressed gone),
+    // pass 3 keeps 1 — the rhyme word `bA`.
+    //
+    // `ga gA gAga` — unstressed, stressed, then the rhyme word's stressed and unstressed
+    // syllables. Pass 1 keeps 3 (drops `ga`); pass 2 keeps 2 — the rhyme word whole, which
+    // outlasts the stressed `gA` before it; pass 3 keeps 1, the rhyme word's stressed syllable.
+    let score = compile_with(SHORT_THEN_LONG, &layers_only("erode"));
+    // Line 0 erodes in slots 2 (pass 1), 12 (pass 2) and 20 (pass 3): it is under every
+    // other bar, and the statements are nine bars long.
+    assert_eq!(kept(&score, 2, 0), vec![1, 2, 3]);
+    assert_eq!(kept(&score, 12, 0), vec![1, 3]);
+    assert_eq!(kept(&score, 20, 0), vec![3]);
+    // Line 1: slots 3, 11 and 21.
+    assert_eq!(kept(&score, 3, 1), vec![1, 2, 3]);
+    assert_eq!(kept(&score, 11, 1), vec![2, 3]);
+    assert_eq!(kept(&score, 21, 1), vec![2]);
+    // The arriving stanza is never eroded: slot 20's host — stanza 2's first line, bar 2 —
+    // sounds every syllable.
+    assert_eq!(kept(&score, 20, 2), vec![0, 1, 2, 3]);
+    // An eroding line keeps its whole line's beats, so what is left sounds where it always did.
+    let slot = &score.arrangement().slots()[20];
+    let eroding = slot.placements()[1];
+    assert_eq!(score.placed(eroding).beats(), score.beats_in(0));
+    assert_eq!(score.placed(eroding).first_beat(), 0);
+}
+
+#[test]
+fn eight_lines_are_not_long() {
+    // Eight-line stanzas on both sides are below the threshold: transformed a line a pass under
+    // both variants, exactly as before the erosion existed.
+    let eight = |letters: &str| -> String {
+        letters
+            .chars()
+            .map(|c| format!("{c}a {c}A {c}a {c}A"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n"
+    };
+    let source = format!("{}\n{}", eight("bcdfghjk"), eight("lmnprstv"));
+    let erode = compile_with(&source, &layers_only("erode"));
+    let gradual = compile_with(&source, &layers_only("gradual"));
+    assert_eq!(erode.arrangement(), gradual.arrangement());
+    assert!(
+        slots(&erode)
+            .iter()
+            .flatten()
+            .any(|(_, cause)| matches!(cause, Cause::Yielding { .. }))
+    );
+    assert!(
+        slots(&erode)
+            .iter()
+            .flatten()
+            .all(|(_, cause)| !matches!(cause, Cause::Eroding { .. }))
+    );
+    // One more line in the second stanza makes it long, and it erodes.
+    let source = format!("{}\n{}", eight("bcdfghjk"), eight("lmnprstvw"));
+    let erode = compile_with(&source, &layers_only("erode"));
+    assert!(
+        slots(&erode)
+            .iter()
+            .flatten()
+            .any(|(_, cause)| matches!(cause, Cause::Eroding { .. }))
+    );
+}

@@ -405,6 +405,13 @@ const $ = (id) => document.getElementById(id);
 // `initStrudel`, which fills the global scope with names of its own.
 const TRANSPORT = __TRANSPORT__;
 const NativeResponse = Response;
+//
+// The compiler runs in two workers, never on the page's own thread: compiling "Patterns" takes
+// about a second there and scoring it seven, and the page's thread is the one Strudel's scheduler
+// ticks on — a block there while the music plays is music skipped. One worker answers what plays
+// (pattern, trace, reading, explanation), the other only measures, so a new pattern never waits
+// behind the scores of the last one. Each loads its own copy of the compiler; their answers are
+// the same bytes, which `scripts/check-wasm.sh` checks against the server.
 let compiler = null;
 function loadCompiler() {
   // The generated module finds `prosody_bg.wasm` beside itself.
@@ -414,13 +421,60 @@ function loadCompiler() {
   });
   return compiler;
 }
+// A worker's script, as text: a worker made from a blob resolves nothing relative to the page,
+// so it is handed the bindings' absolute address.
+const COMPILER_THREAD = `
+  const bindings = import(${JSON.stringify(new URL('./prosody.js', document.baseURI).href)})
+    .then(async (module) => { await module.default(); return module; });
+  onmessage = async ({ data: { id, target, body } }) => {
+    try {
+      const { respond } = await bindings;
+      const answer = respond(target, body);
+      postMessage({ id, status: answer.status, body: answer.body });
+      answer.free();
+    } catch (error) {
+      postMessage({ id, status: 500, body: 'the compiler failed: ' + error });
+    }
+  };`;
+function compilerThread() {
+  const worker = new Worker(URL.createObjectURL(new Blob([COMPILER_THREAD], { type: 'text/javascript' })),
+    { type: 'module' });
+  const waiting = new Map();
+  let asked = 0;
+  worker.onmessage = ({ data }) => {
+    waiting.get(data.id)?.(data);
+    waiting.delete(data.id);
+  };
+  return (target, body) => new Promise((resolve) => {
+    asked += 1;
+    waiting.set(asked, resolve);
+    worker.postMessage({ id: asked, target, body });
+  });
+}
+let threads = null;
+function threadFor(path) {
+  if (threads === null) {
+    try {
+      threads = { compile: compilerThread(), measure: compilerThread() };
+    } catch (error) {
+      // No module workers: the compiler answers in-process, as it did before them.
+      console.warn('[compiler] no worker, compiling on the page:', error);
+      const inProcess = async (target, body) => {
+        const { respond } = await loadCompiler();
+        const answer = respond(target, body);
+        const reply = { status: answer.status, body: answer.body };
+        answer.free();
+        return reply;
+      };
+      threads = { compile: inProcess, measure: inProcess };
+    }
+  }
+  return path === '/score' ? threads.measure : threads.compile;
+}
 async function ask(path, query, body) {
   if (TRANSPORT === 'server') return fetch(path + '?' + query, { method: 'POST', body });
-  const { respond } = await loadCompiler();
-  const answer = respond(path + '?' + query, body);
-  const reply = new NativeResponse(answer.body, { status: answer.status });
-  answer.free();
-  return reply;
+  const answer = await threadFor(path)(path + '?' + query, body);
+  return new NativeResponse(answer.body, { status: answer.status });
 }
 // Every palette control's id is its key in the style header, and every value is in header units.
 const SOUND = ['bass', 'melody', 'kit', 'ride_fallback', 'voicing', 'bass_octave', 'melody_octave',
@@ -521,7 +575,16 @@ let timer = null;
 // variant, what preceded it (off; for the pulse, which has no off, elastic; for the stack,
 // which has none either, crossing), until the writer says otherwise.
 const defaults = (pick) => Object.fromEntries(MAPPINGS.map((m) => [m[0], pick(m)]));
-let settings = { A: defaults((m) => m[3]), B: defaults((m) => m[2][0]) };
+// One exception, `long-stanzas`: B starts where A does. Its first variant, `gradual`, is the
+// quadratic arrangement erosion exists to remove (SPEC.md §4.6) — for "Patterns" 1,314 bars and a
+// 4 MB pattern, which the static page's compiler takes about 5 s to write and 8 s to score, and
+// Strudel seconds more to parse, on every edit, while the A side waits for it — so it is there
+// to choose, not loaded behind every long poem.
+const B_STARTS_AS_A = ['long-stanzas'];
+let settings = {
+  A: defaults((m) => m[3]),
+  B: defaults((m) => (B_STARTS_AS_A.includes(m[0]) ? m[3] : m[2][0])),
+};
 let hearing = 'A';
 let patterns = { A: '', B: '' };
 // The reading of each setting (`prosody_emit::reading`): a cue pattern and the lines it speaks.
@@ -614,18 +677,37 @@ function hear(side) {
     .catch(() => {});
 }
 
+// One measurement at a time, and only of the newest poem: a request made while one is out waits
+// for it and then measures whatever the poem says by then, so a writer typing into a long poem
+// never queues a score per keystroke (each of "Patterns" takes seconds).
+let measuring = false, measureNext = null;
 async function measure(poem) {
-  const one = async (side) => {
-    const response = await ask('/score', query(side), poem);
-    return response.ok ? response.json() : null;
-  };
+  measureNext = poem;
   $('scoreRows').innerHTML = '<tr><td colspan="5">measuring…</td></tr>';
+  if (measuring) return;
+  measuring = true;
   try {
-    [scores.A, scores.B] = await Promise.all([one('A'), one('B')]);
-  } catch (error) {
-    scores = { A: null, B: null };
+    while (measureNext !== null) {
+      const asked = measureNext;
+      measureNext = null;
+      const one = async (side) => {
+        const response = await ask('/score', query(side), asked);
+        return response.ok ? response.json() : null;
+      };
+      let measured;
+      try {
+        measured = await Promise.all([one('A'), one('B')]);
+      } catch (error) {
+        measured = [null, null];
+      }
+      if (measureNext === null) {
+        [scores.A, scores.B] = measured;
+        renderScores();
+      }
+    }
+  } finally {
+    measuring = false;
   }
-  renderScores();
 }
 
 function renderScores() {
@@ -655,7 +737,23 @@ function renderScores() {
   $('scoreRows').innerHTML = rows.join('');
 }
 
+// One compilation at a time, the same way: an edit made while one is out is compiled when it
+// returns, so answers never arrive out of order and a long poem's compilations never pile up.
+let compiling = false, compileAgain = false;
 async function compile() {
+  if (compiling) { compileAgain = true; return; }
+  compiling = true;
+  try {
+    do {
+      compileAgain = false;
+      await compileOnce();
+    } while (compileAgain);
+  } finally {
+    compiling = false;
+  }
+}
+
+async function compileOnce() {
   showValues();
   const poem = $('poem').value;
   if (!poem.trim()) {
@@ -709,7 +807,9 @@ async function compile() {
     const patternText = latestPattern;
     const summary = patternText.split('\n')[1] || '';
     status(hearing + ' · ' + summary.replace('// ', '') + (playing ? ' · playing' : ''));
-    if (playing) play();          // live reload: keep going with the new version
+    // Live reload: keep going with the new version — unless a newer one is already being compiled,
+    // which plays instead (and keeps a preset's restart from being spent on the stale one).
+    if (playing && !compileAgain) play();
   } catch (error) {
     status('server unreachable — is `prosody-web` still running?', true);
   }
@@ -749,6 +849,55 @@ async function startStrudel() {
   // without them and every drum layer, which carries `.crush`, failed to build. Load them now.
   await initAudio();
   honourNudge();
+  rememberParses();
+}
+
+// ---- Parsing ahead ----
+//
+// Evaluating a pattern is almost all Strudel parsing its mini-notation strings: "Patterns" has
+// about 1,200, and parsing them takes about a second, during which the scheduler cannot tick — so
+// a live edit while it plays used to skip a second of music. Two things keep the page's thread
+// free. Strudel turns every string into a pattern through the one parser `setStringParser` names
+// (@strudel/core 1.2.6, pattern.mjs `reify`; `initStrudel` sets it to `mini`), so the page sets
+// a parser that remembers what it has parsed: Strudel's patterns are immutable values, the same
+// string always parses to the same pattern, and an edit to one stanza leaves the strings of every
+// other voice byte-identical (I2), so after an edit almost every string is one already parsed.
+// And before each evaluation the page parses the strings it has not seen, a few milliseconds of
+// them at a time between the scheduler's ticks, so the evaluation itself only looks them up.
+// Entries no evaluation has asked for in the last PARSES_KEPT plays are let go.
+const parsed = new Map();   // mini-notation string → { pattern, play }
+let parsePlay = 0;
+const PARSES_KEPT = 3;      // the piece playing, the other side, and the one before
+const PARSE_SLICE_MS = 8;   // well inside the scheduler's 50 ms tick
+function rememberParses() {
+  setStringParser((text) => {
+    let entry = parsed.get(text);
+    if (!entry) {
+      entry = { pattern: mini(text), play: parsePlay };
+      parsed.set(text, entry);
+    }
+    entry.play = parsePlay;
+    return entry.pattern;
+  });
+}
+async function parseAhead(...codes) {
+  parsePlay += 1;
+  let slice = performance.now();
+  for (const code of codes) {
+    // Every string literal: the mini-notation of `note("…")`, `s("…")` and the rest, and a few
+    // plain names (`.bank("…")`), which parse to themselves. One that does not parse is left for
+    // the evaluation to refuse, with Strudel's own message.
+    for (const [, text] of code.matchAll(/"([^"\\\n]*)"/g)) {
+      const entry = parsed.get(text);
+      if (entry) { entry.play = parsePlay; continue; }
+      try { parsed.set(text, { pattern: mini(text), play: parsePlay }); } catch (error) {}
+      if (performance.now() - slice > PARSE_SLICE_MS) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        slice = performance.now();
+      }
+    }
+  }
+  for (const [text, entry] of parsed) if (entry.play <= parsePlay - PARSES_KEPT) parsed.delete(text);
 }
 
 // Strudel's sampler starts a sample `nudge` seconds late; its oscillators and soundfonts ignore
@@ -813,7 +962,8 @@ async function warmUp(code) {
   const wanted = [];
   for (const line of code.split('\n')) {
     const pattern = (name) => (line.match(new RegExp(`(?:^|[.\\s])${name}\\("([^"]*)"\\)`)) || [])[1];
-    const tokens = (text) => text.replace(/[<>\[\],]/g, ' ').split(/\s+/).filter((t) => t && t !== '~');
+    const tokens = (text) => text.replace(/[<>\[\],]/g, ' ').split(/\s+/)
+      .map((t) => t.split('@')[0]).filter((t) => t && t !== '~');
     const notes = pattern('note');
     if (notes !== undefined) {
       const sound = pattern('sound');
@@ -932,6 +1082,55 @@ $('voice').addEventListener('change', () => {
   try { localStorage.setItem('prosody.voice', $('voice').value); } catch (e) {}
 });
 
+// What the scheduler dropped. Strudel's scheduler (the cyclist bundled in @strudel/web 1.3.0)
+// queries the pattern a tick at a time; a tick it reaches too late it skips whole, saying only
+// `console.log("skip query: too late")` — every note and every reading cue in that tick is lost,
+// and nothing on the page would know. It has set `lastBegin`/`lastEnd` to the skipped span just
+// before it logs, so the watcher asks the cue pattern which lines fell in it. Both are said in the
+// status line (CLAUDE.md §6: a fallback is visible), once a second at most.
+let behind = null;   // { ticks, lines: Set, cues, said, timer } for the pattern now playing
+const pageLog = console.log.bind(console);
+console.log = (...args) => {
+  if (args[0] === 'skip query: too late' && behind) fellBehind(behind);
+  pageLog(...args);
+};
+function fellBehind(record) {
+  record.ticks += 1;
+  const scheduler = strudelRepl?.scheduler;
+  if (record.cues && scheduler) {
+    try {
+      for (const hap of record.cues.queryArc(scheduler.lastBegin, scheduler.lastEnd)) {
+        if (hap.hasOnset()) record.lines.add(Number(hap.value?.n) + 1);
+      }
+    } catch (error) {}
+  }
+  reportSoon(record);
+}
+// A new pattern's record takes over what the old one had not yet said — ticks skipped while the
+// new pattern was being prepared still count against the old record, and its report would
+// otherwise be dropped with it.
+function behindFrom(previous, cues) {
+  const record = { ticks: 0, lines: new Set(), cues, said: '', timer: null };
+  if (previous?.timer) {
+    clearTimeout(previous.timer);
+    record.ticks = previous.ticks;
+    record.lines = previous.lines;
+    reportSoon(record);
+  }
+  return record;
+}
+function reportSoon(record) {
+  record.timer ??= setTimeout(() => {
+    record.timer = null;
+    if (record !== behind) return;
+    const lines = [...record.lines].sort((a, b) => a - b);
+    const lost = ' · Strudel fell behind: ' + record.ticks + ' tick(s) not played, their notes unheard'
+      + (lines.length ? '; not read: line ' + lines.join(', ') : '');
+    console.warn('[scheduler]' + lost);
+    status(record.said + lost, true);
+  }, 1000);
+}
+
 async function play() {
   if (!latestPattern) return;
   if (!strudelReady) {
@@ -949,8 +1148,11 @@ async function play() {
     // `initStrudel` puts in global scope. Mini-notation inside `s("…")` and `note("…")` is parsed
     // by those functions, so no transpiler step is needed.
     const code = latestPattern;
-    const music = (0, eval)(code);
     const reading = readings[hearing];
+    if (code.length > 100000) status('preparing the pattern…' + (playing ? ' · playing' : ''));
+    await parseAhead(code, reading?.pattern ?? '', traces[hearing]?.pattern ?? '');
+    if (code !== latestPattern) return;   // a newer version arrived while parsing; it plays itself
+    const music = (0, eval)(code);
     const generation = ++generations;
     // The reading is evaluated apart from the music: a cue pattern Strudel refuses costs the
     // reading, never the piece.
@@ -977,6 +1179,7 @@ async function play() {
     quietReading();
     if (fromTheTop && playing && typeof hush === 'function') hush();   // restart at cycle 0
     fromTheTop = false;
+    behind = behindFrom(behind, cues);
     pattern.play();
     tracePattern = nextTrace;
     heardBars = nextBars;
@@ -998,7 +1201,9 @@ async function play() {
       ? ' · not read: ' + reading.unread.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ')
       : '';
     if (lost) console.log('[reading]' + lost);
-    status(hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread + lost, !!unread);
+    const said = hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread + lost;
+    status(said, !!unread);
+    if (behind) behind.said = said;
   } catch (error) {
     status('Strudel refused the pattern: ' + error.message, true);
   }
@@ -1008,6 +1213,7 @@ function stop() {
   if (typeof hush === 'function') hush();
   readingGeneration = ++generations;   // nothing the stopped pattern cued is read
   quietReading();
+  behind = null;
   drawer?.stop();
   drawing = false;
   tracePattern = null;
