@@ -21,6 +21,19 @@
 //!
 //! Every utterance is traceable to its line's span (I4) under every variant.
 //!
+//! # Two paces
+//!
+//! The variants say *which* lines are read and *from where*; the page reads them at one of two
+//! paces, its own setting (`SPEC.md` §4.7):
+//!
+//! - **natural** (the page's default, *decided by the user, 2026-10-24*): each line at the voice's
+//!   own speed times its [`Pace`] — 0.92 to 1.08, drawn from the line's own seed — and the next
+//!   line after it has finished plus its [`Pause`], read from how it ends. A line is no longer
+//!   given a bar; its [`Onset`] says what it waits for, and [`Reading::natural_pattern`] carries
+//!   the bars that start them on Strudel's clock. The page times the rest on the audio clock,
+//!   since only it knows how long a voice takes.
+//! - **fitted**: each line fitted to its bar at a rate ([`Reading::pattern`]), as it shipped.
+//!
 //! # Why a separate artefact, and why here
 //!
 //! It is **not** part of [`Strudel`](crate::Strudel)'s pattern text, for three reasons:
@@ -43,19 +56,23 @@
 //!
 //! *Which* lines are spoken in *which* bar is structure, read from the arrangement and the chosen
 //! [`Mappings`] alone — no [`Style`] field moves a cue (I3). *How fast* a line is spoken is a
-//! parameter: the rate is fitted so the line fits its bar at the piece's tempo, and the tempo is
-//! palette, so a faster palette reads faster. Which voice speaks is the page's.
+//! parameter: at the fitted pace the rate is fitted so the line fits its bar at the piece's tempo,
+//! and the tempo is palette, so a faster palette reads faster; at the natural pace a line's pace
+//! and pause are its own text's, and no palette moves them. Which engine and voice speak is the
+//! page's.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use prosody_core::mapping::{Mapping, Mappings, Variant};
 use prosody_core::parse::Poem;
 use prosody_core::span::Span;
 use prosody_core::voice::Score;
-use prosody_core::{Cause, Lane};
+use prosody_core::{Cause, Domain, Lane, Seed};
+use rand_core::Rng as _;
 
 use crate::fmt_param;
-use crate::strudel::{cycles_per_minute, nested, one_a_cycle, weights};
+use crate::strudel::{cycles_per_minute, nested, one_a_cycle, starts, weights};
 use crate::style::Style;
 
 /// How many syllables a speech synthesiser says a second at rate 1.
@@ -88,28 +105,32 @@ pub const FASTEST: f64 = 1.6;
 /// fitted to the bar as it actually sounds.
 pub const SCHEDULER_CPS: f64 = 1.0;
 
-/// One line, spoken in one slot.
+/// One line of the poem as the reading speaks it, whichever pace the page reads at: the words, how
+/// many syllables each sounds, and the two values the natural pace reads it with — its [`Pace`]
+/// and the [`Pause`] after it.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Cue {
-    slot: usize,
+pub struct Spoken {
     line: usize,
+    stanza: usize,
     span: Span,
     text: String,
     syllables: usize,
-    rate: f64,
+    words: Vec<Word>,
+    pace: Pace,
+    pause: Pause,
 }
 
-impl Cue {
-    /// The slot of the arrangement — the cycle — it is spoken in, from 0.
-    #[must_use]
-    pub const fn slot(&self) -> usize {
-        self.slot
-    }
-
+impl Spoken {
     /// Which line of the poem it speaks, in reading order from 0: the line's bar in the score.
     #[must_use]
     pub const fn line(&self) -> usize {
         self.line
+    }
+
+    /// Which stanza the line is in, from 0 — what the page ducks the music for as one reading.
+    #[must_use]
+    pub const fn stanza(&self) -> usize {
+        self.stanza
     }
 
     /// The line's span in the source (I4).
@@ -124,10 +145,251 @@ impl Cue {
         &self.text
     }
 
-    /// How many syllables the line sounds — what the rate is fitted to.
+    /// How many syllables the line sounds — what the fitted rate is fitted to.
     #[must_use]
     pub const fn syllables(&self) -> usize {
         self.syllables
+    }
+
+    /// The line's words, in order, each with the syllables it sounds.
+    #[must_use]
+    pub fn words(&self) -> &[Word] {
+        &self.words
+    }
+
+    /// How fast the natural pace reads it, against the voice's own speed.
+    #[must_use]
+    pub const fn pace(&self) -> Pace {
+        self.pace
+    }
+
+    /// How long the natural pace waits after it, from how it ends.
+    #[must_use]
+    pub const fn pause(&self) -> Pause {
+        self.pause
+    }
+}
+
+/// A word of a spoken line and how many syllables it sounds. Where a speech engine reports no
+/// word timings, the page spreads a rendered line's duration over its words by these counts, so
+/// the word marker moves with the syllables rather than the letters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Word {
+    span: Span,
+    syllables: usize,
+}
+
+impl Word {
+    /// The word's span in the source (I4).
+    #[must_use]
+    pub const fn span(self) -> Span {
+        self.span
+    }
+
+    /// The syllables it sounds in the score; a word nobody could pronounce counts one, since a
+    /// voice will still say it.
+    #[must_use]
+    pub const fn syllables(self) -> usize {
+        self.syllables
+    }
+}
+
+/// How fast a line is read at the natural pace, in hundredths of the voice's own speed:
+/// [`Pace::SLOWEST`]`..=`[`Pace::FASTEST`].
+///
+/// *Decided by the user, 2026-10-24* (`SPEC.md` §4.7): squeezing every line into its bar sounds
+/// forced, so by default a line is read at the voice's natural speed with a small variation of
+/// its own, as a reader never says two lines at quite the same speed. The variation is drawn from
+/// the line's **own** seed ([`Seed::for_unit`] on the line's span, `Domain::Line`, child
+/// `"reading pace"`), so it is the same every time (I1), an edit to one line moves only that
+/// line's pace (I2), and a refrain line, whose text is the same, returns at the pace it left at.
+/// Kept in whole hundredths, so it is an integer everywhere but the value handed to a voice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Pace(u8);
+
+impl Pace {
+    /// The slowest, in hundredths: 0.92 of the voice's speed.
+    pub const SLOWEST: u8 = 92;
+    /// The fastest, in hundredths: 1.08 of the voice's speed.
+    pub const FASTEST: u8 = 108;
+    /// The voice's own speed, for a line whose span cannot be seeded (a caller's bug, and said:
+    /// the header prints the pace of every line).
+    pub const NEUTRAL: Self = Self(100);
+
+    /// The pace of the line at `span` of `source`, or `None` if the span is not in it.
+    #[must_use]
+    pub fn of(span: Span, source: &str) -> Option<Self> {
+        let seed = Seed::for_unit(Domain::Line, span, source)?.child("reading pace");
+        Some(Self::from_draw(seed.rng().next_u32()))
+    }
+
+    /// One draw onto the seventeen steps from [`Pace::SLOWEST`] to [`Pace::FASTEST`].
+    fn from_draw(draw: u32) -> Self {
+        let steps = u32::from(Self::FASTEST - Self::SLOWEST) + 1;
+        Self(Self::SLOWEST + u8::try_from(draw % steps).unwrap_or(0))
+    }
+
+    /// The pace in hundredths.
+    #[must_use]
+    pub const fn hundredths(self) -> u8 {
+        self.0
+    }
+
+    /// The pace as the speed a voice is asked for (1 is its own). A value only; print it through
+    /// [`fmt_param`].
+    #[must_use]
+    pub fn speed(self) -> f64 {
+        f64::from(self.0) / 100.0
+    }
+}
+
+/// The pause after a line at the natural pace, from how the line ends (`SPEC.md` §4.7).
+///
+/// The values are estimates of a reader's pauses, not measurements: a line break with nothing at
+/// it is still a breath's catch, a comma a longer one, a full stop longer again, and the end of a
+/// stanza the longest. They are the page's *least* waits — a stanza also waits for its music and
+/// a silent bar (the breath rule), so at a stanza's end that pause is a floor the bar rule
+/// usually exceeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Pause {
+    /// The line ends on a word: 250 ms.
+    RunOn,
+    /// A comma, semicolon, colon or dash: 450 ms.
+    Comma,
+    /// A full stop, question mark, exclamation mark or ellipsis: 800 ms.
+    Stop,
+    /// The stanza's last line, however it ends: 1500 ms.
+    StanzaEnd,
+}
+
+impl Pause {
+    /// After the line of `text`, the last of its stanza when `closes_stanza`.
+    ///
+    /// Read from the line's last character that is not space or a closing quote or bracket, so
+    /// `"…bright,”` pauses as a comma.
+    #[must_use]
+    pub fn after(text: &str, closes_stanza: bool) -> Self {
+        if closes_stanza {
+            return Self::StanzaEnd;
+        }
+        let closers = |c: char| c.is_whitespace() || "\"'”’»)]}".contains(c);
+        match text.trim_end_matches(closers).chars().next_back() {
+            Some('.' | '?' | '!' | '…') => Self::Stop,
+            Some(',' | ';' | ':' | '—' | '–' | '-') => Self::Comma,
+            _ => Self::RunOn,
+        }
+    }
+
+    /// How long, in milliseconds.
+    #[must_use]
+    pub const fn millis(self) -> u32 {
+        match self {
+            Self::RunOn => 250,
+            Self::Comma => 450,
+            Self::Stop => 800,
+            Self::StanzaEnd => 1500,
+        }
+    }
+
+    /// How long, in seconds — the value the page waits. A value only; print it through
+    /// [`fmt_param`].
+    #[must_use]
+    pub fn seconds(self) -> f64 {
+        f64::from(self.millis()) / 1000.0
+    }
+
+    /// What it follows, in words, as the cue pattern's header and the page say it.
+    #[must_use]
+    pub const fn says(self) -> &'static str {
+        match self {
+            Self::RunOn => "run-on",
+            Self::Comma => "comma",
+            Self::Stop => "full stop",
+            Self::StanzaEnd => "stanza end",
+        }
+    }
+}
+
+/// When a line may begin at the natural pace (`SPEC.md` §4.7). The page times it on the audio
+/// clock from where the music is and when the line before it actually ended — which only the
+/// page knows, since it is the voice's own length.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Onset {
+    /// A stanza's first line under `breath`: in `slot`, where the music has begun the stanza —
+    /// or, if the previous stanza's reading ended too late for that, on the first bar that
+    /// begins at least the stanza-end pause after it and after one whole silent bar.
+    Breath {
+        /// The slot the music begins the stanza in.
+        slot: usize,
+    },
+    /// In `slot` — or, if the line before it and its pause have not finished by then, as soon
+    /// as they have.
+    At {
+        /// The slot it is first heard in (`arrives`) or its stanza is (`stanza`).
+        slot: usize,
+    },
+    /// As soon as the line before it and its pause have finished.
+    Follows,
+}
+
+impl Onset {
+    /// The slot it waits for, if any.
+    #[must_use]
+    pub const fn slot(self) -> Option<usize> {
+        match self {
+            Self::Breath { slot } | Self::At { slot } => Some(slot),
+            Self::Follows => None,
+        }
+    }
+
+    /// Its name in the `/reading` answer.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Breath { .. } => "breath",
+            Self::At { .. } => "at",
+            Self::Follows => "follows",
+        }
+    }
+}
+
+/// One line, spoken in one slot: the fitted pace, each line fitted to its bar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Cue {
+    slot: usize,
+    rate: f64,
+    spoken: Spoken,
+}
+
+impl Cue {
+    /// The slot of the arrangement — the cycle — it is spoken in, from 0.
+    #[must_use]
+    pub const fn slot(&self) -> usize {
+        self.slot
+    }
+
+    /// Which line of the poem it speaks, in reading order from 0: the line's bar in the score.
+    #[must_use]
+    pub const fn line(&self) -> usize {
+        self.spoken.line
+    }
+
+    /// The line's span in the source (I4).
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.spoken.span
+    }
+
+    /// The words to speak: the line exactly as written.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        &self.spoken.text
+    }
+
+    /// How many syllables the line sounds — what the rate is fitted to.
+    #[must_use]
+    pub const fn syllables(&self) -> usize {
+        self.spoken.syllables
     }
 
     /// The speaking rate, `SLOWEST..=FASTEST`, for a speech synthesiser's `rate`. A value only;
@@ -135,6 +397,33 @@ impl Cue {
     #[must_use]
     pub const fn rate(&self) -> f64 {
         self.rate
+    }
+
+    /// The line as spoken: its words, stanza, pace and pause.
+    #[must_use]
+    pub const fn spoken(&self) -> &Spoken {
+        &self.spoken
+    }
+}
+
+/// One line at the natural pace: when it may begin, and the line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Natural {
+    onset: Onset,
+    spoken: Spoken,
+}
+
+impl Natural {
+    /// When it may begin.
+    #[must_use]
+    pub const fn onset(&self) -> Onset {
+        self.onset
+    }
+
+    /// The line as spoken.
+    #[must_use]
+    pub const fn spoken(&self) -> &Spoken {
+        &self.spoken
     }
 }
 
@@ -208,51 +497,21 @@ pub enum ReadingError {
     },
 }
 
-/// The poem's reading: every line at most once, in the slot the chosen variant puts it in.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Reading {
-    cues: Vec<Cue>,
-    unread: Vec<Unread>,
-    slots: usize,
-    cpm: f64,
-    variant: Variant,
-    /// How many cycles each slot lasts — the music's own ([`weights`]) — or `None` under the
-    /// elastic pulse, where every slot is one cycle and the cue pattern is written as it always
-    /// was.
-    weights: Option<Vec<u64>>,
+/// The reading's own variants, read once from [`Mapping::Reading`]'s choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Off,
+    Arrives,
+    Stanza,
+    Breath,
 }
 
-impl Reading {
-    /// Every cue, in playing order — which is reading order.
-    #[must_use]
-    pub fn cues(&self) -> &[Cue] {
-        &self.cues
-    }
-
-    /// The lines left unread, in reading order, and why: empty when every line is read, and
-    /// always empty under `off`, where nothing is read by choice.
-    #[must_use]
-    pub fn unread(&self) -> &[Unread] {
-        &self.unread
-    }
-
-    /// The cue pattern, as Strudel text: one element per slot, the spoken line's index where a
-    /// line is first heard and a rest elsewhere — weighted as the music's bars are under the
-    /// steady pulse (`<0@3 ~@4>`), one a cycle under the elastic — at the pattern's own cycles per
-    /// minute, so each cue falls on the first beat of its bar.
-    ///
-    /// The page evaluates this, attaches its speaking callback with `.onTrigger(…, true)` — the
-    /// `true` keeps Strudel's default output from trying to sound the cue — and stacks it with the
-    /// music. Comment lines first, so the pattern says where every cue came from.
-    #[must_use]
-    pub fn pattern(&self) -> String {
-        let what = match self.variant {
-            Variant::Breath => {
-                "each stanza read through a line a bar, a silent bar after the last, never before \
-                 the music begins it"
-            }
-            Variant::Stanza => "each stanza read a line a bar from where it is first heard",
-            Variant::Off => "switched off, nothing spoken",
+impl Kind {
+    const fn of(variant: Variant) -> Self {
+        match variant {
+            Variant::Off => Self::Off,
+            Variant::Stanza => Self::Stanza,
+            Variant::Breath => Self::Breath,
             // The harmony's and the bass's variants are not the reading's: `Mapping::choose`
             // never stores them for it, so they fall with the default.
             Variant::Arrives
@@ -270,7 +529,89 @@ impl Reading {
             | Variant::Full
             | Variant::Light
             | Variant::Gradual
-            | Variant::Erode => "each line spoken in the bar it is first heard",
+            | Variant::Erode => Self::Arrives,
+        }
+    }
+}
+
+/// The poem's reading: every line at most once, in the slot the chosen variant puts it in — at
+/// the fitted pace, a line a bar, and at the natural pace, a line after the last.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reading {
+    cues: Vec<Cue>,
+    natural: Vec<Natural>,
+    unread: Vec<Unread>,
+    natural_unread: Vec<Unread>,
+    slots: usize,
+    cpm: f64,
+    variant: Variant,
+    kind: Kind,
+    /// How many cycles each slot lasts — the music's own ([`weights`]) — or `None` under the
+    /// elastic pulse, where every slot is one cycle and the cue pattern is written as it always
+    /// was.
+    weights: Option<Vec<u64>>,
+    /// The cycle each slot begins on, then the piece's length ([`starts`]).
+    starts: Vec<u64>,
+}
+
+impl Reading {
+    /// Every cue of the fitted pace, in playing order — which is reading order.
+    #[must_use]
+    pub fn cues(&self) -> &[Cue] {
+        &self.cues
+    }
+
+    /// Every line of the natural pace, in reading order, with when it may begin.
+    #[must_use]
+    pub fn natural(&self) -> &[Natural] {
+        &self.natural
+    }
+
+    /// The lines left unread at the fitted pace, in reading order, and why: empty when every line
+    /// is read, and always empty under `off`, where nothing is read by choice.
+    #[must_use]
+    pub fn unread(&self) -> &[Unread] {
+        &self.unread
+    }
+
+    /// The lines the natural pace has no onset for — a stanza the music never begins. Where the
+    /// natural pace runs out of piece depends on how long the voice takes, so the page says that.
+    #[must_use]
+    pub fn natural_unread(&self) -> &[Unread] {
+        &self.natural_unread
+    }
+
+    /// The cycle each slot begins on, from 0, and last the piece's length — the music's own bars,
+    /// for the page to find a bar on the audio clock.
+    #[must_use]
+    pub fn bars(&self) -> &[u64] {
+        &self.starts
+    }
+
+    /// The pattern's cycles per minute: a cycle lasts `60 / cpm` seconds on the page's scheduler.
+    #[must_use]
+    pub const fn cpm(&self) -> f64 {
+        self.cpm
+    }
+
+    /// The cue pattern of the fitted pace, as Strudel text: one element per slot, the spoken
+    /// line's index where a line is first heard and a rest elsewhere — weighted as the music's
+    /// bars are under the steady pulse (`<0@3 ~@4>`), one a cycle under the elastic — at the
+    /// pattern's own cycles per minute, so each cue falls on the first beat of its bar.
+    ///
+    /// The page evaluates this, attaches its speaking callback with `.onTrigger(…, true)` — the
+    /// `true` keeps Strudel's default output from trying to sound the cue — and stacks it with the
+    /// music. Comment lines first, so the pattern says where every cue came from.
+    #[must_use]
+    pub fn pattern(&self) -> String {
+        let what = match self.kind {
+            Kind::Breath => {
+                "each stanza read through a line a bar, a silent bar after the last, never before \
+                 the music begins it"
+            }
+            Kind::Stanza => "each stanza read a line a bar from where it is first heard",
+            Kind::Off => "switched off, nothing spoken",
+            Kind::Arrives => "each line spoken in the bar it is first heard",
         };
         let mut out = format!(
             "// the reading: {what} (SPEC.md §4.7, candidate; reading = {})\n",
@@ -288,42 +629,104 @@ impl Reading {
         );
         // A lost line is said where the reading is described, not left for the listener to notice
         // (CLAUDE.md §6): `breath` can run out of piece (SPEC.md §4.7).
-        if !self.unread.is_empty() {
-            let _ = writeln!(
-                out,
-                "// {} of {} lines not read:",
-                self.unread.len(),
-                self.unread.len() + self.cues.len(),
-            );
-            for unread in &self.unread {
-                let _ = writeln!(
-                    out,
-                    "//   line {} (bytes {}..{}) is not read, {}: {}",
-                    unread.line + 1,
-                    unread.span.start(),
-                    unread.span.end(),
-                    unread.why.says(),
-                    comment_safe(&unread.text)
-                );
-            }
-        }
+        say_unread(&mut out, &self.unread, self.cues.len());
         for cue in &self.cues {
             let _ = writeln!(
                 out,
                 "//   bar {} speaks line {} (bytes {}..{}), {} syllables at rate {}: {}",
                 cue.slot + 1,
-                cue.line + 1,
-                cue.span.start(),
-                cue.span.end(),
-                cue.syllables,
+                cue.line() + 1,
+                cue.span().start(),
+                cue.span().end(),
+                cue.syllables(),
                 fmt_param(cue.rate),
-                comment_safe(&cue.text)
+                comment_safe(cue.text())
             );
         }
+        let at = self.cues.iter().map(|cue| (cue.slot, cue.line()));
+        let _ = writeln!(out, "{}", self.cue_line(at));
+        out
+    }
+
+    /// The cue pattern of the natural pace, as Strudel text: one element per slot, a line's
+    /// index in the slot it waits for ([`Onset::slot`]) and a rest elsewhere, on the music's
+    /// clock exactly as [`Reading::pattern`] is. Its header lists every line, with its onset,
+    /// pace and pause.
+    ///
+    /// A cue here is the *earliest* its line may begin: the page starts it on that bar, or later
+    /// if the line before it is still being read, and chains every [`Onset::Follows`] line onto
+    /// the end of the one before.
+    #[must_use]
+    pub fn natural_pattern(&self) -> String {
+        let what = match self.kind {
+            Kind::Breath => {
+                "a stanza starts in the bar the music begins it, or a silent bar after the \
+                 previous stanza's spoken end, and its lines follow each other"
+            }
+            Kind::Stanza => {
+                "a stanza starts in the bar it is first heard, or when the line before ends, and \
+                 its lines follow each other"
+            }
+            Kind::Off => "switched off, nothing spoken",
+            Kind::Arrives => {
+                "a line starts in the bar it is first heard, or when the line before ends"
+            }
+        };
+        let mut out = format!(
+            "// the reading at the natural pace: {what} (SPEC.md §4.7, candidate; reading = {})\n",
+            self.variant.name()
+        );
+        let _ = writeln!(
+            out,
+            "// {} lines over {} bars, each at the voice's own speed times its pace ({}..{}, from \
+             the line's own seed), then a pause: {} s after a run-on line, {} after a comma, {} \
+             after a full stop, {} at a stanza's end",
+            self.natural.len(),
+            self.slots,
+            fmt_param(f64::from(Pace::SLOWEST) / 100.0),
+            fmt_param(f64::from(Pace::FASTEST) / 100.0),
+            fmt_param(Pause::RunOn.seconds()),
+            fmt_param(Pause::Comma.seconds()),
+            fmt_param(Pause::Stop.seconds()),
+            fmt_param(Pause::StanzaEnd.seconds()),
+        );
+        say_unread(&mut out, &self.natural_unread, self.natural.len());
+        for natural in &self.natural {
+            let spoken = &natural.spoken;
+            let when = match natural.onset {
+                Onset::Breath { slot } => {
+                    format!("bar {}, a stanza, after a silent bar,", slot + 1)
+                }
+                Onset::At { slot } => format!("bar {}, or after the line before,", slot + 1),
+                Onset::Follows => "then".to_owned(),
+            };
+            let _ = writeln!(
+                out,
+                "//   {when} line {} (bytes {}..{}): {} syllables, pace {}, then {} s ({}): {}",
+                spoken.line + 1,
+                spoken.span.start(),
+                spoken.span.end(),
+                spoken.syllables,
+                fmt_param(spoken.pace.speed()),
+                fmt_param(spoken.pause.seconds()),
+                spoken.pause.says(),
+                comment_safe(&spoken.text)
+            );
+        }
+        let at = self
+            .natural
+            .iter()
+            .filter_map(|natural| Some((natural.onset.slot()?, natural.spoken.line)));
+        let _ = writeln!(out, "{}", self.cue_line(at));
+        out
+    }
+
+    /// The `n("<…>")` line of a cue pattern: `line` in each of its slots, a rest elsewhere.
+    fn cue_line(&self, at: impl Iterator<Item = (usize, usize)>) -> String {
         let mut steps = vec!["~".to_owned(); self.slots.max(1)];
-        for cue in &self.cues {
-            if let Some(step) = steps.get_mut(cue.slot) {
-                *step = cue.line.to_string();
+        for (slot, line) in at {
+            if let Some(step) = steps.get_mut(slot) {
+                *step = line.to_string();
             }
         }
         // The music's bars, as long as the music's: under the steady pulse a slot lasts its
@@ -339,8 +742,31 @@ impl Reading {
             Some(_) => steps.join(" "),
             None => one_a_cycle(steps),
         };
-        let _ = writeln!(out, "n(\"<{sequence}>\").cpm({})", fmt_param(self.cpm));
-        out
+        format!("n(\"<{sequence}>\").cpm({})", fmt_param(self.cpm))
+    }
+}
+
+/// The header lines that say which lines a cue pattern leaves unread, and why.
+fn say_unread(out: &mut String, unread: &[Unread], read: usize) {
+    if unread.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "// {} of {} lines not read:",
+        unread.len(),
+        unread.len() + read,
+    );
+    for line in unread {
+        let _ = writeln!(
+            out,
+            "//   line {} (bytes {}..{}) is not read, {}: {}",
+            line.line + 1,
+            line.span.start(),
+            line.span.end(),
+            line.why.says(),
+            comment_safe(&line.text)
+        );
     }
 }
 
@@ -379,86 +805,125 @@ pub fn plan(
     };
     let slots = score.arrangement().slots().len();
     let variant = mappings.get(Mapping::Reading);
+    let kind = Kind::of(variant);
 
     let arrivals = arrivals(score);
-    let placed: Vec<(usize, usize)> = match variant {
-        Variant::Off => Vec::new(),
-        Variant::Stanza => by_stanza(poem, &arrivals, slots),
-        Variant::Breath => by_breath(poem, &arrivals, slots),
-        // As above: only the reading's own variants can reach here.
-        Variant::Arrives
-        | Variant::On
-        | Variant::Rhyme
-        | Variant::Cadence
-        | Variant::Both
-        | Variant::Height
-        | Variant::Syllables
-        | Variant::Feet
-        | Variant::Steady
-        | Variant::Elastic
-        | Variant::Crossing
-        | Variant::Straight
-        | Variant::Full
-        | Variant::Light
-        | Variant::Gradual
-        | Variant::Erode => arrivals.clone(),
+    let placed: Vec<(usize, usize)> = match kind {
+        Kind::Off => Vec::new(),
+        Kind::Stanza => by_stanza(poem, &arrivals, slots),
+        Kind::Breath => by_breath(poem, &arrivals, slots),
+        Kind::Arrives => arrivals.clone(),
     };
+    let spoken = |bar: usize| said(poem, score, &lines, bar);
 
-    let mut cues = Vec::new();
-    for (slot, bar) in placed {
-        let Some(line) = lines.get(bar) else {
-            continue;
-        };
-        let Some(text) = line.span().text(poem.source()) else {
-            continue;
-        };
-        // What the line sounds is what the rate fits; a line of words nobody could pronounce still
-        // has words, and a synthesiser will say them, so it counts one each.
-        let sounded = score
-            .events()
-            .iter()
-            .filter(|e| e.bar().get() == bar)
-            .count();
-        let syllables = if sounded == 0 {
-            line.words().count().max(1)
-        } else {
-            sounded
-        };
-        cues.push(Cue {
-            slot,
-            line: bar,
-            span: line.span(),
-            text: text.to_owned(),
-            syllables,
-            rate: fitted(syllables, bar_seconds(slot)),
-        });
-    }
-    let unread = if variant == Variant::Off {
-        Vec::new()
+    let cues: Vec<Cue> = placed
+        .into_iter()
+        .filter_map(|(slot, bar)| {
+            let spoken = spoken(bar)?;
+            Some(Cue {
+                slot,
+                rate: fitted(spoken.syllables, bar_seconds(slot)),
+                spoken,
+            })
+        })
+        .collect();
+    let natural: Vec<Natural> = by_nature(kind, poem, &arrivals)
+        .into_iter()
+        .filter_map(|(onset, bar)| {
+            Some(Natural {
+                onset,
+                spoken: spoken(bar)?,
+            })
+        })
+        .collect();
+    let (unread, natural_unread) = if kind == Kind::Off {
+        (Vec::new(), Vec::new())
     } else {
-        unread(poem, &lines, &cues, &arrivals)
+        let fitted: BTreeSet<usize> = cues.iter().map(Cue::line).collect();
+        let natural: BTreeSet<usize> = natural.iter().map(|n| n.spoken.line).collect();
+        (
+            unread(poem, &lines, &fitted, &arrivals),
+            unread(poem, &lines, &natural, &arrivals),
+        )
     };
     Ok(Reading {
         cues,
+        natural,
         unread,
+        natural_unread,
         slots,
         cpm,
         variant,
+        kind,
         weights: (score.pulse() != Variant::Elastic).then_some(all_weights),
+        starts: starts(score),
     })
 }
 
-/// The lines of `lines` no cue speaks, and why: a line whose stanza is read in part, or which
+/// Line `bar` of the poem as the reading speaks it, or `None` if its span is not in the source.
+fn said(
+    poem: &Poem,
+    score: &Score,
+    lines: &[&prosody_core::parse::Line],
+    bar: usize,
+) -> Option<Spoken> {
+    let line = lines.get(bar)?;
+    let text = line.span().text(poem.source())?;
+    let mut first = 0;
+    let (mut stanza, mut closes) = (0, false);
+    for (index, each) in poem.stanzas().iter().enumerate() {
+        let count = each.lines().len();
+        if bar < first + count {
+            stanza = index;
+            closes = bar + 1 == first + count;
+            break;
+        }
+        first += count;
+    }
+    let events: Vec<_> = score
+        .events()
+        .iter()
+        .filter(|e| e.bar().get() == bar)
+        .collect();
+    // What the line sounds is what the rate fits; a line of words nobody could pronounce still
+    // has words, and a synthesiser will say them, so it counts one each.
+    let syllables = if events.is_empty() {
+        line.words().count().max(1)
+    } else {
+        events.len()
+    };
+    let words = line
+        .words()
+        .map(|word| Word {
+            span: word.span(),
+            syllables: events
+                .iter()
+                .filter(|e| e.span() == word.span())
+                .count()
+                .max(1),
+        })
+        .collect();
+    Some(Spoken {
+        line: bar,
+        stanza,
+        span: line.span(),
+        text: text.to_owned(),
+        syllables,
+        words,
+        pace: Pace::of(line.span(), poem.source()).unwrap_or(Pace::NEUTRAL),
+        pause: Pause::after(text, closes),
+    })
+}
+
+/// The lines of `lines` not in `read`, and why: a line whose stanza is read in part, or which
 /// arrives, lost its turn to the end of the piece; any other never arrives at all.
 fn unread(
     poem: &Poem,
     lines: &[&prosody_core::parse::Line],
-    cues: &[Cue],
+    read: &BTreeSet<usize>,
     arrivals: &[(usize, usize)],
 ) -> Vec<Unread> {
-    let read: std::collections::BTreeSet<usize> = cues.iter().map(|cue| cue.line).collect();
-    let arrived: std::collections::BTreeSet<usize> =
-        arrivals.iter().map(|(_, line)| *line).collect();
+    let arrived: BTreeSet<usize> = arrivals.iter().map(|(_, line)| *line).collect();
     let mut out = Vec::new();
     let mut first_line = 0;
     for stanza in poem.stanzas() {
@@ -484,6 +949,68 @@ fn unread(
                     .to_owned(),
                 why,
             });
+        }
+    }
+    out
+}
+
+/// The natural pace (`SPEC.md` §4.7): which lines are read, in reading order, and when each may
+/// begin. The variants keep their meaning — `breath` and `stanza` read a stanza through from
+/// where they start it, `arrives` reads each line where it is first heard — but a line is no
+/// longer given a bar: it follows the line before it, after that line's pause.
+///
+/// Under `breath` a stanza starts where its first line first arrives (or, if it never does,
+/// where its earliest line does), *not* the bar after the previous stanza's last cue: the breath
+/// is measured on the page against the previous stanza's spoken end, which only the voice
+/// decides. Under `stanza` it starts at the earliest arrival of any of its lines, as at the
+/// fitted pace. A stanza none of whose lines arrives is not read, and is said
+/// ([`Reading::natural_unread`]). Nothing here is cut at the piece's end: whether the reading
+/// reaches it depends on the voice's length, so the page cuts and says.
+fn by_nature(kind: Kind, poem: &Poem, arrivals: &[(usize, usize)]) -> Vec<(Onset, usize)> {
+    let first_slot: BTreeMap<usize, usize> =
+        arrivals.iter().map(|(slot, line)| (*line, *slot)).collect();
+    let mut out = Vec::new();
+    match kind {
+        Kind::Off => {}
+        Kind::Arrives => {
+            let mut lines: Vec<(usize, usize)> = arrivals.to_vec();
+            // Reading order; arrivals are in slot order, which a line arriving before an earlier
+            // one would break, and the page chains in reading order.
+            lines.sort_by_key(|(_, line)| *line);
+            out.extend(
+                lines
+                    .into_iter()
+                    .map(|(slot, line)| (Onset::At { slot }, line)),
+            );
+        }
+        Kind::Stanza | Kind::Breath => {
+            let mut first_line = 0;
+            for stanza in poem.stanzas() {
+                let lines = first_line..first_line + stanza.lines().len();
+                first_line = lines.end;
+                let earliest = || {
+                    lines
+                        .clone()
+                        .filter_map(|line| first_slot.get(&line).copied())
+                        .min()
+                };
+                let start = if kind == Kind::Breath {
+                    first_slot.get(&lines.start).copied().or_else(earliest)
+                } else {
+                    earliest()
+                };
+                let Some(slot) = start else {
+                    continue;
+                };
+                for line in lines.clone() {
+                    let onset = match (line == lines.start, kind) {
+                        (true, Kind::Breath) => Onset::Breath { slot },
+                        (true, _) => Onset::At { slot },
+                        (false, _) => Onset::Follows,
+                    };
+                    out.push((onset, line));
+                }
+            }
         }
     }
     out
@@ -646,7 +1173,7 @@ mod tests {
 
     use prosody_core::mapping::{Mapping, Mappings, Variant};
 
-    use super::{Cue, FASTEST, SLOWEST, Why, by_breath, by_stanza, comment_safe, fitted, plan};
+    use super::{FASTEST, SLOWEST, Why, by_breath, by_stanza, comment_safe, fitted, plan};
     use crate::fmt_param;
     use crate::style::Style;
 
@@ -1074,21 +1601,11 @@ mod tests {
             .iter()
             .flat_map(prosody_core::parse::Stanza::lines)
             .collect();
-        let cue = |line: usize| {
-            let span = lines[line].span();
-            Cue {
-                slot: line,
-                line,
-                span,
-                text: span.text(poem.source()).unwrap().to_owned(),
-                syllables: 1,
-                rate: 1.0,
-            }
-        };
         // Lines 0 and 2 read. Line 1 arrived and its stanza was read: the piece ended first.
         // Line 3 never arrived, but its stanza was read, so it too lost its turn to the end. Stanza
         // 3 (lines 4 and 5) has no cue and no arrival: it never arrives.
-        let left = super::unread(&poem, &lines, &[cue(0), cue(2)], &[(0, 0), (1, 1), (4, 2)]);
+        let read = std::collections::BTreeSet::from([0, 2]);
+        let left = super::unread(&poem, &lines, &read, &[(0, 0), (1, 1), (4, 2)]);
         let said: Vec<(usize, &str, Why)> = left
             .iter()
             .map(|line| (line.line(), line.text(), line.why()))
@@ -1329,6 +1846,267 @@ mod tests {
         assert!(pattern.contains("bAt\\u{2028}dAt"), "{pattern}");
         // The cue keeps the line's exact source, separator and all, for the page to speak (I4).
         assert_eq!(reading.cues()[0].text(), "bAt\u{2028}dAt");
+    }
+
+    #[test]
+    fn a_pause_is_read_from_how_the_line_ends() {
+        use super::Pause;
+        // Hand-worked from SPEC.md §4.7's table: the last character that is not space or a
+        // closing quote or bracket.
+        assert_eq!(
+            Pause::after("Tyger Tyger, burning bright,", false),
+            Pause::Comma
+        );
+        assert_eq!(
+            Pause::after("In the forests of the night;", false),
+            Pause::Comma
+        );
+        assert_eq!(
+            Pause::after("What the hand dare seize the fire?", false),
+            Pause::Stop
+        );
+        assert_eq!(Pause::after("Prijat'lji!", false), Pause::Stop);
+        assert_eq!(Pause::after("And so on...", false), Pause::Stop);
+        assert_eq!(Pause::after("and then \u{2014}", false), Pause::Comma);
+        assert_eq!(
+            Pause::after("\u{201c}burning bright,\u{201d}  ", false),
+            Pause::Comma
+        );
+        assert_eq!(Pause::after("(as if it were.)", false), Pause::Stop);
+        assert_eq!(
+            Pause::after("And what shoulder, & what art", false),
+            Pause::RunOn
+        );
+        assert_eq!(Pause::after("", false), Pause::RunOn);
+        // A stanza's last line pauses longest, however it ends.
+        assert_eq!(
+            Pause::after("Could frame thy fearful symmetry?", true),
+            Pause::StanzaEnd
+        );
+        assert_eq!(Pause::after("and on", true), Pause::StanzaEnd);
+        // The values, ascending: a run-on line the least, a stanza's end the most.
+        let millis: Vec<u32> = [Pause::RunOn, Pause::Comma, Pause::Stop, Pause::StanzaEnd]
+            .iter()
+            .map(|pause| pause.millis())
+            .collect();
+        assert_eq!(millis, vec![250, 450, 800, 1500]);
+        assert_eq!(fmt_param(Pause::Comma.seconds()), "0.450");
+    }
+
+    #[test]
+    fn a_pace_is_one_of_seventeen_hundredths_from_its_own_lines_seed() {
+        use super::Pace;
+        use prosody_core::span::Span;
+        // The draw onto the steps, by hand: seventeen steps from 92 to 108, the draw modulo 17.
+        // 2^32 = (2^8)^4 and 2^8 = 256 = 15 * 17 + 1, so 2^32 - 1 is a multiple of 17: step 0.
+        assert_eq!(Pace::from_draw(0).hundredths(), 92);
+        assert_eq!(Pace::from_draw(16).hundredths(), 108);
+        assert_eq!(Pace::from_draw(17).hundredths(), 92);
+        assert_eq!(Pace::from_draw(25).hundredths(), 100);
+        assert_eq!(Pace::from_draw(u32::MAX).hundredths(), 92);
+        assert_eq!(fmt_param(Pace::from_draw(5).speed()), "0.970");
+        // The line's own text alone: the same line at another place in another poem paces the
+        // same — a refrain returns at the pace it left at — and a span outside the source has none.
+        let here = "eA eA\nteA teA\n";
+        let there = "bAt\n\nteA teA\n";
+        assert_eq!(
+            Pace::of(Span::new(6, 13), here),
+            Pace::of(Span::new(5, 12), there)
+        );
+        assert_eq!(Pace::of(Span::new(6, 99), here), None);
+        // Within bounds for many lines.
+        for n in 0..200 {
+            let text = format!("line number {n}");
+            let pace = Pace::of(Span::new(0, text.len()), &text).unwrap();
+            assert!((Pace::SLOWEST..=Pace::FASTEST).contains(&pace.hundredths()));
+        }
+    }
+
+    /// `(onset, line)` of every line at the natural pace.
+    fn natural(reading: &super::Reading) -> Vec<(super::Onset, usize)> {
+        reading
+            .natural()
+            .iter()
+            .map(|n| (n.onset(), n.spoken().line()))
+            .collect()
+    }
+
+    #[test]
+    fn at_the_natural_pace_a_stanza_starts_where_the_music_begins_it_and_its_lines_follow() {
+        use super::Onset::{At, Breath, Follows};
+        use super::Pause;
+        // The arrangement asserted in the first test: lines 0, 1 stated in slots 0, 1; line 2
+        // first arrives in slot 2, line 3 in slot 5.
+        let (poem, score) = lowered(TRANSFORMING);
+        let plan = |variant| plan(&poem, &score, &at_120(), &reading(variant)).unwrap();
+        // `breath`: stanza 2 waits for the music, slot 2 — not the fitted pace's slot 3, a bar
+        // after stanza 1's last cue: at the natural pace the breath is measured on the page,
+        // from where stanza 1's voice actually stopped.
+        let breath = plan(Variant::Breath);
+        assert_eq!(
+            natural(&breath),
+            vec![
+                (Breath { slot: 0 }, 0),
+                (Follows, 1),
+                (Breath { slot: 2 }, 2),
+                (Follows, 3)
+            ]
+        );
+        // `stanza`: the same starts, waiting only for the line before.
+        assert_eq!(
+            natural(&plan(Variant::Stanza)),
+            vec![
+                (At { slot: 0 }, 0),
+                (Follows, 1),
+                (At { slot: 2 }, 2),
+                (Follows, 3)
+            ]
+        );
+        // `arrives`: every line where it is first heard.
+        assert_eq!(
+            natural(&plan(Variant::Arrives)),
+            vec![
+                (At { slot: 0 }, 0),
+                (At { slot: 1 }, 1),
+                (At { slot: 2 }, 2),
+                (At { slot: 5 }, 3)
+            ]
+        );
+        assert!(natural(&plan(Variant::Off)).is_empty());
+        // Each stanza's last line pauses longest; the others end on a word, so run on.
+        let pauses: Vec<Pause> = breath
+            .natural()
+            .iter()
+            .map(|n| n.spoken().pause())
+            .collect();
+        assert_eq!(
+            pauses,
+            vec![
+                Pause::RunOn,
+                Pause::StanzaEnd,
+                Pause::RunOn,
+                Pause::StanzaEnd
+            ]
+        );
+        let stanzas: Vec<usize> = breath
+            .natural()
+            .iter()
+            .map(|n| n.spoken().stanza())
+            .collect();
+        assert_eq!(stanzas, vec![0, 0, 1, 1]);
+        // The cue pattern carries the onsets: slots 0 and 2, two cycles each at 120.
+        let pattern = breath.natural_pattern();
+        assert!(
+            pattern.ends_with("n(\"<0@2 ~@2 2@2 ~@2 ~@2 ~@2 ~@2 ~@2>\").cpm(120.000)\n"),
+            "{pattern}"
+        );
+        assert!(
+            pattern.starts_with(
+                "// the reading at the natural pace: a stanza starts in the bar the music begins \
+                 it, or a silent bar after the previous stanza's spoken end, and its lines follow \
+                 each other (SPEC.md §4.7, candidate; reading = breath)\n"
+            ),
+            "{pattern}"
+        );
+        assert!(
+            pattern.contains(
+                "pace (0.920..1.080, from the line's own seed), then a pause: 0.250 s after a \
+                 run-on line, 0.450 after a comma, 0.800 after a full stop, 1.500 at a stanza's end"
+            ),
+            "{pattern}"
+        );
+        // Line 3 of the poem, "beA beA", opens stanza 2 in bar 3. It starts at byte 15 —
+        // "eA eA\n" is 6 bytes, "teA teA\n" 8 and the blank line 1 — and is 7 long. Its pace is
+        // its own seed's, so it is read back rather than worked by hand.
+        let pace = super::Pace::of(prosody_core::span::Span::new(15, 22), poem.source()).unwrap();
+        assert!(
+            pattern.contains(&format!(
+                "//   bar 3, a stanza, after a silent bar, line 3 (bytes 15..22): 4 syllables, \
+                 pace {}, then 0.250 s (run-on): beA beA\n",
+                fmt_param(pace.speed())
+            )),
+            "{pattern}"
+        );
+        assert!(
+            pattern.contains("//   then line 4 (bytes 23..30): 4 syllables, pace "),
+            "{pattern}"
+        );
+    }
+
+    #[test]
+    fn a_spoken_line_counts_the_syllables_of_each_word() {
+        // "eA" is two syllables (an unstressed IH, a stressed AA), "teA" two, "beAn" two: the
+        // consonants carry none.
+        let (poem, score) = lowered("eA teA\nbeAn\n");
+        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let words: Vec<(usize, usize, usize)> = reading.natural()[0]
+            .spoken()
+            .words()
+            .iter()
+            .map(|w| (w.span().start(), w.span().end(), w.syllables()))
+            .collect();
+        assert_eq!(words, vec![(0, 2, 2), (3, 6, 2)]);
+        assert_eq!(reading.natural()[0].spoken().syllables(), 4);
+        // A word nobody can pronounce still counts one: a voice will say it.
+        let (poem, score) = lowered("eA xyz\n");
+        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let counts: Vec<usize> = reading.natural()[0]
+            .spoken()
+            .words()
+            .iter()
+            .map(|w| w.syllables())
+            .collect();
+        assert_eq!(counts, vec![2, 1]);
+    }
+
+    #[test]
+    fn three_stanzas_at_the_natural_pace_by_hand() {
+        use super::Onset::{Breath, Follows};
+        // The arrangement asserted above: stanza 1 stated in slots 0-2, stanza 2's first line
+        // arrives in 3, stanza 3's in 12. The fitted pace starts stanza 2 at 4 (a bar after
+        // slot 2); the natural pace hands slot 3 to the page, which waits as long as stanza 1's
+        // voice needs.
+        let (poem, score) = lowered(THREE);
+        let reading = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        assert_eq!(
+            natural(&reading),
+            vec![
+                (Breath { slot: 0 }, 0),
+                (Follows, 1),
+                (Follows, 2),
+                (Breath { slot: 3 }, 3),
+                (Follows, 4),
+                (Follows, 5),
+                (Breath { slot: 12 }, 6),
+                (Follows, 7),
+                (Follows, 8)
+            ]
+        );
+        // 24 slots: rests joined as the fitted pattern's are — two after slot 0, eight after 3,
+        // eleven after 12.
+        assert!(
+            reading
+                .natural_pattern()
+                .ends_with("n(\"<0@2 ~@4 3@2 ~@16 6@2 ~@22>\").cpm(120.000)\n"),
+            "{}",
+            reading.natural_pattern()
+        );
+        // The bars on the clock: 24 slots of two cycles, and the piece's length last.
+        assert_eq!(reading.bars().len(), 25);
+        assert_eq!(reading.bars()[3], 6);
+        assert_eq!(reading.bars()[24], 48);
+    }
+
+    #[test]
+    fn the_palette_moves_no_onset_pace_or_pause() {
+        // I3, at the natural pace: only the clock's speed is palette.
+        let (poem, score) = lowered(THREE);
+        let a = plan(&poem, &score, &at_120(), &Mappings::all()).unwrap();
+        let other = Style::parse("+++\ntempo_range = [90, 90]\nscale = \"lydian\"\n+++").unwrap();
+        let b = plan(&poem, &score, &other, &Mappings::all()).unwrap();
+        assert_eq!(a.natural(), b.natural());
+        assert_eq!(a.bars(), b.bars());
+        assert_ne!(fmt_param(a.cpm()), fmt_param(b.cpm()));
     }
 
     #[test]

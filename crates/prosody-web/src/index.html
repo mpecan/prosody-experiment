@@ -329,20 +329,43 @@
     <details class="panel" id="panelReading">
       <summary>Reading <span class="aside">the poem spoken over the music</span></summary>
       <div class="palette reading">
+        <label>Engine
+          <select id="engine" title="Who reads: your browser's own voice, or a neural voice that runs in this page — downloaded once you choose it, then kept by the browser">
+            <option value="kokoro">Kokoro-82M</option>
+            <option value="piper">Piper</option>
+            <option value="kitten">Kitten TTS (nano)</option>
+            <option value="browser">browser voice</option>
+          </select>
+        </label>
+        <label>Language
+          <select id="language" title="The language the poem is read in: an example poem sets its own; each engine lists only its voices for it"></select>
+        </label>
         <label>Voice
           <select id="voice"><option value="">browser default</option></select>
         </label>
-        <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a line is read</span></label>
+        <label>Pace
+          <select id="pace" title="natural: each line at the voice's own speed, a little faster or slower line by line, with pauses where the punctuation asks; fitted: each line squeezed or stretched to fill its bar">
+            <option value="natural">natural</option>
+            <option value="fitted">fitted to the bar</option>
+          </select>
+        </label>
+        <label>Reading level <span id="readingLevelOut"></span>
+          <input id="readingLevel" type="range" min="0" max="2" step="0.05" value="1" title="The voice's level into the master, against the music">
+        </label>
+        <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a stanza is read</span></label>
         <p>
           Whether and when lines are read is the <code>reading</code> mapping above:
-          <code>breath</code> (the default) reads each stanza through, a line a bar, with a silent
-          bar before the next stanza and never before the music has begun it;
-          <code>arrives</code> speaks each line once, in the bar where it is first heard;
-          <code>stanza</code> reads a stanza's lines one a bar from where it is first heard, so a
-          stanza that transforms a loop is read through rather than a line every few bars;
-          <code>off</code> reads nothing. Each line is fitted to its bar at the piece's tempo; loops,
-          lanes and the outro are never read. Strudel's clock fires each line; your browser's voice
-          speaks it.
+          <code>breath</code> (the default) reads each stanza through, with a silent bar before the
+          next stanza and never before the music has begun it;
+          <code>arrives</code> speaks each line once, where it is first heard;
+          <code>stanza</code> reads a stanza through from where it is first heard;
+          <code>off</code> reads nothing. Loops, lanes and the outro are never read.
+          At the <em>natural</em> pace a line follows the one before after a pause from how it
+          ends — a quarter of a second after a line that runs on, more after a comma, more after a
+          full stop, a second and a half at a stanza's end; <em>fitted</em> fits each line to its bar.
+          Strudel's clock places every line; a neural voice is rendered ahead and started exactly on
+          it, the browser's voice as near as its speech allows. Kokoro and Kitten speak English;
+          Piper speaks many languages, Slovenian among them. Kitten needs WebGPU.
         </p>
       </div>
     </details>
@@ -545,6 +568,19 @@ $('preset').addEventListener('input', () => {
   setControls(preset.palette, controls);
   $('poem').scrollTop = 0;
   fromTheTop = true;   // a new poem starts at its first bar, so the reading starts at its first line
+  // A preset is read in its own language, with a voice that speaks it (Prešeren in Slovenian).
+  // The old poem's reading is let go first — stopped, and its lines out of the render queue — so
+  // its lines are never rendered in the new poem's voice, nor the new poem's in the old one's:
+  // until the new poem has compiled there is nothing to read.
+  if (preset.language && preset.language !== language) {
+    readingGeneration = ++generations;   // nothing the old poem cues is read any more
+    quietReading();
+    playingReading = null;
+    playingCues = null;
+    readings = { A: null, B: null };
+    language = preset.language;
+    readingChanged();
+  }
   compile();
 });
 
@@ -641,8 +677,10 @@ for (const menu of document.querySelectorAll('#mappings select')) {
 }
 
 function status(text, bad = false) {
-  $('status').textContent = text;
-  $('status').classList.toggle('bad', bad);
+  statusText = text;
+  statusBad = bad;
+  $('status').textContent = text + (readingNote ? ' · ' + readingNote : '');
+  $('status').classList.toggle('bad', bad || readingNoteBad);
 }
 
 function query(side = hearing) {
@@ -658,8 +696,10 @@ function showPattern() {
   const reading = readings[hearing];
   // The cue pattern is shown under the music, apart from it: it is not part of what a writer
   // pastes into strudel.cc, where nothing would speak it.
-  $('pattern').textContent = latestPattern + (reading && reading.cues.length
-    ? '\n// ---- spoken by this page, not part of the pattern above ----\n' + reading.pattern
+  const cues = reading && (readingSettings.pace === 'fitted' ? reading.cues : reading.lines);
+  $('pattern').textContent = latestPattern + (cues && cues.length
+    ? '\n// ---- spoken by this page, not part of the pattern above ----\n'
+      + (readingSettings.pace === 'fitted' ? reading.pattern : reading.natural)
     : '');
 }
 
@@ -804,6 +844,9 @@ async function compileOnce() {
     showPattern();
     buildLit();
     measure(poem);
+    // Every changed line rendered again, ahead of its turn; the unchanged ones are kept. Not for
+    // a text already replaced: the compile of the newer one asks for its own lines.
+    if (!compileAgain) prerender();
     const patternText = latestPattern;
     const summary = patternText.split('\n')[1] || '';
     status(hearing + ' · ' + summary.replace('// ', '') + (playing ? ' · playing' : ''));
@@ -951,6 +994,11 @@ function limitTheMaster() {
   duckGain = new GainNode(ctx, { gain: 1 });
   gain.disconnect();
   gain.connect(duckGain).connect(glue).connect(into).connect(clip).connect(ctx.destination);
+  // A rendered voice joins the music at the glue, after the duck: through the same master stage,
+  // at the reading's own level.
+  voiceBus?.disconnect();
+  voiceBus = new GainNode(ctx, { gain: readingSettings.level });
+  voiceBus.connect(glue);
   limited = gain;
 }
 
@@ -990,97 +1038,830 @@ async function warmUp(code) {
 // Strudel's own `speak`, `duck` and `silence` on the global scope, over any page function of
 // that name: a `speak` here was silently replaced by Strudel's pattern function and said nothing.
 //
-// Each cue is an event of the reading's own pattern, `n("<0@3 1@4 ~@3 2@4 …>").cpm(…)`, one element
-// per bar, each as long as the music's bar (under the elastic pulse, `<0 1 ~ 2 …>`, a cycle a
-// bar), at the music's cycles per minute, so Strudel's scheduler fires it as the bar begins. Its
-// callback is attached with `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the
-// `true` makes it the cue's only output, so the default webaudio output never tries to sound an
-// event with no `s`). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
-// audio-context seconds — so the speech waits out the difference, as Strudel's own
-// `onTriggerTime` does.
-let voices = [];
-const pendingSpeech = new Set();
-// Which cue pattern is current. Every play() starts a new generation; a cue from an older one —
+// Where a line is read comes from two cue patterns (`prosody_emit::reading`), both stacked with
+// the music so a change of pace needs no new pattern: `pattern`, the fitted pace, a line a bar;
+// and `natural`, the natural pace, whose cues are the earliest bar a line — a stanza's first,
+// under `breath` — may begin in. Each is `n("<0@3 1@4 ~@3 2@4 …>").cpm(…)`, one element per bar,
+// each as long as the music's bar (under the elastic pulse, a cycle a bar), at the music's cycles
+// per minute, so Strudel's scheduler fires a cue as its bar begins. Its callback is attached with
+// `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the `true` makes it the cue's
+// only output). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
+// audio-context seconds — and `targetTime` is when the bar begins on the audio clock: a rendered
+// line is started then, exactly, by an AudioBufferSourceNode; the browser's voice, which cannot be
+// scheduled, by a timer that waits out the difference, as Strudel's own `onTriggerTime` does.
+//
+// Who speaks is an engine, the listener's choice (a page setting, not a style key — the CLI never
+// reads aloud): `browser`, the speech synthesiser, instant and the fallback for everything else;
+// and three neural voices, each in a worker of its own (speech-worker.mjs), downloaded only once
+// chosen: `kokoro` (the default), `piper` (many languages, Slovenian among them) and `kitten`.
+// Every engine answers the same three calls: `load(onProgress)`, `voices(language)` and
+// `render(text, { voice, speed })`, which gives an AudioBuffer. A neural engine renders every line
+// ahead of time, after each compile, and keeps what it made by engine, voice, speed and text, so a
+// recompile reuses every line it did not change.
+// What the reading is doing, after whatever the status bar says about the music.
+let readingNote = '', readingNoteBad = false, statusText = 'ready', statusBad = false;
+let voices = [];   // the browser's speech voices
+// Which cue patterns are current. Every play() starts a new generation; a cue from an older one —
 // a hap Strudel had already scheduled from the previous pattern, or its pending timer — is
 // dropped, so a line of the previous poem or setting is never read over the new music.
 let readingGeneration = 0;
 let generations = 0;   // handed out one per play(), so two overlapping plays never share one
-let duckGain = null;
-const DUCK = 0.6;   // the music under a spoken line, as a fraction of its level
+let duckGain = null;   // the music, before the master stage
+let voiceBus = null;   // the reading's level, into the master stage
+const DUCK = 0.6;      // the music under a spoken line, as a fraction of its level
+const LEAD = 0.05;     // the least ahead of now a late line is started, in seconds
+const SCHEDULER_CPS = 1;   // reading::SCHEDULER_CPS, and the page's repl.setCps(1)
 
-function listVoices() {
-  if (!('speechSynthesis' in window)) return;
-  voices = speechSynthesis.getVoices();
-  const chosen = $('voice').value || (() => { try { return localStorage.getItem('prosody.voice') || ''; } catch (e) { return ''; } })();
-  $('voice').innerHTML = '<option value="">browser default</option>'
-    + voices.map((v) => `<option value="${v.name.replace(/"/g, '&quot;')}">${v.name} (${v.lang})</option>`).join('');
-  if (voices.some((v) => v.name === chosen)) $('voice').value = chosen;
+// The reading's own settings, remembered per browser like the voice picker.
+const READING_DEFAULTS = { engine: 'kokoro', pace: 'natural', level: 1, voices: {} };
+let readingSettings = { ...READING_DEFAULTS };
+try {
+  const saved = JSON.parse(localStorage.getItem('prosody.reading') || 'null');
+  if (saved && typeof saved === 'object') {
+    readingSettings = {
+      engine: ['browser', 'kokoro', 'piper', 'kitten'].includes(saved.engine) ? saved.engine : READING_DEFAULTS.engine,
+      pace: ['natural', 'fitted'].includes(saved.pace) ? saved.pace : READING_DEFAULTS.pace,
+      level: Number(saved.level) >= 0 && Number(saved.level) <= 2 ? Number(saved.level) : 1,
+      voices: saved.voices && typeof saved.voices === 'object' ? saved.voices : {},
+    };
+  }
+  // The voice picker before there were engines: a browser voice.
+  const old = localStorage.getItem('prosody.voice');
+  if (old && !readingSettings.voices.browser) readingSettings.voices.browser = { en: old };
+} catch (error) { /* no storage: the defaults */ }
+function saveReading() {
+  try { localStorage.setItem('prosody.reading', JSON.stringify(readingSettings)); } catch (error) {}
+}
+// The language the poem is read in: a preset's own (Prešeren is Slovenian), otherwise the
+// writer's choice, English to begin with.
+let language = 'en';
+const LANGUAGES = { en: 'English', sl: 'Slovenian' };
+
+// ---- Engines ----
+
+// What each neural engine offers before it has loaded — its default voice per language — and,
+// once it has, everything it lists. Kokoro and Kitten speak English only; Piper reads its
+// catalogue (rhasspy/piper-voices) and offers every language there.
+const ENGINE_INFO = {
+  browser: { label: 'browser voice', defaults: {} },
+  kokoro: { label: 'Kokoro-82M', defaults: { en: 'af_heart' } },
+  piper: { label: 'Piper', defaults: { en: 'en_GB-cori-medium', sl: 'sl_SI-artur-medium' } },
+  kitten: { label: 'Kitten TTS (nano)', defaults: { en: 'Bella' } },
+};
+const engines = {};
+const sameLanguage = (lang, wanted) => (lang || '').toLowerCase().replace('_', '-').split('-')[0] === wanted;
+
+engines.browser = {
+  name: 'browser',
+  state: 'ready',
+  load: async () => {},
+  voices: (lang) => voices.filter((v) => sameLanguage(v.lang, lang)).map((v) => ({ id: v.name, name: `${v.name} (${v.lang})`, lang: v.lang })),
+  // The browser's voice cannot be rendered ahead: it is spoken, not made.
+  render: null,
+};
+
+function workerEngine(name) {
+  let worker = null, asked = 0;
+  const waiting = new Map();
+  const engine = {
+    name,
+    state: 'idle',     // idle → loading → ready, or failed (and then idle again on a retry)
+    device: null,
+    listed: null,      // the voices it lists once loaded
+    error: null,
+    progress: '',
+    crashed(error) {
+      engine.state = 'failed';
+      engine.error = error.message;
+      for (const pending of waiting.values()) pending.reject(error);
+      waiting.clear();
+      worker?.terminate();
+      worker = null;
+      engineFailed(engine, error);
+    },
+    ask(message, transfer) {
+      return new Promise((resolve, reject) => {
+        if (!worker) { reject(new Error('the engine is not loaded')); return; }
+        asked += 1;
+        waiting.set(asked, { resolve, reject });
+        worker.postMessage({ id: asked, ...message }, transfer || []);
+      });
+    },
+    async load(onProgress) {
+      if (engine.state === 'ready') return;
+      if (engine.loading) return engine.loading;
+      engine.state = 'loading';
+      engine.error = null;
+      engine.loading = (async () => {
+        try {
+          // `?device=wasm` on the page keeps every engine off WebGPU (see speech-worker.mjs).
+          const device = new URLSearchParams(location.search).get('device') === 'wasm' ? '&device=wasm' : '';
+          worker ??= new Worker(new URL(`./speech-worker.mjs?engine=${name}${device}`, document.baseURI), { type: 'module' });
+          worker.onmessage = ({ data }) => {
+            if (data.progress) { engine.progress = data.progress.text; onProgress?.(data.progress); return; }
+            const pending = waiting.get(data.id);
+            waiting.delete(data.id);
+            if (!pending) return;
+            if (data.ok) pending.resolve(data); else pending.reject(new Error(data.error));
+          };
+          worker.onerror = (event) => {
+            const error = new Error(event.message || 'the worker failed');
+            for (const pending of waiting.values()) pending.reject(error);
+            waiting.clear();
+            // A worker that dies after it has loaded would leave every later request posted to
+            // nothing: the engine is failed instead, so the browser voice reads and it is said.
+            if (engine.state === 'ready') engine.crashed(error);
+          };
+          const info = await engine.ask({ op: 'load' });
+          engine.device = info.device;
+          engine.listed = info.voices;
+          engine.state = 'ready';
+        } catch (error) {
+          engine.state = 'failed';
+          engine.error = error.message;
+          // A worker that failed to load is let go, so choosing the engine again starts afresh.
+          worker?.terminate();
+          worker = null;
+          throw error;
+        } finally {
+          engine.loading = null;
+        }
+      })();
+      return engine.loading;
+    },
+    voices(lang) {
+      const listed = engine.listed || Object.entries(ENGINE_INFO[name].defaults)
+        .map(([code, id]) => ({ id, name: id, lang: code }));
+      return listed.filter((v) => sameLanguage(v.lang, lang));
+    },
+    async render(text, { voice, speed }) {
+      const answer = await engine.ask({ op: 'render', text, voice, speed });
+      const buffer = new AudioBuffer({ numberOfChannels: 1, length: Math.max(1, answer.pcm.length), sampleRate: answer.rate });
+      buffer.copyToChannel(answer.pcm, 0);
+      buffer.took = answer.took;
+      buffer.lead = answer.lead || 0;   // the quiet margin before the speech: started that much early
+      return buffer;
+    },
+  };
+  return engine;
+}
+for (const name of ['kokoro', 'piper', 'kitten']) engines[name] = workerEngine(name);
+
+// The voice the setting asks `engine` to read `language` with: the saved one if it still lists
+// it, otherwise its default, otherwise its first.
+function voiceOf(engine, lang = language) {
+  const offered = engines[engine].voices(lang);
+  const saved = readingSettings.voices[engine]?.[lang];
+  if (offered.some((v) => v.id === saved)) return saved;
+  // The browser's voice has a default of its own, the system's (`null`: no voice set on the
+  // utterance, only its language), which is what nothing, or 'browser default', chosen means.
+  if (engine === 'browser') return null;
+  const fallback = ENGINE_INFO[engine].defaults[lang];
+  if (offered.some((v) => v.id === fallback)) return fallback;
+  return offered[0]?.id ?? null;
 }
 
-function cuesOf(reading, generation) {
-  const byLine = new Map(reading.cues.map((cue) => [cue.line, cue]));
-  return (0, eval)(reading.pattern).onTrigger((hap, currentTime, cps, targetTime) => {
-    if (generation !== readingGeneration) return;
-    const cue = byLine.get(Number(hap.value?.n));
-    if (!cue) return;
-    const wait = Math.max(0, targetTime - currentTime);
-    // The trace: which line, from which bytes, at which cycle of Strudel's clock.
-    console.log(`[reading] cycle ${hap.whole.begin.valueOf()} (bar ${cue.slot + 1}): line ${cue.line + 1}`
-      + ` bytes ${cue.start}..${cue.end}, rate ${cue.rate}, in ${wait.toFixed(3)} s: ${cue.text}`);
-    const timer = setTimeout(() => {
-      pendingSpeech.delete(timer);
-      if (generation === readingGeneration) readLine(cue);
-    }, wait * 1000);
-    pendingSpeech.add(timer);
-  }, true);
+// Who reads now, and why not the chosen one when it is not: the chosen engine once it has
+// loaded and has a voice in the poem's language; the browser's voice meanwhile, and instead.
+function speaker() {
+  const chosen = readingSettings.engine;
+  const engine = engines[chosen];
+  if (chosen === 'browser') return { engine: 'browser', why: '' };
+  const name = ENGINE_INFO[chosen].label;
+  if (engine.state === 'failed') return { engine: 'browser', why: `${name} could not load (${engine.error}); reading with the browser voice`, bad: true };
+  if (engine.state !== 'ready') return { engine: 'browser', why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; reading with the browser voice meanwhile` };
+  if (!voiceOf(chosen)) return { engine: 'browser', why: `${name} has no ${LANGUAGES[language] || language} voice; reading with the browser voice${language === 'sl' ? ' (Piper has one)' : ''}`, bad: true };
+  return { engine: chosen, why: '' };
 }
 
-function readLine(cue) {
-  if (!('speechSynthesis' in window)) return;
+// Loads the chosen engine if it is not loaded, showing its progress in the status bar. A failure
+// is said and the reading carries on with the browser's voice; choosing the engine again (`retry`)
+// retries — any other change of setting leaves a failed engine failed. What an engine says while
+// it loads, renders or fails is shown only while it is the one chosen, and its progress while it
+// renders only for the voice now chosen: a voice or engine let go must not hold the status bar.
+let progressShown = false;   // the reading's note is an engine's progress, cleared when it is done
+const chosenEngine = (engine) => readingSettings.engine === engine.name;
+function ensureEngine(retry = false) {
+  const engine = engines[readingSettings.engine];
+  if (engine.state === 'ready' || engine.state === 'loading' || !engine.render) return;
+  if (engine.state === 'failed' && !retry) return;
+  const name = ENGINE_INFO[engine.name].label;
+  let shown = '';
+  engine.load((progress) => {
+    if (!chosenEngine(engine)) return;
+    if (engine.state === 'ready' && renderingJob && (renderingJob.engine !== engine.name || renderingJob.voice !== voiceOf(engine.name))) return;
+    // Said in the status bar as it moves, a whole percent at a time; logged only when it is done.
+    const said = `${name}: ${progress.text}${progress.fraction != null ? ' (' + Math.round(progress.fraction * 100) + '%)' : ''}`;
+    if (said !== shown) { noteReading(shown = said, false, true); progressShown = true; }
+  }).then(() => {
+    console.log(`[reading] ${engine.name} loaded on ${engine.device}`);
+    showVoices();
+    if (!chosenEngine(engine)) return;
+    noteReading(`${name} ready (${engine.device === 'webgpu' ? 'WebGPU' : 'WebAssembly'})`);
+    prerender();
+  }, (error) => {
+    console.warn(`[reading] ${engine.name} failed to load:`, error);
+    showVoices();
+    if (!chosenEngine(engine)) return;
+    noteReading(`${name} could not load: ${error.message} — reading with the browser voice`, true);
+  });
+}
+
+// An engine that failed after it had loaded (its worker died): said if it is the one chosen, and
+// the reading carries on with the browser's voice — a line waiting for it gives up (its render is
+// rejected) and the next is read by the browser.
+function engineFailed(engine, error) {
+  console.warn(`[reading] ${engine.name} failed:`, error);
+  showVoices();
+  if (!chosenEngine(engine)) return;
+  noteReading(`${ENGINE_INFO[engine.name].label} failed: ${error.message} — reading with the browser voice; choose it again to retry`, true);
+}
+
+// ---- Rendering ahead ----
+
+const renders = new Map();   // engine|voice|speed|text → { buffer, promise }
+const RENDERS_KEPT = 600;
+let renderQueue = [], rendering = false;
+let renderingJob = null;     // the job the engine is rendering now
+// A pending line is in `renders` exactly while its job is queued or rendering: a job dropped from
+// the queue (no longer to be read: the poem, engine, voice or pace changed) takes its entry with it
+// and rejects its promise as `dropped`, so asking for that line again queues it afresh rather than
+// waiting on a render that will never come.
+function dropJob(job) {
+  if (renders.get(job.key) === job.entry) renders.delete(job.key);
+  const error = new Error('dropped: no longer to be read (the poem, engine, voice or pace changed)');
+  error.dropped = true;
+  job.entry.reject(error);
+}
+const renderKey = (engine, voice, speed, text) => `${engine}|${voice}|${Number(speed).toFixed(3)}|${text}`;
+
+// The buffer for a line, if it has been rendered; and otherwise asks for it, first in the queue
+// when `urgent` (a line due now), and gives the promise of it.
+function rendered(engine, voice, speed, text) {
+  return renders.get(renderKey(engine, voice, speed, text))?.buffer ?? null;
+}
+function whenRendered(engine, voice, speed, text, urgent = false, room = null) {
+  const key = renderKey(engine, voice, speed, text);
+  let entry = renders.get(key);
+  if (entry?.buffer) return Promise.resolve(entry.buffer);
+  // An entry neither queued nor rendering has lost its job (it cannot, by `dropJob`, but a line
+  // waiting on it would wait for good): it is asked for afresh.
+  if (entry && renderingJob?.key !== key && !renderQueue.some((job) => job.key === key)) {
+    renders.delete(key);
+    entry = null;
+  }
+  if (!entry) {
+    entry = {};
+    entry.promise = new Promise((resolve, reject) => { entry.resolve = resolve; entry.reject = reject; });
+    entry.promise.catch(() => {});
+    renders.set(key, entry);
+    const job = { key, engine, voice, speed, text, entry, room };
+    if (urgent) renderQueue.unshift(job); else renderQueue.push(job);
+  } else if (urgent) {
+    const at = renderQueue.findIndex((job) => job.key === key);
+    if (at > 0) renderQueue.unshift(...renderQueue.splice(at, 1));
+  }
+  pumpRenders();
+  return entry.promise;
+}
+async function pumpRenders() {
+  if (rendering) return;
+  rendering = true;
+  try {
+    while (renderQueue.length) {
+      const job = renderQueue.shift();
+      if (engines[job.engine].state !== 'ready') { renders.delete(job.key); job.entry.reject(new Error('not loaded')); continue; }
+      renderingJob = job;
+      try {
+        const buffer = await engines[job.engine].render(job.text, { voice: job.voice, speed: job.speed });
+        job.entry.buffer = buffer;
+        job.entry.resolve(buffer);
+        // A voice's download shown while it rendered has done its work.
+        if (progressShown) { progressShown = false; noteReading(speaker().why, speaker().bad); }
+        afterRender(job, buffer);
+        console.log(`[reading] rendered with ${job.engine} ${job.voice} at ${Number(job.speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${(buffer.took / 1000).toFixed(2)} s: ${job.text}`);
+      } catch (error) {
+        renders.delete(job.key);
+        job.entry.reject(error);
+        console.warn(`[reading] ${job.engine} could not render "${job.text}":`, error);
+      } finally {
+        renderingJob = null;
+      }
+    }
+  } finally {
+    rendering = false;
+  }
+  // Oldest first out: insertion order is the order lines were first asked for.
+  while (renders.size > RENDERS_KEPT) renders.delete(renders.keys().next().value);
+}
+
+// Every line of a reading in reading order: what this pace reads at the speed it reads it — the
+// line's pace, or its fitted rate (and the faster one it was refitted to, if it was).
+function linesToRead(reading) {
+  if (!reading) return [];
+  return readingSettings.pace === 'fitted'
+    ? reading.cues.map((cue) => ({ text: cue.text, speed: cue.rate, room: slotLength(reading, cue.slot) * reading.fill, cue }))
+    : reading.lines.map((line) => ({ text: line.text, speed: line.pace }));
+}
+// The same, from the line the reading of the playing piece is at round to the one before it: the
+// order the lines will be wanted in. Any other reading from its first line.
+let fittedAt = null;   // { reading, index }: the fitted cue after the one last cued
+function upcoming(reading) {
+  const lines = linesToRead(reading);
+  let at = 0;
+  if (readingSettings.pace === 'natural' && chain?.reading === reading) at = chain.next;
+  if (readingSettings.pace === 'fitted' && fittedAt?.reading === reading) at = fittedAt.index;
+  at = Math.min(Math.max(0, at), lines.length);
+  return lines.slice(at).concat(lines.slice(0, at));
+}
+
+// ---- Fitting a rendered line to its bar ----
+//
+// A fitted cue's `rate` is fitted for a voice that says SYLLABLES_PER_SECOND at rate 1 (reading.rs);
+// a neural voice has a speed of its own, so a line rendered at that rate can still run past its
+// bar and be cut off at the next cue. Such a line is rendered once more, faster by just as much
+// as it ran over `fill` of its bar (reading.rs FILL, sent in /reading), no faster than
+// REFIT_FASTEST, and that render is the one read once it is ready; until then the first is, and
+// a line that runs past its bar is said. Only ever faster: a line that ends early leaves the rest
+// of its bar silent, as the browser's voice does.
+const REFIT_FASTEST = 2.0;    // past this a voice is gabbling; the line is cut off instead
+const refits = new Map();     // renderKey at the cue's rate → the speed that fits it to its bar
+const speechOf = (buffer) => buffer.duration - 2 * (buffer.lead || 0);   // the trim margin each side
+function slotLength(reading, slot) {
+  const bars = barSeconds(reading);
+  return (bars[slot + 1] ?? bars[slot]) - bars[slot];
+}
+function afterRender(job, buffer) {
+  if (!job.room || speechOf(buffer) <= job.room + 0.02) return;
+  const speed = Math.min(REFIT_FASTEST, job.speed * speechOf(buffer) / job.room);
+  if (speed <= job.speed + 0.0005) return;
+  refits.set(job.key, speed);
+  console.log(`[reading] fitted: ${speechOf(buffer).toFixed(3)} s of speech for ${job.room.toFixed(3)} s of bar; rendering again at ${speed.toFixed(3)}: ${job.text}`);
+  whenRendered(job.engine, job.voice, speed, job.text, true);
+}
+// The speed a fitted cue is rendered at for this engine and voice: refitted if it was too long.
+function fittedSpeed(engine, voice, cue) {
+  const refit = refits.get(renderKey(engine, voice, cue.rate, cue.text));
+  return refit !== undefined && rendered(engine, voice, refit, cue.text) ? refit : cue.rate;
+}
+// Asks for every line the reading may want, in the order it will want them: the playing piece's
+// from where its reading is, then the side heard, then the other. The queue then holds exactly
+// those, in that order — a queued line nobody will read (of a poem no longer loaded, or another
+// engine, voice or pace) is dropped — so a line due next is never stuck behind one of the top of
+// the poem, or of the last poem. Called again whenever the reading moves on (advance, fittedCue).
+function prerender() {
+  const { engine } = speaker();
+  const voice = engine === 'browser' ? null : voiceOf(engine);
+  const other = hearing === 'A' ? 'B' : 'A';
+  const wanted = [], keys = new Set();
+  if (voice) {
+    for (const reading of [playingReading, readings[hearing], readings[other]]) {
+      for (const { text, speed, room, cue } of upcoming(reading)) {
+        if (!text.trim()) continue;
+        const refit = cue && refits.get(renderKey(engine, voice, speed, text));
+        for (const [s, r] of refit !== undefined && refit !== null ? [[speed, room], [refit, null]] : [[speed, room]]) {
+          const key = renderKey(engine, voice, s, text);
+          if (keys.has(key)) continue;
+          keys.add(key);
+          wanted.push({ key, text, speed: s, room: r });
+        }
+      }
+    }
+  }
+  renderQueue = renderQueue.filter((job) => {
+    const kept = keys.has(job.key);
+    if (!kept) dropJob(job);
+    return kept;
+  });
+  for (const { text, speed, room } of wanted) whenRendered(engine, voice, speed, text, false, room);
+  const rank = new Map(wanted.map(({ key }, i) => [key, i]));
+  renderQueue.sort((a, b) => rank.get(a.key) - rank.get(b.key));
+}
+
+// ---- Playing a line ----
+
+const sources = new Set();   // every AudioBufferSourceNode scheduled and not yet ended
+const readingTimers = new Set();
+function later(seconds, fn) {
+  const timer = setTimeout(() => { readingTimers.delete(timer); fn(); }, Math.max(0, seconds) * 1000);
+  readingTimers.add(timer);
+  return timer;
+}
+
+// Starts `buffer` so its speech begins at `start` on the audio clock — the buffer itself its quiet
+// margin earlier — through the reading's level into the master stage, and shows the line from
+// then until it ends. Returns its source, to cut it off.
+function playBuffer(buffer, start, line, last) {
+  const ctx = getAudioContext();
+  const source = new AudioBufferSourceNode(ctx, { buffer });
+  source.connect(voiceBus || ctx.destination);
+  const at = start - (buffer.lead || 0);
+  if (at >= ctx.currentTime) source.start(at); else source.start(ctx.currentTime, ctx.currentTime - at);
+  sources.add(source);
+  source.onended = () => { sources.delete(source); source.disconnect(); };
+  const end = spokenEnd(buffer, start);
+  duckSpan(start, end, last ? 0 : line.pause);
+  const shown = { line, start, duration: end - start, source };
+  later(start - ctx.currentTime, () => { speaking = shown; showReading(); followWords(shown); });
+  later(end - ctx.currentTime, () => { if (speaking === shown) { speaking = null; showReading(); } });
+  return source;
+}
+
+// Where a line whose speech begins at `start` stops sounding.
+function spokenEnd(buffer, start) {
+  return start - (buffer.lead || 0) + buffer.duration;
+}
+
+// The music ducked from `start` to `end`, on the audio clock, and kept down through a pause of
+// `hold` seconds after it, so the lines of one stanza duck it once rather than pumping: the next
+// line's own duck, starting within the hold, cancels the release.
+function duckSpan(start, end, hold) {
+  if (!duckGain) return;
+  const gain = duckGain.gain;
+  const level = $('duck').checked ? DUCK : 1;
+  gain.cancelScheduledValues(start);
+  gain.setTargetAtTime(level, start, 0.08);
+  gain.setTargetAtTime(1, end + hold + 0.05, 0.15);
+}
+
+// The browser's voice, at `rate`, from now. `onEnd` is called when it has finished (or failed).
+function readLine(line, rate, onEnd) {
+  if (!('speechSynthesis' in window)) { onEnd?.(); return; }
   // A line still being read when the next is due is cut off, so the reading stays on the bar.
   speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(cue.text);
-  utterance.rate = cue.rate;
-  const voice = voices.find((v) => v.name === $('voice').value);
-  if (voice) { utterance.voice = voice; utterance.lang = voice.lang; }
+  const utterance = new SpeechSynthesisUtterance(line.text);
+  utterance.rate = rate;
+  utterance.volume = Math.min(1, readingSettings.level);
+  const voice = voices.find((v) => v.name === voiceOf('browser'));
+  if (voice) { utterance.voice = voice; utterance.lang = voice.lang; } else utterance.lang = language;
   // `cancel()` above ends the previous utterance asynchronously; its `end` must not clear the line
   // that has started since, so each handler checks it is still the one speaking.
-  speaking = { utterance, cue };
-  utterance.onstart = () => { readingDuck(true); if (speaking?.utterance === utterance) showReading(); };
+  const shown = { line, utterance };
+  speaking = shown;
+  utterance.onstart = () => { readingDuck(true); if (speaking === shown) showReading(); };
   utterance.onboundary = (event) => {
-    if (speaking?.utterance === utterance && event.name !== 'sentence') showSpoken(event);
+    if (speaking === shown && event.name !== 'sentence') showSpoken(event);
   };
+  let ended = false;
   const done = () => {
-    readingDuck(false);
-    if (speaking?.utterance === utterance) { speaking = null; showReading(); }
+    if (ended) return;
+    ended = true;
+    readingDuck(false, line.stanzaLast ? 0 : line.pause);
+    if (speaking === shown) { speaking = null; showReading(); }
+    onEnd?.();
   };
   utterance.onend = done;
   utterance.onerror = done;
   speechSynthesis.speak(utterance);
 }
 
-function readingDuck(down) {
+function readingDuck(down, hold = 0) {
   if (!duckGain) return;
   const now = getAudioContext().currentTime;
-  const level = down && $('duck').checked ? DUCK : 1;
-  duckGain.gain.cancelScheduledValues(now);
-  duckGain.gain.setTargetAtTime(level, now, 0.08);
+  if (down) duckSpan(now, now + 3600, 0);
+  else { duckGain.gain.cancelScheduledValues(now); duckGain.gain.setTargetAtTime(1, now + hold, 0.15); }
 }
 
 function quietReading() {
-  for (const timer of pendingSpeech) clearTimeout(timer);
-  pendingSpeech.clear();
+  for (const timer of readingTimers) clearTimeout(timer);
+  readingTimers.clear();
+  for (const source of sources) { try { source.stop(); } catch (error) {} }
+  sources.clear();
   if ('speechSynthesis' in window) speechSynthesis.cancel();
-  readingDuck(false);
+  chain = null;
+  fittedLast = null;
+  fittedAt = null;
+  if (duckGain) {
+    const now = getAudioContext().currentTime;
+    duckGain.gain.cancelScheduledValues(now);
+    duckGain.gain.setTargetAtTime(1, now, 0.08);
+  }
   speaking = null;
   showReading();
 }
 
+// ---- The fitted pace: a line a bar ----
+
+let fittedLast = null;   // the source of the line last started, to cut off at the next cue
+function fittedCue(cue, time, generation) {
+  if (generation !== readingGeneration || readingSettings.pace !== 'fitted') return;
+  const ctx = getAudioContext();
+  const who = speaker();
+  const voice = who.engine === 'browser' ? null : voiceOf(who.engine);
+  const speed = voice ? fittedSpeed(who.engine, voice, cue) : cue.rate;
+  const buffer = voice && rendered(who.engine, voice, speed, cue.text);
+  if (playingReading) {
+    fittedAt = { reading: playingReading, index: playingReading.cues.indexOf(cue) + 1 };
+    prerender();
+  }
+  console.log(`[reading] fitted: bar ${cue.slot + 1} line ${cue.line + 1} at ${time.toFixed(3)} s`
+    + ` (bytes ${cue.start}..${cue.end}), rate ${cue.rate}${speed !== cue.rate ? ', refitted to ' + speed.toFixed(3) : ''}, ${buffer ? who.engine : 'browser'}: ${cue.text}`);
+  if (buffer) {
+    // A line still sounding when the next is due is cut off at the bar, as the browser's is.
+    try { fittedLast?.stop(time); } catch (error) {}
+    fittedLast = playBuffer(buffer, time, cue, true);
+    const bar = playingReading ? slotLength(playingReading, cue.slot) : Infinity;
+    const over = speechOf(buffer) - bar;
+    if (over > 0.02) noteReading(`line ${cue.line + 1} runs ${over.toFixed(2)} s past its bar and may be cut off at the next cue`);
+    return;
+  }
+  if (voice) {
+    whenRendered(who.engine, voice, cue.rate, cue.text, true, playingReading ? slotLength(playingReading, cue.slot) * playingReading.fill : null);
+    noteReading(`line ${cue.line + 1} not rendered in time; read by the browser voice`);
+  } else if (who.why) noteReading(who.why, who.bad);
+  later(time - ctx.currentTime, () => { if (generation === readingGeneration) readLine(cue, cue.rate); });
+}
+
+// ---- The natural pace: a line after the last ----
+//
+// SPEC.md §4.7. A line is read at the voice's own speed times its pace, and the next begins when
+// it has finished plus its pause; a stanza begins where its cue says the music has reached it —
+// and, under `breath`, not before a whole silent bar has passed since the previous stanza's last
+// line ended, nor before that line's stanza-end pause: on the first bar that satisfies all three.
+// All of it is timed on the audio clock from the cue's `targetTime`. A rendered line's end is known
+// the moment it is scheduled, so a stanza is scheduled line after line ahead of time; the
+// browser's voice reports its end only when it gets there, so its lines are chained on `onend`.
+let chain = null;
+let playingReading = null, playingCues = null;   // the reading of the pattern now playing, and its cues
+function newChain(reading, generation) {
+  return {
+    reading, generation,
+    next: 0,             // the index into reading.lines of the line to read next
+    round: null,         // which pass of the looping piece the anchors below belong to
+    wrapTo: null,        // the line the new round starts at, when it came round mid-line
+    origin: null,        // the audio time this round's bar 1 began
+    anchors: new Map(),  // index into reading.lines → the audio time its cue fired for, this round
+    prevEnd: null, prevPause: 0,
+    busy: false,
+  };
+}
+// The music's bars, in seconds from the piece's start, and its length last.
+function barSeconds(reading) {
+  return reading.bars.map((cycles) => cycles * 60 / reading.cpm / SCHEDULER_CPS);
+}
+// Bar `k` of the looping piece (negative or past the end: the rounds before and after) on the
+// audio clock, and the bar playing at audio time `t`.
+function barTime(c, k) {
+  const bars = c.seconds, slots = bars.length - 1, piece = bars[slots];
+  const round = Math.floor(k / slots);
+  return c.origin + round * piece + bars[k - round * slots];
+}
+function barAt(c, t) {
+  const bars = c.seconds, slots = bars.length - 1, piece = bars[slots];
+  const round = Math.floor((t - c.origin) / piece);
+  const within = t - c.origin - round * piece;
+  let k = 0;
+  while (k + 1 < slots && bars[k + 1] <= within + 1e-9) k += 1;
+  return k + round * slots;
+}
+
+function naturalCue(index, hap, time, cps, generation) {
+  if (generation !== readingGeneration || readingSettings.pace !== 'natural') return;
+  const reading = playingReading;
+  if (!reading) return;
+  if (!chain || chain.generation !== generation) {
+    chain = newChain(reading, generation);
+    chain.seconds = barSeconds(reading);
+  }
+  const line = reading.lines[index];
+  const piece = chain.seconds[chain.seconds.length - 1];
+  const at = hap.whole.begin.valueOf() / cps / SCHEDULER_CPS;   // seconds since the scheduler's cycle 0
+  const round = Math.round((at - chain.seconds[line.slot]) / piece);
+  chain.origin = time - chain.seconds[line.slot];
+  if (round !== chain.round) {
+    // The piece has come round: this round's cues begin afresh, from this one. While a line is
+    // still being read (the browser's voice until its `onend`, a neural line until it is rendered)
+    // the move waits for it to finish (`wrapTo`, taken in advance()), or its `after()` would step
+    // past the last line and leave this round unread. The last line's end is kept, so a first
+    // stanza still waits for its breath after a last one that ran over the loop's seam.
+    if (chain.round !== null && !chain.busy) wrapRound(chain, index);
+    else if (chain.round !== null) chain.wrapTo = index;
+    else chain.next = index;
+    chain.round = round;
+    chain.anchors.clear();
+  }
+  chain.anchors.set(index, time);
+  // Nothing being read, and the line waited for is not this one: either the clock was joined
+  // part-way through (a live edit) or the reading had finished this round. Start here.
+  if (!chain.busy && chain.next !== index && !chain.anchors.has(chain.next)) chain.next = index;
+  console.log(`[reading] natural: cue for line ${line.line + 1} (${line.onset}) in bar ${line.slot + 1} at ${time.toFixed(3)} s`);
+  advance();
+}
+
+// The chain moves to the new round's line `index`. A line of the old round not yet read will not
+// be — its round's cues are gone — and is said, not dropped in silence (CLAUDE.md §6).
+function wrapRound(c, index) {
+  const lines = c.reading.lines;
+  if (c.next < lines.length) {
+    const lost = lines.slice(c.next).map((l) => l.line + 1);
+    noteLoss(`not read last time round: line ${lost.join(', ')}, the piece came round before its turn`);
+  }
+  c.next = index;
+  c.wrapTo = null;
+}
+
+// Reads on, then puts the lines it will want next at the head of the render queue.
+function advance() {
+  advanceChain();
+  if (chain && chain.generation === readingGeneration) prerender();
+}
+function advanceChain() {
+  const c = chain;
+  if (!c || c.busy || c.generation !== readingGeneration) return;
+  if (c.wrapTo !== null) wrapRound(c, c.wrapTo);
+  const lines = c.reading.lines;
+  while (c.next < lines.length) {
+    const line = lines[c.next];
+    let earliest = -Infinity;
+    if (line.onset !== 'follows') {
+      const anchor = c.anchors.get(c.next);
+      if (anchor === undefined) {
+        // Waiting for its bar. If a later line's cue has already fired this round, this one's
+        // will not (the clock was joined after it): move on to that one.
+        const later = [...c.anchors.keys()].filter((k) => k > c.next).sort((a, b) => a - b)[0];
+        if (later === undefined) return;
+        c.next = later;
+        continue;
+      }
+      earliest = anchor;
+    } else if (c.prevEnd === null) {
+      // Joined in the middle of a stanza: there is no line before to follow, so this one waits for
+      // the piece to come round, as a line before the clock's bar does at the fitted pace.
+      c.next += 1;
+      continue;
+    }
+    if (c.prevEnd !== null) {
+      earliest = Math.max(earliest, c.prevEnd + c.prevPause);
+      if (line.onset === 'breath') {
+        // On a bar, and at least two bars after the one the last line ended in, so one whole bar
+        // between is silent: the first bar from there that begins no earlier than `earliest`.
+        let bar = Math.max(barAt(c, c.prevEnd) + 2, barAt(c, earliest));
+        if (barTime(c, bar) < earliest - 1e-6) bar += 1;
+        earliest = barTime(c, bar);
+      }
+    }
+    const pieceEnd = c.origin + c.seconds[c.seconds.length - 1];
+    if (earliest >= pieceEnd - 1e-6) {
+      const lost = lines.slice(c.next).filter((l) => l.stanza >= line.stanza).map((l) => l.line + 1);
+      noteReading(`not read this time round: line ${lost.join(', ')}, the piece ends before its turn`);
+      console.log(`[reading] natural: the piece ends before line ${line.line + 1}`);
+      c.next = lines.length;
+      return;
+    }
+    speakNatural(c, line, earliest);
+    if (c.busy) return;
+  }
+}
+
+function speakNatural(c, line, earliest) {
+  const ctx = getAudioContext();
+  const who = speaker();
+  const last = c.next + 1 >= c.reading.lines.length || c.reading.lines[c.next + 1].stanza !== line.stanza;
+  const after = () => { c.prevPause = line.pause; c.next += 1; };
+  if (who.engine === 'browser') {
+    if (who.why) noteReading(who.why, who.bad);
+    c.busy = true;
+    later(earliest - ctx.currentTime, () => {
+      if (chain !== c) return;
+      console.log(`[reading] natural: line ${line.line + 1} with the browser voice at ${ctx.currentTime.toFixed(3)} s (due ${earliest.toFixed(3)}), pace ${line.pace}: ${line.text}`);
+      readLine({ ...line, stanzaLast: last }, line.pace, () => {
+        if (chain !== c) return;
+        c.prevEnd = getAudioContext().currentTime;
+        after();
+        c.busy = false;
+        advance();
+      });
+    });
+    return;
+  }
+  const voice = voiceOf(who.engine);
+  const buffer = rendered(who.engine, voice, line.pace, line.text);
+  if (!buffer) {
+    c.busy = true;
+    noteReading(`waiting for ${ENGINE_INFO[who.engine].label} to render line ${line.line + 1}`);
+    whenRendered(who.engine, voice, line.pace, line.text, true).then(() => {
+      if (chain !== c) return;
+      c.busy = false;
+      advance();
+    }, (error) => {
+      if (chain !== c) return;
+      // Dropped for a change of engine or voice: the line is asked for again by whoever reads now.
+      if (error.dropped) { c.busy = false; advance(); return; }
+      noteReading(`${ENGINE_INFO[who.engine].label} could not render line ${line.line + 1}: ${error.message}`, true);
+      after();
+      c.busy = false;
+      advance();
+    });
+    return;
+  }
+  const start = Math.max(earliest, ctx.currentTime + LEAD);
+  const late = start - earliest;
+  console.log(`[reading] natural: line ${line.line + 1} with ${who.engine} ${voice} at ${start.toFixed(3)} s`
+    + (late > 0.001 ? ` (${late.toFixed(3)} s late)` : '') + `, ${buffer.duration.toFixed(3)} s, pace ${line.pace}, then ${line.pause} s: ${line.text}`);
+  playBuffer(buffer, start, line, last);
+  c.prevEnd = spokenEnd(buffer, start);
+  if (readingNote.startsWith('waiting for')) noteReading('');
+  after();
+}
+
+function cuesOf(reading, generation) {
+  const byLine = new Map(reading.cues.map((cue) => [cue.line, cue]));
+  const fitted = (0, eval)(reading.pattern).onTrigger((hap, currentTime, cps, targetTime) => {
+    const cue = byLine.get(Number(hap.value?.n));
+    if (cue) fittedCue(cue, targetTime, generation);
+  }, true);
+  const indexOf = new Map(reading.lines.map((line, index) => [line.line, index]));
+  const natural = (0, eval)(reading.natural).onTrigger((hap, currentTime, cps, targetTime) => {
+    const index = indexOf.get(Number(hap.value?.n));
+    if (index !== undefined) naturalCue(index, hap, targetTime, cps, generation);
+  }, true);
+  return { fitted, natural, both: stack(fitted, natural) };
+}
+
+let lossNote = '', lossUntil = 0;
+function noteReading(text, bad = false, quiet = false) {
+  if (text && !quiet) console.log('[reading] ' + text);
+  // A line lost at the seam is reported once, in the same pass that goes on to read the next round —
+  // which may at once say why the browser voice is standing in, or that a line is still rendering.
+  // So a loss stays beside whatever note follows it for a few seconds rather than being replaced
+  // before anyone could read it (CLAUDE.md §6: a loss must be visible).
+  const loss = performance.now() < lossUntil ? lossNote : '';
+  readingNote = loss && text !== loss ? (text ? `${text} · ${loss}` : loss) : text;
+  readingNoteBad = bad;
+  status(statusText, statusBad);
+}
+
+function noteLoss(text) {
+  lossNote = text;
+  lossUntil = performance.now() + 8000;
+  noteReading(text);
+}
+
 listVoices();
 if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', listVoices);
+
+function listVoices() {
+  if (!('speechSynthesis' in window)) return;
+  voices = speechSynthesis.getVoices();
+  showVoices();
+}
+
+// The reading panel's menus, from the settings and what each engine offers.
+function showVoices() {
+  for (const option of $('engine').options) {
+    const engine = engines[option.value];
+    const state = engine.state === 'failed' ? ' — could not load' : engine.state === 'loading' ? ' — loading…' : '';
+    option.textContent = ENGINE_INFO[option.value].label + state;
+  }
+  $('engine').value = readingSettings.engine;
+  $('pace').value = readingSettings.pace;
+  const known = { ...LANGUAGES };
+  for (const v of engines.piper.listed || []) {
+    const code = v.lang.split('-')[0];
+    known[code] ??= code;
+  }
+  $('language').innerHTML = Object.entries(known).map(([code, name]) => `<option value="${code}">${name}</option>`).join('');
+  $('language').value = language;
+  const engine = readingSettings.engine;
+  const offered = engines[engine].voices(language);
+  const chosen = voiceOf(engine);
+  $('voice').innerHTML = (engine === 'browser' ? '<option value="">browser default</option>' : '')
+    + offered.map((v) => `<option value="${v.id.replace(/"/g, '&quot;')}">${v.name}</option>`).join('');
+  $('voice').value = chosen ?? '';
+  $('voice').disabled = !offered.length && engine !== 'browser';
+  $('readingLevel').value = readingSettings.level;
+  $('readingLevelOut').textContent = Number(readingSettings.level).toFixed(2);
+}
+
+// A change of who reads, how fast, or in what language, while it plays: what is scheduled is
+// dropped and the reading picks up at the next cue, in the new voice.
+function readingChanged(retry = false) {
+  saveReading();
+  showVoices();
+  ensureEngine(retry);
+  prerender();
+  if (playing) {
+    quietReading();
+    showPattern();
+    if (behind) behind.cues = playingCues?.[readingSettings.pace === 'fitted' ? 'fitted' : 'natural'] ?? null;
+  }
+  noteReading(speaker().why, speaker().bad);
+}
+$('engine').addEventListener('change', () => { readingSettings.engine = $('engine').value; readingChanged(true); });
+$('pace').addEventListener('change', () => { readingSettings.pace = $('pace').value; readingChanged(); });
+$('language').addEventListener('change', () => { language = $('language').value; readingChanged(); });
 $('voice').addEventListener('change', () => {
-  try { localStorage.setItem('prosody.voice', $('voice').value); } catch (e) {}
+  const engine = readingSettings.engine;
+  readingSettings.voices[engine] = { ...(readingSettings.voices[engine] || {}), [language]: $('voice').value };
+  readingChanged();
 });
+$('readingLevel').addEventListener('input', () => {
+  readingSettings.level = Number($('readingLevel').value);
+  $('readingLevelOut').textContent = readingSettings.level.toFixed(2);
+  if (voiceBus) voiceBus.gain.setTargetAtTime(readingSettings.level, getAudioContext().currentTime, 0.02);
+  saveReading();
+});
+showVoices();
 
 // What the scheduler dropped. Strudel's scheduler (the cyclist bundled in @strudel/web 1.3.0)
 // queries the pattern a tick at a time; a tick it reaches too late it skips whole, saying only
@@ -1150,20 +1931,20 @@ async function play() {
     const code = latestPattern;
     const reading = readings[hearing];
     if (code.length > 100000) status('preparing the pattern…' + (playing ? ' · playing' : ''));
-    await parseAhead(code, reading?.pattern ?? '', traces[hearing]?.pattern ?? '');
+    await parseAhead(code, reading?.pattern ?? '', reading?.natural ?? '', traces[hearing]?.pattern ?? '');
     if (code !== latestPattern) return;   // a newer version arrived while parsing; it plays itself
     const music = (0, eval)(code);
     const generation = ++generations;
     // The reading is evaluated apart from the music: a cue pattern Strudel refuses costs the
     // reading, never the piece.
     let cues = null, unread = '';
-    if (reading && reading.cues.length) {
+    if (reading && (reading.cues.length || reading.lines.length)) {
       try { cues = cuesOf(reading, generation); } catch (error) {
         unread = ' · the reading could not be cued: ' + error.message;
         console.warn('[reading] cue pattern refused:', error);
       }
     }
-    const pattern = cues ? stack(music, cues) : music;
+    const pattern = cues ? stack(music, cues.both) : music;
     // The trace is evaluated but never played: the drawing queries it for which syllable sounds.
     let nextTrace = null;
     const nextBars = barsOf(traces[hearing]);
@@ -1177,9 +1958,15 @@ async function play() {
     // From here the old pattern's cues are stale: drop the queued ones and the line being read.
     readingGeneration = generation;
     quietReading();
+    playingReading = reading;
+    playingCues = cues;
+    // The chosen engine loads now if it has not (the default, Kokoro, is never downloaded before
+    // the first play); until it has, the browser's voice reads.
+    ensureEngine();
+    prerender();
     if (fromTheTop && playing && typeof hush === 'function') hush();   // restart at cycle 0
     fromTheTop = false;
-    behind = behindFrom(behind, cues);
+    behind = behindFrom(behind, cues?.[readingSettings.pace === 'fitted' ? 'fitted' : 'natural'] ?? null);
     pattern.play();
     tracePattern = nextTrace;
     heardBars = nextBars;
@@ -1197,8 +1984,9 @@ async function play() {
     $('stop').disabled = false;
     $('play').textContent = '▶ Playing';
     // A line the reading leaves out is said, not left for the listener to miss (SPEC.md §4.7).
-    const lost = reading?.unread?.length
-      ? ' · not read: ' + reading.unread.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ')
+    const missing = readingSettings.pace === 'fitted' ? reading?.unread : reading?.natural_unread;
+    const lost = missing?.length
+      ? ' · not read: ' + missing.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ')
       : '';
     if (lost) console.log('[reading]' + lost);
     const said = hearing + ' · ' + (latestPattern.split('\n')[1] || '').replace('// ', '') + ' · playing' + unread + lost;
@@ -1213,6 +2001,9 @@ function stop() {
   if (typeof hush === 'function') hush();
   readingGeneration = ++generations;   // nothing the stopped pattern cued is read
   quietReading();
+  playingReading = null;
+  playingCues = null;
+  readingNote = '';
   behind = null;
   drawer?.stop();
   drawing = false;
@@ -1375,8 +2166,12 @@ function buildLit() {
   }
   // The reading's lines too, so a line being read is a run of whole pieces.
   if (readings.poem === poem) {
-    for (const cue of readings[hearing]?.cues || []) {
-      if (cue.to > cue.from) { cuts.add(cue.from); cuts.add(cue.to); }
+    // and its words, so the word being said is a run of whole pieces too.
+    const reading = readings[hearing];
+    for (const line of [...(reading?.cues || []), ...(reading?.lines || [])]) {
+      for (const at of [line, ...(line.words || [])]) {
+        if (at.to > at.from) { cuts.add(at.from); cuts.add(at.to); }
+      }
     }
   }
   const edges = [...cuts].filter((at) => at <= poem.length).sort((a, b) => a - b);
@@ -1403,23 +2198,45 @@ function buildLit() {
 
 // The reading, shown behind the words: the line being read, and the word being said when the
 // voice reports its words (`boundary` events; some voices send none, and then only the line shows).
-let speaking = null;       // { utterance, cue } while a line is being read
+// The reading, shown behind the words: the line being read, and the word being said. The browser's
+// voice reports its words as it says them (`boundary` events; some voices send none, and then only
+// the line shows). A rendered line reports nothing, so its words are spread over its length by
+// how many syllables each sounds — the cue carries them — which is where a reader's time goes.
+let speaking = null;       // { line, utterance } or { line, start, duration } while a line is read
+let wordFrame = null;
 function showReading() {
   for (const piece of lit.pieces || []) {
-    const inLine = !!speaking && piece.start < speaking.cue.to && piece.end > speaking.cue.from;
+    const inLine = !!speaking && piece.start < speaking.line.to && piece.end > speaking.line.from;
     piece.element.classList.toggle('reading', inLine);
     if (!inLine) piece.element.classList.remove('spoken');
   }
 }
-function showSpoken(event) {
-  const { cue } = speaking;
-  const text = cue.text;
-  const at = event.charIndex;
-  const length = event.charLength || (text.slice(at).match(/^\S+/) || [''])[0].length;
-  const [from, to] = [cue.from + at, cue.from + at + Math.max(1, length)];
+function markSpoken(from, to) {
   for (const piece of lit.pieces || []) {
     piece.element.classList.toggle('spoken', piece.start < to && piece.end > from);
   }
+}
+function showSpoken(event) {
+  const { line } = speaking;
+  const text = line.text;
+  const at = event.charIndex;
+  const length = event.charLength || (text.slice(at).match(/^\S+/) || [''])[0].length;
+  markSpoken(line.from + at, line.from + at + Math.max(1, length));
+}
+function followWords(shown) {
+  cancelAnimationFrame(wordFrame);
+  const words = shown.line.words || [];
+  const total = words.reduce((sum, word) => sum + word.syllables, 0);
+  if (!total) return;
+  const step = () => {
+    if (speaking !== shown) return;
+    const into = (getAudioContext().currentTime - shown.start) / shown.duration;
+    let reached = 0;
+    const word = words.find((w) => (reached += w.syllables) / total > into) || words[words.length - 1];
+    markSpoken(word.from, word.to);
+    wordFrame = requestAnimationFrame(step);
+  };
+  step();
 }
 
 let shining = new Map();   // element → the mark lighting it

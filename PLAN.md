@@ -406,6 +406,162 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Reading engines — second review: the seam, a stale queue, a slow engine's order
+
+A second review of the uncommitted engines work. `SPEC.md` §4.7 ("Engines", "Two paces").
+
+- **A reading that runs over the loop's seam no longer loses the next round's first stanza.** When
+  the round changed while the chain was busy (the browser voice still saying the last line, or a
+  neural line still rendering), the chain's position was not moved and the anchors were cleared,
+  so the line's `after()` stepped past the end and the next stanza's cue jumped there: stanza 1
+  went unread, with no note. Now the move waits (`wrapTo`) and is taken when the line ends
+  (`wrapRound`), and a line of the old round left unread is said. Checked by running the page's
+  own chain code in node with a virtual clock (two stanzas of two lines, 16 s piece, 3 s browser
+  lines): before, round 2 read lines 3, 4 only; after, it reads 1 (at 20 s, its breath after the
+  last line's 16.3 s end), 2, 3, and says line 4 was not read when round 3 came round mid-line 3.
+- **The render queue holds only lines still to be read.** `prerender()` dropped jobs only for a
+  change of engine or voice, so an old poem's unrendered lines (and, after a pace change, fitted
+  jobs) stayed ahead of the new poem's. It now keeps exactly the lines of the playing piece and
+  of A and B at the chosen pace, engine and voice, and drops the rest. A preset in another
+  language first lets go of the old poem's reading (stopped, its readings cleared, so its lines
+  leave the queue) and then switches the language, so neither poem is rendered in the other's
+  voice; a compile whose text was already replaced no longer asks for its lines.
+- **The line due next is rendered next.** The chain asked for line n+1 only once line n had
+  rendered, by which time the queue had started the next job in poem order from the top, so on
+  Kokoro/WebAssembly every line waited for an unrelated render (4–6 s late). The queue is now in
+  wanted order — the playing piece from the line its reading is at, round to the one before — and
+  re-ordered every time the reading moves on (`advance`, `fittedCue`).
+- Comments on `dropJob`/`prerender` now say what they drop.
+
+### Reading engines — review fixes: no stalled reading, honest status, fitted lines fit
+
+A review of the uncommitted engines work found the reading could stop for good. `SPEC.md` §4.7
+("Engines", "Two paces").
+
+- **A change of engine or voice no longer strands lines.** `prerender()` dropped queued jobs for the
+  old engine/voice but left their `renders` entries pending for ever, so going back to that engine
+  or voice found an entry, queued nothing, and the natural chain waited with `busy = true` until
+  the next play (reproduced by the reviewer: Kokoro → Piper → Kokoro, and cori → ryan → cori →
+  ryan). A dropped job now takes its entry with it and rejects it as `dropped` (`dropJob`); the
+  natural chain, on `dropped`, asks again for the line from whoever reads now instead of skipping
+  it; and `whenRendered` re-queues any entry that is neither queued nor rendering.
+- **A worker that dies after loading fails its engine** (`engine.crashed`): waiting requests are
+  rejected, the worker let go, the status says so in red, the browser voice reads, and choosing the
+  engine again retries. `ask()` on an engine with no worker rejects rather than throwing.
+- **Only the chosen engine speaks in the status bar.** A failed engine is retried only when it is
+  chosen again (`ensureEngine(retry)`, true only from the engine menu), not on every change of
+  pace or language; load, ready and failure messages of an engine no longer chosen are not shown;
+  a render's download progress is shown only while its voice is the chosen one, and cleared when
+  the render finishes.
+- **"browser default" works again**: `voiceOf('browser')` is `null` (the system's voice for the
+  language) unless a listed voice is saved.
+- **Fitted lines fit.** The fitted rate assumes 4 syllables a second at rate 1; a neural render that
+  runs past `fill` (85%, now sent in `/reading` as `fill`, from `reading::FILL`) of its bar is
+  rendered once more at `rate × speech / room` (at most 2.0) and that render is read once ready; a
+  line still running past its bar is said. Measured on Piper ryan: "In what distant deeps or
+  skies." 1.861 s of speech for a 1.686 s room was re-rendered at 1.158 (1.803 s — VITS speed is not
+  linear in its length scale), inside its 1.98 s bar, so nothing was cut.
+- **The I2 proptest cannot pass vacuously.** It no longer skips lines missing on one side: a stanza
+  must be heard on a side exactly when that side's `natural_unread` does not list it, every line of
+  a stanza heard on both sides is compared, and the count compared must equal the lines of the
+  stanzas heard on both sides. Mutation-checked again (pace seeded from the whole source fails it).
+- **Tests.** `/reading` carries `"fill":0.850`; the page drops a job with its entry, fails a crashed
+  engine, retries a failed one only on being chosen, and refits a fitted line.
+- **Browser (headless Chromium, `?device=wasm`).** The reviewer's stub reproduction (5 queued
+  Kokoro lines, switch to Piper, ask again) now resolves all five (it left four hanging). Real
+  runs: Kokoro WASM ready with 7 queued → Piper → Kokoro: the next round read all 8 lines by Kokoro,
+  heard exactly when scheduled, nothing pending; Piper cori → ryan → cori → ryan: next round read by
+  ryan, heard within 0.1 ms; on the static site cori → ryan → cori mid-stanza: stanza 2 and the
+  next round read, heard within 0.1 ms. Kitten fails, pace change does not retry it, choosing Piper
+  leaves a clean status. A simulated crash (`engines.piper.crashed`) rejects the render in flight,
+  shows the red status, reads with the browser voice; choosing Piper again reloads it.
+
+### Reading engines in the page — four voices, and a natural pace
+
+The user decided: one engine interface on the page with four engines to choose between, a page
+setting remembered like the voice picker (not a style key — the CLI never reads aloud); and, added
+after the plan, a **natural pace** as the default, since squeezing every line into its bar sounds
+forced. `SPEC.md` §4.7 ("Two paces", "Engines", "Language").
+
+- **Rust, the natural pace** (`prosody_emit::reading`). Per line: a `Pace` in hundredths, 92..=108,
+  `Seed::for_unit(Domain::Line, line span)` child `"reading pace"`, one draw modulo 17 — local to
+  the line (I2), integer everywhere but the speed handed to a voice; a `Pause` from the line's last
+  character that is not space or a closing quote/bracket — run-on 250 ms, comma/semicolon/colon/
+  dash 450, full stop/?/!/… 800, a stanza's last line 1500 (estimates, documented); per-word
+  syllable counts (`Word`); its stanza. An `Onset` per line: under `breath` a stanza's first line
+  `Breath { slot }` at its **arrival** (not the fitted breath slot — the breath is measured on the
+  page against the previous stanza's actual spoken end), the rest `Follows`; under `stanza`
+  `At { slot }` then `Follows`; under `arrives` every line `At` its arrival. A second cue pattern,
+  `Reading::natural_pattern`, carries the onset bars, its header every line's onset, pace and
+  pause; `natural_unread` lists stanzas never begun. `bars()`/`cpm()` give the page the clock. The
+  fitted pattern and every existing cue are unchanged (`Cue` now wraps a `Spoken`).
+- **Web.** `/reading` gains `natural`, `bars`, `cpm`, `lines` (each with `onset`, `slot`) and on
+  every spoken line `stanza`, `pace`, `pause`, `ends`, `words`; `natural_unread`. Presets carry a
+  language (`PRESETS` 4-tuples; Prešeren `sl`, the rest `en`). `GET /speech-worker.mjs`, written by
+  `--site`, so the static site has it too.
+- **The page.** Engines `browser` (speechSynthesis; instant, the fallback, word boundaries),
+  `kokoro` (default), `piper`, `kitten`, each neural one in its own module worker
+  (`speech-worker.mjs`): `load(onProgress)`, `voices(language)`, `render(text, {voice, speed})` →
+  `AudioBuffer`. Loaded on choice or on the first play; progress in the status bar; until ready,
+  or on failure (said in the status and the engine menu; choosing it again retries), the browser
+  voice reads. Every line rendered ahead after each compile, cached by engine|voice|speed|text, at
+  the natural pace's speed (or the fitted rate), trimmed of silence with a 10 ms margin whose length
+  (`lead`) the page starts early, so the speech lands on the time. Both cue patterns are stacked
+  with the music; the fitted trigger starts a buffer at `targetTime` and cuts the last at it; the
+  natural trigger anchors a chain that schedules each line at max(anchor, previous end + pause) —
+  for a `breath` onset on the first bar ≥ that and ≥ two bars after the bar the last line ended in
+  — on the audio clock, a stanza at a time; the browser voice is chained on `onend`. A line that
+  would start at or after the piece's end is not read that round, and said. Voice through a
+  `voiceBus` (the reading level, 0–2) into the master's glue; the music ducked per stanza on the
+  audio clock (held through pauses). Word marker: spread by syllables for rendered lines. Language
+  menu; a preset sets it; an engine without a voice in it gives way to the browser voice and says
+  so. `?device=wasm` keeps every engine off WebGPU.
+- **Dependencies (CDN, exact versions, each checked against its npm tarball, sha-256 identical on
+  jsDelivr):** kokoro-js 1.2.1 (`dist/kokoro.web.js`, bundles Transformers.js 3.5.1; English
+  voices only, 20 en-us + 8 en-gb; Apache-2.0) — replaces nothing, hand-rolling Kokoro's
+  phonemiser and tokenizer is not reasonable; onnxruntime-web 1.18.0 (`dist/esm/ort.wasm.min.js`)
+  and the espeak-ng phonemiser ES module of @mintplex-labs/piper-tts-web 1.0.5 (published
+  2026-08, the maintained fork of @diffusionstudio/vits-web, last 2024; piper-tts-web 1.1.2 ships a
+  46 MB bundle) with its binary/data from @diffusionstudio/piper-wasm 1.0.0 — the package's own
+  `TtsSession` was not used because it is a singleton that keeps its first voice and has no speed
+  control, so the ~30 lines of inference are here (phoneme ids → `scales` with `length_scale /
+  speed`); voices from `rhasspy/piper-voices` pinned at `5041a7a…`; kitten-tts-webgpu 0.1.1
+  (WebGPU compute shaders only; no WebAssembly path). Licences in README "Voices and their licences".
+- **Tests.** Hand-worked (`reading.rs`): the pause table on twelve endings; the pace's draw onto
+  seventeen steps (0→92, 16→108, 17→92, 25→100, 2³²−1→92 because 2⁸ ≡ 1 mod 17) and its locality;
+  the natural onsets of TRANSFORMING under all four variants and of THREE (stanza 2 at its arrival,
+  slot 3, where the fitted pace has 4), their cue patterns, header lines and bars; per-word
+  syllables; I3 (another palette moves no onset, pace or pause). Properties (`tests/breath.rs`):
+  the natural plan against the `arrives` plan on random poems, all 18 examples and all 18 without
+  the outro; I2 — replacing one stanza leaves every other stanza's lines' pace and pause unchanged
+  (mutation-checked: seeding from the whole source fails it). Web: the JSON by hand for the seed's
+  first line (bytes, words 0..5, 6..11, 13..20, 21..27 with 2, 2, 2, 1 syllables, pause 0.450
+  comma); Pied Beauty outro off (fitted loses line 11, natural lists it); the worker route; the
+  engines, pins and master routing in the page; Prešeren's language.
+- **In the browser** (headless Chromium via Playwright, port 4922; a test-only AudioWorklet tap on
+  the voice bus, recording the first sample above −50 dBFS after 0.3 s of quiet). Served page,
+  `?device=wasm`: Kokoro q8 on WebAssembly loaded (92 MB) in 12.7 s, 3.6 s to render a 1.66 s line;
+  Piper loaded in 1.0 s, `en_GB-cori-medium` and `sl_SI-artur-medium` (63 MB) rendered, speed 1.08
+  shortening a line 2.150 → 1.927 s, two sentences in one line both voiced (3.86 s). Natural pace,
+  seed poem, Piper: line 1 scheduled at its bar-1 cue (0.2007 s) and heard at 0.2007; every line
+  heard within 0.1 ms of its scheduled start; stanza 2's cue at 8.135 s, stanza 1's voice ended
+  8.46 s inside that bar, so it started at 12.1015 = two bars later, as the rule says. Switching
+  to Kokoro while playing: status "Kokoro-82M loading; reading with the browser voice meanwhile",
+  the next round read by Kokoro from its bar-1 cue exactly (47.804). Kitten under `?device=wasm`:
+  "could not load: Kitten runs only on WebGPU…", red, the menu says so, and the browser voice read
+  the next stanza, chained on `onend` (line 2 at line 1's end + 0.45 s). Fitted pace with Piper:
+  all eight lines started at their cue times exactly. Prešeren preset: language `sl`, voice
+  `sl_SI-artur-medium`, read from its cue at 280.419 s. Static site (WASM compiler), The Tyger,
+  Kokoro on WebAssembly: lines heard within 0.3 ms of schedule, 0 skipped ticks while the worker
+  rendered. Headless Chromium on this Mac *does* offer WebGPU (Metal): Kitten nano loaded in 4.4 s
+  and rendered a line in 0.30 s; Kokoro fp32 on WebGPU loaded in 31 s and rendered a line in 0.31 s
+  (ORT logs two benign node-placement warnings as errors). Nothing was listened to.
+- **Raised, not done.** Kitten has no WebAssembly path (an ONNX port on onnxruntime-web would
+  need the voices' NPZ parsed and Kitten's symbol table); WebAssembly Kokoro renders at about half
+  real time, so a first play waits for lines (said: "waiting for Kokoro-82M to render line N"); the
+  stanza-end pause is mostly a floor under the one-silent-bar rule; Piper's VITS noise makes a
+  re-render not bit-identical, so a stanza's start can differ by a few ms between machines.
+
 ### Erosion, second review — editing "Patterns" while it plays
 
 Review found that a live edit to "Patterns" while it played stopped the music: on the static page

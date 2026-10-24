@@ -147,9 +147,10 @@ adds. The **Score A vs B** tab measures both settings side by side (see [Measuri
 with the difference between them, under the machine, jazz or interest profile. The page remembers
 your two settings.
 
-Under the mappings is **Reading — the poem spoken over the music**: the voice and the duck. Whether
-and when lines are read is the `reading` mapping above. Under `breath`, the default, each stanza
-is read through in your browser's own voice (`speechSynthesis`), one line a bar, in order; it
+Under the mappings is **Reading — the poem spoken over the music**: who reads, in what language and
+voice, at what pace and level, and the duck. Whether and when lines are read is the `reading`
+mapping above. Under `breath`, the default, each stanza is read through, in order; at the fitted
+pace one line a bar (at the natural pace, below, a line after the last); it
 starts in the bar where the music first plays its first line — or one silent bar after the previous
 stanza's last line, if that is later — so lines within a stanza are always a bar apart, two stanzas
 always have at least one silent bar between them, and a stanza is never read before the music has
@@ -167,9 +168,26 @@ pass, five bars apart in The Tyger under `arrives`) is read straight through whi
 still turning into it, with no pause after the stanza before it. Under `off`, nothing is read.
 Strudel's own clock fires each line, so it stays on the bar; a line still being spoken when the
 next is due is cut off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
-0.6–1.6. Pick a voice from the menu (the page remembers it), and untick **duck** to stop the music
-dipping while a line is read. The Pattern tab shows the cue pattern under the music's, and the
-browser console logs every line as it is cued: which bar, which bytes, which rate. Picking a
+0.6–1.6 — at the **fitted** pace. The default pace is **natural**: each line at the voice's own
+speed, a little faster or slower line by line (0.92–1.08, from the line's own seed), the next after
+a pause from how the line ends (0.25 s running on, 0.45 s at a comma, 0.8 s at a full stop, 1.5 s
+at a stanza's end), and a stanza starting where the music begins it — or, if the last stanza's
+voice ran on, on the first bar after one whole silent bar. Switch **Pace** to compare by ear. Pick
+an **engine**: Kokoro-82M (the default — 92 MB, downloaded on your first play, on WebGPU where your
+browser has it, WebAssembly otherwise), Piper (many languages, Slovenian among them; about 60 MB a
+voice), Kitten TTS nano (24 MB, WebGPU only) or your browser's own voice (instant, and what reads
+while a model downloads, or if one fails to load or stops working — the status bar says so in red;
+choose the engine again to retry). Each download shows its progress in the status bar
+and is kept by the browser; every line is rendered ahead after each compile, the line due next
+first, and started exactly on the music's clock. A line the reading leaves out — the piece came
+round, or ended, before its turn — is said in the status bar. At the fitted pace a rendered line too long for its bar is rendered again,
+faster, to fit. An example poem sets its own **language** — Prešeren's Zdravljica is read in
+Slovenian, which only Piper (`sl_SI-artur-medium`) and perhaps your browser can speak. The page
+remembers the engine, pace, level and a voice per engine and language; untick **duck** to stop the
+music dipping while a stanza is read. Add `?device=wasm` to the page's address to keep every
+engine off WebGPU. The Pattern tab shows the cue pattern under the music's, and the
+browser console logs every line as it is cued and started: which bar, which bytes, which rate or
+pace, which engine, and how late if a render was. Picking a
 preset or switching A/B while playing starts the piece again from bar 1, so the reading begins at
 the first line. A live edit keeps playing from where it is, and the reading carries on from there.
 If Strudel's scheduler ever falls behind — it skips a tick it reaches too late, and every note and
@@ -207,7 +225,9 @@ static host (GitHub Pages, a bucket), and since it compiles in the visitor's bro
 the host runs arbitrary input. The compiler is about 5 MB, about 1 MB compressed — nearly all of
 it the pronouncing dictionary — and the first compile takes a moment while the dictionary loads.
 Opening `index.html` straight from disk does not work: browsers refuse to fetch a file beside a
-`file://` page.
+`file://` page. The reading's neural voices run from `speech-worker.mjs` beside the page, a
+module worker that loads each engine from a CDN, so they work the same on a static host
+(Cloudflare Pages included); the host needs no special headers.
 
 `./scripts/check-wasm.sh` builds both and checks that the browser build answers every view of every
 example, under several palettes and mapping choices, byte for byte as the native server does —
@@ -663,6 +683,18 @@ recorded rather than patched because changing what a poetic feature maps to is a
 design, not a bug fix.
 
 ---
+
+## Voices and their licences
+
+The reading's neural voices are not part of this repository: the page loads each from a CDN at an
+exact version, and its model from Hugging Face, only when you choose it.
+
+| Engine | Code (version, licence) | Model and voices (licence) |
+|---|---|---|
+| Kokoro | kokoro-js 1.2.1 (Apache-2.0), bundling Transformers.js 3.5.1 (Apache-2.0) and phonemizer.js (Apache-2.0, around espeak-ng, GPL-3.0) | Kokoro-82M v1.0, `onnx-community/Kokoro-82M-v1.0-ONNX` (Apache-2.0), voices included |
+| Piper | onnxruntime-web 1.18.0 (MIT); the espeak-ng phonemiser module of @mintplex-labs/piper-tts-web 1.0.5 (MIT) with @diffusionstudio/piper-wasm 1.0.0 (MIT; espeak-ng data, GPL-3.0) | `rhasspy/piper-voices` at revision `5041a7a`; each voice's licence is its `MODEL_CARD`: `en_GB-cori-medium` (the English default) is trained on public-domain LibriVox readings, `sl_SI-artur-medium` (Slovenian) on the ARTUR corpus under CC BY 4.0; several others are non-commercial (`en_US-lessac-*`, Blizzard 2013 licence; `en_US-ryan-*` and `en_US-hfc_*`, CC BY-NC-SA 4.0) — check a voice's card before using what it reads |
+| Kitten | kitten-tts-webgpu 0.1.1 (MIT; its phonemiser carries espeak-ng data, GPL-3.0) | Kitten TTS nano 0.8 int8, `KittenML/kitten-tts-nano-0.8-int8` (Apache-2.0) |
+| browser | your browser's `speechSynthesis` | your operating system's voices, under its terms |
 
 ## Development
 

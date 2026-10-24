@@ -7,7 +7,7 @@
 mod server;
 
 use anyhow::{Context as _, Result};
-use prosody_web::{STRUDEL_GLOBALS, Site, Transport};
+use prosody_web::{SPEECH_WORKER, STRUDEL_GLOBALS, Site, Transport};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Writes the static page and its helper module into `dir`. The page then expects the compiler
+/// Writes the static page and its helper modules into `dir`. The page then expects the compiler
 /// beside it (`prosody.js` and `prosody_bg.wasm`, which `scripts/build-site.sh` generates).
 fn write_site(dir: &std::path::Path) -> Result<()> {
     std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -33,6 +33,7 @@ fn write_site(dir: &std::path::Path) -> Result<()> {
     for (name, text) in [
         ("index.html", site.page()),
         ("strudel-globals.mjs", STRUDEL_GLOBALS),
+        ("speech-worker.mjs", SPEECH_WORKER),
     ] {
         let path = dir.join(name);
         std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
