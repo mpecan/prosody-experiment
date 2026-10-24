@@ -1,0 +1,20 @@
+// The static page, deployed as an assets-only Cloudflare Worker: no server code runs, because the
+// whole compiler is in the page (`crates/prosody-wasm`) and every request is answered in the
+// visitor's browser. `./scripts/deploy.sh` builds `target/site` and deploys it.
+{
+  "name": "prosody",
+  "compatibility_date": "2026-10-01",
+  // What `./scripts/build-site.sh` writes: index.html, the compiler (prosody.js, prosody_bg.wasm),
+  // the module Strudel's imports are answered from, the speech worker and the recorded readings.
+  "assets": {
+    "directory": "./target/site",
+    // A missing file is a plain 404 — never index.html, which would reach the page as a broken
+    // compiler or module rather than as a missing one.
+    "not_found_handling": "none"
+  },
+  // Served at the apex of the zone, which is on this account; the custom domain makes the DNS
+  // record and the certificate.
+  "routes": [{ "pattern": "prosody.rocks", "custom_domain": true }],
+  // No preview hostname on workers.dev: the site lives at one address.
+  "workers_dev": false
+}

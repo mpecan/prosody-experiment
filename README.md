@@ -236,6 +236,15 @@ the `llvm-tools` component, which `rust-toolchain.toml` asks rustup for, and the
 CLI at exactly the crate's version, which the script installs into `target/tools` the first time
 (leaving any other `wasm-bindgen` on your PATH alone).
 
+**Deploying it.** The static page is published at [prosody.rocks](https://prosody.rocks) as an
+assets-only Cloudflare Worker (`wrangler.jsonc`): no server code, since every request is answered in
+the visitor's browser. `./scripts/deploy.sh` checks that the browser build answers as the native one
+(`check-wasm.sh`), rebuilds `target/site` from empty and runs `wrangler deploy`; `--dry-run` does
+everything but the upload. Wrangler comes from mise (`mise.toml`) and must be logged in to the
+account that holds the `prosody.rocks` zone (`mise exec -- wrangler login`). The custom domain makes
+its own DNS record and certificate on the first deploy. `mise exec -- wrangler dev` serves the built
+site locally through the same runtime.
+
 ### Path B — Strudel, by hand
 
 1. Compile a poem and copy the output:
