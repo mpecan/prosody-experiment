@@ -720,6 +720,10 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 All four must pass. Check the exit code, not the summary text —
 [`CLAUDE.md`](CLAUDE.md) §3 explains why that warning is there.
 
+## Contact
+
+Questions, poems that should be in it, ideas: [me@prosody.rocks](mailto:me@prosody.rocks).
+
 ## Licence
 
 The code is under the [MIT licence](LICENSE). What it bundles keeps its own terms: the CMU
