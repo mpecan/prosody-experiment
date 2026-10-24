@@ -50,6 +50,10 @@ const POEMS: &[(&str, &str)] = &[
         include_str!("../../prosody-emit/tests/corpus/slovenian.poem"),
     ),
     (
+        "example-ball-karawane",
+        include_str!("../../../examples/ball-karawane.poem"),
+    ),
+    (
         "example-blake-tyger",
         include_str!("../../../examples/blake-tyger.poem"),
     ),
@@ -58,12 +62,32 @@ const POEMS: &[(&str, &str)] = &[
         include_str!("../../../examples/carroll-jabberwocky.poem"),
     ),
     (
+        "example-crane-in-the-desert",
+        include_str!("../../../examples/crane-in-the-desert.poem"),
+    ),
+    (
         "example-dickinson-because",
         include_str!("../../../examples/dickinson-because.poem"),
     ),
     (
+        "example-dunbar-we-wear-the-mask",
+        include_str!("../../../examples/dunbar-we-wear-the-mask.poem"),
+    ),
+    (
         "example-hopkins-pied-beauty",
         include_str!("../../../examples/hopkins-pied-beauty.poem"),
+    ),
+    (
+        "example-kjv-psalm-23",
+        include_str!("../../../examples/kjv-psalm-23.poem"),
+    ),
+    (
+        "example-lowell-night-clouds",
+        include_str!("../../../examples/lowell-night-clouds.poem"),
+    ),
+    (
+        "example-naidu-bazaars-of-hyderabad",
+        include_str!("../../../examples/naidu-bazaars-of-hyderabad.poem"),
     ),
     (
         "example-poe-annabel-lee",
@@ -76,6 +100,14 @@ const POEMS: &[(&str, &str)] = &[
     (
         "example-shakespeare-sonnet-18",
         include_str!("../../../examples/shakespeare-sonnet-18.poem"),
+    ),
+    (
+        "example-stein-tender-buttons",
+        include_str!("../../../examples/stein-tender-buttons.poem"),
+    ),
+    (
+        "example-tagore-gitanjali-35",
+        include_str!("../../../examples/tagore-gitanjali-35.poem"),
     ),
     (
         "example-whitman-song-of-myself",

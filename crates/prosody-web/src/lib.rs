@@ -170,6 +170,11 @@ fn page(transport: Transport) -> Result<String> {
 /// that every file in `examples/` is here, so a new example cannot be missing from the menu.
 const PRESETS: &[(&str, &str, &str)] = &[
     (
+        "ball-karawane",
+        "Ball — Karawane",
+        include_str!("../../../examples/ball-karawane.poem"),
+    ),
+    (
         "blake-tyger",
         "Blake — The Tyger",
         include_str!("../../../examples/blake-tyger.poem"),
@@ -180,14 +185,39 @@ const PRESETS: &[(&str, &str, &str)] = &[
         include_str!("../../../examples/carroll-jabberwocky.poem"),
     ),
     (
+        "crane-in-the-desert",
+        "Crane — In the desert",
+        include_str!("../../../examples/crane-in-the-desert.poem"),
+    ),
+    (
         "dickinson-because",
         "Dickinson — Because I could not stop for Death",
         include_str!("../../../examples/dickinson-because.poem"),
     ),
     (
+        "dunbar-we-wear-the-mask",
+        "Dunbar — We Wear the Mask",
+        include_str!("../../../examples/dunbar-we-wear-the-mask.poem"),
+    ),
+    (
         "hopkins-pied-beauty",
         "Hopkins — Pied Beauty",
         include_str!("../../../examples/hopkins-pied-beauty.poem"),
+    ),
+    (
+        "kjv-psalm-23",
+        "Psalm 23 (King James)",
+        include_str!("../../../examples/kjv-psalm-23.poem"),
+    ),
+    (
+        "lowell-night-clouds",
+        "Lowell — Night Clouds",
+        include_str!("../../../examples/lowell-night-clouds.poem"),
+    ),
+    (
+        "naidu-bazaars-of-hyderabad",
+        "Naidu — In the Bazaars of Hyderabad",
+        include_str!("../../../examples/naidu-bazaars-of-hyderabad.poem"),
     ),
     (
         "poe-annabel-lee",
@@ -203,6 +233,16 @@ const PRESETS: &[(&str, &str, &str)] = &[
         "shakespeare-sonnet-18",
         "Shakespeare — Sonnet 18",
         include_str!("../../../examples/shakespeare-sonnet-18.poem"),
+    ),
+    (
+        "stein-tender-buttons",
+        "Stein — Tender Buttons",
+        include_str!("../../../examples/stein-tender-buttons.poem"),
+    ),
+    (
+        "tagore-gitanjali-35",
+        "Tagore — Gitanjali 35",
+        include_str!("../../../examples/tagore-gitanjali-35.poem"),
     ),
     (
         "whitman-song-of-myself",

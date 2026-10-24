@@ -406,6 +406,26 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Eight more poems
+
+Eight public-domain poems join the examples (each also a preset on the page and a scored corpus
+entry): Ball's *Karawane* (a Dada sound poem — no dictionary word at all), Stein's *Tender Buttons*
+(prose lineated a sentence a line, noted in its header), Crane's "In the desert", Dunbar's "We Wear
+the Mask" (a rondeau), Naidu's "In the Bazaars of Hyderabad" (call and response), Tagore's
+*Gitanjali* 35 (anaphora), Psalm 23 (KJV) and Lowell's "Night Clouds". All published before 1931 by
+authors who died before 1956, so public domain in the US and the EU; each file's header names its
+source (Wikisource or Project Gutenberg), and each text was taken from that source, not from memory,
+with any editorial change stated there.
+
+- **Lowell's "Patterns" was tried first and dropped**: 107 lines in stanzas of up to 23 arrange into
+  1,331 bars and an 8.6 MB pattern (6 s to score natively), because a transforming stanza replaces
+  one line a pass — growth with the square of stanza length. The user chose a short Lowell poem
+  instead, and asked about introducing *loss* for long pieces; that is a structural question, open.
+- Machine profile over 17 poems: mean overall 0.711 (the original nine unchanged, 0.743 among
+  themselves). Highest: Naidu 0.954, Dunbar 0.949; lowest: Stein 0.502, Prešeren 0.503, Tagore 0.539
+  — prose poems and unmetred verse have the least pulse and steadiness to give the machine bands.
+  Jazz: 0.733. `check-wasm.sh` now compares 1,020 answers.
+
 ### The breath says what it leaves unread — a lost line is listed, not silent
 
 Review of the breath step: with `outro` off, Pied Beauty (eleven bars) lost its closing line,

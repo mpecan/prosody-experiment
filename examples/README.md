@@ -41,8 +41,16 @@ arrival.
 | `hopkins-pied-beauty.poem` | alliteration at its densest, and sprung rhythm the scansion was never designed for | Hopkins, written 1877, published 1918 |
 | `carroll-jabberwocky.poem` | invented words, so the letter-to-sound fallback carries most of the poem | Carroll, *Through the Looking-Glass* (1871) |
 | `preseren-zdravljica.poem` | §9's language limitation: Slovenian through an English dictionary | Prešeren, *Zdravljica* (1844) |
+| `ball-karawane.poem` | a Dada sound poem: no word in any dictionary, so every syllable is letter-to-sound | Ball, *Karawane* (1916) |
+| `stein-tender-buttons.poem` | prose as verse: repetition and syntax as texture, long uneven lines (lineated a sentence a line) | Stein, *Tender Buttons* (1914) |
+| `crane-in-the-desert.poem` | spare unrhymed free verse, speech and reply | Crane, *The Black Riders* (1895) |
+| `dunbar-we-wear-the-mask.poem` | a rondeau: strict form with a short returning refrain | Dunbar, *Lyrics of Lowly Life* (1896) |
+| `naidu-bazaars-of-hyderabad.poem` | call and response — question lines answered by lists, like a chant | Naidu, *The Bird of Time* (1912) |
+| `tagore-gitanjali-35.poem` | a prose poem held together by anaphora ("Where…") rather than rhyme or metre | Tagore, *Gitanjali* (1912) |
+| `kjv-psalm-23.poem` | liturgical parallelism: long verse-lines with no metre and no rhyme | Psalm 23, King James Version (1611) |
+| `lowell-night-clouds.poem` | an imagist free-verse poem, one long sentence of images | Lowell, *What's O'Clock* (1925) |
 
-Four carry a `[style]` header (§5) so the palette layer is exercised too; the rest take the
+Twelve carry a `[style]` header (§5) so the palette layer is exercised too; the rest take the
 default.
 
 All nine were first published before 1929 and their authors died long before that, so they are
