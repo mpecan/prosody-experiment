@@ -1,9 +1,16 @@
 //! `prosody-web` — the page, served on localhost.
 //!
 //! Everything the page asks for is answered by the library ([`prosody_web::Site`]); this binary
-//! adds the IO: a socket on localhost, or, with `--site DIR`, the page written out as static files
-//! for the WebAssembly build to sit beside (`scripts/build-site.sh`).
+//! adds the IO: a socket on localhost, the recorded readings read from disk (`--readings DIR`,
+//! `examples/readings` of this checkout by default), or, with `--site DIR`, the page written out as
+//! static files for the WebAssembly build to sit beside (`scripts/build-site.sh`).
+//!
+//! ```text
+//! prosody-web [PORT] [--readings DIR]
+//! prosody-web --site DIR
+//! ```
 
+mod readings;
 mod server;
 
 use anyhow::{Context as _, Result};
@@ -16,12 +23,29 @@ fn main() -> Result<()> {
         let dir = args.next().context("--site wants a directory")?;
         return write_site(std::path::Path::new(&dir));
     }
-    let port = first
-        .map_or(Ok(4747), |given| given.parse())
-        .context("the port must be a number")?;
+    let mut port = 4747;
+    let mut recordings = std::path::PathBuf::from(readings::DEFAULT_DIR);
+    let mut next = first;
+    while let Some(arg) = next {
+        if arg == "--readings" {
+            recordings = args.next().context("--readings wants a directory")?.into();
+        } else {
+            port = arg.parse().context("the port must be a number")?;
+        }
+        next = args.next();
+    }
+    if !recordings.join("manifest.json").is_file() {
+        println!(
+            "prosody: no recorded readings in {} — the page reads with live engines only",
+            recordings.display()
+        );
+    }
 
     let site = Site::new(Transport::Server)?;
-    server::serve(port, move |request| site.respond(request)).context("serving")?;
+    server::serve(port, move |request| {
+        readings::answer(&recordings, &request.path).unwrap_or_else(|| site.respond(request).into())
+    })
+    .context("serving")?;
     Ok(())
 }
 

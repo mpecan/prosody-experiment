@@ -175,7 +175,9 @@ at a stanza's end), and a stanza starting where the music begins it — or, if t
 voice ran on, on the first bar after one whole silent bar. Switch **Pace** to compare by ear. Pick
 an **engine**: Kokoro-82M (the default — 92 MB, downloaded on your first play, on WebGPU where your
 browser has it, WebAssembly otherwise), Piper (many languages, Slovenian among them; about 60 MB a
-voice), Kitten TTS nano (24 MB, WebGPU only) or your browser's own voice (instant, and what reads
+voice), Kitten TTS nano (24 MB, WebGPU only), **recorded readings** (the example poems spoken
+ahead of time, a few kB a line, in four voices — see [Recorded readings](#recorded-readings); a line
+you edit has no recording and is read live, which the status bar says) or your browser's own voice (instant, and what reads
 while a model downloads, or if one fails to load or stops working — the status bar says so in red;
 choose the engine again to retry). Each download shows its progress in the status bar
 and is kept by the browser; every line is rendered ahead after each compile, the line due next
@@ -227,7 +229,8 @@ it the pronouncing dictionary — and the first compile takes a moment while the
 Opening `index.html` straight from disk does not work: browsers refuse to fetch a file beside a
 `file://` page. The reading's neural voices run from `speech-worker.mjs` beside the page, a
 module worker that loads each engine from a CDN, so they work the same on a static host
-(Cloudflare Pages included); the host needs no special headers.
+(Cloudflare Pages included); the host needs no special headers. The recorded readings are copied in too, as
+`readings/` beside the page.
 
 `./scripts/check-wasm.sh` builds both and checks that the browser build answers every view of every
 example, under several palettes and mapping choices, byte for byte as the native server does —
@@ -235,6 +238,41 @@ invariant I1 across targets. It needs node. Building needs the `wasm32-unknown-u
 the `llvm-tools` component, which `rust-toolchain.toml` asks rustup for, and the `wasm-bindgen`
 CLI at exactly the crate's version, which the script installs into `target/tools` the first time
 (leaving any other `wasm-bindgen` on your PATH alone).
+
+### Recorded readings
+
+`examples/readings/` holds every line of every example poem spoken ahead of time — each line any
+variant of the reading can speak, at its own natural pace — in four voices: Kokoro `af_heart`
+(American, female), Kokoro `bm_george` (British, male) and Piper `en_GB-cori-medium` (British,
+female) for the English poems, Piper `sl_SI-artur-medium` for Prešeren. One MP3 a line and voice
+(mono, 32 kbit/s), named by the voice, a hash of the line's exact text and the pace it was
+spoken at (`kokoro-af_heart/<key>-0.950.mp3`), and `manifest.json`
+listing them; choose **recorded readings** as the engine, and the voice menu lists the voices that
+have recordings of the poem in front of you. `prosody-web` serves them from the checkout
+(`--readings DIR` for another place), and `./scripts/build-site.sh` copies them into the site.
+
+They are made on your own machine by `scripts/readings/`, a small Node package kept out of the
+Rust workspace, which runs the page's own `speech-worker.mjs` in headless Chromium — so a
+recording is the same voice, model and phonemiser as the live engine — and encodes with ffmpeg:
+
+```sh
+./scripts/build-site.sh                       # the compiler as WebAssembly, which the tool asks
+cd scripts/readings && npm ci                 # playwright-core 1.64.0, the only dependency
+npx playwright-core install chromium          # once, if Chromium 1248 is not already there
+node render.mjs                               # renders what is missing, removes what nothing wants
+node render.mjs --poem blake-tyger --voice kokoro:bm_george --force   # just those, again
+node render.mjs --check                       # renders nothing; fails if anything is missing or stale
+npm test                                      # the tool's own tests
+```
+
+It needs node 20 or later, ffmpeg built with libmp3lame (`brew install ffmpeg`), and the network
+(the engines' code from jsDelivr, the models from Hugging Face; Kokoro's full-precision model is
+326 MB, kept in `scripts/readings/.profile/`). Re-render after changing an example poem, or anything
+that changes which lines the reading speaks or their pace: `cargo test` checks the committed set
+against the compiler and fails until you do. A pace changed with no text changed is a new file
+name, so `node render.mjs` renders the lines again at their new pace and removes the old audio,
+rather than keeping it under the new pace. Adding a voice is a line in `scripts/readings/lib.mjs`
+`VOICES` — check its licence first (below).
 
 ### Path B — Strudel, by hand
 
@@ -695,6 +733,19 @@ exact version, and its model from Hugging Face, only when you choose it.
 | Piper | onnxruntime-web 1.18.0 (MIT); the espeak-ng phonemiser module of @mintplex-labs/piper-tts-web 1.0.5 (MIT) with @diffusionstudio/piper-wasm 1.0.0 (MIT; espeak-ng data, GPL-3.0) | `rhasspy/piper-voices` at revision `5041a7a`; each voice's licence is its `MODEL_CARD`: `en_GB-cori-medium` (the English default) is trained on public-domain LibriVox readings, `sl_SI-artur-medium` (Slovenian) on the ARTUR corpus under CC BY 4.0; several others are non-commercial (`en_US-lessac-*`, Blizzard 2013 licence; `en_US-ryan-*` and `en_US-hfc_*`, CC BY-NC-SA 4.0) — check a voice's card before using what it reads |
 | Kitten | kitten-tts-webgpu 0.1.1 (MIT; its phonemiser carries espeak-ng data, GPL-3.0) | Kitten TTS nano 0.8 int8, `KittenML/kitten-tts-nano-0.8-int8` (Apache-2.0) |
 | browser | your browser's `speechSynthesis` | your operating system's voices, under its terms |
+
+The **recorded readings** in `examples/readings/` *are* in this repository: speech made with the
+voices above from the public-domain example poems, and shipped with the site. Each was chosen for a
+licence that allows it:
+
+| Recorded voice | Made with | Licence of the voice |
+|---|---|---|
+| `kokoro:af_heart`, `kokoro:bm_george` | kokoro-js 1.2.1, Kokoro-82M v1.0 full precision (fp32) on WebGPU | Apache-2.0 (the model and its voices) |
+| `piper:en_GB-cori-medium` | onnxruntime-web 1.18.0, `rhasspy/piper-voices` at `5041a7a` | the voices repository is MIT; the voice's `MODEL_CARD` gives its dataset as LibriVox, public domain |
+| `piper:sl_SI-artur-medium` | the same | the voices repository is MIT; trained on the ARTUR corpus (`ppisljar/artur_studio_tts`), CC BY 4.0 — attribution: the ARTUR speech corpus, voice trained by ppisljar |
+
+`manifest.json` repeats each voice's licence. The tool's one dependency, playwright-core 1.64.0,
+is Apache-2.0, and is used only on the machine that renders.
 
 ## Development
 

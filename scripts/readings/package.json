@@ -1,0 +1,16 @@
+{
+  "name": "prosody-readings",
+  "private": true,
+  "description": "Records the example poems' readings with the page's own speech engines, into examples/readings (SPEC.md §4.7, the recorded engine).",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "render": "node render.mjs",
+    "check": "node render.mjs --check",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "playwright-core": "1.64.0"
+  }
+}

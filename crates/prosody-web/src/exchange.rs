@@ -68,6 +68,16 @@ impl Response {
         }
     }
 
+    /// A successful JSON document.
+    #[must_use]
+    pub fn json(body: String) -> Self {
+        Self {
+            status: 200,
+            content_type: "application/json; charset=utf-8",
+            body,
+        }
+    }
+
     /// A refusal, with the reason as the body so the page can show it to the writer.
     ///
     /// A poem that will not compile is the normal case while someone is typing, so the reason

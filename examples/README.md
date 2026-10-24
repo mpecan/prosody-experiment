@@ -28,6 +28,14 @@ arrival.
 
 `./examples/run.sh` compiles all of them at once; `./examples/run.sh --explain` annotates them.
 
+## Their readings, recorded
+
+[`readings/`](readings/) is every line of every poem here spoken ahead of time, in each voice of
+its language, for the page's **recorded readings** engine: `manifest.json` and one MP3 a line and
+voice. They are made by `scripts/readings/` and checked by `cargo test` against what the compiler
+reads now, so editing a poem here means rendering its readings again — the main
+[README](../README.md#recorded-readings) says how.
+
 ## What each one is for
 
 | File | Exercises | Source |

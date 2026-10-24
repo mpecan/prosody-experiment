@@ -67,6 +67,7 @@ pub const SPEECH_WORKER: &str = include_str!("speech-worker.mjs");
 #[derive(Debug, Clone)]
 pub struct Site {
     page: String,
+    presets: String,
 }
 
 impl Site {
@@ -78,6 +79,7 @@ impl Site {
     pub fn new(transport: Transport) -> Result<Self> {
         Ok(Self {
             page: page(transport)?,
+            presets: presets_json()?,
         })
     }
 
@@ -87,11 +89,18 @@ impl Site {
         &self.page
     }
 
-    /// Answers one request: the page, its helper module, or one of the four compiled views.
+    /// Answers one request: the page, its helper modules, the presets, or one of the compiled
+    /// views.
+    ///
+    /// `/presets.json` is the example poems as the preset menu has them — name, label, language,
+    /// poem and palette — for the tool that records their readings (`scripts/readings/`), so that
+    /// a preset's language has one source. It answers a `POST` as well as a `GET` because the
+    /// WebAssembly build's binding only ever posts.
     #[must_use]
     pub fn respond(&self, request: &Request) -> Response {
         match (request.method.as_str(), request.path.as_str()) {
             ("GET", "/") => Response::html(self.page.clone()),
+            ("GET" | "POST", "/presets.json") => Response::json(self.presets.clone()),
             ("GET", "/strudel-globals.mjs") => Response::javascript(STRUDEL_GLOBALS.to_owned()),
             ("GET", "/speech-worker.mjs") => Response::javascript(SPEECH_WORKER.to_owned()),
             ("POST", "/pattern") => compile(request, &Output::Pattern),
@@ -965,11 +974,11 @@ mod tests {
     }
 
     #[test]
-    fn the_page_reads_with_four_engines_at_two_paces() {
+    fn the_page_reads_with_five_engines_at_two_paces() {
         let html = page(super::Transport::Wasm).unwrap();
         // One menu of engines — the browser's voice the fallback, Kokoro the default — and the
         // pace, natural by default; both page settings, remembered, never style keys.
-        for engine in ["kokoro", "piper", "kitten", "browser"] {
+        for engine in ["kokoro", "piper", "kitten", "recorded", "browser"] {
             assert!(
                 html.contains(&format!("<option value=\"{engine}\">")),
                 "{engine}"
@@ -1025,6 +1034,43 @@ mod tests {
         assert!(html.contains("else if (chain.round !== null) chain.wrapTo = index;"));
         assert!(html.contains("if (c.wrapTo !== null) wrapRound(c, c.wrapTo);"));
         assert!(html.contains("noteLoss(`not read last time round: line ${lost.join(', ')}"));
+        // The recorded readings are the page's neighbours too, on either transport: a manifest,
+        // then a file a line, looked up by the line's exact text and the voice chosen.
+        assert!(html.contains("const READINGS = './readings/';"));
+        assert!(html.contains("fetch(new URL(READINGS + 'manifest.json', document.baseURI))"));
+        assert!(html.contains("fetch(new URL(READINGS + recording.file, document.baseURI))"));
+        assert!(html.contains("engines.recorded.byText.get(text)?.recordings[voice]"));
+        // Recorded at the line's pace, so at the natural pace a file plays as it is; asked for
+        // another speed (the fitted pace's refit) it is resampled.
+        assert!(html.contains("return engine === 'recorded' ? item.pace : item.speed;"));
+        assert!(html.contains("const rate = speed / line.pace;"));
+        // A line with no recording is read live — the recording's own voice if its engine has
+        // loaded, otherwise the browser's — and that is said, with the line's number.
+        assert!(html.contains("read live by ${ENGINE_INFO[live].label} ${liveVoice}"));
+        assert!(html.contains("'no recording of it; read by the browser voice'"));
+        assert!(
+            html.contains("if (who.fallback) noteReading(`line ${line.line + 1}: ${who.why}`);")
+        );
+        assert!(
+            html.contains("if (who.fallback) noteReading(`line ${cue.line + 1}: ${who.why}`);")
+        );
+        // A recording is fetched at once, never queued behind a live engine's render.
+        assert!(html.contains("if (engine === 'recorded') {\n      entry.direct = true;"));
+        assert!(html.contains("if (entry?.direct) return entry.promise;"));
+        // A recording has one key at both paces, so one fetched at the natural pace is fitted to
+        // its bar when the fitted pace asks for it, before the cached buffer is handed back.
+        assert!(html.contains(
+            "  if (room) fitWhenRendered(key, entry, { key, engine, voice, speed, text, room });\n  if (entry?.buffer) return Promise.resolve(entry.buffer);"
+        ));
+        assert!(html.contains("if (entry.buffer) { afterRender(job, entry.buffer); return; }"));
+        // Every line is asked of whoever reads it, so the render queue mixes engines.
+        assert!(html.contains("const { engine, voice } = speakerOf(text);"));
+        // The voices are listed per poem, with how many of its lines each has recorded.
+        assert!(html.contains("`${have} of ${texts.length} lines recorded`"));
+        assert!(html.contains("'this side reads nothing'"));
+        // A returning reader of the recordings has the manifest at once, not at the first Play.
+        assert!(html.contains("\nif (readingSettings.engine === 'recorded') ensureEngine();\n"));
+        assert!(html.contains("if (readingSettings.engine === 'recorded') showVoices();"));
         // Every CDN package the worker loads is pinned to an exact version.
         for pinned in [
             "kokoro-js@1.2.1/",
@@ -1549,6 +1595,167 @@ mod tests {
             "{}",
             arrives.body
         );
+    }
+
+    #[test]
+    fn the_presets_are_answered_as_json_for_the_recording_tool() {
+        let site = super::Site::new(super::Transport::Wasm).unwrap();
+        for method in ["GET", "POST"] {
+            let answer = site.respond(&super::Request::new(method, "/presets.json", String::new()));
+            assert_eq!(answer.status, 200, "{method}");
+            assert_eq!(answer.content_type, "application/json; charset=utf-8");
+            assert!(
+                answer
+                    .body
+                    .starts_with("[{\"name\":\"ball-karawane\",\"label\":")
+            );
+            assert!(answer.body.contains(
+                "{\"name\":\"preseren-zdravljica\",\"label\":\"Prešeren — Zdravljica\",\"language\":\"sl\","
+            ));
+            assert_eq!(
+                answer.body.matches("\"language\":").count(),
+                super::PRESETS.len()
+            );
+        }
+    }
+
+    /// The settings the recording tool asks each reading under (`scripts/readings/lib.mjs`
+    /// `SETTINGS`), as query pairs: every line any of them can speak is recorded.
+    const RECORDED_SETTINGS: &[&[(&str, &str)]] = &[
+        &[],
+        &[("set", "reading:arrives")],
+        &[("set", "reading:stanza")],
+        &[("off", "outro")],
+        &[("off", "outro"), ("set", "reading:arrives")],
+    ];
+
+    /// Every line a reading of `text` under `query` speaks, with its natural pace as the page is
+    /// sent it.
+    fn spoken_lines(text: &str, query: &[(&str, &str)]) -> Vec<(String, String)> {
+        let request = request(query, text);
+        let source = format!("{}{}", super::header(&request), super::body_of(text));
+        let mappings = super::mappings(&request).unwrap();
+        let poem = super::Poem::parse(source).unwrap();
+        let style =
+            super::Style::parse_optional(poem.frontmatter().and_then(|s| s.text(poem.source())))
+                .unwrap();
+        let phonemiser =
+            super::Fallback::new(super::CmuDict::new(), super::LetterToSound::new()).unwrap();
+        let lexicon = super::EnglishLexicon::new();
+        let (score, _) = super::lower_poem(&poem, &phonemiser, &lexicon, &mappings).unwrap();
+        let reading = super::reading::plan(&poem, &score, &style, &mappings).unwrap();
+        reading
+            .natural()
+            .iter()
+            .map(prosody_emit::reading::Natural::spoken)
+            .chain(
+                reading
+                    .cues()
+                    .iter()
+                    .map(prosody_emit::reading::Cue::spoken),
+            )
+            .filter(|line| !line.text().trim().is_empty())
+            .map(|line| {
+                (
+                    line.text().to_owned(),
+                    prosody_emit::fmt_param(line.pace().speed()),
+                )
+            })
+            .collect()
+    }
+
+    /// A string as JavaScript's `JSON.stringify` writes it, which is how the manifest has it.
+    fn js_string(text: &str) -> String {
+        let mut out = String::from("\"");
+        for character in text.chars() {
+            match character {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                '\u{8}' => out.push_str("\\b"),
+                '\u{c}' => out.push_str("\\f"),
+                other if u32::from(other) < 0x20 => {
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut out,
+                        format_args!("\\u{:04x}", u32::from(other)),
+                    );
+                }
+                other => out.push(other),
+            }
+        }
+        out.push('"');
+        out
+    }
+
+    #[test]
+    fn every_line_of_every_example_is_recorded_in_every_voice_of_its_language() {
+        // `examples/readings/manifest.json`, made by `scripts/readings/render.mjs`: a line of the
+        // file per voice and per recorded line. This checks it against the compiler as it is now,
+        // so a change that alters a line's text or its pace — and so leaves the recordings stale —
+        // fails here until they are rendered again. (That each key is its text's hash, the tool's
+        // own `--check` verifies.)
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/readings");
+        let manifest = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
+        let voices: Vec<(String, String)> = manifest
+            .lines()
+            .filter(|line| line.contains("{\"engine\":"))
+            .map(|line| {
+                let id = line.trim().split('"').nth(1).unwrap().to_owned();
+                let lang = line.split("\"lang\":\"").nth(1).unwrap();
+                (id, lang.split('"').next().unwrap().to_owned())
+            })
+            .collect();
+        let speaking = |language: &str| -> Vec<&str> {
+            voices
+                .iter()
+                .filter(|(_, lang)| lang == language)
+                .map(|(id, _)| id.as_str())
+                .collect()
+        };
+        assert!(speaking("en").len() >= 3, "{voices:?}");
+        assert_eq!(speaking("sl"), ["piper:sl_SI-artur-medium"]);
+
+        let mut crane = 0;
+        for (name, _, language, text) in super::PRESETS {
+            let mut lines = std::collections::BTreeMap::new();
+            for query in RECORDED_SETTINGS {
+                lines.extend(spoken_lines(text, query));
+            }
+            assert!(!lines.is_empty(), "{name}");
+            if *name == "crane-in-the-desert" {
+                crane = lines.len();
+            }
+            for (line, pace) in &lines {
+                let entry = format!(
+                    "{{\"text\":{},\"pace\":{pace},\"recordings\":{{",
+                    js_string(line)
+                );
+                let found = manifest.lines().find(|row| row.contains(&entry));
+                assert!(
+                    found.is_some(),
+                    "{name}: no recording of {line:?} at pace {pace}"
+                );
+                let found = found.unwrap();
+                for voice in speaking(language) {
+                    let after = found.split(&format!("\"{voice}\":{{\"file\":\"")).nth(1);
+                    assert!(after.is_some(), "{name}: {line:?} has no {voice}");
+                    let file = after.unwrap().split('"').next().unwrap();
+                    // The file is named for the pace it was spoken at, so audio rendered at an
+                    // older pace can never be listed as this one (scripts/readings `fileOf`).
+                    assert!(
+                        file.ends_with(&format!("-{pace}.mp3")),
+                        "{name}: {file} is not at pace {pace}"
+                    );
+                    let bytes = std::fs::metadata(dir.join(file)).map_or(0, |m| m.len());
+                    assert!(bytes > 0, "{name}: {file} is missing or empty");
+                }
+            }
+        }
+        // Counted by hand from examples/crane-in-the-desert.poem: ten lines in two stanzas, each
+        // spoken by some setting, none repeated — so ten recordings in each English voice.
+        assert_eq!(crane, 10);
     }
 
     #[test]

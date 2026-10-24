@@ -406,6 +406,134 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Recorded readings — review: a recording fetched at the natural pace is fitted at the fitted pace
+
+A second review of the uncommitted recordings. `SPEC.md` §4.7 ("Engines", `recorded`; the fitted
+pace's refit).
+
+- **The bug.** A recording plays at its own speed (the line's pace) under both paces, so its render
+  key, `recorded|voice|pace|text`, is the same at natural and at fitted. A line fetched at the
+  natural pace was cached with no bar `room`. When the fitted pace asked for it, `whenRendered`
+  returned the cached buffer and never called `afterRender` with the cue's room, so no refit was
+  made. Dunbar's line 10 (3.140 s of speech for a 2.267 s bar) ran 0.47 s past its bar and lost
+  "our cries" at the line 11 cue. Live engines did not hit this, because their fitted speed is
+  the cue's rate, which gives a different key.
+- **The fix.** When `whenRendered` is asked with a room, it calls `fitWhenRendered` before it
+  returns. For a buffer already cached, that runs `afterRender` at once. For a fetch still in
+  flight, it runs `afterRender` when the fetch resolves. For a live job still queued without a
+  room, it gives the job the room. A key that has already been refitted is skipped.
+- **Checked in a browser,** on the served page and on the static site. With recorded George at
+  natural, Dunbar's 23 recordings were fetched first; then the pace was switched to fitted and
+  the poem played. The page logged "rendering again" for lines 7, 10 and 11 (refitted to 1.135,
+  1.274 and 1.071), played the refitted buffers, and said "past its bar" for no line. The earlier
+  checks still pass: the edited line falls back, switching voices works, and there are no
+  console errors.
+
+### Recorded readings — review: a file is named for its pace, the manifest at startup
+
+A review of the uncommitted recordings. `SPEC.md` §4.7 ("Engines", `recorded`).
+
+- **A changed pace rule no longer relabels old audio.** A file was named by voice and text only, and
+  only missing files were rendered, so after a pace rule changed (no text changed) `node render.mjs`
+  — as the README said to run — rendered nothing and rewrote the manifest with the new paces: the
+  test, `--check` and the page were all satisfied, and the page played old-pace audio as if at the
+  new pace (rate = speed / pace = 1), with no resampling and no warning. Now a file is
+  `<key>-<pace>.mp3` (`lib.mjs` `fileOf`, pace to the manifest's three places): a new pace wants new
+  files, the old are left over (removed; `--check` fails on both), and the Rust test asserts each
+  listed file's name carries its line's pace. The 976 committed files were renamed from the
+  manifest's paces (which the test had already checked against the compiler); `node render.mjs` then
+  had 0 to render and `--check` passes. Checked by moving one file to another pace: `--check` names
+  it missing and left over; a manifest naming a file at another pace fails the Rust test
+  ("kokoro-af_heart/027269a22bdb16b2-0.950.mp3 is not at pace 0.990").
+- **The Rust test's total is gone.** `323 * voices + 7` was the tool's own count, not worked by hand;
+  in its place, Crane's "In the desert" is counted by hand (ten lines, each spoken).
+- **A returning reader of the recordings has the manifest at once.** With `recorded` saved, the
+  manifest (121 kB, no model) is fetched at startup rather than at the first Play, so the saved
+  voice is listed and line 1 of the first play is read from its file, not by the browser voice.
+  Before it loads, the menu lists the saved voice (or the default) by id.
+- **A side that reads nothing says so** in the recorded voice menu ("this side reads nothing")
+  instead of "(0 of 0 lines recorded)".
+
+### Recorded readings — the examples spoken ahead of time, a fifth engine
+
+The user decided: make pre-recorded versions of the readings on this machine and ship them with the
+site (to be hosted on Cloudflare), above all for browsers where the in-browser engines do not work,
+with a set of alternative voices. `SPEC.md` §4.7 ("Engines", `recorded`).
+
+- **The tool, `scripts/readings/`** — a Node package (one dependency, playwright-core 1.64.0,
+  Apache-2.0, published 2026-10-07, zero dependencies of its own; lockfile committed; kept out of the
+  Rust workspace). Node rather than Python because the point is that a recording is the *same voice*
+  as the live engine: it runs the page's own `speech-worker.mjs` in headless Chromium (1248, the
+  revision playwright-core 1.64.0 names), so Kokoro, Piper, their models and their phonemisers are
+  exactly the page's; a Python port (kokoro's misaki G2P, piper-tts's native phonemiser) would be
+  another pronunciation. playwright-core replaces nothing — driving a browser's WebGPU and module
+  workers by hand over the DevTools protocol is not reasonable. It asks the site's WebAssembly
+  compiler (as `check-wasm.mjs` does) for `/presets.json` (new: the presets with their language, one
+  source for it) and for each preset's `/reading` under `breath`, `arrives`, `stanza`, outro off,
+  and outro off + `arrives`, takes every line any of them speaks with its natural pace (a pace that
+  differs between settings throws), renders it in each voice of the poem's language at that pace
+  (baked in), and encodes MP3 with ffmpeg (mono, 32 kbit/s, the voice's rate, bit-exact flags, no
+  tags). Files are `<engine>-<voice>/<key>.mp3`, key = first 16 hex of SHA-256 of the line's UTF-8
+  text; the manifest (deterministic, sorted, a line of the file per voice and per line) carries
+  each line's text, pace and each voice's file and length, and each voice's licence and what it was
+  rendered on. Incremental (only missing files unless `--force`), prunes files nothing wants,
+  `--check` renders nothing and fails on anything missing, left over or a stale manifest. A per-line
+  timeout restarts the browser: on the first full run Kokoro on WebGPU stopped answering after 385
+  lines; in a fresh browser the same line rendered at once, and the rerun had no stalls.
+- **Voices** (`lib.mjs` `VOICES`): Kokoro `af_heart` and `bm_george` (Apache-2.0, fp32 on WebGPU),
+  Piper `en_GB-cori-medium` (piper-voices MIT, LibriVox public-domain data) for English; Piper
+  `sl_SI-artur-medium` (ARTUR corpus, CC BY 4.0, attribution in README) for Prešeren. Chosen for
+  licences that allow publishing the audio; the non-commercial Piper voices are left out.
+- **What it made.** 18 poems, 330 distinct lines (323 English, 7 Slovenian), 976 recordings
+  (323 × 3 + 7), **8,994,308 bytes** with the manifest (121 kB): Heart 3.0 MB, George 3.8 MB, Cori
+  3.4 MB, Artur 48 kB (du). Committed size well under the 25 MB line. Kokoro on WebGPU ~0.3 s a line,
+  Piper ~0.3 s.
+- **Serving.** `prosody-web` serves `/readings/…` from disk (`--readings DIR`, the checkout's
+  `examples/readings` by default) in the binary, not the library, so the WebAssembly build never
+  carries the audio: `readings.rs` answers only `manifest.json` or `*.mp3` by a path of plain names
+  (no `..`, no hidden files), 404 otherwise; the server now writes bytes (`Reply`). `build-site.sh`
+  copies the directory into the site whole.
+- **The page.** A fifth engine, `recorded`: `load` fetches the manifest, `voices(language)` lists the
+  recorded voices of the language that have recordings of the poem heard, each "(n of m lines
+  recorded)", refreshed on each compile and A/B switch; `render` fetches, decodes (an
+  `OfflineAudioContext` of its own, so it works before Strudel's context exists), resamples only if
+  asked for another speed than it was recorded at, and trims the silence (an MP3's encoder delay
+  included) to the worker's 10 ms margin and `lead`. Scheduling is the neural engines' own. Per line
+  (`speakerOf`): a recorded line from its file; one without (edited, or a poem of the writer's own)
+  by the recording's live voice if its engine has loaded, otherwise the browser voice — no model is
+  downloaded unasked — and the status says `line N: no recording of it; read …`. Recordings are
+  fetched at once, outside the serial render queue: a browser check found line 1 started 5.9 s late
+  behind a Piper render left over from a moment before; after the change it starts on its cue. At
+  the fitted pace a recording plays at its own speed (its pace, not the fitted rate) and is only
+  resampled faster if it overruns its bar, through the existing refit.
+- **Tests.** Rust: `/presets.json` by GET and POST (Prešeren `sl`, one language per preset); the
+  page has the fifth engine, the manifest and file URLs relative to the page, the per-line fallback
+  and its notes, the per-poem voice counts, the direct fetch; `readings.rs` refuses `..`, hidden,
+  empty segments, absolute paths, other extensions; and
+  `every_line_of_every_example_is_recorded_in_every_voice_of_its_language` checks the committed
+  manifest against the compiler — every line every setting speaks, at its pace, with a non-empty
+  file in each voice of its language, 976 in all (mutation-checked: a pace changed in the manifest
+  fails it, a deleted Artur file fails it). Node (`npm test`, 5): SHA-256 keys by hand from FIPS
+  180-2 and known digests ("abc", "", "a", "b"), file naming, lines and the pace conflict, voices
+  per language, the manifest's exact bytes for a hand-built case.
+- **In the browser** (headless Chromium via Playwright, port 4923). Served page: Crane, recorded
+  Heart: every line from its file, each source started its 10 ms lead before its scheduled time
+  (line 1 cue 0.257 s, start 0.2500); line 3 edited → "(9 of 10 lines recorded)" in all three voices,
+  read by the browser voice, chained on its end, said in the status; George chosen while playing →
+  the next round all George; Prešeren at the fitted pace: language `sl`, the menu lists only Artur
+  (7 of 7), lines 2–7 from files on their cues (line 1, cued 30 ms before its fetch finished at the
+  preset change, read by the browser voice, said); Piper loaded then recorded Cori: the edited line
+  read live by Piper `en_GB-cori-medium`. Static site (WASM compiler, `python3 -m http.server`):
+  The Tyger with line 5 edited, "(22 of 23 lines recorded)", Heart then Cori mid-piece, 22 files
+  each fetched from `readings/`, the edited line by the browser voice. 0 console errors and 0
+  warnings after the decoder fix (before it, 12 warnings: `getAudioContext is not defined`, a fetch
+  before Strudel started, retried). Nothing was listened to; WebKit/Safari, where MP3 was chosen
+  for, was not run.
+- **Raised, not done** (in the report): whether `recorded` should be the default engine on the
+  static site, or the fallback when a live engine fails, instead of the browser voice; whether a
+  line with no recording should load the recording's live engine; the fitted pace's line 1 race at
+  a preset change (shared with the neural engines).
+
 ### Reading engines — second review: the seam, a stale queue, a slow engine's order
 
 A second review of the uncommitted engines work. `SPEC.md` §4.7 ("Engines", "Two paces").

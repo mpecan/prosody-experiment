@@ -610,9 +610,9 @@ voice. Not a style key: the CLI never reads aloud, and no palette moves a cue (I
   status bar. Only ever faster — a line that ends early leaves its bar's rest silent, as the
   browser's voice does.
 
-**Engines** (*the same decision*). One interface on the page — `load(onProgress)`,
-`voices(language)`, `render(text, { voice, speed })` → an `AudioBuffer` — and four engines, the
-listener's choice, remembered:
+**Engines** (*the same decision*; `recorded` *the user's decision, 2026-10-24*). One interface on
+the page — `load(onProgress)`, `voices(language)`, `render(text, { voice, speed })` → an
+`AudioBuffer` — and five engines, the listener's choice, remembered:
 
 - **`browser`** — the browser's speech synthesiser: instant, the only one that reports word
   boundaries, and the fallback for the others. It cannot be scheduled, so it is started by a timer
@@ -624,6 +624,38 @@ listener's choice, remembered:
   every voice of rhasspy/piper-voices at a fixed revision, Slovenian (`sl_SI-artur-medium`) among
   them. The speed is piper's own length scale.
 - **`kitten`** — Kitten TTS nano through kitten-tts-webgpu: the lightest, WebGPU only.
+- **`recorded`** — the example poems' readings, made ahead of time on the maintainer's machine and
+  served beside the page (`readings/`: a manifest and one MP3 a line and voice, mono, 32 kbit/s),
+  for the browsers the live engines fail in or are too slow on. `scripts/readings/` renders every
+  line any variant of each example's reading can speak (under `breath`, `arrives`, `stanza`, and
+  without the outro) with the page's own `speech-worker.mjs` in Chromium — the same engines,
+  models and phonemisers as live — in each voice of the poem's language: Kokoro `af_heart` and
+  `bm_george` and Piper `en_GB-cori-medium` for English, Piper `sl_SI-artur-medium` for
+  Prešeren. Each line is rendered **at its natural pace**, the speed baked in, so at the natural
+  pace the file plays as it is, with no resampling. The manifest is keyed by voice (named
+  `engine:voice`, after the live voice that made it) and by a hash of the line's exact text (the
+  first 64 bits of its SHA-256), and carries the text; the page looks a line up by its text, so
+  an **edited line simply has no recording**. A file is named by voice, key **and the pace it was
+  spoken at** (`<key>-<pace>.mp3`): the pace is in the audio, so a changed pace rule wants new
+  files — the old ones are left over and removed, the new ones rendered — and the tool can never
+  relabel audio spoken at one speed as another. Such a line — or any line of a poem of the writer's
+  own — is read by the live voice that made the recordings if its engine has already loaded, and
+  otherwise by the browser's voice, never by a model downloaded unasked; the status bar says so
+  with the line's number (`line 3: no recording of it; read by the browser voice`). The voice menu
+  lists the recorded voices of the language that have recordings of the poem heard, each with how
+  many of its lines it has, so a preset offers its own alternatives. A recording is fetched,
+  decoded and trimmed of its silence (an MP3 encoder's delay included) when it is rendered ahead —
+  at once, not in the render queue, which a slow live render would otherwise hold it behind — and
+  then scheduled exactly as a neural line is. At the fitted pace it is read at its natural
+  speed too — its pace, not the fitted rate, which assumes a syllable rate no recording has — and
+  a line too long for its bar is refitted as any rendered line is, by resampling, which shifts its
+  pitch as well. (A pace rule changed after the recordings were made leaves the committed set
+  failing its test until it is rendered again; it is never papered over by resampling.) The
+  recordings are fixed files, so unlike a live render they are the same on every machine; that
+  the committed set matches what the compiler reads now — every line of every example, at its
+  pace, in every voice of its language — is a test (`prosody-web`,
+  `every_line_of_every_example_is_recorded_in_every_voice_of_its_language`), so a change to a
+  line's text or its pace fails until they are rendered again.
 
 The neural engines each run in a module worker of their own (`speech-worker.mjs`), so their
 computing never blocks the thread Strudel's scheduler ticks on. A model downloads only once its

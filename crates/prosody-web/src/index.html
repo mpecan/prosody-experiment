@@ -330,10 +330,11 @@
       <summary>Reading <span class="aside">the poem spoken over the music</span></summary>
       <div class="palette reading">
         <label>Engine
-          <select id="engine" title="Who reads: your browser's own voice, or a neural voice that runs in this page — downloaded once you choose it, then kept by the browser">
+          <select id="engine" title="Who reads: your browser's own voice, a neural voice that runs in this page — downloaded once you choose it, then kept by the browser — or readings recorded ahead of time for the example poems, a small file a line">
             <option value="kokoro">Kokoro-82M</option>
             <option value="piper">Piper</option>
             <option value="kitten">Kitten TTS (nano)</option>
+            <option value="recorded">recorded readings</option>
             <option value="browser">browser voice</option>
           </select>
         </label>
@@ -707,6 +708,7 @@ function hear(side) {
   hearing = side;
   $('hearA').setAttribute('aria-pressed', side === 'A');
   $('hearB').setAttribute('aria-pressed', side === 'B');
+  if (readingSettings.engine === 'recorded') showVoices();
   showPattern();
   buildLit();
   if (playing && latestPattern) { fromTheTop = true; play(); }
@@ -844,6 +846,8 @@ async function compileOnce() {
     showPattern();
     buildLit();
     measure(poem);
+    // The recorded voices are listed per poem, with how many of its lines each has.
+    if (readingSettings.engine === 'recorded') showVoices();
     // Every changed line rendered again, ahead of its turn; the unchanged ones are kept. Not for
     // a text already replaced: the compile of the newer one asks for its own lines.
     if (!compileAgain) prerender();
@@ -1057,7 +1061,10 @@ async function warmUp(code) {
 // Every engine answers the same three calls: `load(onProgress)`, `voices(language)` and
 // `render(text, { voice, speed })`, which gives an AudioBuffer. A neural engine renders every line
 // ahead of time, after each compile, and keeps what it made by engine, voice, speed and text, so a
-// recompile reuses every line it did not change.
+// recompile reuses every line it did not change. A fifth, `recorded`, answers the same calls from
+// files made ahead of time (scripts/readings/): its `render` fetches and decodes a line's
+// recording, and a line it has none of — an edited line, a poem of the writer's own — is read by a
+// live engine instead, and said (speakerOf).
 // What the reading is doing, after whatever the status bar says about the music.
 let readingNote = '', readingNoteBad = false, statusText = 'ready', statusBad = false;
 let voices = [];   // the browser's speech voices
@@ -1079,7 +1086,7 @@ try {
   const saved = JSON.parse(localStorage.getItem('prosody.reading') || 'null');
   if (saved && typeof saved === 'object') {
     readingSettings = {
-      engine: ['browser', 'kokoro', 'piper', 'kitten'].includes(saved.engine) ? saved.engine : READING_DEFAULTS.engine,
+      engine: ['browser', 'kokoro', 'piper', 'kitten', 'recorded'].includes(saved.engine) ? saved.engine : READING_DEFAULTS.engine,
       pace: ['natural', 'fitted'].includes(saved.pace) ? saved.pace : READING_DEFAULTS.pace,
       level: Number(saved.level) >= 0 && Number(saved.level) <= 2 ? Number(saved.level) : 1,
       voices: saved.voices && typeof saved.voices === 'object' ? saved.voices : {},
@@ -1107,6 +1114,8 @@ const ENGINE_INFO = {
   kokoro: { label: 'Kokoro-82M', defaults: { en: 'af_heart' } },
   piper: { label: 'Piper', defaults: { en: 'en_GB-cori-medium', sl: 'sl_SI-artur-medium' } },
   kitten: { label: 'Kitten TTS (nano)', defaults: { en: 'Bella' } },
+  // The recorded readings' voices are named `engine:voice`, after the live voice that made them.
+  recorded: { label: 'recorded readings', defaults: { en: 'kokoro:af_heart', sl: 'piper:sl_SI-artur-medium' } },
 };
 const engines = {};
 const sameLanguage = (lang, wanted) => (lang || '').toLowerCase().replace('_', '-').split('-')[0] === wanted;
@@ -1207,6 +1216,139 @@ function workerEngine(name) {
 }
 for (const name of ['kokoro', 'piper', 'kitten']) engines[name] = workerEngine(name);
 
+// ---- The recorded readings ----
+//
+// SPEC.md §4.7, `recorded`. Every line of every example poem, spoken ahead of time on the
+// maintainer's machine by the page's own engines (scripts/readings/), at the line's natural pace
+// — baked in, so the file plays as it is — one MP3 a line and voice, beside the page in
+// `readings/`, with a manifest. The manifest is keyed by voice and by a hash of the line's exact
+// text, and carries the text: a line is looked up by its text, so an edited line simply has none.
+// A voice is named `engine:voice` after the live voice that made it; where a line has no
+// recording, that live voice reads it if its engine is already loaded, and otherwise the browser's
+// voice does — never a model downloaded unasked — and the status bar says which (speakerOf).
+// Loading is fetching the manifest (a few tens of kB); a line's file is fetched when it is
+// rendered ahead, as any engine's line is.
+const READINGS = './readings/';
+engines.recorded = {
+  name: 'recorded',
+  state: 'idle',
+  device: 'files',
+  error: null,
+  progress: '',
+  manifest: null,
+  byText: new Map(),   // a line's exact text → { key, pace, recordings: { voice id → { file, seconds } } }
+  load() {
+    const engine = engines.recorded;
+    if (engine.state === 'ready') return Promise.resolve();
+    if (engine.loading) return engine.loading;
+    engine.state = 'loading';
+    engine.error = null;
+    engine.loading = (async () => {
+      try {
+        const response = await fetch(new URL(READINGS + 'manifest.json', document.baseURI));
+        if (!response.ok) throw new Error(`no recordings here (${response.status} for readings/manifest.json)`);
+        const manifest = await response.json();
+        engine.manifest = manifest;
+        engine.byText = new Map(Object.entries(manifest.lines).map(([key, line]) => [line.text, { key, ...line }]));
+        engine.state = 'ready';
+        console.log(`[reading] recorded: ${engine.byText.size} lines in ${Object.keys(manifest.voices).length} voices`);
+      } catch (error) {
+        engine.state = 'failed';
+        engine.error = error.message;
+        throw error;
+      } finally {
+        engine.loading = null;
+      }
+    })();
+    return engine.loading;
+  },
+  // The recorded voices of `lang` that have recordings of the poem heard, most lines first, each
+  // saying how many of its lines it has; every voice of the language if none has any (a poem of
+  // the writer's own), so the menu is never empty and every line is read live, and said.
+  voices(lang) {
+    const engine = engines.recorded;
+    // Before the manifest is here: the voice saved for the language, else the default, by id.
+    if (!engine.manifest) {
+      const id = readingSettings.voices.recorded?.[lang] ?? ENGINE_INFO.recorded.defaults[lang];
+      return id ? [{ id, name: id, lang }] : [];
+    }
+    const texts = recordedTexts(readings[hearing]);
+    const listed = Object.entries(engine.manifest.voices)
+      .filter(([, v]) => sameLanguage(v.lang, lang))
+      .map(([id, v]) => {
+        const have = texts.filter((text) => engine.byText.get(text)?.recordings[id]).length;
+        // A side whose reading is off reads nothing: said so, not as 0 of 0 recorded.
+        const count = texts.length ? `${have} of ${texts.length} lines recorded` : 'this side reads nothing';
+        return { id, name: `${v.name} (${count})`, lang: v.lang, have };
+      });
+    const some = listed.filter((v) => v.have > 0).sort((a, b) => b.have - a.have);
+    return some.length ? some : listed;
+  },
+  has(voice, text) {
+    return !!engines.recorded.byText.get(text)?.recordings[voice];
+  },
+  // The recording of `text` in `voice`, decoded and trimmed of its silence (an MP3 adds an
+  // encoder's delay before it), as an AudioBuffer. At the speed it was recorded at — the line's
+  // pace — it is the file as it is; asked for another (the fitted pace's refit, or a pace rule
+  // changed since the recording), it is resampled to it, which shifts its pitch as well.
+  async render(text, { voice, speed }) {
+    const began = performance.now();
+    const line = engines.recorded.byText.get(text);
+    const recording = line?.recordings[voice];
+    if (!recording) throw new Error(`no recording of this line in ${voice}`);
+    const response = await fetch(new URL(READINGS + recording.file, document.baseURI));
+    if (!response.ok) throw new Error(`${response.status} for readings/${recording.file}`);
+    let buffer = await decoder().decodeAudioData(await response.arrayBuffer());
+    const rate = speed / line.pace;
+    if (Math.abs(rate - 1) > 0.0005) buffer = await resampled(buffer, rate);
+    buffer = trimmedBuffer(buffer);
+    buffer.took = performance.now() - began;
+    return buffer;
+  },
+};
+
+// What decodes a recording: a context of the page's own, so a line can be fetched ahead before
+// Strudel has made the audio context it plays in (which resamples a 48 kHz buffer as it plays it).
+let decoding = null;
+function decoder() {
+  decoding ??= new OfflineAudioContext(1, 1, 48000);
+  return decoding;
+}
+
+// The lines a reading may speak, by text.
+function recordedTexts(reading) {
+  if (!reading) return [];
+  return [...new Set([...reading.lines, ...reading.cues].map((line) => line.text).filter((text) => text.trim()))];
+}
+
+// `buffer` played `rate` times as fast, as a new buffer.
+async function resampled(buffer, rate) {
+  const offline = new OfflineAudioContext(1, Math.max(1, Math.ceil(buffer.length / rate)), buffer.sampleRate);
+  const source = new AudioBufferSourceNode(offline, { buffer, playbackRate: rate });
+  source.connect(offline.destination);
+  source.start();
+  return offline.startRendering();
+}
+
+// A decoded recording without the silence before and after its speech, keeping 10 ms either side
+// and saying how long the margin before is (`lead`), as speech-worker.mjs does for a rendered line:
+// the page starts it that much early, so the speech itself begins on the time.
+const SILENCE = 10 ** (-50 / 20);
+function trimmedBuffer(buffer) {
+  const pcm = buffer.getChannelData(0);
+  let first = 0;
+  while (first < pcm.length && Math.abs(pcm[first]) < SILENCE) first += 1;
+  let last = pcm.length - 1;
+  while (last > first && Math.abs(pcm[last]) < SILENCE) last -= 1;
+  const margin = Math.round(0.01 * buffer.sampleRate);
+  const from = first >= pcm.length ? 0 : Math.max(0, first - margin);
+  const to = first >= pcm.length ? 1 : Math.min(pcm.length, last + 1 + margin);
+  const kept = new AudioBuffer({ numberOfChannels: 1, length: Math.max(1, to - from), sampleRate: buffer.sampleRate });
+  kept.copyToChannel(pcm.subarray(from, to), 0);
+  kept.lead = first >= pcm.length ? 0 : (first - from) / buffer.sampleRate;
+  return kept;
+}
+
 // The voice the setting asks `engine` to read `language` with: the saved one if it still lists
 // it, otherwise its default, otherwise its first.
 function voiceOf(engine, lang = language) {
@@ -1234,6 +1376,29 @@ function speaker() {
   return { engine: chosen, why: '' };
 }
 
+// Who reads the line `text`, in which voice, and why not the chosen one when it is not. As
+// speaker(), and for the recorded readings line by line: a line recorded in the chosen voice is
+// read from its file; one that is not is read by the live voice that made the recordings, if its
+// engine has loaded, and otherwise by the browser's voice (`fallback`, with the reason, which the
+// caller says with the line's number).
+function speakerOf(text) {
+  const who = speaker();
+  if (who.engine !== 'recorded') return { ...who, voice: who.engine === 'browser' ? null : voiceOf(who.engine) };
+  const voice = voiceOf('recorded');
+  if (engines.recorded.has(voice, text)) return { ...who, voice };
+  const [live, liveVoice] = voice.split(':');
+  const engine = engines[live];
+  if (engine?.render && engine.state === 'ready' && engine.voices(language).some((v) => v.id === liveVoice)) {
+    return { engine: live, voice: liveVoice, why: `no recording of it; read live by ${ENGINE_INFO[live].label} ${liveVoice}`, fallback: true };
+  }
+  return { engine: 'browser', voice: null, why: 'no recording of it; read by the browser voice', fallback: true };
+}
+// The speed a line is rendered at by `engine`: a recording's own (the line's pace, at which it was
+// recorded) at either pace; a live engine's, the line's pace or its fitted rate.
+function baseSpeed(engine, item) {
+  return engine === 'recorded' ? item.pace : item.speed;
+}
+
 // Loads the chosen engine if it is not loaded, showing its progress in the status bar. A failure
 // is said and the reading carries on with the browser's voice; choosing the engine again (`retry`)
 // retries — any other change of setting leaves a failed engine failed. What an engine says while
@@ -1257,7 +1422,7 @@ function ensureEngine(retry = false) {
     console.log(`[reading] ${engine.name} loaded on ${engine.device}`);
     showVoices();
     if (!chosenEngine(engine)) return;
-    noteReading(`${name} ready (${engine.device === 'webgpu' ? 'WebGPU' : 'WebAssembly'})`);
+    noteReading(`${name} ready (${engine.device === 'files' ? 'from files' : engine.device === 'webgpu' ? 'WebGPU' : 'WebAssembly'})`);
     prerender();
   }, (error) => {
     console.warn(`[reading] ${engine.name} failed to load:`, error);
@@ -1303,7 +1468,12 @@ function rendered(engine, voice, speed, text) {
 function whenRendered(engine, voice, speed, text, urgent = false, room = null) {
   const key = renderKey(engine, voice, speed, text);
   let entry = renders.get(key);
+  // A line asked for with its bar's `room` is fitted to it even if it was first asked for without
+  // one: a recording has one key at both paces (its own speed), so one fetched at the natural pace
+  // would otherwise be read at the fitted pace unfitted, run past its bar and be cut off.
+  if (room) fitWhenRendered(key, entry, { key, engine, voice, speed, text, room });
   if (entry?.buffer) return Promise.resolve(entry.buffer);
+  if (entry?.direct) return entry.promise;   // a recording being fetched (below)
   // An entry neither queued nor rendering has lost its job (it cannot, by `dropJob`, but a line
   // waiting on it would wait for good): it is asked for afresh.
   if (entry && renderingJob?.key !== key && !renderQueue.some((job) => job.key === key)) {
@@ -1316,6 +1486,24 @@ function whenRendered(engine, voice, speed, text, urgent = false, room = null) {
     entry.promise.catch(() => {});
     renders.set(key, entry);
     const job = { key, engine, voice, speed, text, entry, room };
+    // A recording is a fetch, not a computation: it uses no worker, so it is not queued behind a
+    // live engine's render (a slow one would hold it up for seconds), and it is never dropped —
+    // it takes milliseconds, and its buffer is wanted again whenever the line comes round.
+    if (engine === 'recorded') {
+      entry.direct = true;
+      engines.recorded.render(text, { voice, speed }).then((buffer) => {
+        entry.buffer = buffer;
+        entry.resolve(buffer);
+        afterRender(job, buffer);
+        while (renders.size > RENDERS_KEPT) renders.delete(renders.keys().next().value);
+        console.log(`[reading] fetched from the recording, ${voice} at ${Number(speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${(buffer.took / 1000).toFixed(2)} s: ${text}`);
+      }, (error) => {
+        if (renders.get(key) === entry) renders.delete(key);
+        entry.reject(error);
+        console.warn(`[reading] recorded could not fetch "${text}":`, error);
+      });
+      return entry.promise;
+    }
     if (urgent) renderQueue.unshift(job); else renderQueue.push(job);
   } else if (urgent) {
     const at = renderQueue.findIndex((job) => job.key === key);
@@ -1360,8 +1548,8 @@ async function pumpRenders() {
 function linesToRead(reading) {
   if (!reading) return [];
   return readingSettings.pace === 'fitted'
-    ? reading.cues.map((cue) => ({ text: cue.text, speed: cue.rate, room: slotLength(reading, cue.slot) * reading.fill, cue }))
-    : reading.lines.map((line) => ({ text: line.text, speed: line.pace }));
+    ? reading.cues.map((cue) => ({ text: cue.text, speed: cue.rate, pace: cue.pace, room: slotLength(reading, cue.slot) * reading.fill, cue }))
+    : reading.lines.map((line) => ({ text: line.text, speed: line.pace, pace: line.pace }));
 }
 // The same, from the line the reading of the playing piece is at round to the one before it: the
 // order the lines will be wanted in. Any other reading from its first line.
@@ -1399,32 +1587,43 @@ function afterRender(job, buffer) {
   console.log(`[reading] fitted: ${speechOf(buffer).toFixed(3)} s of speech for ${job.room.toFixed(3)} s of bar; rendering again at ${speed.toFixed(3)}: ${job.text}`);
   whenRendered(job.engine, job.voice, speed, job.text, true);
 }
+// For a line asked for with its bar's room (`job`) that is already rendered, being fetched, or
+// queued without a room: fitted once its buffer is there, unless it has been already.
+function fitWhenRendered(key, entry, job) {
+  if (!entry || refits.has(key)) return;
+  if (entry.buffer) { afterRender(job, entry.buffer); return; }
+  if (entry.direct) { entry.promise.then((buffer) => { if (!refits.has(key)) afterRender(job, buffer); }, () => {}); return; }
+  const queued = renderingJob?.key === key ? renderingJob : renderQueue.find((queuedJob) => queuedJob.key === key);
+  if (queued && !queued.room) queued.room = job.room;
+}
 // The speed a fitted cue is rendered at for this engine and voice: refitted if it was too long.
-function fittedSpeed(engine, voice, cue) {
-  const refit = refits.get(renderKey(engine, voice, cue.rate, cue.text));
-  return refit !== undefined && rendered(engine, voice, refit, cue.text) ? refit : cue.rate;
+function fittedSpeed(engine, voice, cue, base = cue.rate) {
+  const refit = refits.get(renderKey(engine, voice, base, cue.text));
+  return refit !== undefined && rendered(engine, voice, refit, cue.text) ? refit : base;
 }
 // Asks for every line the reading may want, in the order it will want them: the playing piece's
 // from where its reading is, then the side heard, then the other. The queue then holds exactly
 // those, in that order — a queued line nobody will read (of a poem no longer loaded, or another
 // engine, voice or pace) is dropped — so a line due next is never stuck behind one of the top of
 // the poem, or of the last poem. Called again whenever the reading moves on (advance, fittedCue).
+// Each line is asked of whoever reads it (speakerOf): under the recorded readings, a line with no
+// recording is rendered ahead by the live voice standing in for it, if that has loaded.
 function prerender() {
-  const { engine } = speaker();
-  const voice = engine === 'browser' ? null : voiceOf(engine);
   const other = hearing === 'A' ? 'B' : 'A';
   const wanted = [], keys = new Set();
-  if (voice) {
-    for (const reading of [playingReading, readings[hearing], readings[other]]) {
-      for (const { text, speed, room, cue } of upcoming(reading)) {
-        if (!text.trim()) continue;
-        const refit = cue && refits.get(renderKey(engine, voice, speed, text));
-        for (const [s, r] of refit !== undefined && refit !== null ? [[speed, room], [refit, null]] : [[speed, room]]) {
-          const key = renderKey(engine, voice, s, text);
-          if (keys.has(key)) continue;
-          keys.add(key);
-          wanted.push({ key, text, speed: s, room: r });
-        }
+  for (const reading of [playingReading, readings[hearing], readings[other]]) {
+    for (const item of upcoming(reading)) {
+      const { text, room, cue } = item;
+      if (!text.trim()) continue;
+      const { engine, voice } = speakerOf(text);
+      if (!voice) continue;
+      const speed = baseSpeed(engine, item);
+      const refit = cue && refits.get(renderKey(engine, voice, speed, text));
+      for (const [s, r] of refit !== undefined && refit !== null ? [[speed, room], [refit, null]] : [[speed, room]]) {
+        const key = renderKey(engine, voice, s, text);
+        if (keys.has(key)) continue;
+        keys.add(key);
+        wanted.push({ key, engine, voice, text, speed: s, room: r });
       }
     }
   }
@@ -1433,7 +1632,7 @@ function prerender() {
     if (!kept) dropJob(job);
     return kept;
   });
-  for (const { text, speed, room } of wanted) whenRendered(engine, voice, speed, text, false, room);
+  for (const { engine, voice, text, speed, room } of wanted) whenRendered(engine, voice, speed, text, false, room);
   const rank = new Map(wanted.map(({ key }, i) => [key, i]));
   renderQueue.sort((a, b) => rank.get(a.key) - rank.get(b.key));
 }
@@ -1546,16 +1745,18 @@ let fittedLast = null;   // the source of the line last started, to cut off at t
 function fittedCue(cue, time, generation) {
   if (generation !== readingGeneration || readingSettings.pace !== 'fitted') return;
   const ctx = getAudioContext();
-  const who = speaker();
-  const voice = who.engine === 'browser' ? null : voiceOf(who.engine);
-  const speed = voice ? fittedSpeed(who.engine, voice, cue) : cue.rate;
+  const who = speakerOf(cue.text);
+  const voice = who.voice;
+  const base = baseSpeed(who.engine, { speed: cue.rate, pace: cue.pace });
+  const speed = voice ? fittedSpeed(who.engine, voice, cue, base) : cue.rate;
   const buffer = voice && rendered(who.engine, voice, speed, cue.text);
+  if (who.fallback) noteReading(`line ${cue.line + 1}: ${who.why}`);
   if (playingReading) {
     fittedAt = { reading: playingReading, index: playingReading.cues.indexOf(cue) + 1 };
     prerender();
   }
   console.log(`[reading] fitted: bar ${cue.slot + 1} line ${cue.line + 1} at ${time.toFixed(3)} s`
-    + ` (bytes ${cue.start}..${cue.end}), rate ${cue.rate}${speed !== cue.rate ? ', refitted to ' + speed.toFixed(3) : ''}, ${buffer ? who.engine : 'browser'}: ${cue.text}`);
+    + ` (bytes ${cue.start}..${cue.end}), rate ${cue.rate}${speed !== base ? ', refitted to ' + speed.toFixed(3) : ''}, ${buffer ? who.engine + ' ' + voice : 'browser'}: ${cue.text}`);
   if (buffer) {
     // A line still sounding when the next is due is cut off at the bar, as the browser's is.
     try { fittedLast?.stop(time); } catch (error) {}
@@ -1566,9 +1767,9 @@ function fittedCue(cue, time, generation) {
     return;
   }
   if (voice) {
-    whenRendered(who.engine, voice, cue.rate, cue.text, true, playingReading ? slotLength(playingReading, cue.slot) * playingReading.fill : null);
+    whenRendered(who.engine, voice, base, cue.text, true, playingReading ? slotLength(playingReading, cue.slot) * playingReading.fill : null);
     noteReading(`line ${cue.line + 1} not rendered in time; read by the browser voice`);
-  } else if (who.why) noteReading(who.why, who.bad);
+  } else if (who.why && !who.fallback) noteReading(who.why, who.bad);
   later(time - ctx.currentTime, () => { if (generation === readingGeneration) readLine(cue, cue.rate); });
 }
 
@@ -1715,11 +1916,12 @@ function advanceChain() {
 
 function speakNatural(c, line, earliest) {
   const ctx = getAudioContext();
-  const who = speaker();
+  const who = speakerOf(line.text);
   const last = c.next + 1 >= c.reading.lines.length || c.reading.lines[c.next + 1].stanza !== line.stanza;
   const after = () => { c.prevPause = line.pause; c.next += 1; };
+  if (who.fallback) noteReading(`line ${line.line + 1}: ${who.why}`);
   if (who.engine === 'browser') {
-    if (who.why) noteReading(who.why, who.bad);
+    if (who.why && !who.fallback) noteReading(who.why, who.bad);
     c.busy = true;
     later(earliest - ctx.currentTime, () => {
       if (chain !== c) return;
@@ -1734,11 +1936,11 @@ function speakNatural(c, line, earliest) {
     });
     return;
   }
-  const voice = voiceOf(who.engine);
+  const voice = who.voice;
   const buffer = rendered(who.engine, voice, line.pace, line.text);
   if (!buffer) {
     c.busy = true;
-    noteReading(`waiting for ${ENGINE_INFO[who.engine].label} to render line ${line.line + 1}`);
+    noteReading(`waiting for ${ENGINE_INFO[who.engine].label} to ${who.engine === 'recorded' ? 'fetch' : 'render'} line ${line.line + 1}`);
     whenRendered(who.engine, voice, line.pace, line.text, true).then(() => {
       if (chain !== c) return;
       c.busy = false;
@@ -1862,6 +2064,11 @@ $('readingLevel').addEventListener('input', () => {
   saveReading();
 });
 showVoices();
+// A returning reader whose engine is the recorded readings: the manifest is fetched now — a few
+// tens of kB, no model — so the voice saved is listed and the first line of the first play is
+// read from its file, not by the browser while the manifest is still on its way. A live engine
+// still loads only when chosen or played, its model being hundreds of MB.
+if (readingSettings.engine === 'recorded') ensureEngine();
 
 // What the scheduler dropped. Strudel's scheduler (the cyclist bundled in @strudel/web 1.3.0)
 // queries the pattern a tick at a time; a tick it reaches too late it skips whole, saying only
