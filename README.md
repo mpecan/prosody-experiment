@@ -242,7 +242,10 @@ the visitor's browser. `./scripts/deploy.sh` checks that the browser build answe
 (`check-wasm.sh`), rebuilds `target/site` from empty and runs `wrangler deploy`; `--dry-run` does
 everything but the upload. Wrangler comes from mise (`mise.toml`) and must be logged in to the
 account that holds the `prosody.rocks` zone (`mise exec -- wrangler login`). The custom domain makes
-its own DNS record and certificate on the first deploy. `mise exec -- wrangler dev` serves the built
+its own DNS record and certificate on the first deploy. `www.prosody.rocks` is a second custom domain that
+only ever redirects: a tiny worker in front of the files (`deploy/worker.js`) sends `http://` and
+`www` to `https://prosody.rocks` for good (301), path kept, and every https answer carries a
+one-year HSTS header; `deploy/check-worker.mjs` checks this before each deploy. `mise exec -- wrangler dev` serves the built
 site locally through the same runtime.
 
 ### Path B — Strudel, by hand

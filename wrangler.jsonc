@@ -1,20 +1,29 @@
-// The static page, deployed as an assets-only Cloudflare Worker: no server code runs, because the
-// whole compiler is in the page (`crates/prosody-wasm`) and every request is answered in the
-// visitor's browser. `./scripts/deploy.sh` builds `target/site` and deploys it.
+// The static page, deployed as a Cloudflare Worker that is almost only its assets: the whole
+// compiler is in the page (`crates/prosody-wasm`) and every request is answered in the visitor's
+// browser. The one bit of code (deploy/worker.js) keeps the site at a single secure address.
+// `./scripts/deploy.sh` builds `target/site` and deploys it.
 {
   "name": "prosody",
   "compatibility_date": "2026-10-01",
+  "main": "./deploy/worker.js",
   // What `./scripts/build-site.sh` writes: index.html, the compiler (prosody.js, prosody_bg.wasm),
   // the module Strudel's imports are answered from, the speech worker and the recorded readings.
   "assets": {
     "directory": "./target/site",
+    "binding": "ASSETS",
+    // The worker sees every request first, so http and www move to https://prosody.rocks before any
+    // file is served from them.
+    "run_worker_first": true,
     // A missing file is a plain 404 — never index.html, which would reach the page as a broken
     // compiler or module rather than as a missing one.
     "not_found_handling": "none"
   },
-  // Served at the apex of the zone, which is on this account; the custom domain makes the DNS
-  // record and the certificate.
-  "routes": [{ "pattern": "prosody.rocks", "custom_domain": true }],
+  // Both names are custom domains of this worker, which makes their DNS records and certificates;
+  // www only ever answers with a redirect (deploy/worker.js).
+  "routes": [
+    { "pattern": "prosody.rocks", "custom_domain": true },
+    { "pattern": "www.prosody.rocks", "custom_domain": true }
+  ],
   // No preview hostname on workers.dev: the site lives at one address.
   "workers_dev": false
 }

@@ -5,14 +5,16 @@
 #   ./scripts/deploy.sh             build, check that the browser build answers as the native one, deploy
 #   ./scripts/deploy.sh --dry-run   build and check, and show what would be uploaded, without deploying
 #
-# The check is `scripts/check-wasm.sh` (invariant I1 across targets): a site whose compiler disagrees
-# with the native one is not deployed.
+# Two checks come first, and either failing stops the deploy: `scripts/check-wasm.sh` (invariant I1
+# across targets — a site whose compiler disagrees with the native one is not deployed) and
+# `deploy/check-worker.mjs` (http and www reach https://prosody.rocks).
 set -eu
 
 here=$(dirname "$0")
 cd "$here/.."
 
 ./scripts/check-wasm.sh
+node deploy/check-worker.mjs
 # From empty, so nothing an older build left behind is uploaded with it.
 rm -rf target/site
 ./scripts/build-site.sh target/site
