@@ -50,6 +50,10 @@ export const fixture: SiteData = {
     default: SOUND,
     jazz: [...SOUND, 'scale', 'swing', 'bank'],
   },
+  layers: [
+    { name: 'pulse', colour: '#c9a6ff' }, { name: 'ornament', colour: '#6fd6c5' }, { name: 'bass', colour: '#ffb86b' },
+    { name: 'rhyme', colour: '#ff7aa8' }, { name: 'chords', colour: '#8fb3ff' },
+  ],
   styles: [
     { name: 'default', what: 'electric piano over an acoustic bass', suggests: {} },
     { name: 'jazz', what: 'a piano trio', suggests: { bass: 'syllables', pulse: 'elastic', polka: 'on' } },

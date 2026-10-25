@@ -35,6 +35,12 @@ export interface StyleInfo {
   suggests: Record<string, string>;
 }
 
+/** A layer of the pattern, and the colour its events carry. */
+export interface Layer {
+  name: string;
+  colour: string;
+}
+
 export interface SiteData {
   /** Where the page's questions go: the local server, or the compiler beside the page. */
   transport: 'server' | 'wasm';
@@ -53,6 +59,8 @@ export interface SiteData {
   palettes: Record<string, Palette>;
   /** The controls each named palette sets (`style::preset_keys`). */
   paletteKeys: Record<string, string[]>;
+  /** The pattern's layers, in lane order. */
+  layers: Layer[];
   /** Every named palette, in order, for the style picker. */
   styles: StyleInfo[];
   /** The poem the page opens with. */

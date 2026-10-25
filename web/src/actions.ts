@@ -4,10 +4,13 @@ import { CONTROLS, choosePalette, presetOf, setControl, setControls } from './co
 import { site } from './data';
 import { suggest } from './settings';
 import { compile, piece, schedule } from './piece';
-import { readIn } from './reading';
+import { applyVoiceLevel, readIn } from './reading';
 import { fitRoll, buildLit, watch } from './watch';
 import { load, save } from './storage';
-import { folder, noticeShown, poem, preset, rollBars, rollShown, sheetOpen, theme, welcomeOpen, type Folder, type Theme } from './store';
+import {
+  folder, muted, noticeShown, poem, preset, rollBars, rollShown, sheetOpen, soloed, theme, welcomeOpen,
+  type Channel, type Folder, type Theme,
+} from './store';
 
 /** An example poem, with its palette, read in its own language. */
 export function choosePreset(name: string): void {
@@ -78,6 +81,18 @@ export function toggleFolder(id: Folder): void {
 export function foldSheet(): void {
   sheetOpen.value = false;
   save('prosody.folder', '');
+}
+
+// ---- Mute and solo ----
+/** Mutes or unmutes a channel; heard at once (mix.ts). */
+export function toggleMute(channel: Channel): void {
+  muted.value = { ...muted.value, [channel]: !muted.value[channel] };
+  applyVoiceLevel();
+}
+/** Solos or unsolos a channel: with any soloed, only the soloed are heard. */
+export function toggleSolo(channel: Channel): void {
+  soloed.value = { ...soloed.value, [channel]: !soloed.value[channel] };
+  applyVoiceLevel();
 }
 
 // ---- The roll ----

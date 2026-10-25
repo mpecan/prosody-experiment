@@ -248,8 +248,15 @@
   .module.tempo { flex-direction: column; }
   .module.voices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .module.mixer { grid-column: 1 / -1; justify-content: space-around; align-items: flex-end; flex-wrap: nowrap; gap: .4rem; }
+  /* A channel strip: its fader, then mute and solo. Dimmed while it is not heard. */
+  .mixer .channel { display: flex; flex-direction: column; align-items: center; gap: .45rem; padding: .4rem .3rem .3rem; border-radius: 10px; }
+  .mixer .channel.quiet .fader { opacity: .4; }
+  .ms { display: flex; gap: .25rem; }
+  .sheet .ms button { width: 1.9rem; height: 1.7rem; padding: 0; border-radius: 6px; font: 600 .72rem var(--mono); color: var(--engrave); }
+  .sheet .ms .mute[aria-pressed=true] { background: var(--rhyme); border-color: var(--rhyme); color: #191423; }
+  .sheet .ms .solo[aria-pressed=true] { background: var(--bass); border-color: var(--bass); color: #191423; }
   /* The voice's channel: the reader, not the band, so it sits apart. */
-  .mixer .channel.voice { padding: .4rem .5rem .2rem; margin-left: .4rem; border-radius: 10px;
+  .mixer .channel.voice { padding: .4rem .5rem .3rem; margin-left: .4rem;
     background: color-mix(in srgb, var(--ornament) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ornament) 35%, var(--groove)); }
   .module.duck { grid-column: 1 / -1; align-items: center; }
   .module.reading { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 1rem; }
@@ -281,7 +288,7 @@
   .fader { display: flex; flex-direction: column; align-items: center; gap: .3rem; color: var(--desk-ink); }
   .fader .rail { display: flex; gap: .35rem; align-items: flex-end; height: 9.5rem; }
   .fader .meter { width: 6px; height: 100%; border-radius: 3px; background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); position: relative; overflow: hidden; }
-  .fader .meter::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--v, 0) * 100%); background: linear-gradient(to top, var(--c), color-mix(in srgb, var(--c) 40%, #ff9b8a)); }
+  .fader .meter::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--v, 0) * var(--a, 1) * 100%); transition: height .06s linear; background: linear-gradient(to top, var(--c), color-mix(in srgb, var(--c) 40%, #ff9b8a)); }
   .fader input {
     writing-mode: vertical-lr; direction: rtl; width: 2.1rem; height: 100%; margin: 0;
     -webkit-appearance: none; appearance: none; background: transparent; cursor: grab;

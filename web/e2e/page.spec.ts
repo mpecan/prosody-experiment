@@ -77,3 +77,23 @@ test('on a phone an open folder leaves the poem in view, and nothing scrolls sid
   await page.getByRole('button', { name: 'Fold the settings away' }).click();
   await expect(page.locator('#sheet')).toBeHidden();
 });
+
+test('solos a layer while it plays: the others fall silent on the meters and faint on the roll', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('▶ Playing', { timeout: 45_000 });
+  await page.getByRole('tab', { name: 'Mixer' }).click();
+  await page.getByRole('button', { name: 'Hear only bass' }).click();
+  const meter = (channel: string) => page.locator(`.fader[data-channel="${channel}"]`).evaluate(
+    (fader) => Number((fader as HTMLElement).style.getPropertyValue('--a') || 'NaN'));
+  // The drums sound on every beat; soloed away, their meter falls and stays down.
+  await expect.poll(() => meter('drums'), { timeout: 5_000 }).toBeLessThan(0.05);
+  await expect.poll(async () => Math.max(...await Promise.all([0, 1, 2, 3].map(async () => {
+    await page.waitForTimeout(150);
+    return meter('bass');
+  }))), { timeout: 10_000 }).toBeGreaterThan(0.5);
+  await expect(page.locator('.channel[data-channel="drums"]')).toHaveClass(/quiet/);
+  await page.click('#stop');
+});

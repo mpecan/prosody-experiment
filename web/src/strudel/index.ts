@@ -2,9 +2,10 @@
 // pattern uses, and Play and Stop.
 import { closeLoader, loaderEngine, openLoader } from '../loader';
 import { piece, summaryOf } from '../piece';
-import { cuesOf, ensureEngine, prerender, quietReading, speech } from '../reading';
+import { cuesOf, ensureEngine, prerender, quietReading, speech, voiceLevel } from '../reading';
 import { beat, hearing, playing, readingNote, readingSettings, settings, status } from '../store';
-import { barsOf, clearRoll, fitRoll, lightUp, startDrawing, watch } from '../watch';
+import { barsOf, clearRoll, fitRoll, lightUp, resetMeters, startDrawing, watch } from '../watch';
+import { played } from '../mix';
 import { audioContext, evaluate, strudel, type Pattern, type Repl } from './globals';
 
 // Where the sounds come from. The drum machines are the same sample map strudel.cc loads; without
@@ -147,7 +148,7 @@ function limitTheMaster(): void {
   // A rendered voice joins the music at the glue, after the duck: through the same master stage,
   // at the reading's own level.
   speech.bus?.disconnect();
-  speech.bus = new GainNode(ctx, { gain: readingSettings.value.level });
+  speech.bus = new GainNode(ctx, { gain: voiceLevel() });
   speech.bus.connect(glue);
   limited = gain;
 }
@@ -281,7 +282,8 @@ export async function play(): Promise<void> {
     if (code.length > 100000) status('preparing the pattern…' + (playing.value ? ' · playing' : ''));
     await parseAhead(code, reading?.pattern ?? '', reading?.natural ?? '', trace?.pattern ?? '');
     if (code !== piece.latest) return;   // a newer version arrived while parsing; it plays itself
-    const music = evaluate(code);
+    // Through the mixer's mute and solo, read as each event is scheduled.
+    const music = evaluate(code).withValue(played);
     const generation = ++speech.generations;
     // The reading is evaluated apart from the music: a cue pattern Strudel refuses costs the
     // reading, never the piece.
@@ -357,6 +359,7 @@ export function stop(): void {
   watch.heardBars = null;
   lightUp(null);
   clearRoll();
+  resetMeters();
   playing.value = false;
   showBeat();
   status('stopped');

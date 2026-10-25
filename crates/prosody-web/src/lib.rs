@@ -169,6 +169,7 @@ fn site_json(transport: Transport) -> Result<String> {
         ("palettes", format!("{{{}}}", palettes.join(","))),
         ("paletteKeys", format!("{{{}}}", palette_keys.join(","))),
         ("styles", styles_json()),
+        ("layers", layers_json()),
         ("seed", json_string(SEED)),
     ];
     let fields: Vec<String> = fields
@@ -262,6 +263,21 @@ struct StyleEntry {
     name: &'static str,
     what: &'static str,
     suggests: &'static [(&'static str, &'static str)],
+}
+
+/// The pattern's layers as JSON, `[{"name", "colour"}]`, in lane order (`strudel::layers`).
+fn layers_json() -> String {
+    let layers: Vec<String> = prosody_emit::strudel::layers()
+        .iter()
+        .map(|(name, colour)| {
+            format!(
+                "{{\"name\":{},\"colour\":{}}}",
+                json_string(name),
+                json_string(colour)
+            )
+        })
+        .collect();
+    format!("[{}]", layers.join(","))
 }
 
 /// [`STYLES`] as JSON for the page: `[{"name", "what", "suggests": {mapping: variant}}]`.
@@ -1067,6 +1083,32 @@ mod tests {
         assert!(
             data.contains("\"suggests\":{}}"),
             "default suggests nothing"
+        );
+    }
+
+    #[test]
+    fn the_site_data_names_each_layer_by_the_colour_its_events_carry() {
+        // The colours the roll and the lit poem have always drawn each layer in (styles.css).
+        let data = site_json(super::Transport::Server).unwrap();
+        assert!(data.contains(
+            "\"layers\":[{\"name\":\"pulse\",\"colour\":\"#c9a6ff\"},\
+             {\"name\":\"ornament\",\"colour\":\"#6fd6c5\"},\
+             {\"name\":\"bass\",\"colour\":\"#ffb86b\"},\
+             {\"name\":\"rhyme\",\"colour\":\"#ff7aa8\"},\
+             {\"name\":\"chords\",\"colour\":\"#8fb3ff\"}]"
+        ));
+        // And the pattern carries only those: every `.color` in a compiled poem is one of them.
+        let pattern = super::compile(
+            &request(&[("set", "harmony:cadence")], SEED),
+            &Output::Pattern,
+        )
+        .body;
+        assert_eq!(
+            pattern.matches(".color(\"").count(),
+            prosody_emit::strudel::layers()
+                .iter()
+                .map(|(_, colour)| pattern.matches(&format!(".color(\"{colour}\")")).count())
+                .sum::<usize>()
         );
     }
 

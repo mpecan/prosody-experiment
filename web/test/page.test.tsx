@@ -8,7 +8,7 @@ import { startControls } from '../src/controls';
 import { compile } from '../src/piece';
 import { engines, startReading } from '../src/reading';
 import { loadSettings } from '../src/settings';
-import { folder, language, poem, preset, rollShown, settings, sheetOpen, suggested } from '../src/store';
+import { folder, language, muted, poem, preset, rollShown, settings, sheetOpen, soloed, suggested } from '../src/store';
 import { useFixture } from './site.fixture';
 
 // What the compiler answers, for any poem: a pattern of two bars, a reading of one line, a trace
@@ -43,6 +43,8 @@ function start() {
   sheetOpen.value = false;
   rollShown.value = true;
   suggested.value = {};
+  muted.value = {};
+  soloed.value = {};
   preset.value = '';
   restorePage();
   startReading();
@@ -234,6 +236,28 @@ describe('the styles', () => {
     expect(document.getElementById('putBack')).toBeNull();
     // The sound stays jazz: only the suggestions were put back.
     expect(card('jazz').getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe('mute and solo', () => {
+  const strip = (channel: string) => document.querySelector<HTMLElement>(`#folderMixer .channel[data-channel="${channel}"]`)!;
+
+  it('mute a channel, dimming it, and solo one, dimming the rest', async () => {
+    start();
+    fireEvent.click(screen.getByRole('tab', { name: 'Mixer' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mute bass' }));
+    await waitFor(() => expect(strip('bass').classList.contains('quiet')).toBe(true));
+    expect(screen.getByRole('button', { name: 'Mute bass' }).getAttribute('aria-pressed')).toBe('true');
+    expect(strip('drums').classList.contains('quiet')).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Hear only melody' }));
+    await waitFor(() => expect(strip('drums').classList.contains('quiet')).toBe(true));
+    expect(strip('melody').classList.contains('quiet')).toBe(false);
+    expect(strip('voice').classList.contains('quiet')).toBe(true);
+    expect(document.querySelector('#folderMixer .desk-head .hint')!.textContent).toBe('Soloed: only the lit channels are heard.');
+    fireEvent.click(screen.getByRole('button', { name: 'Hear only melody' }));
+    await waitFor(() => expect(strip('drums').classList.contains('quiet')).toBe(false));
+    // The bass is still muted: solo and mute are separate switches.
+    expect(strip('bass').classList.contains('quiet')).toBe(true);
   });
 });
 

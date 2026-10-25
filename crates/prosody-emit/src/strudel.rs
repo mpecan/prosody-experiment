@@ -356,6 +356,18 @@ fn colour(colour: Colour) -> String {
     format!(".color(\"{}\")", colour.hex())
 }
 
+/// Every layer's name and the colour its events carry (`.color`), in lane order: how the page
+/// tells a pattern's layers apart — its roll lays each in a lane of its own, and its mixer mutes or
+/// solos each — without parsing the pattern. The colour is display only to Strudel's sound, so the
+/// page reading it changes nothing that plays.
+#[must_use]
+pub fn layers() -> Vec<(&'static str, &'static str)> {
+    Colour::ALL
+        .iter()
+        .map(|colour| (colour.name(), colour.hex()))
+        .collect()
+}
+
 /// The colour each layer is drawn in, on the page's roll and in its lit poem alike, so a syllable
 /// lighting up and the note it plays read as one thing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -373,6 +385,26 @@ pub(crate) enum Colour {
 }
 
 impl Colour {
+    /// Every layer, in the order the page's roll lays its lanes out.
+    const ALL: [Self; 5] = [
+        Self::Foundation,
+        Self::Flourish,
+        Self::Bass,
+        Self::Melody,
+        Self::Chords,
+    ];
+
+    /// The layer's name on the page: `SPEC.md` §4's words for it.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Foundation => "pulse",
+            Self::Flourish => "ornament",
+            Self::Bass => "bass",
+            Self::Melody => "rhyme",
+            Self::Chords => "chords",
+        }
+    }
+
     /// As CSS takes it.
     pub(crate) const fn hex(self) -> &'static str {
         match self {
