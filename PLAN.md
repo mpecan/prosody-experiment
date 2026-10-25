@@ -406,6 +406,28 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The folders as a studio desk
+
+The user chose the "studio desk" direction from three proposals (a canvas of studio desk, score
+paper and signal). The folders are now hardware on a desk that slides up from the bottom edge, in
+place of paper; the welcome and the dialogs stay paper, notes on the desk. Nothing the compiler does
+changed, and no control's id, value or meaning: every knob and fader is still the range input it
+was, so dragging, the keyboard and screen readers work as before.
+
+- **Sound** is five modules on a grid that reflows on a phone: the **key** (the twelve notes on a
+  circle — a note sets the root, the root lit, the scale's other notes tinted from `SCALE_STEPS`,
+  which `Scale::steps` now sends to the page), the **tempo** window as an amber readout with the
+  swing knob, the **instruments** as selectors in dark wells with the two octave knobs, the
+  **mixer**'s four faders with meters (drums, bass, melody, chords, each in its layer colour), and
+  the **mix** as a row of knobs with lit arcs.
+- **Reading**: the voice level is a knob and the duck a flip switch; **Mappings** and **Under the
+  hood** sit on the desk with the same wells.
+- `showValues` sets `--v`, each knob's and fader's 0–1 position, from which CSS draws the arc, the
+  pointer and the meter; the note circle follows the root and scale from the same place.
+- Dark anodised in dark mode, light aluminium in light; the tempo readout stays a dark display in
+  both. Checked in Chromium at 1440 and 390 px, dark and light: no sideways scroll, the knobs and
+  faders move with their values, the circle lights D phrygian dominant's notes for The Tyger.
+
 ### The page for everyone: folders, a welcome, light and dark, downloads asked about
 
 Before publishing at prosody.rocks, the page was reworked to work on a phone as on a desk, to say
