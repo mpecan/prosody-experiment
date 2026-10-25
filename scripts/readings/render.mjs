@@ -12,7 +12,7 @@
 // the reading under several settings, and so for every line any of them can speak and that line's
 // natural pace. Each line is then spoken by each voice of the poem's language AT THAT PACE — the
 // speed is baked in at render time, so the page plays the file as it is — by the page's own
-// speech worker (crates/prosody-web/src/speech-worker.mjs) running in Chromium: the same engines,
+// speech worker (web/public/speech-worker.mjs) running in Chromium: the same engines,
 // models and phonemisers as the live page, so a recording and a live render of a line are the
 // same voice. The worker trims the model's silence to 10 ms either side; ffmpeg encodes MP3.
 //
@@ -132,7 +132,7 @@ console.log(`readings: ${sizeOf()} bytes in ${relative(process.cwd(), options.ou
 async function render(jobs, devices) {
   ffmpegOrExit();
   const { chromium } = await import('playwright-core');
-  const worker = readFileSync(join(repo, 'crates/prosody-web/src/speech-worker.mjs'));
+  const worker = readFileSync(join(repo, 'web/public/speech-worker.mjs'));
   // The worker as the page has it, at the same relative URL, from a page of our own on localhost.
   const server = createServer((request, response) => {
     if (request.url.startsWith('/speech-worker.mjs')) {

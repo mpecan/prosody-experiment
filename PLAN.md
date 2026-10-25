@@ -406,6 +406,38 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The page as its own program: Preact, Signals, TypeScript, Vite
+
+The first of four agreed steps (then the desk redesign from the canvas, styles and genres, and the
+mixer's mute/solo with a lane roll): the page, which had grown into one 3,100-line `index.html`
+with its data substituted in by `prosody-web` and its tests string-matching its source, is now its
+own program in `web/`, looking and behaving exactly as before. Nothing the compiler does changed.
+
+- **What replaces what.** Preact 10 with `@preact/signals` for the components and the state the
+  screen shows; Vite to build; TypeScript in strict mode; Vitest with Testing Library and
+  happy-dom for unit and component tests; Playwright for end-to-end tests of the built site. All
+  pinned exactly, none newer than two weeks. They replace hand-written DOM code and the Rust tests
+  that asserted on the page's text (`html.contains("…")`), which caught a renamed variable and
+  missed a broken behaviour.
+- **The boundary.** `prosody-web`'s library no longer renders HTML: it answers `/site.json`, the
+  page's data (option lists, scales and their steps, mappings, presets, palettes, the seed, the
+  transport), tested in Rust as data. The server serves the built page from `web/dist`
+  (`--page DIR`), the static build writes `site.json` beside it, and `speech-worker.mjs` and
+  `strudel-globals.mjs` moved to `web/public`. `npm run dev` proxies to a running `prosody-web`.
+- **The port is close, not a rewrite.** The engine code — compiling and measuring, Strudel and the
+  master stage, the reading's engines, render queue and both paces, the roll and the lit verse —
+  moved function by function into modules, comments and all, typed. Only what the screen shows is
+  signals; the lit verse is still drawn by hand, being relit every frame.
+- **Tests.** 46 in Vitest: the A/B starting settings and every saved shape; palette matching; who
+  reads a line (recording, live stand-in, browser) and why; the bars on the audio clock and the
+  refit of an overlong line; the soft clipper's ceiling; the sounds a pattern warms; and the page
+  rendered whole against a hand-made `site.json` — the welcome, folders, the key circle, knobs,
+  mappings, the download question, compiling, A/B and the score table, a Slovenian preset. Four in
+  Playwright against the built site with the real WebAssembly compiler: the seed compiles to the
+  native summary, Zdravljica is read in Slovenian from its recordings, settings survive a reload,
+  and it plays, lights and stops. CI gains a `web` job and runs the end-to-end tests after
+  check-wasm. Node 24 is pinned in `mise.toml`.
+
 ### The folders as a studio desk
 
 The user chose the "studio desk" direction from three proposals (a canvas of studio desk, score

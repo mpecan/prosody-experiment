@@ -61,9 +61,16 @@ Three ways. The first is the one to start with.
 ### Path A — the local web page (easiest)
 
 ```sh
+npm --prefix web ci && npm --prefix web run build   # the page, once (node from mise.toml)
 cargo run -p prosody-web
 # prosody: http://127.0.0.1:4747 — ^C to stop
 ```
+
+The page is its own program in `web/` — Preact and TypeScript, built by Vite into `web/dist`, which
+`prosody-web` serves beside the compiler's answers. Working on the page itself, run
+`npm --prefix web run dev` with `prosody-web` still running: Vite serves the page with hot reload
+and sends every question to the server. `npm --prefix web run check` typechecks it, runs its tests
+(Vitest) and builds it.
 
 Open it. You get the poem on the left with every palette control under it, the generated pattern
 and the annotation on the right, and Play/Stop at the top. It recompiles as you type — about a
@@ -224,6 +231,7 @@ The page also builds as static files, with the whole compiler inside it as WebAs
 ```sh
 ./scripts/build-site.sh                  # into target/site: the page, the compiler as WebAssembly
 python3 -m http.server -d target/site    # or any static host; then open http://localhost:8000
+npm --prefix web run e2e                 # the built site in Chromium, end to end
 ```
 
 It is the same page with the same controls, and it answers itself: every request the served page
@@ -234,7 +242,8 @@ static host (GitHub Pages, a bucket), and since it compiles in the visitor's bro
 the host runs arbitrary input. The compiler is about 5 MB, about 1 MB compressed — nearly all of
 it the pronouncing dictionary — and the first compile takes a moment while the dictionary loads.
 Opening `index.html` straight from disk does not work: browsers refuse to fetch a file beside a
-`file://` page. The reading's neural voices run from `speech-worker.mjs` beside the page, a
+`file://` page. The page's data — option lists, presets, mappings — is `site.json` beside it, written
+by `prosody-web --site`. The reading's neural voices run from `speech-worker.mjs` beside the page, a
 module worker that loads each engine from a CDN, so they work the same on a static host
 (Cloudflare Pages included); the host needs no special headers. The recorded readings are copied in too, as
 `readings/` beside the page.
@@ -704,9 +713,10 @@ crates/
   prosody-emit/       Style, and the Strudel and OSC backends
   prosody-score/      how interesting a compiled poem is, and whether it still listens to the poem
   prosody-cli/        arguments, files, stdout, the watcher — all IO lives here
-  prosody-web/        the page: what it asks answered by a library, plus a local server
+  prosody-web/        what the page asks, answered by a library, plus a local server
   prosody-wasm/       that library built for the browser, for the static page
   tree-sitter-prosody/  the grammar
+web/                  the page itself: Preact and TypeScript, built by Vite
 ```
 
 The crate boundaries are load-bearing. `prosody-core` cannot reach the filesystem or a style

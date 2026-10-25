@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The reader's light or dark choice, applied before anything is painted, so it never flashes. -->
+<script>try { const t = localStorage.getItem('prosody.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<title>prosody</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400;1,500&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<!--
+  `@strudel/soundfonts` imports `@strudel/core` and `@strudel/webaudio` by name. Answering those
+  from a CDN would give it a second Strudel that the playing one never hears, so the import map
+  sends both to the Strudel `@strudel/web` already put on the page (see public/strudel-globals.mjs).
+-->
+<script type="importmap">
+{ "imports": {
+  "@strudel/core": "./strudel-globals.mjs",
+  "@strudel/webaudio": "./strudel-globals.mjs",
+  "sfumato": "./strudel-globals.mjs"
+} }
+</script>
+<!-- Strudel puts its functions on the global scope, where the compiled pattern finds them. -->
+<script src="https://unpkg.com/@strudel/web@1.3.0"></script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="./src/main.tsx"></script>
+</body>
+</html>
