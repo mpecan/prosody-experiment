@@ -15,13 +15,14 @@ test('compiles the opening poem in the browser, under A and then B', async ({ pa
   await expect(page.locator('#status')).toContainText(/^B · \d+ bars from 8 lines/);
   await page.getByRole('tab', { name: 'Under the hood' }).click();
   await expect(page.locator('#pattern')).toContainText('// compiled from a poem by prosody');
-  await page.click('#tabScore');
+  await page.locator('#views').getByText('Score A vs B').click();
   await expect(page.locator('#scoreRows tr.total').first()).toContainText('interest');
 });
 
 test('reads an example poem in its own language, from its recordings', async ({ page }) => {
   await open(page);
   await page.selectOption('#preset', 'preseren-zdravljica');
+  await expect(page.locator('#preset').locator('xpath=..').locator('.lcd-text')).toHaveText('Prešeren — Zdravljica');
   await expect(page.locator('#poem')).toHaveValue(/^Spet trte so rodile,/);
   await page.getByRole('tab', { name: 'Reading' }).click();
   await expect(page.locator('#language')).toHaveValue('sl');
@@ -48,4 +49,31 @@ test('plays, lighting the poem as it goes, and stops', async ({ page }) => {
   await page.click('#stop');
   await expect(page.locator('#status')).toContainText('stopped');
   await expect(page.locator('#lit span.on')).toHaveCount(0);
+});
+
+test('on a wide screen the folders sit beside the poem, the roll under it whichever is open', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  const poem = await page.locator('#poem').boundingBox();
+  const panel = await page.locator('#folders').boundingBox();
+  expect(panel!.x).toBeGreaterThanOrEqual(poem!.x + poem!.width - 1);
+  await page.getByRole('tab', { name: 'Mappings' }).click();
+  await expect(page.locator('#folderMappings')).toBeVisible();
+  await expect(page.locator('#roll')).toBeVisible();
+  await page.click('#rollSwitch');
+  await expect(page.locator('#rollband')).toBeHidden();
+  await expect(page.locator('#folderMappings')).toBeVisible();
+});
+
+test('on a phone an open folder leaves the poem in view, and nothing scrolls sideways', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page);
+  await expect(page.locator('#sheet')).toBeHidden();
+  await page.getByRole('tab', { name: 'Sound' }).click();
+  await expect(page.locator('#folderSound')).toBeVisible();
+  const poem = await page.locator('.stage > main').boundingBox();
+  expect(poem!.height).toBeGreaterThan(90);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole('button', { name: 'Fold the settings away' }).click();
+  await expect(page.locator('#sheet')).toBeHidden();
 });

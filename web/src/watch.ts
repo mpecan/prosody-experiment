@@ -10,7 +10,7 @@
 // relit every frame, and a frame's work is a few class changes on the pieces that changed.
 import type { Mark, Trace } from './answers';
 import { piece } from './piece';
-import { folder, hearing, poem, rollBars } from './store';
+import { hearing, poem, rollBars, rollShown } from './store';
 import type { Hap, Pattern, Scheduler } from './strudel/globals';
 
 const DRAW = 'https://unpkg.com/@strudel/draw@1.2.6';
@@ -115,7 +115,7 @@ function rollContext(): CanvasRenderingContext2D | null {
 }
 
 function paintRoll(haps: Hap[], time: number): void {
-  if (!watch.drawRoll || folder.value !== 'roll') return;
+  if (!watch.drawRoll || !rollShown.value) return;
   const ctx = rollContext();
   if (!ctx) return;
   const span = rollWindow();

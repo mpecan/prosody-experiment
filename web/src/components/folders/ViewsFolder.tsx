@@ -2,11 +2,12 @@
 // settings measured side by side.
 import { measure } from '../../piece';
 import { explainView, patternView, poem, profile, scores, view, type Score, type View } from '../../store';
+import { Segmented } from '../desk/Segmented';
 
-const VIEWS: [View, string, string][] = [
-  ['pattern', 'tabPattern', 'Pattern'],
-  ['explain', 'tabExplain', 'What each word became'],
-  ['score', 'tabScore', 'Score A vs B'],
+const VIEWS = [
+  { value: 'pattern', label: 'Pattern' },
+  { value: 'explain', label: 'What each word became' },
+  { value: 'score', label: 'Score A vs B' },
 ];
 
 /** B − A, coloured by which way it went, `·` when it did not move. */
@@ -50,23 +51,22 @@ export function ScoreRows({ measured }: { measured: { A: Score | null; B: Score 
 export function ViewsFolder() {
   return (
     <>
-      <div class="desk-head"><h2>Under the hood</h2><span class="engrave">what the poem compiled to</span></div>
-      <nav class="views-nav">
-        {VIEWS.map(([name, id, label]) => (
-          <button key={name} id={id} aria-selected={view.value === name} onClick={() => { view.value = name; }}>{label}</button>
-        ))}
-      </nav>
+      <div class="desk-head"><h2>Under the hood</h2><span class="hint">What the poem compiled to.</span></div>
+      <div class="views-nav">
+        <Segmented id="views" label="View" showLabel={false} value={view.value} options={VIEWS} colour="var(--chords)"
+          onChange={(next) => { view.value = next as View; }} />
+      </div>
       <pre id="pattern" class={view.value === 'pattern' ? 'wrapped' : 'wrapped hidden'}>{patternView.value}</pre>
       <pre id="explain" class={view.value === 'explain' ? undefined : 'hidden'}>{explainView.value}</pre>
       <div id="score" class={view.value === 'score' ? undefined : 'hidden'}>
         <div class="bar">
-          <label>Judged against
-            <select id="profile" value={profile.value} onInput={(event) => { profile.value = event.currentTarget.value; void measure(poem.value); }}>
-              <option value="machine">machine — Kraftwerk, Daft Punk, psytrance</option>
-              <option value="jazz">jazz — a piano trio, a modal quartet</option>
-              <option value="interest">interest — generic</option>
-            </select>
-          </label>
+          <Segmented id="profile" label="Judged against" value={profile.value} colour="var(--chords)"
+            options={[
+              { value: 'machine', label: 'machine — Kraftwerk, Daft Punk, psytrance' },
+              { value: 'jazz', label: 'jazz — a piano trio, a modal quartet' },
+              { value: 'interest', label: 'interest — generic' },
+            ]}
+            wrap onChange={(next) => { profile.value = next; void measure(poem.value); }} />
         </div>
         <table>
           <thead><tr><th>metric</th><th>band</th><th>A</th><th>B</th><th>B − A</th></tr></thead>

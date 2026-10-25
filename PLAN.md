@@ -406,6 +406,41 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The desk, rearranged: a mixer, the roll on a switch, patch displays
+
+The second of the four steps: the redesign the user chose from the design canvas's second row
+(boards A–D), after a review of the live page. Nothing the compiler does changed, and no control's
+id, value or meaning.
+
+- **Every level in one place.** A Mixer folder holds the four band faders and the voice's own, set
+  apart as the reader's channel, with the duck switch and the effects (reverb, room, echo, high
+  cut, drive, compress, density). The voice level and the duck left Reading; swing and humanise sit
+  together on Sound as the feel.
+- **The roll is a switch, not a folder.** Shown or hidden from the top bar, remembered, whichever
+  folder is open; it sits under the poem (the bars-shown switch and its key above it). A reader
+  who had left the old Roll folder open finds the roll shown and the sheet folded.
+- **The layout.** On a wide screen (≥ 1100 px) the folders are a panel beside the poem, the whole
+  height, always showing one; on a phone a sheet along the bottom edge, folded to its tabs until
+  one is opened, folded again by the open tab or a handle, at most two fifths of the screen, the
+  roll a slim strip — so the poem keeps a few lines in view. A new folder starts at its top.
+- **Patch displays and switches instead of menus.** A long list (scale, palette, drum machine,
+  bass, melody, chords, language, voice, the poem picker) is a value on a small dark screen with ◀
+  and ▶, and a real menu lies over the screen, so a click, the keyboard or a phone's picker still
+  chooses from the whole list. A short one (kit, ride stand-in, rhyme voicing, pace, who reads,
+  the views, the score's profile, bars shown) is a segmented switch. Values have names a reader
+  knows: "Acoustic bass", "Roland TR-909", "phrygian dominant" (`names.ts`); the page still sends
+  `gm_acoustic_bass`.
+- **Mappings** are a row each, A over B as switches, the default underlined; a row whose A and B
+  differ glows and says so, the head counts them, and "?" opens what the mapping does.
+- **Calmer labels.** Plain sentence-case words for controls and folder tabs; the engraved capitals
+  kept for the hardware's own markings. Long explanations fold behind "How the reading works" and
+  "About the mappings".
+- Tests: 55 in Vitest (the folders and the handle, the roll switch and the old Roll folder, the
+  patch display's names and steps, the poem picker, the voice fader, the mappings' glow, count,
+  default and "?") and 6 end to end (the panel beside the poem, the roll with any folder, a phone
+  with no sideways scroll and the poem still in view). Checked by eye at 1440 and 390 px, dark and
+  light.
+
 ### The page as its own program: Preact, Signals, TypeScript, Vite
 
 The first of four agreed steps (then the desk redesign from the canvas, styles and genres, and the

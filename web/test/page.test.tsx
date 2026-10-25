@@ -8,7 +8,7 @@ import { startControls } from '../src/controls';
 import { compile } from '../src/piece';
 import { engines, startReading } from '../src/reading';
 import { loadSettings } from '../src/settings';
-import { folder, language, poem, preset, settings } from '../src/store';
+import { folder, language, poem, preset, rollShown, settings, sheetOpen } from '../src/store';
 import { useFixture } from './site.fixture';
 
 // What the compiler answers, for any poem: a pattern of two bars, a reading of one line, a trace
@@ -39,7 +39,9 @@ function start() {
   settings.value = loadSettings();
   poem.value = site.seed;
   language.value = 'en';
-  folder.value = null;
+  folder.value = 'mixer';
+  sheetOpen.value = false;
+  rollShown.value = true;
   preset.value = '';
   restorePage();
   startReading();
@@ -76,12 +78,13 @@ describe('a first visit', () => {
 });
 
 describe('the folders', () => {
-  it('open one at a time, swap, and close on their own tab again, remembered', async () => {
+  const folders = () => document.getElementById('folders')!;
+
+  it('open one at a time, swap, and fold on their own tab again, remembered', async () => {
     start();
-    const sheet = document.getElementById('sheet')!;
-    expect(sheet.hidden).toBe(true);
+    expect(folders().classList.contains('open')).toBe(false);
     fireEvent.click(screen.getByRole('tab', { name: 'Sound' }));
-    await waitFor(() => expect(sheet.hidden).toBe(false));
+    await waitFor(() => expect(folders().classList.contains('open')).toBe(true));
     expect(document.getElementById('folderSound')!.hidden).toBe(false);
     expect(document.getElementById('folderReading')!.hidden).toBe(true);
     expect(screen.getByRole('tab', { name: 'Sound' }).getAttribute('aria-selected')).toBe('true');
@@ -90,13 +93,54 @@ describe('the folders', () => {
     expect(document.getElementById('folderSound')!.hidden).toBe(true);
     expect(localStorage.getItem('prosody.folder')).toBe('reading');
     fireEvent.click(screen.getByRole('tab', { name: 'Reading' }));
-    await waitFor(() => expect(sheet.hidden).toBe(true));
+    await waitFor(() => expect(folders().classList.contains('open')).toBe(false));
+    // Folded, the folder is still the one shown beside the poem on a wide screen.
+    expect(document.getElementById('folderReading')!.hidden).toBe(false);
+  });
+
+  it('fold and open by the handle', async () => {
+    start();
+    const handle = screen.getByRole('button', { name: 'Open the settings' });
+    fireEvent.click(handle);
+    await waitFor(() => expect(folders().classList.contains('open')).toBe(true));
+    expect(document.getElementById('folderMixer')!.hidden).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Fold the settings away' }));
+    await waitFor(() => expect(folders().classList.contains('open')).toBe(false));
   });
 
   it('come back as they were left, by the old saved ids too', () => {
     localStorage.setItem('prosody.folder', 'folderMappings');
     start();
     expect(document.getElementById('folderMappings')!.hidden).toBe(false);
+    expect(folders().classList.contains('open')).toBe(true);
+  });
+});
+
+describe('the roll', () => {
+  it('is shown or hidden from the top bar, whichever folder is open, and remembered', async () => {
+    start();
+    fireEvent.click(screen.getByRole('tab', { name: 'Mappings' }));
+    const band = document.getElementById('rollband')!;
+    const toggle = document.getElementById('rollSwitch')!;
+    expect(band.hidden).toBe(false);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(toggle);
+    await waitFor(() => expect(band.hidden).toBe(true));
+    expect(localStorage.getItem('prosody.roll')).toBe('hidden');
+    expect(document.getElementById('folderMappings')!.hidden).toBe(false);
+  });
+
+  it('stays hidden on the next visit once hidden', () => {
+    localStorage.setItem('prosody.roll', 'hidden');
+    start();
+    expect(document.getElementById('rollband')!.hidden).toBe(true);
+  });
+
+  it('was a folder once: a reader who left it open finds it shown, the sheet folded', () => {
+    localStorage.setItem('prosody.folder', 'folderRoll');
+    start();
+    expect(document.getElementById('rollband')!.hidden).toBe(false);
+    expect(document.getElementById('folders')!.classList.contains('open')).toBe(false);
   });
 });
 
@@ -104,6 +148,7 @@ describe('the sound desk', () => {
   it('lights the root and tints the scale\'s own notes on the circle', async () => {
     start();
     fireEvent.click(screen.getByRole('tab', { name: 'Sound' }));
+    await waitFor(() => expect(document.getElementById('folderSound')!.hidden).toBe(false));
     fireEvent.change(document.getElementById('scale')!, { target: { value: 'phrygian_dominant' } });
     await waitFor(() => expect(document.getElementById('hubScale')!.textContent).toBe('phrygian dominant'));
     const tinted = [...document.querySelectorAll('#noteCircle button.in')].map((b) => b.textContent);
@@ -125,39 +170,96 @@ describe('the sound desk', () => {
   });
 });
 
-describe('the mappings', () => {
-  it('start A at the defaults and B at what preceded them, and mark a choice that is not the default', async () => {
+describe('the patch displays', () => {
+  it('show a readable name and step through the list, the real menu underneath', async () => {
     start();
-    const choice = (side: string, name: string) =>
-      document.querySelector<HTMLSelectElement>(`#mappings select[data-side="${side}"][data-name="${name}"]`)!;
-    expect(choice('A', 'bass').value).toBe('height');
-    expect(choice('B', 'bass').value).toBe('off');
-    expect(choice('B', 'long-stanzas').value).toBe('erode');
-    expect(choice('A', 'bass').querySelector('option[value="height"]')!.textContent).toBe('height (default)');
-    expect(choice('A', 'bass').className).toBe('');
-    fireEvent.change(choice('A', 'bass'), { target: { value: 'feet' } });
-    await waitFor(() => expect(choice('A', 'bass').className).toBe('changed'));
-    expect(JSON.parse(localStorage.getItem('prosody.settings')!).A.bass).toBe('feet');
+    fireEvent.click(screen.getByRole('tab', { name: 'Sound' }));
+    const bass = document.getElementById('bass') as HTMLSelectElement;
+    const screenOf = (select: HTMLElement) => select.closest('.lcd')!.querySelector('.lcd-text')!.textContent;
+    expect(bass.value).toBe('gm_acoustic_bass');
+    expect(screenOf(bass)).toBe('Acoustic bass');
+    fireEvent.click(screen.getByRole('button', { name: 'Next bass' }));
+    await waitFor(() => expect(bass.value).toBe('gm_epiano1'));
+    expect(screenOf(bass)).toBe('Electric piano');
+    // From the first, ◀ goes round to the last.
+    fireEvent.change(bass, { target: { value: 'triangle' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Previous bass' }));
+    await waitFor(() => expect(bass.value).toBe('gm_vibraphone'));
+  });
+
+  it('pick an example poem from the top bar', async () => {
+    start();
+    const picker = document.getElementById('preset')!;
+    expect(picker.closest('.lcd')!.querySelector('.lcd-text')!.textContent).toBe('Your own poem');
+    fireEvent.click(screen.getByRole('button', { name: 'Next example poems' }));
+    await waitFor(() => expect((document.getElementById('poem') as HTMLTextAreaElement).value).toBe('Tyger Tyger, burning bright,\n'));
+  });
+});
+
+describe('the mixer', () => {
+  it('sets the voice\'s level beside the band\'s, and remembers it', async () => {
+    start();
+    fireEvent.click(screen.getByRole('tab', { name: 'Mixer' }));
+    const voice = document.getElementById('readingLevel') as HTMLInputElement;
+    expect(document.getElementById('drums_gain')).toBeTruthy();
+    fireEvent.input(voice, { target: { value: '1.5' } });
+    await waitFor(() => expect(document.getElementById('readingLevelOut')!.textContent).toBe('1.50'));
+    expect(JSON.parse(localStorage.getItem('prosody.reading')!).level).toBe(1.5);
+  });
+});
+
+describe('the mappings', () => {
+  const row = (name: string) => document.querySelector<HTMLElement>(`.mapping[data-name="${name}"]`)!;
+  const chosen = (side: string, name: string) =>
+    row(name).querySelector<HTMLElement>(`[aria-label="${name}, setting ${side}"] button[aria-pressed="true"]`)!.dataset.value;
+
+  it('start A at the defaults and B at what preceded them, with the default marked', () => {
+    start();
+    expect(chosen('A', 'bass')).toBe('height');
+    expect(chosen('B', 'bass')).toBe('off');
+    expect(chosen('B', 'long-stanzas')).toBe('erode');
+    expect(row('bass').querySelector('[aria-label="bass, setting A"] button.default')!.textContent).toBe('height');
+  });
+
+  it('glow where A and B differ, count them, and remember a choice', async () => {
+    start();
+    expect(row('long-stanzas').classList.contains('differ')).toBe(false);
+    expect(row('bass').classList.contains('differ')).toBe(true);
+    // held, bass, reading and pulse differ from the start; long-stanzas does not.
+    expect(document.querySelector('#folderMappings .desk-head .hint')!.textContent).toBe('4 settings differ between A and B.');
+    const b = row('bass').querySelector('[aria-label="bass, setting B"]')!;
+    fireEvent.click(within(b as HTMLElement).getByText('height'));
+    await waitFor(() => expect(row('bass').classList.contains('differ')).toBe(false));
+    expect(document.querySelector('#folderMappings .desk-head .hint')!.textContent).toBe('3 settings differ between A and B.');
+    expect(JSON.parse(localStorage.getItem('prosody.settings')!).B.bass).toBe('height');
+  });
+
+  it('say what a mapping does when asked', async () => {
+    start();
+    expect(row('bass').querySelector('.what')).toBeNull();
+    fireEvent.click(within(row('bass')).getByRole('button', { name: 'What bass does', hidden: true }));
+    await waitFor(() => expect(row('bass').querySelector('.what')!.textContent).toBe('a foundation bass'));
   });
 });
 
 describe('the reading', () => {
+  const engine = () => document.getElementById('engine')!;
+
   it('offers five engines, the recorded readings first chosen', () => {
     start();
-    const engine = document.getElementById('engine') as HTMLSelectElement;
-    expect([...engine.options].map((o) => o.value)).toEqual(['kokoro', 'piper', 'kitten', 'recorded', 'browser']);
-    expect(engine.value).toBe('recorded');
+    expect([...engine().querySelectorAll('button')].map((b) => b.dataset.value)).toEqual(['kokoro', 'piper', 'kitten', 'recorded', 'browser']);
+    expect(engine().querySelector<HTMLElement>('button[aria-pressed="true"]')!.dataset.value).toBe('recorded');
   });
 
   it('asks before a neural voice downloads, and keeps the voice there was when told not to', async () => {
     start();
-    fireEvent.change(document.getElementById('engine')!, { target: { value: 'kitten' } });
+    fireEvent.click(engine().querySelector('button[data-value="kitten"]')!);
     const download = document.getElementById('download') as HTMLDialogElement;
     await waitFor(() => expect(download.open).toBe(true));
     expect(document.getElementById('downloadTitle')!.textContent).toBe('Kitten TTS (nano) needs a one-time download of about 25 MB.');
     fireEvent.click(screen.getByText('Keep the current voice'));
     await waitFor(() => expect(download.open).toBe(false));
-    expect((document.getElementById('engine') as HTMLSelectElement).value).toBe('recorded');
+    expect(engine().querySelector<HTMLElement>('button[aria-pressed="true"]')!.dataset.value).toBe('recorded');
     expect(engines.kitten.state).toBe('idle');
   });
 });
@@ -184,10 +286,10 @@ describe('the poem compiled', () => {
 
   it('chooses an example poem with its palette, read in its own language', async () => {
     start();
-    fireEvent.input(document.getElementById('preset')!, { target: { value: 'preseren-zdravljica' } });
+    fireEvent.change(document.getElementById('preset')!, { target: { value: 'preseren-zdravljica' } });
     await waitFor(() => expect((document.getElementById('poem') as HTMLTextAreaElement).value).toBe('Spet trte so rodile,\n'));
     expect(language.value).toBe('sl');
-    expect((document.getElementById('language') as HTMLSelectElement).value).toBe('sl');
+    await waitFor(() => expect((document.getElementById('language') as HTMLSelectElement).value).toBe('sl'));
     expect(document.getElementById('hubRoot')!.textContent).toBe('D');
   });
 });

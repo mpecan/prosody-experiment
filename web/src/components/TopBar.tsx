@@ -1,10 +1,11 @@
 // The top bar: the name, that it is an experiment, the theme, about and the source; then the poem
 // picker, Play, Stop and which setting is heard.
-import { choosePreset, nextTheme } from '../actions';
+import { choosePreset, nextTheme, showRoll } from '../actions';
 import { site } from '../data';
 import { hear } from '../piece';
 import { play, stop } from '../strudel';
-import { beat, hearing, playing, preset, theme, welcomeOpen } from '../store';
+import { beat, hearing, playing, preset, rollShown, theme, welcomeOpen } from '../store';
+import { Patch } from './desk/Patch';
 
 const THEME_LABELS = { auto: '◐ auto', light: '☀ light', dark: '☾ dark' };
 
@@ -23,15 +24,19 @@ export function TopBar() {
         <a href="https://github.com/mpecan/prosody-experiment" rel="noopener" target="_blank">source</a>
       </nav>
       <div class="controls">
-        <select id="preset" title="Load one of the example poems, with its palette" aria-label="Example poems"
-          value={preset.value} onInput={(event) => choosePreset(event.currentTarget.value)}>
-          <option value="">example poems…</option>
-          {site.presets.map((p) => <option key={p.name} value={p.name}>{p.label}</option>)}
-        </select>
+        <div class="poems">
+          <Patch id="preset" label="Example poems" hideLabel value={preset.value} onChange={choosePreset} colour="var(--ornament)"
+            title="Load one of the example poems, with its palette"
+            options={[{ value: '', label: 'Your own poem', disabled: true }, ...site.presets.map((p) => ({ value: p.name, label: p.label }))]} />
+        </div>
         {/* While it plays, the button breathes on the beat. */}
         <button id="play" class={beating ? 'primary beating' : 'primary'} style={beating ? { '--beat': beating.toFixed(3) + 's' } : undefined}
           onClick={() => void play()}>{playing.value ? '▶ Playing' : '▶ Play'}</button>
         <button id="stop" disabled={!playing.value} onClick={stop}>■ Stop</button>
+        <button id="rollSwitch" type="button" class="roll-switch" aria-pressed={rollShown.value}
+          title="Show the roll under the poem, whichever folder is open" onClick={() => showRoll(!rollShown.value)}>
+          <span class="lever" aria-hidden="true" />Roll
+        </button>
         <span class="ab" title="Which setting is playing and shown — switch while it plays to compare">
           <span>hearing</span>
           <button id="hearA" aria-pressed={hearing.value === 'A'} onClick={() => hear('A')}>A</button>

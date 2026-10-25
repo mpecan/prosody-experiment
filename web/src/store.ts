@@ -60,9 +60,14 @@ export const profile = signal('machine');
 export type View = 'pattern' | 'explain' | 'score';
 export const view = signal<View>('pattern');
 
-// The folders, the theme and the notices.
-export type Folder = 'roll' | 'sound' | 'mappings' | 'reading' | 'views';
-export const folder = signal<Folder | null>(null);
+// The folders, the roll, the theme and the notices.
+export type Folder = 'mixer' | 'sound' | 'reading' | 'mappings' | 'views';
+/** The folder shown: in the side panel on a wide screen, in the sheet on a phone. */
+export const folder = signal<Folder>('mixer');
+/** On a phone, whether the sheet is open or folded down to its tabs. */
+export const sheetOpen = signal(false);
+/** Whether the roll is shown, whichever folder is open. */
+export const rollShown = signal(true);
 export type Theme = 'auto' | 'light' | 'dark';
 export const theme = signal<Theme>('auto');
 export const noticeShown = signal(false);

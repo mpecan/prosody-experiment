@@ -5,7 +5,7 @@ import { compile, piece, schedule } from './piece';
 import { readIn } from './reading';
 import { fitRoll, buildLit, watch } from './watch';
 import { load, save } from './storage';
-import { folder, noticeShown, poem, preset, rollBars, theme, welcomeOpen, type Folder, type Theme } from './store';
+import { folder, noticeShown, poem, preset, rollBars, rollShown, sheetOpen, theme, welcomeOpen, type Folder, type Theme } from './store';
 
 /** An example poem, with its palette, read in its own language. */
 export function choosePreset(name: string): void {
@@ -55,15 +55,32 @@ export function nextTheme(): void {
 
 // ---- Folders ----
 //
-// One open at a time, or none: a tab opens its folder, another tab swaps it, the open one's tab
-// closes it. Which is open is remembered per browser.
-export const FOLDERS: Folder[] = ['roll', 'sound', 'mappings', 'reading', 'views'];
-export function openFolder(id: Folder | null): void {
+// One folder at a time. On a wide screen the folders are a side panel beside the poem, always
+// showing one; on a phone they are a sheet along the bottom edge, which a tab opens and the open
+// folder's tab, or the handle, folds away. Which is open, and whether, is remembered per browser.
+export const FOLDERS: Folder[] = ['mixer', 'sound', 'reading', 'mappings', 'views'];
+export function openFolder(id: Folder): void {
+  // Another folder starts at its top, not where the last one was scrolled to.
+  if (folder.value !== id) document.getElementById('sheet')?.scrollTo(0, 0);
   folder.value = id;
-  save('prosody.folder', id || '');
+  sheetOpen.value = true;
+  save('prosody.folder', id);
 }
 export function toggleFolder(id: Folder): void {
-  openFolder(folder.value === id ? null : id);
+  if (folder.value === id && sheetOpen.value) foldSheet();
+  else openFolder(id);
+}
+export function foldSheet(): void {
+  sheetOpen.value = false;
+  save('prosody.folder', '');
+}
+
+// ---- The roll ----
+/** Shows or hides the roll, remembered. */
+export function showRoll(shown: boolean): void {
+  rollShown.value = shown;
+  save('prosody.roll', shown ? 'shown' : 'hidden');
+  if (shown) fitRoll();
 }
 
 /** How many bars the roll shows, remembered. */
@@ -89,11 +106,18 @@ export function dismissNotice(): void {
 export function restorePage(): void {
   const saved = load('prosody.theme');
   setTheme(THEMES.includes(saved as Theme) ? saved as Theme : 'auto');
+  // Folders were saved by their element ids before the page was components, and the roll was one.
   const open = load('prosody.folder');
-  // Folders were saved by their element ids before the page was components.
-  const legacy: Record<string, Folder> = { folderRoll: 'roll', folderSound: 'sound', folderMappings: 'mappings', folderReading: 'reading', folderViews: 'views' };
+  const legacy: Record<string, Folder> = {
+    folderSound: 'sound', folderMappings: 'mappings', folderReading: 'reading', folderViews: 'views',
+    folderRoll: 'mixer', roll: 'mixer',
+  };
   const id = (open && (legacy[open] ?? open)) as Folder | null;
-  if (id && FOLDERS.includes(id)) folder.value = id;
+  if (id && FOLDERS.includes(id)) {
+    folder.value = id;
+    sheetOpen.value = open !== 'roll' && open !== 'folderRoll';
+  }
+  rollShown.value = load('prosody.roll') !== 'hidden';
   const bars = load('prosody.rollBars');
   if (bars && ['2', '4', '8', '16'].includes(bars)) rollBars.value = bars;
   noticeShown.value = load('prosody.notice') !== 'dismissed';
