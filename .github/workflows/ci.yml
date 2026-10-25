@@ -1,5 +1,6 @@
 # The gates from CLAUDE.md §3. They exist as commands so that "high quality" is a thing the
-# repository checks rather than a thing a contributor remembers.
+# repository checks rather than a thing a contributor remembers. A push to main that passes every
+# one of them is deployed to prosody.rocks (the `deploy` job, last).
 name: ci
 
 on:
@@ -59,6 +60,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24.18.0"
+      # The Rust cache restores `target/`; the site is built from empty, so nothing an older build
+      # left behind is tested or deployed with it.
+      - name: a clean site
+        run: rm -rf target/site
       - name: wasm and native agree
         run: ./scripts/check-wasm.sh
       # check-wasm built the site into target/site; the page is tested end to end on it, with the
@@ -69,6 +74,16 @@ jobs:
       - name: the page, end to end
         working-directory: web
         run: npm run e2e
+      # The site just checked, byte for byte and in a browser, is the one deployed: kept for the
+      # deploy job on a push to main.
+      - name: keep the site
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: target/site
+          retention-days: 7
+          if-no-files-found: error
 
   # The page itself (web/): its types, its tests and its build. Node as mise.toml pins it.
   web:
@@ -106,3 +121,40 @@ jobs:
         run: |
           npx --yes tree-sitter-cli@0.26.11 generate
           git diff --exit-code -- src/
+
+  # A push to main that has passed every job above goes live at https://prosody.rocks, as
+  # `./scripts/deploy.sh` would put it there: the worker's redirects checked, then `wrangler deploy`
+  # of the site the wasm job built and tested. One deploy at a time, in order; a deploy is never
+  # cancelled half way. Needs two repository secrets: CLOUDFLARE_API_TOKEN (a token from the
+  # "Edit Cloudflare Workers" template, for the account and the prosody.rocks zone) and
+  # CLOUDFLARE_ACCOUNT_ID.
+  deploy:
+    needs: [gates, wasm, web, grammar]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://prosody.rocks
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: target/site
+      - name: every way in reaches https://prosody.rocks
+        run: node deploy/check-worker.mjs
+      - name: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # The version deploys have been made with from mise; pinned so a deploy never changes
+          # with a wrangler release.
+          wranglerVersion: "4.152.0"
+          command: deploy

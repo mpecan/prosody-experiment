@@ -406,6 +406,18 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### A merge to main deploys itself
+
+The user asked for deployment on merge. CI's new `deploy` job runs on a push to `main` once
+`gates`, `wasm`, `web` and `grammar` have all passed, and publishes the site the `wasm` job built —
+the one check-wasm found byte-identical to the native compiler and the end-to-end tests played — as
+an artifact, so what goes live is exactly what was tested (built from an empty `target/site`, since
+the Rust cache restores `target/`). It checks the worker's redirects (`deploy/check-worker.mjs`),
+then runs `wrangler deploy` through `cloudflare/wrangler-action`, wrangler pinned to 4.152.0 in CI
+and in `mise.toml` alike. One deploy at a time, never cancelled half way, in a `production`
+environment. It needs the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
+`scripts/deploy.sh` stays for a deploy by hand.
+
 ### Mute, solo, live meters and the lane roll
 
 The fourth and last of the agreed steps.
