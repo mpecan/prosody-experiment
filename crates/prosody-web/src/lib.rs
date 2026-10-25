@@ -1112,6 +1112,86 @@ mod tests {
         );
     }
 
+    /// A JSON string field's value, unescaped: enough of JSON for the views this crate writes.
+    fn json_field(json: &str, key: &str) -> String {
+        let start = json.find(&format!("\"{key}\":\"")).unwrap() + key.len() + 4;
+        let mut out = String::new();
+        let mut chars = json[start..].chars();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' => return out,
+                '\\' => match chars.next().unwrap() {
+                    'n' => out.push('\n'),
+                    'r' => out.push('\r'),
+                    't' => out.push('\t'),
+                    'u' => {
+                        let code: String = chars.by_ref().take(4).collect();
+                        out.push(char::from_u32(u32::from_str_radix(&code, 16).unwrap()).unwrap());
+                    }
+                    other => out.push(other),
+                },
+                other => out.push(other),
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn no_poem_text_reaches_the_code_the_page_runs() {
+        // A shared link hands a stranger's poem to the page, which evaluates what it compiles to —
+        // the pattern, the reading's two cue patterns and the trace — as JavaScript. So no text of
+        // the poem may reach that code except inside a `//` comment it cannot leave: no line of the
+        // code outside a comment carries the poem's words, and no line terminator JavaScript knows
+        // (U+2028, U+2029, a carriage return) appears at all, since one inside a comment would end
+        // it. Every word below carries the marker `qzx`.
+        let hostile = "Qzx \"qzx\"); globalThis.qzx = 1; //\n\
+                       qzx` ${qzx} */ </script> 'qzx' \\qzx\\\n\
+                       qzx\u{2028}qzx = 2;\u{2029}qzx = 3;\r\n\
+                       the fire will qzx the night\n\
+                       and qzx the dark to light\n\
+                       \n\
+                       the fire will qzx the night\n";
+        let runs = |set: &str| {
+            let query = [("set", set)];
+            let pattern = super::compile(&request(&query, hostile), &Output::Pattern);
+            assert_eq!(pattern.status, 200, "{}", pattern.body);
+            let reading = super::compile(&request(&query, hostile), &Output::Reading).body;
+            let trace = super::compile(&request(&query, hostile), &Output::Trace).body;
+            vec![
+                ("pattern", pattern.body),
+                ("fitted cues", json_field(&reading, "pattern")),
+                ("natural cues", json_field(&reading, "natural")),
+                ("trace", json_field(&trace, "pattern")),
+            ]
+        };
+        for set in [
+            "",
+            "harmony:both,bass:syllables,reading:arrives,pulse:elastic",
+        ] {
+            for (name, code) in runs(set) {
+                assert!(code.len() > 40, "{name} is empty: {code}");
+                for line in code.lines() {
+                    let comment = line.trim_start().starts_with("//");
+                    assert!(
+                        comment || !line.to_lowercase().contains("qzx"),
+                        "{name} ({set}): poem text outside a comment: {line}"
+                    );
+                }
+                for terminator in ['\u{2028}', '\u{2029}', '\r'] {
+                    assert!(!code.contains(terminator), "{name} ({set}): {terminator:?}");
+                }
+            }
+        }
+        // The controls cannot carry code either: a name a palette does not have is refused.
+        for (key, value) in [
+            ("bank", "tr909\")\n;globalThis.qzx = 1;//"),
+            ("melody", "gm_piano\")"),
+        ] {
+            let refused = super::compile(&request(&[(key, value)], SEED), &Output::Pattern);
+            assert_eq!(refused.status, 400, "{key}: {}", refused.body);
+        }
+    }
+
     #[test]
     fn the_site_data_says_where_to_send_requests() {
         // Served, the page asks the server; built as static files, the compiler beside it.

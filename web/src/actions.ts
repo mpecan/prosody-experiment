@@ -5,10 +5,12 @@ import { site } from './data';
 import { suggest } from './settings';
 import { compile, piece, schedule } from './piece';
 import { applyVoiceLevel, readIn } from './reading';
+import { current, linkTo, settingsOf, type Shared } from './share';
 import { fitRoll, buildLit, watch } from './watch';
 import { load, save } from './storage';
 import {
-  folder, muted, noticeShown, poem, preset, rollBars, rollShown, sheetOpen, soloed, theme, welcomeOpen,
+  folder, hearing, muted, noticeShown, poem, preset, rollBars, rollShown, settings, shareLink, sharedOpened, sheetOpen, soloed,
+  theme, welcomeOpen,
   type Channel, type Folder, type Theme,
 } from './store';
 
@@ -93,6 +95,34 @@ export function toggleMute(channel: Channel): void {
 export function toggleSolo(channel: Channel): void {
   soloed.value = { ...soloed.value, [channel]: !soloed.value[channel] };
   applyVoiceLevel();
+}
+
+// ---- Sharing ----
+/** A shared creation, opened in place of what the page had — without saving over this browser's own
+ * settings, which come back on a plain visit. */
+export function openShared(shared: Shared): void {
+  const { sound, sides } = settingsOf(shared);
+  poem.value = shared.poem;
+  setControls(sound, CONTROLS);
+  settings.value = sides;
+  hearing.value = shared.hear ?? 'A';
+  if (shared.lang) readIn(shared.lang);
+  sharedOpened.value = true;
+}
+/** Opens the share dialog with a link to the page as it is now. */
+export async function openShare(): Promise<void> {
+  shareLink.value = { link: await linkTo(current()), copied: false };
+}
+/** Copies the link, and says so. */
+export async function copyShare(): Promise<void> {
+  const open = shareLink.value;
+  if (!open) return;
+  try {
+    await navigator.clipboard.writeText(open.link);
+    shareLink.value = { ...open, copied: true };
+  } catch {
+    // No clipboard here: the link is selected in its box, to copy by hand.
+  }
 }
 
 // ---- The roll ----

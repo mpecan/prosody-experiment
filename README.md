@@ -105,6 +105,18 @@ voice is never downloaded unasked: the first time one is chosen the page says ho
 asks, then shows its download with a progress bar, Hide and Cancel. Until then, and by default, the
 recorded readings read.
 
+**Sharing** needs no storage, because the compiler is deterministic (I1): a poem and its
+settings are the whole of a piece. **Share** makes a link that carries the creation itself — the
+poem, its sound and its A and B, as compressed JSON in `?s=` (`web/src/share.ts`), a few hundred
+bytes to a couple of kilobytes — and whoever opens it hears the same piece, compiled again in their
+browser; a line says it is a shared poem, and nothing the link holds is saved over the visitor's
+own settings. Where the link is pasted, its preview shows the poem's own first lines: the site's
+worker reads the link as it passes and puts them in the page's title and description
+(`deploy/preview.js`), keeping nothing. A link opens a stranger's poem in the page, which runs what
+it compiles to, so a test pins that no text of a poem reaches that code
+(`no_poem_text_reaches_the_code_the_page_runs`): the compiled pattern, the reading's cues and the
+trace carry no word of it.
+
 The lighting is `SPEC.md` §8's traceability made visible: every lit syllable is the span the sound
 came from. The page gets it from `/trace` (`prosody_emit::trace`), a silent pattern of syllable ids
 built by the same walk of bars and beats as the music and on the same clock, so the light lands

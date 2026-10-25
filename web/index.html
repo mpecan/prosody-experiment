@@ -6,6 +6,19 @@
 <!-- The reader's light or dark choice, applied before anything is painted, so it never flashes. -->
 <script>try { const t = localStorage.getItem('prosody.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <title>prosody</title>
+<!-- What a link to the page shows where it is pasted. For a shared poem the site's worker puts the
+     poem's own first lines here instead (deploy/preview.js); nothing is stored for it. -->
+<meta name="description" content="An experiment: a poem is the source code for a piece of music. Every word becomes part of what you hear; change one and hear what it changed.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="prosody">
+<meta property="og:title" content="prosody — a poem as the source code for music">
+<meta property="og:description" content="An experiment: a poem is the source code for a piece of music. Every word becomes part of what you hear; change one and hear what it changed.">
+<meta property="og:url" content="https://prosody.rocks/">
+<meta property="og:image" content="https://prosody.rocks/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="prosody: a poem lit syllable by syllable over lanes of music">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
