@@ -74,6 +74,10 @@ export const rollShown = signal(true);
 export type Theme = 'auto' | 'light' | 'dark';
 export const theme = signal<Theme>('auto');
 export const noticeShown = signal(false);
+/** Opened from a shared link: the line saying so, until dismissed. */
+export const sharedOpened = signal(false);
+/** The share dialog: open, and the link it offers once made. */
+export const shareLink = signal<{ link: string; copied: boolean } | null>(null);
 export const welcomeOpen = signal(false);
 /** How many bars the roll shows. */
 export const rollBars = signal('4');

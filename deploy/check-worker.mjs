@@ -2,6 +2,7 @@
 // what is served there says to stay on https. Run by scripts/deploy.sh; needs only node.
 import assert from 'node:assert/strict';
 import worker from './worker.js';
+import { escape, MOST, previewOf, sharedIn, withPreview } from './preview.js';
 import { HSTS, redirectFor } from './redirect.js';
 
 // Hand-worked: the redirect keeps path and query, drops www and http, and leaves the rest alone.
@@ -29,4 +30,44 @@ assert.equal(await served.text(), 'page');
 const local = await worker.fetch(new Request('http://localhost:8787/'), env);
 assert.equal(local.headers.get('strict-transport-security'), null);
 
-console.log(`check-worker: ${cases.length} redirects and 3 answers as expected`);
+// A shared poem's preview. A link is made here as the page makes it (web/src/share.ts): JSON,
+// deflated raw, base64url.
+async function linkTo(shared) {
+  const reader = new Blob([JSON.stringify(shared)]).stream().pipeThrough(new CompressionStream('deflate-raw')).getReader();
+  const parts = [];
+  for (;;) { const { done, value } = await reader.read(); if (done) break; parts.push(...value); }
+  const code = btoa(String.fromCharCode(...parts)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `https://prosody.rocks/?s=${code}`;
+}
+const tyger = await linkTo({ v: 1, poem: 'Tyger Tyger, burning bright,\nIn the forests of the night;\n\nWhat immortal hand or eye,\nCould frame thy fearful symmetry?\nIn what distant deeps\n', style: 'jazz' });
+assert.deepEqual(previewOf(await sharedIn(tyger)), {
+  title: 'Tyger Tyger, burning bright, — prosody',
+  description: 'In the forests of the night; / What immortal hand or eye, / Could frame thy fearful symmetry? — A poem played as music, jazz, on prosody.rocks.',
+});
+// One line, the default style: a title and the site's line.
+assert.deepEqual(previewOf({ poem: 'a single line', style: 'default' }),
+  { title: 'a single line — prosody', description: 'A poem played as music, on prosody.rocks.' });
+// Not a link to a poem: junk, a later format, an empty poem, or one made to unpack to too much.
+for (const url of ['https://prosody.rocks/?s=junk', await linkTo({ v: 2, poem: 'x' }), await linkTo({ v: 1, poem: '  \n' }),
+  await linkTo({ v: 1, poem: 'a'.repeat(4 * MOST) })]) {
+  assert.equal(await sharedIn(url), null, url.slice(0, 60));
+}
+// A poem is text, never markup: in an attribute or in the title it is escaped.
+assert.equal(escape(`"><script>alert('x')</script>&`), '&quot;&gt;&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;');
+const head = '<title>prosody</title><meta name="description" content="site"><meta property="og:title" content="site">'
+  + '<meta property="og:description" content="site"><meta property="og:url" content="https://prosody.rocks/">';
+const hostile = await linkTo({ v: 1, poem: '"><script>alert(1)</script>\nsecond' });
+const rewritten = withPreview(head, previewOf(await sharedIn(hostile)), hostile);
+assert.ok(!rewritten.includes('<script>'), rewritten);
+assert.ok(rewritten.startsWith('<title>&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; — prosody</title>'), rewritten);
+assert.equal(rewritten.match(/content="second — A poem played as music, on prosody.rocks."/g).length, 2);
+// Through the handler: the page for a shared link carries the poem's preview, and any other answer
+// is the asset's own.
+const pages = { ASSETS: { fetch: async () => new Response(head, { headers: { 'content-type': 'text/html; charset=utf-8' } }) } };
+const previewed = await (await worker.fetch(new Request(tyger), pages)).text();
+assert.ok(previewed.includes('<title>Tyger Tyger, burning bright, — prosody</title>'), previewed);
+assert.ok(previewed.includes(`<meta property="og:url" content="${escape(tyger)}">`), previewed);
+assert.equal(await (await worker.fetch(new Request('https://prosody.rocks/?s=junk'), pages)).text(), head);
+assert.equal(await (await worker.fetch(new Request('https://prosody.rocks/'), pages)).text(), head);
+
+console.log(`check-worker: ${cases.length} redirects, 3 answers and a shared poem's preview as expected`);

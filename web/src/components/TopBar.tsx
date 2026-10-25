@@ -1,6 +1,6 @@
 // The top bar: the name, that it is an experiment, the theme, about and the source; then the poem
 // picker, Play, Stop and which setting is heard.
-import { choosePreset, nextTheme, showRoll } from '../actions';
+import { choosePreset, nextTheme, openShare, showRoll } from '../actions';
 import { site } from '../data';
 import { hear } from '../piece';
 import { play, stop } from '../strudel';
@@ -33,6 +33,7 @@ export function TopBar() {
         <button id="play" class={beating ? 'primary beating' : 'primary'} style={beating ? { '--beat': beating.toFixed(3) + 's' } : undefined}
           onClick={() => void play()}>{playing.value ? '▶ Playing' : '▶ Play'}</button>
         <button id="stop" disabled={!playing.value} onClick={stop}>■ Stop</button>
+        <button id="share" type="button" title="A link to this poem and how it sounds, to send to anyone" onClick={() => void openShare()}>Share</button>
         <button id="rollSwitch" type="button" class="roll-switch" aria-pressed={rollShown.value}
           title="Show the roll under the poem, whichever folder is open" onClick={() => showRoll(!rollShown.value)}>
           <span class="lever" aria-hidden="true" />Roll

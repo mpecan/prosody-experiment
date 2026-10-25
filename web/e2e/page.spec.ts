@@ -97,3 +97,29 @@ test('solos a layer while it plays: the others fall silent on the meters and fai
   await expect(page.locator('.channel[data-channel="drums"]')).toHaveClass(/quiet/);
   await page.click('#stop');
 });
+
+test('shares a poem as a link that opens to the same piece, for someone else', async ({ page, browser }) => {
+  await open(page);
+  await page.selectOption('#preset', 'carroll-jabberwocky');
+  await expect(page.locator('#status')).toContainText('bars from');
+  await page.getByRole('tab', { name: 'Sound' }).click();
+  await page.locator('#styles [data-style="techno"]').click();
+  await page.click('#hearB');
+  await expect(page.locator('#status')).toContainText(/^B · /);
+  const summary = (await page.locator('#status').textContent())!.split(' · ')[1];
+  await page.click('#share');
+  await expect(page.locator('#shareLink')).toHaveValue(/\?s=[A-Za-z0-9_-]+$/);
+  const link = await page.locator('#shareLink').inputValue();
+  // Someone else, with a browser of their own.
+  const other = await (await browser.newContext()).newPage();
+  await other.addInitScript(() => localStorage.setItem('prosody.welcomed', '1'));
+  await other.goto(link.replace('https://prosody.rocks', 'http://127.0.0.1:4802'));
+  await expect(other.locator('#sharedNote')).toContainText('A shared poem.');
+  await expect(other.locator('#poem')).toHaveValue(await page.locator('#poem').inputValue());
+  await expect(other.locator('#hearB')).toHaveAttribute('aria-pressed', 'true');
+  await expect(other.locator('#status')).toContainText(`B · ${summary}`);
+  await expect(other.locator('#styles [data-style="techno"]')).toHaveAttribute('aria-pressed', 'true');
+  // And its A carries what techno suggested for it.
+  await other.getByRole('tab', { name: 'Mappings' }).click();
+  await expect(other.locator('.mapping[data-name="bass"] [aria-label="bass, setting A"] button[aria-pressed="true"]')).toHaveText('feet');
+});

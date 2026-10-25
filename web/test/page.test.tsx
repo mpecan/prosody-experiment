@@ -2,13 +2,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/preact';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { restorePage } from '../src/actions';
+import { openShared, restorePage } from '../src/actions';
 import { App } from '../src/components/App';
 import { startControls } from '../src/controls';
 import { compile } from '../src/piece';
 import { engines, startReading } from '../src/reading';
 import { loadSettings } from '../src/settings';
-import { folder, language, muted, poem, preset, rollShown, settings, sheetOpen, soloed, suggested } from '../src/store';
+import { folder, hearing, language, muted, poem, preset, rollShown, settings, shareLink, sharedOpened, sheetOpen, soloed, suggested } from '../src/store';
+import { decode } from '../src/share';
 import { useFixture } from './site.fixture';
 
 // What the compiler answers, for any poem: a pattern of two bars, a reading of one line, a trace
@@ -45,6 +46,9 @@ function start() {
   suggested.value = {};
   muted.value = {};
   soloed.value = {};
+  shareLink.value = null;
+  sharedOpened.value = false;
+  hearing.value = 'A';
   preset.value = '';
   restorePage();
   startReading();
@@ -258,6 +262,33 @@ describe('mute and solo', () => {
     await waitFor(() => expect(strip('drums').classList.contains('quiet')).toBe(false));
     // The bass is still muted: solo and mute are separate switches.
     expect(strip('bass').classList.contains('quiet')).toBe(true);
+  });
+});
+
+describe('sharing', () => {
+  it('offers a link that holds the poem as it is now', async () => {
+    start();
+    fireEvent.input(document.getElementById('reverb')!, { target: { value: '0.6' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+    const dialog = document.getElementById('shareDialog') as HTMLDialogElement;
+    await waitFor(() => expect(dialog.open).toBe(true));
+    const link = new URL((document.getElementById('shareLink') as HTMLInputElement).value);
+    expect(link.searchParams.has('s')).toBe(true);
+    const shared = await decode(link.searchParams.get('s')!);
+    expect(shared).toMatchObject({ poem: 'Tyger Tyger, burning bright,\nIn the forests of the night;\n', sound: { reverb: '0.6' } });
+  });
+
+  it('opens a shared poem in place of the opening one, says so, and saves nothing over this browser\'s own', async () => {
+    localStorage.setItem('prosody.settings', JSON.stringify({ A: { bass: 'syllables' }, B: {} }));
+    start();
+    openShared({ v: 1, poem: 'a shared line\n', sound: { scale: 'dorian' }, A: { bass: 'feet' }, hear: 'B' });
+    await waitFor(() => expect((document.getElementById('poem') as HTMLTextAreaElement).value).toBe('a shared line\n'));
+    expect(document.getElementById('sharedNote')!.textContent).toContain('A shared poem.');
+    expect(document.getElementById('hubScale')!.textContent).toBe('dorian');
+    expect(document.getElementById('hearB')!.getAttribute('aria-pressed')).toBe('true');
+    expect(settings.value.A.bass).toBe('feet');
+    // This browser's own settings are where they were.
+    expect(JSON.parse(localStorage.getItem('prosody.settings')!).A.bass).toBe('syllables');
   });
 });
 

@@ -2,6 +2,7 @@
 // folders beside it on a wide screen or under it on a phone — and the dialogs.
 import { Download } from './dialogs/Download';
 import { Loader } from './dialogs/Loader';
+import { Share } from './dialogs/Share';
 import { Welcome } from './dialogs/Welcome';
 import { Editor } from './Editor';
 import { Folders } from './Folders';
@@ -22,6 +23,7 @@ export function App() {
       <Welcome />
       <Download />
       <Loader />
+      <Share />
     </>
   );
 }

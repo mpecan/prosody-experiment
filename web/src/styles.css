@@ -118,6 +118,12 @@
   #notice p { margin: 0; flex: 1; }
   #notice button { background: none; border: 0; color: var(--dim); padding: .1rem .4rem; font-size: 1rem; }
   #notice[hidden] { display: none; }
+  .shared-note { display: flex; gap: .8rem; align-items: center; padding: .45rem 1rem; font-size: .85rem;
+    background: color-mix(in srgb, var(--ornament) 16%, var(--bg)); border-bottom: 1px solid var(--line); }
+  .shared-note p { margin: 0; flex: 1; }
+  .shared-note button { background: none; border: 0; color: var(--dim); padding: .1rem .4rem; font-size: 1rem; }
+  .share-link { width: 100%; font: 500 .8rem var(--mono); padding: .55rem .6rem; border-radius: 8px; border: 1px solid var(--paper-line);
+    background: #fffaf0; color: var(--paper-ink); }
   .notices { min-width: 0; }
 
   /* ---- The poem: a transparent text box over the lit verse. Both layers must lay text out

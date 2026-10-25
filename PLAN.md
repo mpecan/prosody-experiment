@@ -406,6 +406,38 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Sharing without storage: a creation is a link
+
+The user wants people to share what they make, with no storage — previews of a shared link allowed,
+so long as nothing is kept.
+
+- **A link is the creation.** The compiler is deterministic (I1), so a poem and its settings are a
+  whole piece. **Share** writes the poem, the controls that differ from the default palette, each
+  side's variants that differ from where it starts, the side heard and the language as JSON,
+  deflated raw and base64url, into `?s=` (`web/src/share.ts`): Tyger about 700 characters, the
+  longest example ("Patterns") about 2,300, which the dialog says to send by message or email. A
+  query rather than a fragment, so the worker can read it for the preview. The format is
+  versioned (`v: 1`); a link is read defensively — junk, a later format or one unpacking past
+  64 KB is no link, and unknown controls, mappings and variants fall back, as a stale save does.
+  Opening one sets the page from it and says it is a shared poem, without saving over the
+  visitor's own settings.
+- **Previews, keeping nothing.** The worker, for `/?s=…`, decodes the link and puts the poem's first
+  line in the page's title and the next lines in its description and Open Graph tags
+  (`deploy/preview.js`), escaped; a static card (`og.png`, rendered from HTML in the page's own
+  look) is every link's image. `deploy/check-worker.mjs` checks the preview, the escaping, a link
+  made to unpack too far, and the worker's rewrite; a page test checks that the worker reads a link
+  the page made.
+- **The prerequisite.** A link puts a stranger's poem through code the page evaluates, so a new test
+  (`no_poem_text_reaches_the_code_the_page_runs`) compiles a poem written to break out — quotes,
+  backticks, `*/`, `</script>`, U+2028 and U+2029, carriage returns — and checks that no line of the
+  pattern, the two reading cue patterns or the trace carries its words outside a `//` comment, that
+  no JavaScript line terminator appears at all, and that a hostile control value is refused. In
+  fact the compiled code carries no word of a poem at all; the words live only in the explain
+  view, which the page shows as text.
+- Tests: 77 in Vitest (the format, its round trip and defences, the dialog, opening a shared poem)
+  and 8 end to end — one shares Jabberwocky under techno heard on B and opens the link in a second
+  browser, which hears the same piece.
+
 ### A merge to main deploys itself
 
 The user asked for deployment on merge. CI's new `deploy` job runs on a push to `main` once
