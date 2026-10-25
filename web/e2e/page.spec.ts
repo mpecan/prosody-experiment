@@ -44,7 +44,7 @@ test('plays, lighting the poem as it goes, and stops', async ({ page }) => {
   await expect(page.locator('#status')).toContainText('24 bars');
   await page.click('#play');
   // Strudel, the drum machines and the soundfonts come from their CDNs on the first Play.
-  await expect(page.locator('#play')).toHaveText('▶ Playing', { timeout: 45_000 });
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
   await expect(page.locator('#lit span.on').first()).toBeAttached({ timeout: 15_000 });
   await page.click('#stop');
   await expect(page.locator('#status')).toContainText('stopped');
@@ -69,6 +69,14 @@ test('on a phone an open folder leaves the poem in view, and nothing scrolls sid
   await page.setViewportSize({ width: 390, height: 844 });
   await open(page);
   await expect(page.locator('#sheet')).toBeHidden();
+  // The transport is icons alone, on one row with the roll and A/B, each still named.
+  for (const name of ['Play', 'Stop', 'Share']) await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  await expect(page.locator('#play .button-text')).toHaveCSS('width', '1px');
+  const tops = await Promise.all(['#play', '#stop', '#share', '#rollSwitch', '#hearB'].map(async (id) => {
+    const box = await page.locator(id).boundingBox();
+    return Math.round(box!.y + box!.height / 2);
+  }));
+  expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan(6);
   await page.getByRole('tab', { name: 'Sound' }).click();
   await expect(page.locator('#folderSound')).toBeVisible();
   const poem = await page.locator('.stage > main').boundingBox();
@@ -83,7 +91,7 @@ test('solos a layer while it plays: the others fall silent on the meters and fai
   await open(page);
   await expect(page.locator('#status')).toContainText('24 bars');
   await page.click('#play');
-  await expect(page.locator('#play')).toHaveText('▶ Playing', { timeout: 45_000 });
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
   await page.getByRole('tab', { name: 'Mixer' }).click();
   await page.getByRole('button', { name: 'Hear only bass' }).click();
   const meter = (channel: string) => page.locator(`.fader[data-channel="${channel}"]`).evaluate(

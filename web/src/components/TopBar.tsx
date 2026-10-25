@@ -9,6 +9,17 @@ import { Patch } from './desk/Patch';
 
 const THEME_LABELS = { auto: '◐ auto', light: '☀ light', dark: '☾ dark' };
 
+// The transport's icons. With their words beside them on a wide screen; alone on a phone, where the
+// button's name (its aria-label) still says what it does.
+const PLAY = <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.6v10.8L13 8z" /></svg>;
+const STOP = <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1" /></svg>;
+const SHARE = (
+  <svg class="icon" viewBox="0 0 16 16" aria-hidden="true">
+    <circle cx="12" cy="3.5" r="2" /><circle cx="4" cy="8" r="2" /><circle cx="12" cy="12.5" r="2" />
+    <path class="line" d="M10.2 4.5 5.8 7M5.8 9l4.4 2.5" />
+  </svg>
+);
+
 export function TopBar() {
   const beating = beat.value;
   return (
@@ -31,9 +42,14 @@ export function TopBar() {
         </div>
         {/* While it plays, the button breathes on the beat. */}
         <button id="play" class={beating ? 'primary beating' : 'primary'} style={beating ? { '--beat': beating.toFixed(3) + 's' } : undefined}
-          onClick={() => void play()}>{playing.value ? '▶ Playing' : '▶ Play'}</button>
-        <button id="stop" disabled={!playing.value} onClick={stop}>■ Stop</button>
-        <button id="share" type="button" title="A link to this poem and how it sounds, to send to anyone" onClick={() => void openShare()}>Share</button>
+          aria-label={playing.value ? 'Playing' : 'Play'} onClick={() => void play()}>
+          {PLAY}<span class="button-text">{playing.value ? 'Playing' : 'Play'}</span>
+        </button>
+        <button id="stop" disabled={!playing.value} aria-label="Stop" onClick={stop}>{STOP}<span class="button-text">Stop</span></button>
+        <button id="share" type="button" aria-label="Share" title="A link to this poem and how it sounds, to send to anyone"
+          onClick={() => void openShare()}>
+          {SHARE}<span class="button-text">Share</span>
+        </button>
         <button id="rollSwitch" type="button" class="roll-switch" aria-pressed={rollShown.value}
           title="Show the roll under the poem, whichever folder is open" onClick={() => showRoll(!rollShown.value)}>
           <span class="lever" aria-hidden="true" />Roll
