@@ -1,6 +1,8 @@
 #!/bin/sh
 # Builds the static page and deploys it to prosody.rocks as an assets-only Cloudflare Worker
-# (wrangler.jsonc). Wrangler comes from mise (mise.toml), logged in with `wrangler login`.
+# (wrangler.jsonc), by hand. A merge to main deploys itself (the `deploy` job in
+# .github/workflows/ci.yml); this is for a deploy from a working copy. Wrangler comes from mise
+# (mise.toml), logged in with `wrangler login`.
 #
 #   ./scripts/deploy.sh             build, check that the browser build answers as the native one, deploy
 #   ./scripts/deploy.sh --dry-run   build and check, and show what would be uploaded, without deploying
