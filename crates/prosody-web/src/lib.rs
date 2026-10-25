@@ -172,11 +172,25 @@ fn page(transport: Transport) -> Result<String> {
         .replace("__VOICINGS__", &list(VOICINGS))
         .replace("__RIDE_FALLBACKS__", &list(RIDE_FALLBACKS))
         .replace("__SCALES__", &list(&scales))
+        .replace("__SCALE_STEPS__", &scale_steps())
         .replace("__BANKS__", &list(BANKS))
         .replace("__INSTRUMENTS__", &list(&instruments))
         .replace("__MAPPINGS__", &format!("[{}]", mappings.join(",")))
         .replace("__SEED_POEM__", &json_string(SEED))
         .replace("__TRANSPORT__", &json_string(transport.name())))
+}
+
+/// Each scale's semitones above its root, by name, for the page's note circle — from [`Scale`]
+/// itself, so a scale added there lights the right notes here.
+fn scale_steps() -> String {
+    let entries: Vec<String> = Scale::ALL
+        .iter()
+        .map(|scale| {
+            let steps: Vec<String> = scale.steps().iter().map(u8::to_string).collect();
+            format!("{}:[{}]", json_string(scale.name()), steps.join(","))
+        })
+        .collect();
+    format!("{{{}}}", entries.join(","))
 }
 
 /// The example poems, for the preset menu: a file name, a label and the language the poem is in,
@@ -1164,6 +1178,9 @@ mod tests {
             "the old folding panels are gone"
         );
         // A neural voice is asked about before it downloads, and its download can be cancelled.
+        // The note circle lights each scale's own notes: phrygian dominant is 0 1 4 5 7 8 10.
+        assert!(html.contains("\"phrygian_dominant\":[0,1,4,5,7,8,10]"));
+        assert!(!html.contains("__SCALE_STEPS__"));
         assert!(html.contains("<dialog id=\"download\""));
         assert!(html.contains("needs a one-time download of"));
         assert!(html.contains("<dialog id=\"loader\""));

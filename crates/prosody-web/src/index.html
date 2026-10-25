@@ -9,7 +9,7 @@
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;1,400;1,500&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <style>
   /* Two materials. The poem is light on a dark ground — the one bold thing, lit syllable by
      syllable. Everything you set lives in paper folders along the bottom edge, each with its tab
@@ -164,7 +164,30 @@
     -webkit-box-decoration-break: clone; }
   #lit span.spoken { background: var(--wash-strong); }
 
-  /* ---- The folders ---- */
+  /* ---- The folders: a studio desk ----
+     Everything you set is hardware on a desk that slides up from the bottom edge: knobs with lit
+     arcs, faders on rails, flip switches, selectors in dark wells and an amber readout, each part in
+     one of the five layer colours. Every knob and fader is a real range input underneath (turned by
+     dragging across it, or Tab and the arrow keys); `showValues` sets --v, its 0–1 position, which
+     draws the arc, the pointer and the meter. Dark anodised in dark mode, light aluminium in light;
+     the readouts stay dark in both, as displays do. */
+  :root {
+    --desk-top: #24222d; --desk-bottom: #16151c; --desk-ink: #e6e3ef; --engrave: #9a96b0;
+    --well: #0c0b10; --groove: #34313f; --track: #2a2834; --cap-hi: #4a4757; --cap-lo: #23212b;
+    --cap-shadow: rgba(0, 0, 0, .55); --good: #9be3a5;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme=dark]) {
+      --desk-top: #f1efea; --desk-bottom: #dedbd3; --desk-ink: #24202b; --engrave: #5f5a68;
+      --well: #fbfaf6; --groove: #c4bfb4; --track: #cfcac0; --cap-hi: #ffffff; --cap-lo: #cfcbc2;
+      --cap-shadow: rgba(60, 50, 30, .28); --good: #2f7d3c;
+    }
+  }
+  :root[data-theme=light] {
+    --desk-top: #f1efea; --desk-bottom: #dedbd3; --desk-ink: #24202b; --engrave: #5f5a68;
+    --well: #fbfaf6; --groove: #c4bfb4; --track: #cfcac0; --cap-hi: #ffffff; --cap-lo: #cfcbc2;
+    --cap-shadow: rgba(60, 50, 30, .28); --good: #2f7d3c;
+  }
   #folders { position: relative; z-index: 2; }
   .tabs {
     display: flex; gap: .25rem; padding: 0 .75rem; overflow-x: auto; scrollbar-width: none;
@@ -173,86 +196,190 @@
   .tabs::-webkit-scrollbar { display: none; }
   .tabs button {
     flex: none; margin-top: .5rem; padding: .45rem 1rem .4rem; border: 0; border-radius: 10px 10px 0 0;
-    background: var(--paper-back); color: var(--paper-ink); font: italic 500 1rem/1.2 var(--serif);
+    background: var(--desk-bottom); color: var(--engrave);
+    font: 600 .72rem/1.4 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase;
     box-shadow: inset 0 3px 0 var(--t); transform: translateY(4px); transition: transform .15s;
   }
-  .tabs button:hover { transform: translateY(0); border: 0; }
-  .tabs button[aria-selected=true] { background: var(--paper); transform: translateY(0); }
-  .tabs button .count { font: 600 .7rem/1 system-ui, sans-serif; color: var(--paper-dim); margin-left: .3rem; }
+  .tabs button:hover { transform: translateY(0); border: 0; color: var(--desk-ink); }
+  .tabs button[aria-selected=true] { background: var(--desk-top); color: var(--desk-ink); transform: translateY(0); }
   .sheet {
-    background: var(--paper); color: var(--paper-ink); max-height: min(52dvh, 34rem); overflow-y: auto;
-    border-top: 1px solid var(--paper-line); box-shadow: 0 -12px 30px rgba(0, 0, 0, .35);
-    animation: rise .18s ease-out;
-    /* Inside the paper, the page's colours are the paper's. */
-    --ink: var(--paper-ink); --dim: var(--paper-dim); --line: var(--paper-line); --warn: #b4412d; --accent: #6b4bb8;
+    background: linear-gradient(180deg, var(--desk-top), var(--desk-bottom)); color: var(--desk-ink);
+    max-height: min(56dvh, 36rem); overflow-y: auto; border-top: 1px solid var(--groove);
+    box-shadow: 0 -12px 30px rgba(0, 0, 0, .35); animation: rise .18s ease-out;
+    --ink: var(--desk-ink); --dim: var(--engrave); --line: var(--groove);
   }
-  @media (max-width: 720px) { .sheet { max-height: 46dvh; } }
+  @media (max-width: 720px) { .sheet { max-height: 50dvh; } }
   @keyframes rise { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
-  .sheet[hidden] { display: none; }
-  .folder[hidden] { display: none; }
-  .folder > .lede { margin: 0; padding: .9rem 1.2rem .2rem; font: italic 1.05rem/1.4 var(--serif); color: var(--paper-dim); }
-  .sheet select, .sheet input { background: #fffaf0; color: var(--paper-ink); border-color: var(--paper-line); }
-  .sheet button { background: #f7f0e1; color: var(--paper-ink); border-color: var(--paper-line); }
-  .sheet button[aria-selected=true] { background: var(--paper-ink); color: var(--paper); border-color: var(--paper-ink); }
-  .sheet code { background: rgba(43, 38, 32, .07); padding: 0 .2em; border-radius: 3px; }
+  .sheet[hidden], .folder[hidden] { display: none; }
+  .sheet button { background: var(--well); color: var(--desk-ink); border-color: var(--groove); }
+  .sheet button[aria-selected=true] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .sheet code { background: var(--well); padding: 0 .25em; border-radius: 3px; font-size: .9em; }
+  .sheet a { color: var(--accent); }
 
-  .palette {
-    padding: .6rem 1.2rem 1rem; display: grid; gap: .55rem .9rem;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  .engrave { font: 600 .66rem/1.3 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--engrave); }
+  .hint { font-size: .78rem; color: var(--engrave); }
+  .desk-head { display: flex; align-items: baseline; gap: .9rem; flex-wrap: wrap; padding: .9rem 1.2rem .3rem; }
+  .desk-head h2 { margin: 0; font: italic 500 1.5rem/1 var(--serif); color: var(--desk-ink); }
+
+  /* The Sound desk: modules on a grid that reflows on a phone. */
+  .desk { padding-bottom: 1rem; }
+  .desk .desk-head { grid-column: 1 / -1; }
+  .desk { display: grid; gap: .8rem; padding: 0 1rem 1rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16.5rem), 1fr)); }
+  .module {
+    background: color-mix(in srgb, var(--well) 55%, transparent); border-radius: 12px; padding: .9rem;
+    box-shadow: inset 0 0 0 1px var(--groove); display: flex; flex-wrap: wrap; gap: .8rem; align-content: flex-start;
   }
-  .palette h2 { grid-column: 1 / -1; margin: .4rem 0 0; font: italic 600 1rem var(--serif); color: var(--dim); }
-  .palette p { grid-column: 1 / -1; margin: 0; color: var(--dim); font-size: .8rem; max-width: 60rem; }
+  .module.fx { grid-column: 1 / -1; align-items: center; gap: .6rem 1.1rem; }
+  .module.fx .fx-title { width: 100%; }
+  .module.key { flex-direction: column; align-items: center; }
+  .module.tempo { flex-direction: column; }
+  .module.voices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .module.mixer { justify-content: space-around; align-items: flex-end; flex-wrap: nowrap; gap: .4rem; }
+  .octaves { grid-column: 1 / -1; display: flex; gap: 1.2rem; }
+  .desk-note { grid-column: 1 / -1; margin: 0 .2rem; }
+
+  /* A knob: a lit arc of 270°, a cap, and a pointer, all turned by --v. */
+  .knob { display: flex; flex-direction: column; align-items: center; gap: .25rem; width: 4.6rem; cursor: grab; color: var(--desk-ink); }
+  .knob .dial {
+    --size: 3.6rem; position: relative; width: var(--size); height: var(--size); border-radius: 50%;
+    background: conic-gradient(from 225deg, var(--c) 0 calc(var(--v, 0) * 270deg), var(--track) 0 270deg, transparent 0);
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--c) 35%, transparent));
+  }
+  .knob .dial::before {
+    content: ""; position: absolute; inset: 6px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--cap-hi), var(--cap-lo) 75%);
+    box-shadow: 0 4px 10px var(--cap-shadow), inset 0 1px 0 rgba(255, 255, 255, .08);
+  }
+  .knob .dial i { position: absolute; inset: 6px; transform: rotate(calc(-135deg + var(--v, 0) * 270deg)); pointer-events: none; }
+  .knob .dial i::before { content: ""; position: absolute; left: 50%; top: 4px; width: 3px; height: 28%; margin-left: -1.5px; border-radius: 2px; background: var(--c); }
+  .knob input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: grab; z-index: 1; }
+  .knob .dial:focus-within { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .knob output { font: 600 .78rem 'IBM Plex Mono', ui-monospace, monospace; color: color-mix(in srgb, var(--c) var(--lit-strength), #000); }
+  .module.tempo .knob { margin-top: .4rem; }
+
+  /* A fader: a rail with a meter beside it, the cap in its layer colour. */
+  .fader { display: flex; flex-direction: column; align-items: center; gap: .3rem; color: var(--desk-ink); }
+  .fader .rail { display: flex; gap: .35rem; align-items: flex-end; height: 9.5rem; }
+  .fader .meter { width: 6px; height: 100%; border-radius: 3px; background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); position: relative; overflow: hidden; }
+  .fader .meter::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--v, 0) * 100%); background: linear-gradient(to top, var(--c), color-mix(in srgb, var(--c) 40%, #ff9b8a)); }
+  .fader input {
+    writing-mode: vertical-lr; direction: rtl; width: 2.1rem; height: 100%; margin: 0;
+    -webkit-appearance: none; appearance: none; background: transparent; cursor: grab;
+  }
+  .fader input::-webkit-slider-runnable-track { width: 6px; border-radius: 3px; background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); }
+  .fader input::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 2rem; height: 1.3rem; border-radius: 4px; margin-left: -.85rem;
+    background: linear-gradient(var(--cap-hi), var(--cap-lo)); border: 1px solid var(--groove);
+    box-shadow: inset 0 -3px 0 var(--c), 0 4px 8px var(--cap-shadow);
+  }
+  .fader input::-moz-range-track { width: 6px; border-radius: 3px; background: var(--well); }
+  .fader input::-moz-range-thumb { width: 2.3rem; height: 1.3rem; border-radius: 4px; background: var(--cap-lo); border: 1px solid var(--groove); box-shadow: inset 0 -3px 0 var(--c); }
+  .fader input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+  .fader output { font: 600 .78rem 'IBM Plex Mono', ui-monospace, monospace; color: color-mix(in srgb, var(--c) var(--lit-strength), #000); }
+
+  /* A selector: a menu in a dark well with a lit point. */
+  .selector { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+  .selector.inline { flex-direction: row; align-items: center; gap: .6rem; }
+  .sheet select, .sheet input[type=number] {
+    font: 500 .82rem 'IBM Plex Mono', ui-monospace, monospace; color: var(--desk-ink); background: var(--well);
+    border: 1px solid var(--groove); border-radius: 6px; padding: .4rem .5rem; min-height: 2.2rem; min-width: 0; width: 100%;
+  }
+  .selector.inline select { width: auto; }
+  /* The tempo: an amber readout, a display that stays dark in light mode too. */
+  .leds { display: flex; align-items: center; gap: .4rem; }
+  .sheet input.led {
+    width: 5.2rem; text-align: center; font: 600 1.9rem/1 'IBM Plex Mono', ui-monospace, monospace; color: #ffb86b;
+    background: #0e0d12; border: 0; box-shadow: inset 0 0 0 1px #2e2c3a; text-shadow: 0 0 14px rgba(255, 184, 107, .4);
+    padding: .4rem .3rem; -moz-appearance: textfield;
+  }
+  .sheet input.led::-webkit-inner-spin-button { opacity: .35; }
+  .led-dash { font: 600 1.4rem 'IBM Plex Mono', ui-monospace, monospace; color: var(--engrave); }
+
+  /* The key: the twelve notes on a circle, the root lit, the scale's notes tinted. */
+  .circle {
+    position: relative; width: 13rem; height: 13rem; border-radius: 50%; flex: none;
+    background: radial-gradient(color-mix(in srgb, var(--well) 70%, transparent) 55%, transparent 56%);
+    box-shadow: inset 0 0 0 1px var(--groove);
+  }
+  .circle button {
+    position: absolute; width: 2.2rem; height: 2.2rem; margin: -1.1rem 0 0 -1.1rem; padding: 0; border-radius: 50%;
+    font: 600 .72rem 'IBM Plex Mono', ui-monospace, monospace; background: var(--well); color: var(--engrave);
+    border: 1px solid var(--groove);
+  }
+  .circle button.in { background: color-mix(in srgb, var(--pulse) 22%, var(--well)); color: var(--desk-ink); border-color: color-mix(in srgb, var(--pulse) 60%, var(--groove)); }
+  .circle button[aria-pressed=true] { background: var(--pulse); color: #191423; border-color: var(--pulse); box-shadow: 0 0 14px color-mix(in srgb, var(--pulse) 55%, transparent); }
+  .circle .hub {
+    position: absolute; inset: 3.6rem; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); text-align: center; padding: .3rem;
+  }
+  .circle .hub span:first-child { font: italic 500 1.9rem/1 var(--serif); color: color-mix(in srgb, var(--pulse) var(--lit-strength), #000); }
+  .module.key .selector { width: 100%; }
+
+  /* A flip switch: a lever that lights when on. */
+  .switch { display: flex; flex-direction: row; align-items: center; gap: .7rem; cursor: pointer; }
+  .flip {
+    -webkit-appearance: none; appearance: none; flex: none; width: 1.9rem; height: 3.2rem; margin: 0; border-radius: 1rem;
+    background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); position: relative; cursor: pointer;
+  }
+  .flip::before {
+    content: ""; position: absolute; left: .25rem; top: 1.7rem; width: 1.4rem; height: 1.4rem; border-radius: 50%;
+    background: linear-gradient(var(--cap-hi), var(--cap-lo)); box-shadow: 0 2px 5px var(--cap-shadow); transition: top .15s;
+  }
+  .flip:checked { box-shadow: inset 0 0 0 1px var(--rhyme), 0 0 12px color-mix(in srgb, var(--rhyme) 40%, transparent); }
+  .flip:checked::before { top: .25rem; background: linear-gradient(#fff, var(--rhyme)); }
+  .flip:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  /* The other folders' parts on the desk. */
+  .palette { padding: .4rem 1.2rem 1.1rem; display: grid; gap: .8rem 1rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); align-items: end; }
+  .palette p { grid-column: 1 / -1; margin: 0; color: var(--engrave); font-size: .8rem; max-width: 60rem; }
   label { display: flex; flex-direction: column; gap: .2rem; font-size: .76rem; color: var(--dim); }
-  select, input {
-    font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 5px;
-    border: 1px solid var(--line); background: var(--field); color: var(--ink);
-  }
+  select, input { font: inherit; font-size: .85rem; padding: .3rem .4rem; border-radius: 5px; border: 1px solid var(--line); background: var(--field); color: var(--ink); }
   input[type=range] { padding: 0; accent-color: var(--accent); }
   .row { display: flex; gap: .4rem; }
   .row input { width: 100%; min-width: 0; }
+  .reading .knob { justify-self: start; }
+  .reading .switch { grid-column: span 2; }
 
-  .views-nav { display: flex; gap: .3rem; padding: .7rem 1.2rem .5rem; flex-wrap: wrap; }
-  .views-nav button { padding: .25rem .7rem; font-size: .82rem; font-weight: 500; }
+  .views-nav { display: flex; gap: .3rem; padding: .4rem 1.2rem .5rem; flex-wrap: wrap; }
+  .views-nav button { padding: .3rem .8rem; font: 600 .7rem 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
   pre {
-    margin: 0; overflow: auto; padding: .6rem 1.2rem 1.2rem; max-height: 44dvh;
-    font-family: var(--mono); font-size: 12px; line-height: 1.55;
-    white-space: pre; tab-size: 2;
+    margin: 0 1rem 1rem; overflow: auto; padding: .8rem 1rem; max-height: 44dvh; border-radius: 10px;
+    background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); color: var(--desk-ink);
+    font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre; tab-size: 2;
   }
   pre.wrapped { white-space: pre-wrap; word-break: break-all; }
   .hidden { display: none; }
 
-  .mappings table { grid-column: 1 / -1; border-collapse: collapse; font-size: .82rem; }
-  .mappings th { color: var(--dim); font-weight: 600; text-align: center; padding: 0 .5rem; }
-  .mappings td { padding: .15rem .5rem; vertical-align: top; }
-  .mappings td:first-child { padding-left: 0; }
-  .mappings td.check { text-align: center; width: 6rem; }
-  .mappings code { font-family: var(--mono); color: var(--ink); }
-  .mappings .what { color: var(--dim); }
-  .mappings select { width: auto; font-size: .78rem; padding: .1rem .2rem; }
-  .mappings select.changed { border-color: var(--ink); border-width: 2px; }
-  .reading .check span { display: flex; gap: .4rem; align-items: center; color: var(--ink); font-size: .82rem; }
-  .reading input[type=checkbox] { width: auto; }
+  .mappings table { grid-column: 1 / -1; border-collapse: separate; border-spacing: 0 .3rem; font-size: .82rem; }
+  .mappings th { font: 600 .66rem 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; color: var(--engrave); text-align: center; padding: 0 .5rem; }
+  .mappings td { padding: .3rem .5rem; vertical-align: middle; background: color-mix(in srgb, var(--well) 55%, transparent); }
+  .mappings td:first-child { border-radius: 8px 0 0 8px; padding-left: .7rem; }
+  .mappings td:last-child { border-radius: 0 8px 8px 0; }
+  .mappings td.check { text-align: center; width: 8rem; }
+  .mappings code { font-family: var(--mono); color: var(--desk-ink); background: none; }
+  .mappings .what { color: var(--engrave); }
+  .mappings select { width: auto; font-size: .76rem; padding: .2rem .3rem; min-height: 0; }
+  .mappings select.changed { border-color: var(--bass); box-shadow: 0 0 8px color-mix(in srgb, var(--bass) 45%, transparent); }
 
-  #roll { width: 100%; height: clamp(150px, 26dvh, 240px); display: block; background: #18171f; }
-  .rollbar { display: flex; align-items: center; gap: .6rem 1.2rem; padding: .6rem 1.2rem; flex-wrap: wrap; }
-  .rollbar label { flex-direction: row; align-items: center; gap: .5rem; }
-  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .8rem; color: var(--dim); }
+  #roll { width: calc(100% - 2rem); margin: 0 1rem 1rem; border-radius: 10px; height: clamp(150px, 26dvh, 240px); display: block; background: #18171f; box-shadow: inset 0 0 0 1px var(--groove); }
+  .rollbar { display: flex; align-items: center; gap: .6rem 1.2rem; padding: .8rem 1.2rem .6rem; flex-wrap: wrap; }
+  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .8rem; color: var(--engrave); }
   .key span { display: inline-flex; align-items: center; gap: .4rem; }
-  .key i { width: .65rem; height: .65rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
-  .key .echo i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--dim); }
-  .key .voice i { border-radius: 2px; width: 1.1rem; background: rgba(43, 38, 32, .22); }
+  .key i { width: .65rem; height: .65rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+  .key .echo i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--engrave); }
+  .key .voice i { border-radius: 2px; width: 1.1rem; background: var(--wash-strong); box-shadow: none; }
 
-  #score { padding: .6rem 1.2rem 1.2rem; }
+  #score { padding: .4rem 1.2rem 1.2rem; }
   #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
   #score table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
-  #score th { color: var(--dim); font-weight: 600; text-align: right; padding: .2rem .7rem; }
+  #score th { color: var(--engrave); font-weight: 600; text-align: right; padding: .2rem .7rem; }
   #score th:first-child, #score td:first-child { text-align: left; padding-left: 0; }
-  #score td { text-align: right; padding: .2rem .7rem; border-top: 1px solid var(--line); }
+  #score td { text-align: right; padding: .2rem .7rem; border-top: 1px solid var(--groove); }
   #score td.out { color: var(--warn); }
-  #score td.up { color: #2f7d3c; }
+  #score td.up { color: var(--good); }
   #score td.down { color: var(--warn); }
   #score tr.total td { font-weight: 700; }
-  #score p { color: var(--dim); font-size: .8rem; max-width: 46rem; }
+  #score p { color: var(--engrave); font-size: .8rem; max-width: 46rem; }
 
   /* ---- The welcome, the download question and the loader: paper cards over the dimmed page ---- */
   dialog {
@@ -353,7 +480,7 @@
   <div class="sheet" id="sheet" hidden>
     <section class="folder" id="folderRoll" role="tabpanel" aria-labelledby="tabRoll" hidden>
       <div class="rollbar">
-        <label>Bars shown
+        <label class="selector inline"><span class="engrave">Bars shown</span>
           <select id="rollBars">
             <option value="2">2</option>
             <option value="4" selected>4</option>
@@ -374,99 +501,111 @@
       <canvas id="roll" aria-label="The notes playing now, scrolling past a playhead: each row one sound, coloured by its layer; faint lines mark the bars"></canvas>
     </section>
     <section class="folder" id="folderSound" role="tabpanel" aria-labelledby="tabSound" hidden>
-      <p class="lede">How it sounds: change any of it and the same poem plays the same things, differently.</p>
-      <div class="palette">
-        <label>Scale
-          <select id="scale"></select>
-        </label>
-        <label>Root
-          <select id="root"></select>
-        </label>
-        <label>Bank
-          <select id="bank"></select>
-        </label>
-        <label>Sound
-          <select id="palette" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are — except jazz, which also sets its scale, swing and bank."></select>
-        </label>
-        <label>Bass
-          <select id="bass"></select>
-        </label>
-        <label>Melody
-          <select id="melody"></select>
-        </label>
-        <label>Chords
-          <select id="chord_sound" title="The instrument of the chord lane, which plays only when a side's harmony mapping is not off"></select>
-        </label>
-        <label>Kit
-          <select id="kit" title="Which drum carries each layer: kick and hat, or ride and snare"></select>
-        </label>
-        <label>Voicing
-          <select id="voicing" title="Each rhyme word as one note, or as the seventh chord on its degree. With a side's harmony mapping on, rhyme words are single notes over the chords and this voices only the chord lane"></select>
-        </label>
-        <label>Ride stand-in
-          <select id="ride_fallback" title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash"></select>
-        </label>
-        <label>Bass octave <span id="bass_octaveOut"></span>
-          <input id="bass_octave" type="range" min="1" max="3" step="1" title="The octave the bass plays in: 2 is MIDI 36">
-        </label>
-        <label>Melody octave <span id="melody_octaveOut"></span>
-          <input id="melody_octave" type="range" min="3" max="5" step="1" title="The octave the rhyme melody plays in: 4 is MIDI 60, middle C">
-        </label>
-        <label>Tempo range (bpm)
-          <span class="row">
-            <input id="low" type="number" min="1" max="400" value="110">
-            <input id="high" type="number" min="1" max="400" value="130">
-          </span>
-        </label>
-        <label>Swing <span id="swingOut"></span>
-          <input id="swing" type="range" min="0" max="1" step="0.01">
-        </label>
-        <h2>Mix</h2>
-        <label>Reverb <span id="reverbOut"></span>
-          <input id="reverb" type="range" min="0" max="1" step="0.01">
-        </label>
-        <label>Room size (s) <span id="room_sizeOut"></span>
-          <input id="room_size" type="range" min="0.1" max="10" step="0.1">
-        </label>
-        <label>Echo on melody <span id="delayOut"></span>
-          <input id="delay" type="range" min="0" max="1" step="0.01">
-        </label>
-        <label>High cut (Hz) <span id="high_cutOut"></span>
-          <input id="high_cut" type="range" min="1000" max="20000" step="100">
-        </label>
-        <label>Drive <span id="driveOut"></span>
-          <input id="drive" type="range" min="0" max="1" step="0.01">
-        </label>
-        <label>Compress <span id="compressOut"></span>
-          <input id="compress" type="range" min="0" max="1" step="0.01">
-        </label>
-        <label>Humanise <span id="humaniseOut"></span>
-          <input id="humanise" type="range" min="0" max="1" step="0.01">
-        </label>
-        <label>Drums level <span id="drums_gainOut"></span>
-          <input id="drums_gain" type="range" min="0.1" max="2" step="0.01">
-        </label>
-        <label>Bass level <span id="bass_gainOut"></span>
-          <input id="bass_gain" type="range" min="0.1" max="2" step="0.01">
-        </label>
-        <label>Melody level <span id="melody_gainOut"></span>
-          <input id="melody_gain" type="range" min="0.1" max="2" step="0.01">
-        </label>
-        <label>Chords level <span id="chord_gainOut"></span>
-          <input id="chord_gain" type="range" min="0.1" max="2" step="0.01" title="The chord lane's level, shared between a chord's tones; heard only with the harmony mapping on">
-        </label>
-        <label>Levels follow density <span id="density_levelOut"></span>
-          <input id="density_level" type="range" min="0" max="1" step="0.01" title="Each bar's gains divided by n to this power, n = the lines sounding in it: 0 fixed levels, 0.5 by √n, 1 by n">
-        </label>
-        <p>
-          The poem decides where in the tempo range it sits, from how densely its syllables pack
-          into bars. Everything else here is colour. Humanise strays each syllable a little late and
-          soft, drawn from its own line, so the same poem always strays the same way.
-        </p>
+      <div class="desk">
+        <div class="desk-head">
+          <h2>Sound</h2>
+          <span class="engrave">how it sounds · never what happens</span>
+        </div>
+        <div class="module key" aria-label="Key">
+          <div class="circle" id="noteCircle" role="group" aria-label="Root note">
+            <div class="hub"><span id="hubRoot">D</span><span id="hubScale" class="engrave"></span></div>
+          </div>
+          <select id="root" hidden></select>
+          <label class="selector"><span class="engrave">Scale</span><select id="scale"></select></label>
+        </div>
+        <div class="module tempo" aria-label="Tempo">
+          <span class="engrave">Tempo window · bpm</span>
+          <div class="leds">
+            <input id="low" class="led" type="number" min="1" max="400" value="110" aria-label="Slowest tempo, beats per minute">
+            <span class="led-dash">–</span>
+            <input id="high" class="led" type="number" min="1" max="400" value="130" aria-label="Fastest tempo, beats per minute">
+          </div>
+          <span class="hint">the poem picks within it, by how densely its syllables pack</span>
+          <label class="knob" style="--c: var(--ornament)">
+            <span class="dial"><input id="swing" type="range" min="0" max="1" step="0.01" aria-label="Swing"><i></i></span>
+            <span class="engrave">Swing</span><output id="swingOut"></output>
+          </label>
+        </div>
+        <div class="module voices" aria-label="Instruments">
+          <label class="selector" title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are — except jazz, which also sets its scale, swing and bank."><span class="engrave">Sound</span><select id="palette"></select></label>
+          <label class="selector"><span class="engrave">Bank</span><select id="bank"></select></label>
+          <label class="selector" title="Which drum carries each layer: kick and hat, or ride and snare"><span class="engrave">Kit</span><select id="kit"></select></label>
+          <label class="selector" title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash"><span class="engrave">Ride stand-in</span><select id="ride_fallback"></select></label>
+          <label class="selector"><span class="engrave">Bass</span><select id="bass"></select></label>
+          <label class="selector"><span class="engrave">Melody</span><select id="melody"></select></label>
+          <label class="selector" title="The instrument of the chord lane, which plays only when a side’s harmony mapping is not off"><span class="engrave">Chords</span><select id="chord_sound"></select></label>
+          <label class="selector" title="Each rhyme word as one note, or as the seventh chord on its degree. With a side’s harmony mapping on, rhyme words are single notes over the chords and this voices only the chord lane"><span class="engrave">Voicing</span><select id="voicing"></select></label>
+          <div class="octaves">
+          <label class="knob" style="--c: var(--bass)" title="The octave the bass plays in: 2 is MIDI 36">
+            <span class="dial"><input id="bass_octave" type="range" min="1" max="3" step="1" aria-label="Bass oct"><i></i></span>
+            <span class="engrave">Bass oct</span><output id="bass_octaveOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--rhyme)" title="The octave the rhyme melody plays in: 4 is MIDI 60, middle C">
+            <span class="dial"><input id="melody_octave" type="range" min="3" max="5" step="1" aria-label="Melody oct"><i></i></span>
+            <span class="engrave">Melody oct</span><output id="melody_octaveOut"></output>
+          </label>
+          </div>
+        </div>
+        <div class="module mixer" aria-label="Levels">
+          <label class="fader" style="--c: var(--pulse)">
+            <span class="rail"><span class="meter"></span><input id="drums_gain" type="range" min="0.1" max="2" step="0.01" aria-label="Drums level"></span>
+            <output id="drums_gainOut"></output><span class="engrave">Drums</span>
+          </label>
+          <label class="fader" style="--c: var(--bass)">
+            <span class="rail"><span class="meter"></span><input id="bass_gain" type="range" min="0.1" max="2" step="0.01" aria-label="Bass level"></span>
+            <output id="bass_gainOut"></output><span class="engrave">Bass</span>
+          </label>
+          <label class="fader" style="--c: var(--rhyme)">
+            <span class="rail"><span class="meter"></span><input id="melody_gain" type="range" min="0.1" max="2" step="0.01" aria-label="Melody level"></span>
+            <output id="melody_gainOut"></output><span class="engrave">Melody</span>
+          </label>
+          <label class="fader" style="--c: var(--chords)" title="The chord lane’s level, shared between a chord’s tones; heard only with the harmony mapping on">
+            <span class="rail"><span class="meter"></span><input id="chord_gain" type="range" min="0.1" max="2" step="0.01" aria-label="Chords level"></span>
+            <output id="chord_gainOut"></output><span class="engrave">Chords</span>
+          </label>
+        </div>
+        <div class="module fx" aria-label="Mix">
+          <span class="engrave fx-title">Mix</span>
+          <label class="knob" style="--c: var(--pulse)">
+            <span class="dial"><input id="reverb" type="range" min="0" max="1" step="0.01" aria-label="Reverb"><i></i></span>
+            <span class="engrave">Reverb</span><output id="reverbOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--ornament)">
+            <span class="dial"><input id="room_size" type="range" min="0.1" max="10" step="0.1" aria-label="Room"><i></i></span>
+            <span class="engrave">Room</span><output id="room_sizeOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--rhyme)">
+            <span class="dial"><input id="delay" type="range" min="0" max="1" step="0.01" aria-label="Echo"><i></i></span>
+            <span class="engrave">Echo</span><output id="delayOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--chords)">
+            <span class="dial"><input id="high_cut" type="range" min="1000" max="20000" step="100" aria-label="High cut"><i></i></span>
+            <span class="engrave">High cut</span><output id="high_cutOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--bass)">
+            <span class="dial"><input id="drive" type="range" min="0" max="1" step="0.01" aria-label="Drive"><i></i></span>
+            <span class="engrave">Drive</span><output id="driveOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--ornament)">
+            <span class="dial"><input id="compress" type="range" min="0" max="1" step="0.01" aria-label="Compress"><i></i></span>
+            <span class="engrave">Compress</span><output id="compressOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--rhyme)">
+            <span class="dial"><input id="humanise" type="range" min="0" max="1" step="0.01" aria-label="Humanise"><i></i></span>
+            <span class="engrave">Humanise</span><output id="humaniseOut"></output>
+          </label>
+          <label class="knob" style="--c: var(--pulse)" title="Levels follow density: each bar’s gains divided by n to this power, n = the lines sounding in it: 0 fixed levels, 0.5 by √n, 1 by n">
+            <span class="dial"><input id="density_level" type="range" min="0" max="1" step="0.01" aria-label="Density"><i></i></span>
+            <span class="engrave">Density</span><output id="density_levelOut"></output>
+          </label>
+        </div>
+        <p class="hint desk-note">Everything here is colour: the same poem plays the same things,
+          differently. Humanise strays each syllable a little late and soft, drawn from its own line,
+          so the same poem always strays the same way.</p>
       </div>
     </section>
     <section class="folder" id="folderMappings" role="tabpanel" aria-labelledby="tabMappings" hidden>
-      <p class="lede">What happens: which feature of the poem becomes which sound. Set A and B, then switch while it plays.</p>
+      <div class="desk-head"><h2>Mappings</h2><span class="engrave">what happens · set A and B, switch while it plays</span></div>
       <div class="palette mappings">
         <table>
           <thead><tr><th></th><th>A</th><th>B</th></tr></thead>
@@ -485,9 +624,9 @@
       </div>
     </section>
     <section class="folder" id="folderReading" role="tabpanel" aria-labelledby="tabReading" hidden>
-      <p class="lede">A voice reading the poem over the music.</p>
+      <div class="desk-head"><h2>Reading</h2><span class="engrave">a voice reading the poem over the music</span></div>
       <div class="palette reading">
-        <label>Engine
+        <label class="selector"><span class="engrave">Engine</span>
           <select id="engine" title="Who reads: your browser's own voice, a neural voice that runs in this page — downloaded once you choose it, then kept by the browser — or readings recorded ahead of time for the example poems, a small file a line">
             <option value="kokoro">Kokoro-82M</option>
             <option value="piper">Piper</option>
@@ -496,22 +635,23 @@
             <option value="browser">browser voice</option>
           </select>
         </label>
-        <label>Language
+        <label class="selector"><span class="engrave">Language</span>
           <select id="language" title="The language the poem is read in: an example poem sets its own; each engine lists only its voices for it"></select>
         </label>
-        <label>Voice
+        <label class="selector"><span class="engrave">Voice</span>
           <select id="voice"><option value="">browser default</option></select>
         </label>
-        <label>Pace
+        <label class="selector"><span class="engrave">Pace</span>
           <select id="pace" title="natural: each line at the voice's own speed, a little faster or slower line by line, with pauses where the punctuation asks; fitted: each line squeezed or stretched to fill its bar">
             <option value="natural">natural</option>
             <option value="fitted">fitted to the bar</option>
           </select>
         </label>
-        <label>Reading level <span id="readingLevelOut"></span>
-          <input id="readingLevel" type="range" min="0" max="2" step="0.05" value="1" title="The voice's level into the master, against the music">
+        <label class="knob" style="--c: var(--rhyme)" title="The voice's level into the master, against the music">
+          <span class="dial"><input id="readingLevel" type="range" min="0" max="2" step="0.05" value="1" aria-label="Reading level"><i></i></span>
+          <span class="engrave">Voice level</span><output id="readingLevelOut"></output>
         </label>
-        <label class="check"><span><input id="duck" type="checkbox" checked> duck the music while a stanza is read</span></label>
+        <label class="switch"><input id="duck" class="flip" type="checkbox" checked><span class="engrave">Duck the music while a stanza is read</span></label>
         <p>
           Whether and when lines are read is the <code>reading</code> mapping above:
           <code>breath</code> (the default) reads each stanza through, with a silent bar before the
@@ -529,6 +669,7 @@
       </div>
     </section>
     <section class="folder" id="folderViews" role="tabpanel" aria-labelledby="tabViews" hidden>
+      <div class="desk-head"><h2>Under the hood</h2><span class="engrave">what the poem compiled to</span></div>
       <nav class="views-nav">
         <button id="tabPattern" aria-selected="true">Pattern</button>
         <button id="tabExplain" aria-selected="false">What each word became</button>
@@ -731,6 +872,7 @@ const OPTIONS = {
 };
 // [name, what it does, [its variants], its default], in the order the core lists them
 const MAPPINGS = __MAPPINGS__;
+const SCALE_STEPS = __SCALE_STEPS__;   // each scale's semitones above its root, for the note circle
 const PRESETS = __PRESETS__;     // the examples: name, label, poem, and the palette its header set
 const PALETTES = __PALETTES__;   // the named palettes, every control's value, from `Style::preset`
 // The controls each named palette sets (`style::preset_keys`): the sound and mix, and for jazz its
@@ -739,11 +881,51 @@ const PALETTE_KEYS = __PALETTE_KEYS__;
 for (const [id, values] of Object.entries(OPTIONS)) {
   $(id).innerHTML = values.map((v) => `<option>${v}</option>`).join('');
 }
+// The key: twelve notes on a circle. A note is a button that sets the root; the root is lit and
+// the scale's other notes tinted, from the scale's own steps (SCALE_STEPS).
+const NOTES = OPTIONS.root;
+for (const [i, name] of NOTES.entries()) {
+  const note = document.createElement('button');
+  note.type = 'button';
+  note.textContent = name.replace('#', '♯');
+  note.setAttribute('aria-label', 'Root ' + name.replace('#', ' sharp'));
+  const angle = (i / 12) * 2 * Math.PI - Math.PI / 2;
+  note.style.left = `calc(50% + ${(Math.cos(angle) * 5.3).toFixed(3)}rem)`;
+  note.style.top = `calc(50% + ${(Math.sin(angle) * 5.3).toFixed(3)}rem)`;
+  note.addEventListener('click', () => {
+    $('root').value = name;
+    $('root').dispatchEvent(new Event('input'));
+  });
+  $('noteCircle').append(note);
+}
+function showKey() {
+  const root = NOTES.indexOf($('root').value);
+  const steps = SCALE_STEPS[$('scale').value] || [];
+  [...$('noteCircle').querySelectorAll('button')].forEach((note, i) => {
+    note.setAttribute('aria-pressed', i === root);
+    note.classList.toggle('in', steps.includes((i - root + 12) % 12));
+  });
+  $('hubRoot').textContent = ($('root').value || '').replace('#', '♯');
+  $('hubScale').textContent = $('scale').value.replace(/_/g, ' ');
+}
+
 $('palette').innerHTML = Object.keys(PALETTES).map((name) => `<option>${name}</option>`).join('')
   + '<option value="custom" disabled>custom</option>';
 
 function showValues() {
-  for (const id of SLIDERS) $(id + 'Out').textContent = $(id).value;
+  for (const id of SLIDERS) {
+    $(id + 'Out').textContent = $(id).value;
+    turn($(id));
+  }
+  showKey();
+}
+
+// A knob's arc and pointer, and a fader's meter, follow their input: --v is its 0–1 position.
+function turn(input) {
+  const part = input.closest('.knob, .fader');
+  if (!part) return;
+  const at = (Number(input.value) - Number(input.min)) / (Number(input.max) - Number(input.min));
+  part.style.setProperty('--v', Math.max(0, Math.min(1, at || 0)).toFixed(4));
 }
 
 // The palette menu names the palette the sound controls currently match, or "custom".
@@ -2262,6 +2444,7 @@ function showVoices() {
   $('voice').disabled = !offered.length && engine !== 'browser';
   $('readingLevel').value = readingSettings.level;
   $('readingLevelOut').textContent = Number(readingSettings.level).toFixed(2);
+  turn($('readingLevel'));
 }
 
 // A change of who reads, how fast, or in what language, while it plays: what is scheduled is
@@ -2289,6 +2472,7 @@ $('voice').addEventListener('change', () => {
 $('readingLevel').addEventListener('input', () => {
   readingSettings.level = Number($('readingLevel').value);
   $('readingLevelOut').textContent = readingSettings.level.toFixed(2);
+  turn($('readingLevel'));
   if (voiceBus) voiceBus.gain.setTargetAtTime(readingSettings.level, getAudioContext().currentTime, 0.02);
   saveReading();
 });
