@@ -82,6 +82,9 @@
   .poems { width: 19rem; }
   .poems .patch { gap: 0; }
   #play { position: relative; }
+  #play, #stop, #share { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; }
+  .icon { width: 1em; height: 1em; flex: none; fill: currentColor; }
+  .icon .line { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
   /* While it plays, the Play button breathes on the beat (--beat, from the piece's tempo). */
   #play.beating::after {
     content: ""; position: absolute; inset: -4px; border-radius: 9px; border: 2px solid var(--accent);
@@ -100,7 +103,11 @@
     /* The poem picker gets a row of its own; Play, Stop and the A/B switch share the next. */
     .controls { width: 100%; order: 4; gap: .4rem; }
     .poems { flex: 1 1 100%; width: auto; min-width: 0; }
+    /* The transport as icons alone, so it shares one row with the roll and the A/B switch. */
+    #play, #stop, #share { min-width: 2.75rem; min-height: 2.75rem; padding: 0 .7rem; }
     #play { flex: 1; }
+    #play .button-text, #stop .button-text, #share .button-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .icon { width: 1.15rem; height: 1.15rem; }
     .ab span { display: none; }
     #notice { padding: .35rem .75rem; font-size: .8rem; }
   }
