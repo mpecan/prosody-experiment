@@ -1,10 +1,10 @@
 // The Sound folder: how it sounds, never what happens. The key, the tempo window and the feel, and
 // the instruments — each a patch display or a switch. The levels and effects are on the Mixer.
-import { pickPalette, turnControl } from '../../actions';
+import { openFolder, pickStyle, turnControl } from '../../actions';
 import { optionsOf, paletteOf, ROOTS } from '../../controls';
 import { site } from '../../data';
 import { nameOf } from '../../names';
-import { controls } from '../../store';
+import { controls, suggested } from '../../store';
 import { Knob } from '../desk/parts';
 import { Patch, type Choice } from '../desk/Patch';
 import { Segmented } from '../desk/Segmented';
@@ -61,19 +61,47 @@ function KeyCircle() {
   );
 }
 
+/** What a style's suggestions are, in words: "bass: syllables, harmony: cadence". */
+const suggestions = (suggests: Record<string, string>) =>
+  Object.entries(suggests).map(([mapping, variant]) => `${mapping}: ${variant}`).join(', ');
+
+// The styles: a card each, the one the sound controls match lit — none once a control has been
+// turned by hand. A style sets its palette, and on A the mappings its genre suggests.
+function StylePicker() {
+  const current = paletteOf(controls.value);
+  const set = Object.entries(suggested.value).filter(([, change]) => change.style === current);
+  return (
+    <div class="module styles" aria-label="Style">
+      <span class="label">Style</span>
+      <div class="style-cards" id="styles" role="group" aria-label="Style">
+        {site.styles.map((style) => (
+          <button key={style.name} type="button" class="style-card" data-style={style.name} aria-pressed={current === style.name}
+            onClick={() => pickStyle(style.name)}>
+            <span class="style-name">{nameOf(style.name)}</span>
+            <span class="style-what">{style.what}</span>
+            {Object.keys(style.suggests).length > 0 && <span class="style-suggests">suggests {suggestions(style.suggests)}</span>}
+          </button>
+        ))}
+      </div>
+      {current === 'custom' && <p class="hint">Custom: a control has been turned since the last style.</p>}
+      {set.length > 0 && (
+        <p class="hint style-set">
+          {nameOf(current)} also set A's {set.map(([mapping, { to }]) => `${mapping} to ${to}`).join(' and ')}.{' '}
+          <button type="button" class="link" onClick={() => openFolder('mappings')}>See Mappings</button>
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function SoundFolder() {
-  // The palette display names the palette the sound controls currently match, or "custom".
-  const palette = paletteOf(controls.value);
-  const palettes: Choice[] = [
-    ...Object.keys(site.palettes).map((name) => ({ value: name, label: name })),
-    { value: 'custom', label: 'custom', disabled: true },
-  ];
   return (
     <div class="desk">
       <div class="desk-head">
         <h2>Sound</h2>
         <span class="hint">How it sounds, never what happens.</span>
       </div>
+      <StylePicker />
       <div class="module key" aria-label="Key">
         <KeyCircle />
         <ControlPatch id="scale" label="Scale" colour="var(--pulse)" />
@@ -95,8 +123,6 @@ export function SoundFolder() {
         </div>
       </div>
       <div class="module voices" aria-label="Instruments">
-        <Patch id="palette" label="Sound" value={palette} options={palettes} onChange={pickPalette} colour="var(--ornament)"
-          title="A named palette: instruments and mix. Scale, root, tempo and bank stay as they are — except jazz, which also sets its scale, swing and bank." />
         <ControlPatch id="bank" label="Drum machine" colour="var(--pulse)" />
         <ControlSwitch id="kit" label="Kit" colour="var(--pulse)" title="Which drum carries each layer: kick and hat, or ride and snare" />
         <ControlSwitch id="ride_fallback" label="Ride stand-in" colour="var(--pulse)"

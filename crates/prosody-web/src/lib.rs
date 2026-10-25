@@ -168,6 +168,7 @@ fn site_json(transport: Transport) -> Result<String> {
         ("presets", presets_json()?),
         ("palettes", format!("{{{}}}", palettes.join(","))),
         ("paletteKeys", format!("{{{}}}", palette_keys.join(","))),
+        ("styles", styles_json()),
         ("seed", json_string(SEED)),
     ];
     let fields: Vec<String> = fields
@@ -175,6 +176,120 @@ fn site_json(transport: Transport) -> Result<String> {
         .map(|(key, value)| format!("{}:{value}", json_string(key)))
         .collect();
     Ok(format!("{{{}}}", fields.join(",")))
+}
+
+/// Every named palette as the page's style picker shows it: what it sounds like, in a few words,
+/// and the mapping variants it suggests for side A — what its genre would have the poem *do*.
+///
+/// The suggestions are the page's and only the page's. A style is palette (I3): a header naming
+/// `jazz` changes the sound and nothing else. A walking bass and cadences are mappings, and on the
+/// page a writer chooses mappings; so picking a style there also sets these on A, visibly, in the
+/// Mappings folder, where they can be set back — the user's decision of 2026-10-25, "suggest, don't
+/// impose". In the order of [`PALETTES`], which a test checks, as it checks every name below.
+const STYLES: &[StyleEntry] = &[
+    StyleEntry {
+        name: "default",
+        what: "electric piano over an acoustic bass, a modest room",
+        suggests: &[],
+    },
+    StyleEntry {
+        name: "warm",
+        what: "vibraphone over a fretless bass, a long room and echo",
+        suggests: &[],
+    },
+    StyleEntry {
+        name: "raw",
+        what: "bare triangle waves, dry and on the grid",
+        suggests: &[],
+    },
+    // A walking bass and the turn of open rhymes to their answers: PLAN.md's "structural half of
+    // jazz", the two candidates the user approved to compare by ear.
+    StyleEntry {
+        name: "jazz",
+        what: "a piano trio: Rhodes sevenths, upright bass, ride, swung",
+        suggests: &[("bass", "syllables"), ("harmony", "cadence")],
+    },
+    // A chord a rhyme, looping as the rhymes do, and the small words dropped back: a beat tape.
+    StyleEntry {
+        name: "lofi",
+        what: "worn electric piano, sevenths, the 808, a lazy swing",
+        suggests: &[("harmony", "rhyme"), ("function-words", "light")],
+    },
+    // Four on the floor: the bass on every foot, every line squared to the grid, the small words
+    // ghosted.
+    StyleEntry {
+        name: "techno",
+        what: "synth bass and a sawtooth lead on the 909, straight",
+        suggests: &[
+            ("bass", "feet"),
+            ("stack", "straight"),
+            ("function-words", "light"),
+        ],
+    },
+    // Bars that breathe rather than count, and a chord under each rhyme to float on.
+    StyleEntry {
+        name: "ambient",
+        what: "celesta and a halo pad in a long, wet room",
+        suggests: &[("pulse", "elastic"), ("harmony", "rhyme")],
+    },
+    // The bass on the beat, the guitar turning each open rhyme to its answer.
+    StyleEntry {
+        name: "bossa",
+        what: "flute over nylon-guitar sevenths and an upright bass",
+        suggests: &[("bass", "feet"), ("harmony", "cadence")],
+    },
+    // A walking continuo and cadences, as a trio sonata moves.
+    StyleEntry {
+        name: "chamber",
+        what: "harpsichord, cello and strings, harmonic minor",
+        suggests: &[("bass", "syllables"), ("harmony", "cadence")],
+    },
+    // A hymn's cadences, its bass on each foot, and each verse read through.
+    StyleEntry {
+        name: "hymn",
+        what: "organ, choir and a double bass, in a church",
+        suggests: &[
+            ("harmony", "cadence"),
+            ("bass", "feet"),
+            ("reading", "stanza"),
+        ],
+    },
+];
+
+/// A style as the picker shows it: its palette's name, what it sounds like, and the mapping
+/// variants it suggests for A, as `(mapping, variant)`.
+struct StyleEntry {
+    name: &'static str,
+    what: &'static str,
+    suggests: &'static [(&'static str, &'static str)],
+}
+
+/// [`STYLES`] as JSON for the page: `[{"name", "what", "suggests": {mapping: variant}}]`.
+fn styles_json() -> String {
+    let styles: Vec<String> = STYLES
+        .iter()
+        .map(
+            |StyleEntry {
+                 name,
+                 what,
+                 suggests,
+             }| {
+                let suggests: Vec<String> = suggests
+                    .iter()
+                    .map(|(mapping, variant)| {
+                        format!("{}:{}", json_string(mapping), json_string(variant))
+                    })
+                    .collect();
+                format!(
+                    "{{\"name\":{},\"what\":{},\"suggests\":{{{}}}}}",
+                    json_string(name),
+                    json_string(what),
+                    suggests.join(",")
+                )
+            },
+        )
+        .collect();
+    format!("[{}]", styles.join(","))
 }
 
 /// Each scale's semitones above its root, by name, for the page's note circle — from [`Scale`]
@@ -924,6 +1039,34 @@ mod tests {
         assert_eq!(
             body_of("+++\nscale = \"lydian\"\n"),
             "+++\nscale = \"lydian\"\n"
+        );
+    }
+
+    #[test]
+    fn every_style_is_a_palette_and_suggests_only_mappings_the_core_has() {
+        // One entry per named palette, in their order, so the picker cannot miss one.
+        let names: Vec<&str> = super::STYLES.iter().map(|style| style.name).collect();
+        assert_eq!(names, prosody_emit::style::PRESETS.to_vec());
+        for super::StyleEntry { name, suggests, .. } in super::STYLES {
+            for (mapping, variant) in *suggests {
+                let known = Mapping::ALL.iter().find(|m| m.name() == *mapping);
+                assert!(known.is_some(), "{name}: no mapping `{mapping}`");
+                let variants: Vec<&str> =
+                    known.unwrap().variants().iter().map(|v| v.name()).collect();
+                assert!(
+                    variants.contains(variant),
+                    "{name}: `{mapping}` has no `{variant}`"
+                );
+            }
+        }
+        // As the page reads it: jazz walks the bass and turns its rhymes; default suggests nothing.
+        let data = site_json(super::Transport::Server).unwrap();
+        assert!(data.contains(
+            "{\"name\":\"jazz\",\"what\":\"a piano trio: Rhodes sevenths, upright bass, ride, swung\",\"suggests\":{\"bass\":\"syllables\",\"harmony\":\"cadence\"}}"
+        ));
+        assert!(
+            data.contains("\"suggests\":{}}"),
+            "default suggests nothing"
         );
     }
 

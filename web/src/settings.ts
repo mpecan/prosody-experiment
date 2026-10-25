@@ -5,7 +5,7 @@
 import { site } from './data';
 import type { MappingInfo } from './site';
 import { load, loadJson, save } from './storage';
-import { settings, type Setting, type Side } from './store';
+import { settings, suggested, type Setting, type Side } from './store';
 
 // One exception, `long-stanzas`: B starts where A does. Its first variant, `gradual`, is the
 // quadratic arrangement erosion exists to remove (SPEC.md §4.6) — for "Patterns" 1,314 bars and a
@@ -59,8 +59,41 @@ export function loadSettings(): Record<Side, Setting> {
   return start;
 }
 
-/** One side's variant of one mapping, chosen by the writer, and remembered. */
+/** One side's variant of one mapping, chosen by the writer, and remembered. A choice on A is the
+ * writer's own from then on, no longer a style's suggestion. */
 export function choose(side: Side, name: string, variant: string): void {
   settings.value = { ...settings.value, [side]: { ...settings.value[side], [name]: variant } };
+  save('prosody.settings', JSON.stringify(settings.value));
+  if (side === 'A' && name in suggested.value) {
+    const { [name]: _taken, ...rest } = suggested.value;
+    suggested.value = rest;
+  }
+}
+
+/** A style's suggestions, set on A — each remembered with what A had, so it can be put back. A
+ * mapping a style set before keeps the variant A had before any style. */
+export function suggest(style: string, suggests: Record<string, string>): string[] {
+  const changed: string[] = [];
+  const next = { ...suggested.value };
+  const a = { ...settings.value.A };
+  for (const [name, variant] of Object.entries(suggests)) {
+    if (!(name in a) || a[name] === variant) continue;
+    next[name] = { from: next[name]?.from ?? a[name]!, to: variant, style };
+    a[name] = variant;
+    changed.push(name);
+  }
+  if (!changed.length) return changed;
+  settings.value = { ...settings.value, A: a };
+  suggested.value = next;
+  save('prosody.settings', JSON.stringify(settings.value));
+  return changed;
+}
+
+/** A as it was before any style suggested anything. */
+export function putBack(): void {
+  const a = { ...settings.value.A };
+  for (const [name, { from }] of Object.entries(suggested.value)) a[name] = from;
+  settings.value = { ...settings.value, A: a };
+  suggested.value = {};
   save('prosody.settings', JSON.stringify(settings.value));
 }

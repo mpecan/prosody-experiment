@@ -110,14 +110,19 @@ the bass and melody instruments, and the mix. Changing one of them changes what 
 provably not what happens — the page recompiles and the bar, voice and event counts stay put,
 which is invariant I3 in front of you.
 
-The **Sound** menu picks a named palette for the instruments and the mix, leaving scale, root,
-tempo and bank alone (except **jazz**, below): **default** (electric piano over acoustic bass, a modest room, a little echo
-on the melody, light compression, a small human stray), **warm** (vibraphone over fretless bass, a
-long room, more echo, a lower high cut, a touch of drive, more stray) and **raw** (the palette as
-it was before any of this: triangle oscillators, dry, on the grid) and **jazz** (Rhodes playing
-each rhyme word as the seventh chord on its degree, an upright bass, the ride keeping time and the
-snare comping on the sampled acoustic R-8 kit, triplet swing, dorian, a warm room — the one
-palette that also sets the scale, swing and bank). Move any control and it reads *custom*. **Kit**
+The **Style** cards at the top of the Sound folder pick a named palette for the instruments and
+the mix: **default** (electric piano over acoustic bass, a modest room, a little echo on the
+melody, light compression, a small human stray), **warm** (vibraphone over fretless bass, a long
+room, more echo, a lower high cut, a touch of drive, more stray) and **raw** (the palette as it
+was before any of this: triangle oscillators, dry, on the grid) leave scale, root, tempo and bank
+alone. The genres set a scale, a swing and a drum machine as well: **jazz** (Rhodes playing each
+rhyme word as the seventh chord on its degree, an upright bass, the ride keeping time and the
+snare comping on the sampled acoustic R-8 kit, triplet swing, dorian, a warm room), **lo-fi**,
+**techno**, **ambient**, **bossa**, **chamber** and **hymn**. A genre also suggests what the poem
+might *do* — jazz a walking bass and cadences, techno the bass on every foot — and picking it on
+the page sets those mappings on side A, marked in the Mappings folder with a button to put A back;
+a header naming the genre changes only the sound. Move any control and no card is lit: the sound
+is custom. **Kit**
 picks kick-and-hat or ride-and-snare for the two drum layers, and **Voicing** plays each rhyme word
 as one note or as a seventh chord built in the current scale; neither moves an event. With a side's
 harmony mapping on, that side's rhyme words play as single notes over the chord lane whatever the

@@ -17,6 +17,9 @@ export const preset = signal('');
 export const controls = signal<Palette>({});
 /** The two settings being compared. */
 export const settings = signal<Record<Side, Setting>>({ A: {}, B: {} });
+/** What a style set on A, mapping by mapping: the variant A had, the one the style set, and the
+ * style — so Mappings can say so and put A back. */
+export const suggested = signal<Record<string, { from: string; to: string; style: string }>>({});
 /** Which setting is playing and shown. */
 export const hearing = signal<Side>('A');
 export const playing = signal(false);

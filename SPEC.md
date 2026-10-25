@@ -769,6 +769,19 @@ scale without seven notes, `seventh` still stacks every other degree — fourths
 2026-10-23, under any harmony variant the melody is single notes whatever the voicing, which then
 shapes only the chord lane (§4.6, the melody over the harmony).*
 
+*Extended 2026-10-25 (styles).* Six more genre presets after `jazz`, each setting a feel as jazz
+does — `lofi` (a worn electric piano's sevenths, fingered bass, the 808, a lazy swing, dorian),
+`techno` (synth bass and a sawtooth lead on the 909, straight, phrygian), `ambient` (celesta and a
+halo pad, lydian, a long wet room), `bossa` (flute over nylon-guitar sevenths and an upright, the
+R-8's ride, a light swing, major), `chamber` (harpsichord, cello and strings, harmonic minor) and
+`hymn` (organ, choir and a double bass, major) — with the General MIDI instruments they need added
+to the soundfont list. All of it is palette. A genre quietens the drums at most to `0.10`, never
+off, because the pulse is structure (§4.1) and I3 forbids a palette to remove it. What a genre
+would also have the poem *do* — a walking bass, cadences, an elastic pulse — is a mapping, and a
+header naming the genre does none of it. On the page alone, picking a style also sets on side A the
+mapping variants its genre suggests, marked in the Mappings folder with a way to put A back: the
+writer's settings, suggested, never the style's (the user's decision, "suggest, don't impose").
+
 *Extended 2026-10-22 (sound and voice, step 4.2 — palette the user asked to be able to change).*
 Three more keys, every one palette:
 

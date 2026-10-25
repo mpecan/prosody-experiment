@@ -50,6 +50,10 @@ export const fixture: SiteData = {
     default: SOUND,
     jazz: [...SOUND, 'scale', 'swing', 'bank'],
   },
+  styles: [
+    { name: 'default', what: 'electric piano over an acoustic bass', suggests: {} },
+    { name: 'jazz', what: 'a piano trio', suggests: { bass: 'syllables', pulse: 'elastic', polka: 'on' } },
+  ],
   seed: 'Tyger Tyger, burning bright,\nIn the forests of the night;\n',
 };
 
