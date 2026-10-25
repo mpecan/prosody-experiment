@@ -1,10 +1,9 @@
 /* The page's stylesheet: the poem, the folders as a studio desk, the dialogs. */
 
   /* Two materials. The poem is light on a dark ground — the one bold thing, lit syllable by
-     syllable. Everything you set lives in paper folders along the bottom edge, each with its tab
-     sticking up in one of the five layer colours: open one and it slides up over the lower part of
-     the page, open another and they swap, open the open one and it closes. The same on a phone and
-     on a desk; only the proportions change. */
+     syllable, with the roll under it when it is shown. Everything you set is in folders, each with
+     its tab in one of the five layer colours: a panel beside the poem on a wide screen, a sheet
+     along the bottom edge on a phone that a tab opens and the open tab folds away. */
   :root {
     color-scheme: dark;
     --bg: #14131a; --panel: #1c1b24; --line: #2e2c3a;
@@ -44,7 +43,7 @@
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-    height: 100dvh; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto;
+    height: 100dvh; display: grid; grid-template-rows: auto auto minmax(0, 1fr);
     grid-template-columns: minmax(0, 1fr); overflow: hidden;
   }
   a { color: inherit; }
@@ -80,7 +79,8 @@
   }
   .links button:hover, .links a:hover { color: var(--ink); background: var(--control); }
   .controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; order: 3; }
-  #preset { max-width: 18rem; }
+  .poems { width: 19rem; }
+  .poems .patch { gap: 0; }
   #play { position: relative; }
   /* While it plays, the Play button breathes on the beat (--beat, from the piece's tempo). */
   #play.beating::after {
@@ -99,7 +99,7 @@
     .links button, .links a { padding: .3rem .35rem; }
     /* The poem picker gets a row of its own; Play, Stop and the A/B switch share the next. */
     .controls { width: 100%; order: 4; gap: .4rem; }
-    #preset { flex: 1 1 100%; max-width: none; min-width: 0; }
+    .poems { flex: 1 1 100%; width: auto; min-width: 0; }
     #play { flex: 1; }
     .ab span { display: none; }
     #notice { padding: .35rem .75rem; font-size: .8rem; }
@@ -154,11 +154,11 @@
   #lit span.spoken { background: var(--wash-strong); }
 
   /* ---- The folders: a studio desk ----
-     Everything you set is hardware on a desk that slides up from the bottom edge: knobs with lit
-     arcs, faders on rails, flip switches, selectors in dark wells and an amber readout, each part in
-     one of the five layer colours. Every knob and fader is a real range input underneath (turned by
-     dragging across it, or Tab and the arrow keys); `showValues` sets --v, its 0–1 position, which
-     draws the arc, the pointer and the meter. Dark anodised in dark mode, light aluminium in light;
+     Everything you set is hardware on a desk: knobs with lit arcs, faders on rails, flip switches,
+     patch displays, segmented switches and an amber readout, each part in one of the five layer
+     colours. Every knob and fader is a real range input underneath (turned by dragging across it,
+     or Tab and the arrow keys), and every patch display a real menu; --v, a knob's or fader's 0–1
+     position, draws the arc, the pointer and the meter. Dark anodised in dark mode, light aluminium in light;
      the readouts stay dark in both, as displays do. */
   :root {
     --desk-top: #24222d; --desk-bottom: #16151c; --desk-ink: #e6e3ef; --engrave: #9a96b0;
@@ -177,36 +177,60 @@
     --well: #fbfaf6; --groove: #c4bfb4; --track: #cfcac0; --cap-hi: #ffffff; --cap-lo: #cfcbc2;
     --cap-shadow: rgba(60, 50, 30, .28); --good: #2f7d3c;
   }
-  #folders { position: relative; z-index: 2; }
+  /* ---- The stage: the poem, the roll under it, the folders ----
+     On a phone the folders are a sheet along the bottom edge, folded to its tabs until one is
+     opened, and never taller than a little over half the screen, so the poem keeps the page. On a
+     wide screen they are a panel beside the poem, always open, the whole height. */
+  .stage {
+    min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto;
+  }
+  .stage > main { grid-row: 1; }
+  .rollband { grid-row: 2; }
+  .folders { grid-row: 3; position: relative; z-index: 2; display: flex; flex-direction: column; min-height: 0; }
+  .handle { display: block; width: 100%; height: 1.4rem; padding: 0; border: 0; border-radius: 0; background: transparent; cursor: pointer; }
+  .handle span { display: block; width: 2.8rem; height: 5px; margin: 0 auto; border-radius: 3px; background: var(--groove); }
+  .handle:hover span { background: var(--engrave); }
   .tabs {
-    display: flex; gap: .25rem; padding: 0 .75rem; overflow-x: auto; scrollbar-width: none;
+    display: flex; gap: .25rem; padding: 0 .75rem; overflow-x: auto; scrollbar-width: none; flex: none;
     background: linear-gradient(to bottom, transparent 60%, var(--shade));
   }
   .tabs::-webkit-scrollbar { display: none; }
   .tabs button {
-    flex: none; margin-top: .5rem; padding: .45rem 1rem .4rem; border: 0; border-radius: 10px 10px 0 0;
-    background: var(--desk-bottom); color: var(--engrave);
-    font: 600 .72rem/1.4 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase;
+    flex: none; margin-top: .2rem; padding: .5rem 1rem .45rem; border: 0; border-radius: 10px 10px 0 0;
+    background: var(--desk-bottom); color: var(--engrave); font: 600 .85rem/1.3 system-ui, -apple-system, "Segoe UI", sans-serif;
     box-shadow: inset 0 3px 0 var(--t); transform: translateY(4px); transition: transform .15s;
   }
   .tabs button:hover { transform: translateY(0); border: 0; color: var(--desk-ink); }
-  .tabs button[aria-selected=true] { background: var(--desk-top); color: var(--desk-ink); transform: translateY(0); }
+  .folders.open .tabs button[aria-selected=true] { background: var(--desk-top); color: var(--desk-ink); transform: translateY(0); }
   .sheet {
     background: linear-gradient(180deg, var(--desk-top), var(--desk-bottom)); color: var(--desk-ink);
-    max-height: min(56dvh, 36rem); overflow-y: auto; border-top: 1px solid var(--groove);
+    max-height: min(55dvh, 36rem); overflow-y: auto; border-top: 1px solid var(--groove);
     box-shadow: 0 -12px 30px rgba(0, 0, 0, .35); animation: rise .18s ease-out;
     --ink: var(--desk-ink); --dim: var(--engrave); --line: var(--groove);
   }
-  @media (max-width: 720px) { .sheet { max-height: 50dvh; } }
+  .folders:not(.open) .sheet { display: none; }
   @keyframes rise { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
-  .sheet[hidden], .folder[hidden] { display: none; }
+  .folder[hidden] { display: none; }
   .sheet button { background: var(--well); color: var(--desk-ink); border-color: var(--groove); }
-  .sheet button[aria-selected=true] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
   .sheet code { background: var(--well); padding: 0 .25em; border-radius: 3px; font-size: .9em; }
   .sheet a { color: var(--accent); }
+  @media (min-width: 1100px) {
+    .stage { grid-template-columns: minmax(0, 1fr) min(36rem, 42vw); grid-template-rows: minmax(0, 1fr) auto; }
+    .stage > main { grid-column: 1; grid-row: 1; }
+    .rollband { grid-column: 1; grid-row: 2; }
+    .folders { grid-column: 2; grid-row: 1 / span 2; border-left: 1px solid var(--groove); background: var(--desk-bottom); }
+    .handle { display: none; }
+    .tabs { padding-top: .5rem; background: var(--desk-bottom); }
+    .folders .tabs button[aria-selected=true] { background: var(--desk-top); color: var(--desk-ink); transform: translateY(0); }
+    .folders:not(.open) .sheet, .sheet { display: block; flex: 1; max-height: none; box-shadow: none; animation: none; }
+  }
 
   .engrave { font: 600 .66rem/1.3 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--engrave); }
   .hint { font-size: .78rem; color: var(--engrave); }
+  /* The name of a control: plain words. The engraving is kept for the hardware's own markings. */
+  .label { font: 500 .8rem/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--engrave); }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .desk-head { display: flex; align-items: baseline; gap: .9rem; flex-wrap: wrap; padding: .9rem 1.2rem .3rem; }
   .desk-head h2 { margin: 0; font: italic 500 1.5rem/1 var(--serif); color: var(--desk-ink); }
 
@@ -223,7 +247,14 @@
   .module.key { flex-direction: column; align-items: center; }
   .module.tempo { flex-direction: column; }
   .module.voices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .module.mixer { justify-content: space-around; align-items: flex-end; flex-wrap: nowrap; gap: .4rem; }
+  .module.mixer { grid-column: 1 / -1; justify-content: space-around; align-items: flex-end; flex-wrap: nowrap; gap: .4rem; }
+  /* The voice's channel: the reader, not the band, so it sits apart. */
+  .mixer .channel.voice { padding: .4rem .5rem .2rem; margin-left: .4rem; border-radius: 10px;
+    background: color-mix(in srgb, var(--ornament) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ornament) 35%, var(--groove)); }
+  .module.duck { grid-column: 1 / -1; align-items: center; }
+  .module.reading { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: 1rem; }
+  .module.reading .wide { grid-column: 1 / -1; }
+  .feel { display: flex; gap: 1.2rem; margin-top: .4rem; }
   .octaves { grid-column: 1 / -1; display: flex; gap: 1.2rem; }
   .desk-note { grid-column: 1 / -1; margin: 0 .2rem; }
 
@@ -266,14 +297,10 @@
   .fader input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
   .fader output { font: 600 .78rem 'IBM Plex Mono', ui-monospace, monospace; color: color-mix(in srgb, var(--c) var(--lit-strength), #000); }
 
-  /* A selector: a menu in a dark well with a lit point. */
-  .selector { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
-  .selector.inline { flex-direction: row; align-items: center; gap: .6rem; }
-  .sheet select, .sheet input[type=number] {
+  .sheet input[type=number] {
     font: 500 .82rem 'IBM Plex Mono', ui-monospace, monospace; color: var(--desk-ink); background: var(--well);
     border: 1px solid var(--groove); border-radius: 6px; padding: .4rem .5rem; min-height: 2.2rem; min-width: 0; width: 100%;
   }
-  .selector.inline select { width: auto; }
   /* The tempo: an amber readout, a display that stays dark in light mode too. */
   .leds { display: flex; align-items: center; gap: .4rem; }
   .sheet input.led {
@@ -302,7 +329,7 @@
     background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); text-align: center; padding: .3rem;
   }
   .circle .hub span:first-child { font: italic 500 1.9rem/1 var(--serif); color: color-mix(in srgb, var(--pulse) var(--lit-strength), #000); }
-  .module.key .selector { width: 100%; }
+  .module.key .patch { width: 100%; }
 
   /* A flip switch: a lever that lights when on. */
   .switch { display: flex; flex-direction: row; align-items: center; gap: .7rem; cursor: pointer; }
@@ -326,11 +353,9 @@
   input[type=range] { padding: 0; accent-color: var(--accent); }
   .row { display: flex; gap: .4rem; }
   .row input { width: 100%; min-width: 0; }
-  .reading .knob { justify-self: start; }
-  .reading .switch { grid-column: span 2; }
 
-  .views-nav { display: flex; gap: .3rem; padding: .4rem 1.2rem .5rem; flex-wrap: wrap; }
-  .views-nav button { padding: .3rem .8rem; font: 600 .7rem 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
+  .views-nav { padding: .2rem 1rem .7rem; }
+  .folder > pre, .folder > div > pre { margin-top: 0; }
   pre {
     margin: 0 1rem 1rem; overflow: auto; padding: .8rem 1rem; max-height: 44dvh; border-radius: 10px;
     background: var(--well); box-shadow: inset 0 0 0 1px var(--groove); color: var(--desk-ink);
@@ -339,27 +364,43 @@
   pre.wrapped { white-space: pre-wrap; word-break: break-all; }
   .hidden { display: none; }
 
-  .mappings table { grid-column: 1 / -1; border-collapse: separate; border-spacing: 0 .3rem; font-size: .82rem; }
-  .mappings th { font: 600 .66rem 'IBM Plex Mono', ui-monospace, monospace; letter-spacing: .08em; color: var(--engrave); text-align: center; padding: 0 .5rem; }
-  .mappings td { padding: .3rem .5rem; vertical-align: middle; background: color-mix(in srgb, var(--well) 55%, transparent); }
-  .mappings td:first-child { border-radius: 8px 0 0 8px; padding-left: .7rem; }
-  .mappings td:last-child { border-radius: 0 8px 8px 0; }
-  .mappings td.check { text-align: center; width: 8rem; }
-  .mappings code { font-family: var(--mono); color: var(--desk-ink); background: none; }
-  .mappings .what { color: var(--engrave); }
-  .mappings select { width: auto; font-size: .76rem; padding: .2rem .3rem; min-height: 0; }
-  .mappings select.changed { border-color: var(--bass); box-shadow: 0 0 8px color-mix(in srgb, var(--bass) 45%, transparent); }
+  /* The mappings: a row each, A over B, a row that differs glowing. */
+  .mappings { grid-column: 1 / -1; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+  .mapping { padding: .6rem .8rem .7rem; border-radius: 10px; background: color-mix(in srgb, var(--well) 55%, transparent);
+    box-shadow: inset 0 0 0 1px var(--groove); display: flex; flex-direction: column; gap: .4rem; }
+  .mapping.differ { box-shadow: inset 0 0 0 1px var(--bass), 0 0 12px color-mix(in srgb, var(--bass) 22%, transparent); }
+  .mapping-head { display: flex; align-items: center; gap: .5rem; }
+  .mapping-head code { font: 600 .85rem var(--mono); background: none; padding: 0; color: var(--desk-ink); }
+  .mapping .why { width: 1.5rem; height: 1.5rem; padding: 0; border-radius: 50%; font-size: .75rem; line-height: 1; color: var(--engrave); background: transparent; }
+  .mapping .flag { margin-left: auto; font-size: .75rem; color: var(--engrave); }
+  .mapping.differ .flag { color: color-mix(in srgb, var(--bass) var(--lit-strength), #000); }
+  .mapping .what { margin: 0; font-size: .82rem; color: var(--engrave); }
+  .mapping .side { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr); align-items: center; gap: .5rem; }
+  .mapping .side-name { font: 600 .78rem var(--mono); }
 
-  #roll { width: calc(100% - 2rem); margin: 0 1rem 1rem; border-radius: 10px; height: clamp(150px, 26dvh, 240px); display: block; background: #18171f; box-shadow: inset 0 0 0 1px var(--groove); }
-  .rollbar { display: flex; align-items: center; gap: .6rem 1.2rem; padding: .8rem 1.2rem .6rem; flex-wrap: wrap; }
-  .key { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; font-size: .8rem; color: var(--engrave); }
+  /* The roll: a band under the poem, shown or hidden from the top bar. */
+  .rollband { border-top: 1px solid var(--line); background: var(--panel); min-width: 0; }
+  .rollband[hidden] { display: none; }
+  #roll { width: calc(100% - 2rem); margin: 0 1rem .8rem; border-radius: 10px; height: clamp(90px, 18dvh, 200px); display: block; background: #18171f; box-shadow: inset 0 0 0 1px var(--line); }
+  .rollbar { display: flex; align-items: center; gap: .5rem 1.2rem; padding: .5rem 1rem; flex-wrap: wrap; }
+  .rollbar .segmented-field { flex-direction: row; align-items: center; gap: .5rem; }
+  .rollbar .segmented button { padding: .15rem .55rem; min-height: 1.7rem; }
+  /* On a phone the poem always keeps a few lines, the roll is a slim strip, and an open folder
+     takes at most two fifths of the screen. */
+  @media (max-width: 720px) {
+    .stage > main { min-height: 6.5rem; }
+    .rollbar { display: none; }
+    #roll { height: 64px; margin: .45rem .75rem; }
+    .sheet { max-height: 40dvh; }
+  }
+  .key { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .78rem; color: var(--dim); }
   .key span { display: inline-flex; align-items: center; gap: .4rem; }
   .key i { width: .65rem; height: .65rem; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
   .key .echo i { background: transparent; box-shadow: inset 0 0 0 1.5px var(--engrave); }
   .key .voice i { border-radius: 2px; width: 1.1rem; background: var(--wash-strong); box-shadow: none; }
 
-  #score { padding: .4rem 1.2rem 1.2rem; }
-  #score .bar { display: flex; gap: 1rem; align-items: end; margin-bottom: .8rem; }
+  #score { padding: 0 1rem 1.2rem; }
+  #score .bar { margin-bottom: .8rem; }
   #score table { border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
   #score th { color: var(--engrave); font-weight: 600; text-align: right; padding: .2rem .7rem; }
   #score th:first-child, #score td:first-child { text-align: left; padding-left: 0; }
@@ -369,6 +410,69 @@
   #score td.down { color: var(--warn); }
   #score tr.total td { font-weight: 700; }
   #score p { color: var(--engrave); font-size: .8rem; max-width: 46rem; }
+
+  /* A patch display: a value on a small dark screen, ◀ and ▶ either side; the real menu lies over
+     the screen, transparent, so a click or the keyboard chooses from the whole list. The screen
+     stays dark in light mode too, as displays do. */
+  .patch { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+  .patch-row { display: flex; align-items: stretch; gap: .3rem; min-width: 0; }
+  .patch .step {
+    flex: none; width: 2.1rem; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 7px; background: var(--well); color: var(--engrave); border: 1px solid var(--groove);
+  }
+  .patch .step:hover { color: var(--desk-ink); border-color: var(--c); }
+  .patch .step svg { width: .75rem; height: .75rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .lcd {
+    position: relative; flex: 1; min-width: 0; min-height: 2.6rem; padding: .3rem .7rem; border-radius: 7px;
+    background: #0b0e0e; box-shadow: inset 0 0 0 1px #2e2c3a, inset 0 0 16px rgba(0, 0, 0, .6);
+    display: flex; flex-direction: column; justify-content: center; gap: .2rem;
+  }
+  .lcd-text {
+    font: 600 .9rem/1.2 'IBM Plex Mono', ui-monospace, monospace; color: var(--c);
+    text-shadow: 0 0 10px color-mix(in srgb, var(--c) 45%, transparent);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .lcd-dots { display: flex; gap: 3px; }
+  .lcd-dots i { width: .55rem; height: 3px; border-radius: 2px; background: #2a2834; }
+  .lcd-dots i.on { background: var(--c); }
+  .lcd-count { font: 500 .66rem 'IBM Plex Mono', ui-monospace, monospace; color: #8f8aa5; }
+  .lcd select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 1rem; }
+  .lcd:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .patch:has(select:disabled) { opacity: .5; }
+  .header-patch .lcd { min-height: 2.3rem; }
+
+  /* A segmented switch: every option in view, the chosen one lit in its colour. */
+  .segmented-field { display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+  .segmented { display: flex; min-width: 0; }
+  .segmented button {
+    flex: 1 1 auto; min-height: 2.2rem; padding: .3rem .7rem; border-radius: 0; margin-left: -1px;
+    background: var(--well); color: var(--desk-ink); border: 1px solid var(--groove);
+    font: 600 .78rem/1.2 'IBM Plex Mono', ui-monospace, monospace; white-space: nowrap;
+  }
+  .segmented button:first-child { border-radius: 7px 0 0 7px; margin-left: 0; }
+  .segmented button:last-child { border-radius: 0 7px 7px 0; }
+  .segmented button:only-child { border-radius: 7px; }
+  .segmented button.default { text-decoration: underline dotted 1px; text-underline-offset: .25em; }
+  .sheet .segmented button[aria-pressed=true], .segmented button[aria-pressed=true] {
+    background: var(--c); color: #191423; border-color: var(--c); position: relative;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--c) 40%, transparent);
+  }
+  .segmented.wrap { flex-wrap: wrap; gap: .35rem; }
+  .segmented.wrap button { flex: 0 1 auto; border-radius: 7px; margin-left: 0; white-space: normal; text-align: left; }
+  @media (max-width: 720px) { .segmented:not(.wrap) { overflow-x: auto; scrollbar-width: none; } }
+
+  /* "More": the longer explanation, folded until asked for. */
+  .more { grid-column: 1 / -1; padding: 0 .2rem; }
+  .more-toggle { background: none !important; border: 0 !important; padding: .2rem 0; font-weight: 500; font-size: .8rem; color: var(--accent) !important; text-decoration: underline; text-underline-offset: .2em; }
+  .more-text { font-size: .8rem; color: var(--engrave); max-width: 46rem; }
+  .more-text p { margin: .4rem 0; }
+
+  /* The roll's switch in the top bar: a little lever, lit when the roll is shown. */
+  .roll-switch { display: inline-flex; align-items: center; gap: .5rem; }
+  .roll-switch .lever { position: relative; width: 1.9rem; height: 1.1rem; border-radius: 1rem; background: var(--field); box-shadow: inset 0 0 0 1px var(--line); }
+  .roll-switch .lever::before { content: ""; position: absolute; top: .18rem; left: .2rem; width: .74rem; height: .74rem; border-radius: 50%; background: var(--dim); transition: left .15s; }
+  .roll-switch[aria-pressed=true] .lever { background: color-mix(in srgb, var(--pulse) 30%, var(--field)); }
+  .roll-switch[aria-pressed=true] .lever::before { left: .96rem; background: var(--pulse); }
 
   /* ---- The welcome, the download question and the loader: paper cards over the dimmed page ---- */
   dialog {
@@ -406,7 +510,7 @@
   @keyframes sweep { from { margin-left: -35%; } to { margin-left: 100%; } }
 
   @media (prefers-reduced-motion: reduce) {
-    #lit span, .tabs button, .sheet, .bar-inner { transition: none; animation: none; }
+    #lit span, .tabs button, .sheet, .bar-inner, .roll-switch .lever::before { transition: none; animation: none; }
     #play.beating::after { animation: none; opacity: 0; }
   }
 

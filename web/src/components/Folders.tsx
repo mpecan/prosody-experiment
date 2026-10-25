@@ -1,21 +1,22 @@
-// Folders along the bottom edge: a tab each, one open at a time, the open one again to close. Every
-// folder stays on the page while closed, so what is set in it and how far it is scrolled are kept.
+// The folders: a side panel beside the poem on a wide screen; on a phone, a sheet along the bottom
+// edge that a tab opens and the open folder's tab, or the handle, folds away. Every folder stays on
+// the page while another is shown, so what is set in it and how far it is scrolled are kept.
 import type { ComponentChildren } from 'preact';
 
-import { toggleFolder } from '../actions';
-import { folder, type Folder } from '../store';
+import { foldSheet, openFolder, toggleFolder } from '../actions';
+import { folder, sheetOpen, type Folder } from '../store';
 import { MappingsFolder } from './folders/MappingsFolder';
+import { MixerFolder } from './folders/MixerFolder';
 import { ReadingFolder } from './folders/ReadingFolder';
-import { RollFolder } from './folders/RollFolder';
 import { SoundFolder } from './folders/SoundFolder';
 import { ViewsFolder } from './folders/ViewsFolder';
 
-/** Each folder: its name, its element ids' stem, its tab's layer colour. */
+/** Each folder: its name, its element ids' stem, its label, its tab's layer colour. */
 export const TABS: [Folder, string, string, string][] = [
-  ['roll', 'Roll', 'Roll', 'var(--pulse)'],
+  ['mixer', 'Mixer', 'Mixer', 'var(--pulse)'],
   ['sound', 'Sound', 'Sound', 'var(--ornament)'],
-  ['mappings', 'Mappings', 'Mappings', 'var(--bass)'],
   ['reading', 'Reading', 'Reading', 'var(--rhyme)'],
+  ['mappings', 'Mappings', 'Mappings', 'var(--bass)'],
   ['views', 'Views', 'Under the hood', 'var(--chords)'],
 ];
 
@@ -29,23 +30,29 @@ function Panel({ id, children }: { id: Folder; children: ComponentChildren }) {
 }
 
 export function Folders() {
+  const open = sheetOpen.value;
   return (
-    <footer id="folders">
+    <aside id="folders" class={open ? 'folders open' : 'folders'} aria-label="Settings">
+      <button type="button" class="handle" aria-expanded={open} aria-controls="sheet"
+        aria-label={open ? 'Fold the settings away' : 'Open the settings'}
+        onClick={() => (open ? foldSheet() : openFolder(folder.value))}>
+        <span />
+      </button>
       <div class="tabs" role="tablist" aria-label="Settings">
         {TABS.map(([id, stem, label, colour]) => (
-          <button key={id} role="tab" id={'tab' + stem} data-folder={'folder' + stem} aria-controls={'folder' + stem}
+          <button key={id} role="tab" id={'tab' + stem} aria-controls={'folder' + stem}
             aria-selected={folder.value === id} style={{ '--t': colour }} onClick={() => toggleFolder(id)}>
             {label}
           </button>
         ))}
       </div>
-      <div class="sheet" id="sheet" hidden={folder.value === null}>
-        <Panel id="roll"><RollFolder /></Panel>
+      <div class="sheet" id="sheet">
+        <Panel id="mixer"><MixerFolder /></Panel>
         <Panel id="sound"><SoundFolder /></Panel>
-        <Panel id="mappings"><MappingsFolder /></Panel>
         <Panel id="reading"><ReadingFolder /></Panel>
+        <Panel id="mappings"><MappingsFolder /></Panel>
         <Panel id="views"><ViewsFolder /></Panel>
       </div>
-    </footer>
+    </aside>
   );
 }

@@ -1,49 +1,67 @@
 // The Mappings folder: what happens. Every candidate mapping is a selector, set for A and for B;
-// switch between them while it plays, and the Score view measures both.
+// switch between them while it plays, and Under the hood measures both. A row where A and B differ
+// glows, since that is what the A/B switch lets you hear.
+import { useState } from 'preact/hooks';
+
 import { site } from '../../data';
 import { schedule } from '../../piece';
 import { choose } from '../../settings';
 import { settings, type Side } from '../../store';
+import type { MappingInfo } from '../../site';
+import { More } from '../desk/More';
+import { Segmented } from '../desk/Segmented';
 
-function Choice({ side, name, variants, fallback }: { side: Side; name: string; variants: string[]; fallback: string }) {
-  const chosen = settings.value[side][name] ?? fallback;
+const SIDES: [Side, string][] = [['A', 'var(--pulse)'], ['B', 'var(--ornament)']];
+
+function Row({ mapping }: { mapping: MappingInfo }) {
+  const [open, setOpen] = useState(false);
+  const { name, what, variants, default: fallback } = mapping;
+  const chosen = (side: Side) => settings.value[side][name] ?? fallback;
+  const differ = chosen('A') !== chosen('B');
   return (
-    <select data-side={side} data-name={name} aria-label={`${name}, setting ${side}`} value={chosen}
-      class={chosen !== fallback ? 'changed' : undefined}
-      onChange={(event) => { choose(side, name, event.currentTarget.value); schedule(); }}>
-      {variants.map((v) => <option key={v} value={v}>{v}{v === fallback ? ' (default)' : ''}</option>)}
-    </select>
+    <li class={differ ? 'mapping differ' : 'mapping'} data-name={name}>
+      <div class="mapping-head">
+        <code>{name}</code>
+        <button type="button" class="why" aria-expanded={open} aria-label={`What ${name} does`} onClick={() => setOpen(!open)}>?</button>
+        <span class="flag">{differ ? 'A and B differ' : 'same on both'}</span>
+      </div>
+      {open && <p class="what">{what}</p>}
+      {SIDES.map(([side, colour]) => (
+        <div class="side" key={side}>
+          <span class="side-name" style={{ color: colour }}>{side}</span>
+          <Segmented label={`${name}, setting ${side}`} showLabel={false} value={chosen(side)} colour={colour} marked={fallback}
+            options={variants.map((v) => ({ value: v, label: v }))}
+            onChange={(variant) => { choose(side, name, variant); schedule(); }} />
+        </div>
+      ))}
+    </li>
   );
 }
 
 export function MappingsFolder() {
+  const differing = site.mappings.filter(({ name, default: fallback }) =>
+    (settings.value.A[name] ?? fallback) !== (settings.value.B[name] ?? fallback)).length;
   return (
-    <>
-      <div class="desk-head"><h2>Mappings</h2><span class="engrave">what happens · set A and B, switch while it plays</span></div>
-      <div class="palette mappings">
-        <table>
-          <thead><tr><th /><th>A</th><th>B</th></tr></thead>
-          <tbody id="mappings">
-            {site.mappings.map(({ name, what, variants, default: fallback }) => (
-              <tr key={name}>
-                <td><code>{name}</code> <span class="what">— {what}</span></td>
-                <td class="check"><Choice side="A" name={name} variants={variants} fallback={fallback} /></td>
-                <td class="check"><Choice side="B" name={name} variants={variants} fallback={fallback} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div class="desk">
+      <div class="desk-head">
+        <h2>Mappings</h2>
+        <span class="hint">{differing === 1 ? '1 setting differs between A and B.' : `${differing} settings differ between A and B.`}</span>
+      </div>
+      <ul class="mappings" id="mappings">
+        {site.mappings.map((mapping) => <Row key={mapping.name} mapping={mapping} />)}
+      </ul>
+      <More label="About the mappings">
         <p>
           Candidate mappings still under review. Each is a selector: choose a variant — or
           {' '}<code>off</code> — for each setting, then switch between A and B while it plays; the Score
-          tab measures both. A bold border marks a choice that is not the default. The
+          view measures both. A dotted underline marks each mapping's default. The
           {' '}<code>pulse</code> has no off: <code>steady</code> gives every bar as long as its beats,
           {' '}<code>elastic</code> every bar the same span, as the page once played every poem. Nor
           has the <code>stack</code>: <code>crossing</code> keeps every line on its own feet,
           {' '}<code>straight</code> fits a line sounding under the bar's line to that line's
           subdivision wherever the two would cross.
         </p>
-      </div>
-    </>
+      </More>
+    </div>
   );
 }

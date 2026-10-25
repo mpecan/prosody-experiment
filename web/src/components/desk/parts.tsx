@@ -44,7 +44,7 @@ export function Knob({ id, label, value, min, max, step, onInput, colour, title,
 }
 
 /** A fader: a rail with a meter beside it, the cap in its layer colour. */
-export function Fader({ id, label, value, min, max, step, onInput, colour, title, engraved }: Range & { engraved: string }) {
+export function Fader({ id, label, value, min, max, step, onInput, colour, title, engraved, shown }: Range & { engraved: string }) {
   return (
     <label class="fader" style={{ '--c': colour, '--v': v(value, min, max) }} title={title}>
       <span class="rail">
@@ -52,34 +52,11 @@ export function Fader({ id, label, value, min, max, step, onInput, colour, title
         <input id={id} type="range" min={min} max={max} step={step} value={value} aria-label={label}
           onInput={(event) => onInput(event.currentTarget.value)} />
       </span>
-      <output id={id + 'Out'}>{read(value)}</output>
+      <output id={id + 'Out'}>{shown ?? read(value)}</output>
       <span class="engrave">{engraved}</span>
     </label>
   );
 }
-
-/** A selector: a menu in a dark well. */
-export function Selector({ id, label, value, options, onChange, title, inline = false }: {
-  id: string;
-  label: string;
-  value: string;
-  options: { value: string; label: string; disabled?: boolean }[];
-  onChange: (value: string) => void;
-  title?: string;
-  inline?: boolean;
-}) {
-  return (
-    <label class={inline ? 'selector inline' : 'selector'} title={title}>
-      <span class="engrave">{label}</span>
-      <select id={id} value={value} onChange={(event) => onChange(event.currentTarget.value)}>
-        {options.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}
-      </select>
-    </label>
-  );
-}
-
-/** A plain list of values as a selector's options. */
-export const plain = (values: string[]) => values.map((value) => ({ value, label: value }));
 
 /** A flip switch: a lever that lights when on. */
 export function Switch({ id, checked, onChange, children }: {
@@ -91,7 +68,7 @@ export function Switch({ id, checked, onChange, children }: {
   return (
     <label class="switch">
       <input id={id} class="flip" type="checkbox" checked={checked} onChange={(event) => onChange(event.currentTarget.checked)} />
-      <span class="engrave">{children}</span>
+      <span class="label">{children}</span>
     </label>
   );
 }
