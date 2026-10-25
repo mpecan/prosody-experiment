@@ -6,8 +6,9 @@
   "name": "prosody",
   "compatibility_date": "2026-10-01",
   "main": "./deploy/worker.js",
-  // What `./scripts/build-site.sh` writes: index.html, the compiler (prosody.js, prosody_bg.wasm),
-  // the module Strudel's imports are answered from, the speech worker and the recorded readings.
+  // What `./scripts/build-site.sh` writes: the page (index.html, assets/, site.json), the compiler
+  // (prosody.js, prosody_bg.wasm), the module Strudel's imports are answered from, the speech worker
+  // and the recorded readings.
   "assets": {
     "directory": "./target/site",
     "binding": "ASSETS",

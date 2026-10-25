@@ -1,0 +1,32 @@
+{
+  "name": "prosody-page",
+  "private": true,
+  "description": "The prosody page: write a poem and hear it. Built into dist/, served by prosody-web or as static files.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@preact/signals": "2.11.3",
+    "preact": "10.29.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@preact/preset-vite": "2.10.6",
+    "@testing-library/preact": "3.2.4",
+    "@testing-library/user-event": "14.6.7",
+    "happy-dom": "20.14.6",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}

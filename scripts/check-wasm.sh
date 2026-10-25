@@ -19,7 +19,7 @@ server=$!
 trap 'kill $server 2>/dev/null' EXIT INT TERM
 # The server prints once it is bound; poll rather than guess how long that takes.
 tries=0
-until curl -s -o /dev/null "http://127.0.0.1:$port/"; do
+until curl -s -o /dev/null "http://127.0.0.1:$port/site.json"; do
   tries=$((tries + 1))
   if [ "$tries" -gt 100 ]; then echo "check-wasm: the server did not start" >&2; exit 1; fi
   sleep 0.1

@@ -39,9 +39,11 @@ crates/
   prosody-emit/      backend emitters (Strudel/Tidal text first; OSC later)
   prosody-score/     measuring a compiled poem: interest metrics and the one-word edit test
   prosody-cli/       argument parsing, file reads, stdout, the watcher. All IO lives here.
-  prosody-web/       the page: a pure library answering what it asks, and a localhost server (IO)
+  prosody-web/       what the page asks: a pure library (its data, `site.json`, and the compiled
+                     views), and a localhost server (IO) that also serves the built page
   prosody-wasm/      that library built for the browser, so the page can be static files
   tree-sitter-prosody/  the grammar
+web/                 the page: Preact + Signals + TypeScript, built by Vite into web/dist
 ```
 
 **A concrete phonemiser is its own crate.** `prosody-core` holds the inventory-agnostic model —
@@ -79,6 +81,18 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --no-fail-fast
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
+
+The page (`web/`, Preact and TypeScript) has its own, run with node from `mise.toml`:
+
+```sh
+npm --prefix web ci
+npm --prefix web run check        # tsc --noEmit (strict), Vitest, the Vite build
+./scripts/build-site.sh && npm --prefix web run e2e   # the built site in Chromium (Playwright)
+```
+
+A page change is tested in `web/test` (Vitest, against a hand-made `site.json` fixture) or, when
+it needs the real compiler or a browser's audio, in `web/e2e`. The Rust side tests the page's data
+(`site_json`), never the page's code.
 
 `--no-fail-fast` matters: without it `cargo test` stops at the first failing target, so a broken
 unit test in `prosody-core` hides every integration suite behind it — including the measured

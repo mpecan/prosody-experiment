@@ -5,10 +5,12 @@
 //! the cheapest that exists: type a word, hear the difference, and see which pass caused it.
 //!
 //! Every musical decision belongs to `prosody-core` and every palette decision to `prosody-emit`;
-//! nothing here does more than move text. This library is the page and the answers to what it
-//! asks, with no IO at all, so the same answers come from two places: the local server
-//! (`src/main.rs`, all the IO) and the page's own WebAssembly build (`prosody-wasm`), which runs
-//! the whole compiler in the browser so the page can be hosted as static files ([`Transport`]).
+//! nothing here does more than move text. The page itself is a separate program (`web/`, built
+//! with Vite); this library is what it asks for — its data, `/site.json`, and the compiled views —
+//! with no IO at all, so the same answers come from two places: the local server (`src/main.rs`,
+//! all the IO, which also serves the built page) and the page's own WebAssembly build
+//! (`prosody-wasm`), which runs the whole compiler in the browser so the page can be hosted as
+//! static files ([`Transport`]).
 //!
 //! The page also compares. Each candidate mapping ([`Mapping`]) is a selector, and either of two
 //! settings, A and B, can choose any of its variants; the page plays one, shows both patterns, and
@@ -46,7 +48,7 @@ pub enum Transport {
 }
 
 impl Transport {
-    /// Its name, as the page's script reads it.
+    /// Its name, as the page reads it from `/site.json`.
     const fn name(self) -> &'static str {
         match self {
             Self::Server => "server",
@@ -55,54 +57,44 @@ impl Transport {
     }
 }
 
-/// The module the page's import map answers Strudel's own imports from (see the file).
-pub const STRUDEL_GLOBALS: &str = include_str!("strudel-globals.mjs");
-
-/// The module worker the page's neural reading engines run in (see the file): Kokoro, Piper and
-/// Kitten, each loaded from a CDN at an exact version only when the listener chooses it, and kept
-/// off the page's own thread, which is the one Strudel's scheduler ticks on.
-pub const SPEECH_WORKER: &str = include_str!("speech-worker.mjs");
-
-/// The page, and the answer to everything it asks.
+/// The page's data, and the answer to everything it asks.
 #[derive(Debug, Clone)]
 pub struct Site {
-    page: String,
+    data: String,
     presets: String,
 }
 
 impl Site {
-    /// The page for `transport`, rendered once.
+    /// The site for `transport`, its data rendered once.
     ///
     /// # Errors
     ///
     /// If an example poem embedded as a preset no longer parses — which a test rules out.
     pub fn new(transport: Transport) -> Result<Self> {
         Ok(Self {
-            page: page(transport)?,
+            data: site_json(transport)?,
             presets: presets_json()?,
         })
     }
 
-    /// The page itself.
+    /// The page's data, `/site.json`: everything it needs to know before it can ask for anything.
     #[must_use]
-    pub fn page(&self) -> &str {
-        &self.page
+    pub fn data(&self) -> &str {
+        &self.data
     }
 
-    /// Answers one request: the page, its helper modules, the presets, or one of the compiled
-    /// views.
+    /// Answers one request: the page's data, the presets, or one of the compiled views. The page
+    /// itself and its modules are files, served by whoever serves the built page.
     ///
     /// `/presets.json` is the example poems as the preset menu has them — name, label, language,
     /// poem and palette — for the tool that records their readings (`scripts/readings/`), so that
-    /// a preset's language has one source. It answers a `POST` as well as a `GET` because the
-    /// WebAssembly build's binding only ever posts.
+    /// a preset's language has one source. Both JSON documents answer a `POST` as well as a `GET`
+    /// because the WebAssembly build's binding only ever posts.
     #[must_use]
     pub fn respond(&self, request: &Request) -> Response {
         match (request.method.as_str(), request.path.as_str()) {
-            ("GET", "/") => Response::html(self.page.clone()),
+            ("GET" | "POST", "/site.json") => Response::json(self.data.clone()),
             ("GET" | "POST", "/presets.json") => Response::json(self.presets.clone()),
-            ("GET", "/strudel-globals.mjs") => Response::javascript(STRUDEL_GLOBALS.to_owned()),
-            ("GET", "/speech-worker.mjs") => Response::javascript(SPEECH_WORKER.to_owned()),
             ("POST", "/pattern") => compile(request, &Output::Pattern),
             ("POST", "/explain") => compile(request, &Output::Explain),
             ("POST", "/score") => compile(request, &Output::Score),
@@ -113,23 +105,25 @@ impl Site {
     }
 }
 
-/// The page, with the option lists and a starting poem substituted in.
+/// The page's data as one JSON object: the option lists, the mappings, the presets and palettes,
+/// the scales' steps, the poem it opens with, and where it sends its requests.
 ///
-/// Substituted rather than hard-coded in the HTML so that the controls cannot drift from what
-/// [`Style`] actually accepts — adding a scale in one place adds it to the page.
-fn page(transport: Transport) -> Result<String> {
+/// From the tables themselves rather than typed into the page, so that the controls cannot drift
+/// from what [`Style`] actually accepts — adding a scale in one place adds it to the page.
+fn site_json(transport: Transport) -> Result<String> {
     let list = |values: &[&str]| {
-        let quoted: Vec<String> = values.iter().map(|value| format!("\"{value}\"")).collect();
+        let quoted: Vec<String> = values.iter().map(|value| json_string(value)).collect();
         format!("[{}]", quoted.join(","))
     };
     let scales: Vec<&str> = Scale::ALL.iter().map(|scale| scale.name()).collect();
-    // Each mapping as `[name, what it does, [its variants], its default]`.
+    // Each mapping with what it does, its variants and its default, in the order the core lists
+    // them.
     let mappings: Vec<String> = Mapping::ALL
         .iter()
         .map(|mapping| {
             let variants: Vec<&str> = mapping.variants().iter().map(|v| v.name()).collect();
             format!(
-                "[{},{},{},{}]",
+                "{{\"name\":{},\"what\":{},\"variants\":{},\"default\":{}}}",
                 json_string(mapping.name()),
                 json_string(mapping.describe()),
                 list(&variants),
@@ -161,23 +155,26 @@ fn page(transport: Transport) -> Result<String> {
         })
         .collect();
 
-    Ok(include_str!("index.html")
-        .replace("__PRESETS__", &presets_json()?)
-        .replace("__PALETTES__", &format!("{{{}}}", palettes.join(",")))
-        .replace(
-            "__PALETTE_KEYS__",
-            &format!("{{{}}}", palette_keys.join(",")),
-        )
-        .replace("__KITS__", &list(KITS))
-        .replace("__VOICINGS__", &list(VOICINGS))
-        .replace("__RIDE_FALLBACKS__", &list(RIDE_FALLBACKS))
-        .replace("__SCALES__", &list(&scales))
-        .replace("__SCALE_STEPS__", &scale_steps())
-        .replace("__BANKS__", &list(BANKS))
-        .replace("__INSTRUMENTS__", &list(&instruments))
-        .replace("__MAPPINGS__", &format!("[{}]", mappings.join(",")))
-        .replace("__SEED_POEM__", &json_string(SEED))
-        .replace("__TRANSPORT__", &json_string(transport.name())))
+    let fields = [
+        ("transport", json_string(transport.name())),
+        ("scales", list(&scales)),
+        ("scaleSteps", scale_steps()),
+        ("banks", list(BANKS)),
+        ("instruments", list(&instruments)),
+        ("kits", list(KITS)),
+        ("voicings", list(VOICINGS)),
+        ("rideFallbacks", list(RIDE_FALLBACKS)),
+        ("mappings", format!("[{}]", mappings.join(","))),
+        ("presets", presets_json()?),
+        ("palettes", format!("{{{}}}", palettes.join(","))),
+        ("paletteKeys", format!("{{{}}}", palette_keys.join(","))),
+        ("seed", json_string(SEED)),
+    ];
+    let fields: Vec<String> = fields
+        .iter()
+        .map(|(key, value)| format!("{}:{value}", json_string(key)))
+        .collect();
+    Ok(format!("{{{}}}", fields.join(",")))
 }
 
 /// Each scale's semitones above its root, by name, for the page's note circle — from [`Scale`]
@@ -384,7 +381,7 @@ const SEED: &str = "Tyger Tyger, burning bright,\n\
                     On what wings dare he aspire?\n\
                     What the hand, dare seize the fire?\n";
 
-/// A JSON string literal, for embedding a poem in the page.
+/// A JSON string literal, for the page's data.
 fn json_string(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 2);
     out.push('"');
@@ -395,7 +392,7 @@ fn json_string(text: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            // `<` would otherwise be able to close the surrounding `<script>` element.
+            // `<` too, so the data stays safe to inline in an HTML `<script>` element.
             '<' => out.push_str("\\u003c"),
             other if (other as u32) < 0x20 => {
                 let _ = write!(out, "\\u{:04x}", other as u32);
@@ -868,27 +865,27 @@ fn report_json(report: &Report) -> String {
 mod tests {
     use prosody_core::mapping::Variant;
 
-    use super::{Mapping, Mappings, Output, Profile, SEED, body_of, json_string, page};
+    use super::{Mapping, Mappings, Output, Profile, SEED, body_of, json_string, site_json};
 
     #[test]
-    fn the_page_lists_every_palette_value_the_style_accepts() {
-        // Substituted from `Style`'s own tables rather than typed into the HTML, so a scale added
-        // in one place cannot be missing from the other.
-        let html = page(super::Transport::Server).unwrap();
+    fn the_site_data_lists_every_palette_value_the_style_accepts() {
+        // From `Style`'s own tables rather than typed into the page, so a scale added in one place
+        // cannot be missing from the other.
+        let data = site_json(super::Transport::Server).unwrap();
         for scale in prosody_emit::Scale::ALL {
-            assert!(html.contains(scale.name()), "{} missing", scale.name());
+            assert!(data.contains(scale.name()), "{} missing", scale.name());
         }
         for name in prosody_emit::style::BANKS
             .iter()
             .chain(prosody_emit::style::SYNTHS)
             .chain(prosody_emit::style::SOUNDFONTS)
         {
-            assert!(html.contains(&format!("\"{name}\"")), "{name} missing");
+            assert!(data.contains(&format!("\"{name}\"")), "{name} missing");
         }
         // Every named palette, with its values, for the sound menu.
         for name in prosody_emit::style::PRESETS {
             assert!(
-                html.contains(&format!("\"{name}\":{{")),
+                data.contains(&format!("\"{name}\":{{")),
                 "palette {name} missing"
             );
         }
@@ -897,37 +894,23 @@ mod tests {
             .chain(prosody_emit::style::VOICINGS)
             .chain(prosody_emit::style::RIDE_FALLBACKS)
         {
-            assert!(html.contains(&format!("\"{name}\"")), "{name} missing");
+            assert!(data.contains(&format!("\"{name}\"")), "{name} missing");
         }
         // The jazz palette tells the menu it sets the scale, swing and bank as well; warm does not.
         assert!(
-            html.contains("\"jazz\":[\"bass\",\"melody\",\"kit\",\"ride_fallback\",\"voicing\""),
+            data.contains("\"jazz\":[\"bass\",\"melody\",\"kit\",\"ride_fallback\",\"voicing\""),
             "jazz's keys"
         );
-        let jazz_keys = html.split("\"jazz\":[").nth(1).unwrap();
+        let jazz_keys = data.split("\"jazz\":[").nth(1).unwrap();
         let jazz_keys = &jazz_keys[..jazz_keys.find(']').unwrap()];
         assert!(
             jazz_keys.contains("\"scale\",\"swing\",\"bank\""),
             "{jazz_keys}"
         );
-        let warm_keys = html.split("\"warm\":[").nth(1).unwrap();
+        let warm_keys = data.split("\"warm\":[").nth(1).unwrap();
         assert!(!warm_keys[..warm_keys.find(']').unwrap()].contains("scale"));
-        for placeholder in [
-            "__PALETTES__",
-            "__PALETTE_KEYS__",
-            "__INSTRUMENTS__",
-            "__PRESETS__",
-            "__KITS__",
-            "__VOICINGS__",
-            "__RIDE_FALLBACKS__",
-        ] {
-            assert!(!html.contains(placeholder), "{placeholder} left unfilled");
-        }
-        assert!(
-            !html.contains("__SCALES__"),
-            "a placeholder was left unfilled"
-        );
-        assert!(!html.contains("__SEED_POEM__"));
+        // And the poem it opens with.
+        assert!(data.contains(&format!("\"seed\":{}", json_string(SEED))));
     }
 
     #[test]
@@ -945,158 +928,18 @@ mod tests {
     }
 
     #[test]
-    fn the_page_knows_where_to_send_its_requests() {
-        // Served, it asks the server; built as static files, it asks the compiler beside it.
-        let served = page(super::Transport::Server).unwrap();
-        let static_ = page(super::Transport::Wasm).unwrap();
-        assert!(served.contains("const TRANSPORT = \"server\";"));
-        assert!(static_.contains("const TRANSPORT = \"wasm\";"));
-        assert!(!static_.contains("__TRANSPORT__"));
-        // Relative, so the static page works from a subdirectory of a host, not only from `/`.
-        assert!(static_.contains("\"@strudel/core\": \"./strudel-globals.mjs\""));
+    fn the_site_data_says_where_to_send_requests() {
+        // Served, the page asks the server; built as static files, the compiler beside it.
+        let served = site_json(super::Transport::Server).unwrap();
+        let static_ = site_json(super::Transport::Wasm).unwrap();
         assert!(
-            !static_.contains("fetch('/"),
-            "every request goes through ask()"
-        );
-        // Relative too: the bindings `scripts/build-site.sh` generates sit beside the page.
-        assert!(static_.contains("import('./prosody.js')"), "the bindings");
-        // The compiler answers from workers, off the thread Strudel's scheduler ticks on; a worker
-        // made from a blob is handed the bindings' absolute address, and scores go to a worker of
-        // their own so a new pattern never waits behind them.
-        assert!(static_.contains("new URL('./prosody.js', document.baseURI).href"));
-        assert!(static_.contains("{ type: 'module' }"));
-        assert!(
-            static_.contains("threads = { compile: compilerThread(), measure: compilerThread() };")
-        );
-        assert!(static_.contains("return path === '/score' ? threads.measure : threads.compile;"));
-    }
-
-    #[test]
-    fn the_page_parses_a_pattern_without_stopping_the_music() {
-        let html = page(super::Transport::Server).unwrap();
-        // Strudel parses every string through the parser `setStringParser` names; the page's
-        // remembers, and parses what is new in slices before evaluating.
-        assert!(html.contains("setStringParser((text) => {"));
-        assert!(html.contains(
-            "await parseAhead(code, reading?.pattern ?? '', reading?.natural ?? '', traces[hearing]?.pattern ?? '');"
-        ));
-        assert!(html.contains("rememberParses();"));
-        // A skip reported against the pattern being replaced is carried to the new one.
-        assert!(html.contains(
-            "behind = behindFrom(behind, cues?.[readingSettings.pace === 'fitted' ? 'fitted' : 'natural'] ?? null);"
-        ));
-    }
-
-    #[test]
-    fn the_page_reads_with_five_engines_at_two_paces() {
-        let html = page(super::Transport::Wasm).unwrap();
-        // One menu of engines — the browser's voice the fallback, Kokoro the default — and the
-        // pace, natural by default; both page settings, remembered, never style keys.
-        for engine in ["kokoro", "piper", "kitten", "recorded", "browser"] {
-            assert!(
-                html.contains(&format!("<option value=\"{engine}\">")),
-                "{engine}"
-            );
-        }
-        // The recorded readings by default: a first visit downloads no model it was not asked about.
-        assert!(html.contains(
-            "const READING_DEFAULTS = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };"
-        ));
-        assert!(
-            html.contains(
-                "localStorage.setItem('prosody.reading', JSON.stringify(readingSettings))"
-            )
-        );
-        // The worker is the page's neighbour on either transport, so a static host serves it.
-        assert!(
-            html.contains(
-                "new URL(`./speech-worker.mjs?engine=${name}${device}`, document.baseURI)"
-            )
-        );
-        // A rendered line starts on the audio clock, at the time Strudel gives for its bar.
-        assert!(html.contains("if (at >= ctx.currentTime) source.start(at);"));
-        assert!(html.contains("fittedCue(cue, targetTime, generation)"));
-        assert!(html.contains("naturalCue(index, hap, targetTime, cps, generation)"));
-        // Both cue patterns are stacked with the music, so a change of pace needs no new pattern.
-        assert!(html.contains("return { fitted, natural, both: stack(fitted, natural) };"));
-        // The voice goes through the master stage, at its own level.
-        assert!(html.contains("voiceBus.connect(glue);"));
-        // A queued line dropped for a change of engine or voice takes its entry with it, so asking
-        // for it again renders it rather than waiting on a promise that never settles; and an
-        // engine whose worker dies after loading is failed, so the browser voice reads.
-        assert!(html.contains("if (!kept) dropJob(job);"));
-        assert!(html.contains("if (engine.state === 'ready') engine.crashed(error);"));
-        // A failed engine is retried only when it is chosen again, and only the chosen engine
-        // speaks in the status bar.
-        assert!(html.contains("if (engine.state === 'failed' && !retry) return;"));
-        assert!(html.contains("readingChanged(true);   // starts the download (ensureEngine)"));
-        // At the fitted pace a rendered line that overruns its bar is rendered again to fit.
-        assert!(html.contains("room: slotLength(reading, cue.slot) * reading.fill"));
-        // The queue holds only lines still to be read — of the poems loaded, at this pace, in this
-        // voice — in the order they will be wanted, from where the reading is; it is re-ordered as
-        // the reading moves on, so a line due next waits for no other.
-        assert!(html.contains("const kept = keys.has(job.key);"));
-        assert!(html.contains(
-            "for (const reading of [playingReading, readings[hearing], readings[other]]) {"
-        ));
-        assert!(html.contains("return lines.slice(at).concat(lines.slice(0, at));"));
-        assert!(html.contains("renderQueue.sort((a, b) => rank.get(a.key) - rank.get(b.key));"));
-        assert!(html.contains(
-            "  advanceChain();\n  if (chain && chain.generation === readingGeneration) prerender();"
-        ));
-        // A round that comes round while a line is still being read starts once it has finished,
-        // and a line it leaves unread is said.
-        assert!(html.contains("else if (chain.round !== null) chain.wrapTo = index;"));
-        assert!(html.contains("if (c.wrapTo !== null) wrapRound(c, c.wrapTo);"));
-        assert!(html.contains("noteLoss(`not read last time round: line ${lost.join(', ')}"));
-        // The recorded readings are the page's neighbours too, on either transport: a manifest,
-        // then a file a line, looked up by the line's exact text and the voice chosen.
-        assert!(html.contains("const READINGS = './readings/';"));
-        assert!(html.contains("fetch(new URL(READINGS + 'manifest.json', document.baseURI))"));
-        assert!(html.contains("fetch(new URL(READINGS + recording.file, document.baseURI))"));
-        assert!(html.contains("engines.recorded.byText.get(text)?.recordings[voice]"));
-        // Recorded at the line's pace, so at the natural pace a file plays as it is; asked for
-        // another speed (the fitted pace's refit) it is resampled.
-        assert!(html.contains("return engine === 'recorded' ? item.pace : item.speed;"));
-        assert!(html.contains("const rate = speed / line.pace;"));
-        // A line with no recording is read live — the recording's own voice if its engine has
-        // loaded, otherwise the browser's — and that is said, with the line's number.
-        assert!(html.contains("read live by ${ENGINE_INFO[live].label} ${liveVoice}"));
-        assert!(html.contains("'no recording of it; read by the browser voice'"));
-        assert!(
-            html.contains("if (who.fallback) noteReading(`line ${line.line + 1}: ${who.why}`);")
+            served.starts_with("{\"transport\":\"server\","),
+            "{served:.40}"
         );
         assert!(
-            html.contains("if (who.fallback) noteReading(`line ${cue.line + 1}: ${who.why}`);")
+            static_.starts_with("{\"transport\":\"wasm\","),
+            "{static_:.40}"
         );
-        // A recording is fetched at once, never queued behind a live engine's render.
-        assert!(html.contains("if (engine === 'recorded') {\n      entry.direct = true;"));
-        assert!(html.contains("if (entry?.direct) return entry.promise;"));
-        // A recording has one key at both paces, so one fetched at the natural pace is fitted to
-        // its bar when the fitted pace asks for it, before the cached buffer is handed back.
-        assert!(html.contains(
-            "  if (room) fitWhenRendered(key, entry, { key, engine, voice, speed, text, room });\n  if (entry?.buffer) return Promise.resolve(entry.buffer);"
-        ));
-        assert!(html.contains("if (entry.buffer) { afterRender(job, entry.buffer); return; }"));
-        // Every line is asked of whoever reads it, so the render queue mixes engines.
-        assert!(html.contains("const { engine, voice } = speakerOf(text);"));
-        // The voices are listed per poem, with how many of its lines each has recorded.
-        assert!(html.contains("`${have} of ${texts.length} lines recorded`"));
-        assert!(html.contains("'this side reads nothing'"));
-        // A returning reader of the recordings has the manifest at once, not at the first Play.
-        assert!(html.contains("\nif (readingSettings.engine === 'recorded') ensureEngine();\n"));
-        assert!(html.contains("if (readingSettings.engine === 'recorded') showVoices();"));
-        // Every CDN package the worker loads is pinned to an exact version.
-        for pinned in [
-            "kokoro-js@1.2.1/",
-            "onnxruntime-web@1.18.0/",
-            "@mintplex-labs/piper-tts-web@1.0.5/",
-            "@diffusionstudio/piper-wasm@1.0.0/",
-            "kitten-tts-webgpu@0.1.1/",
-            "piper-voices/resolve/5041a7a49ae5b3a0f30e6837769eb03fdbb231bd",
-        ] {
-            assert!(super::SPEECH_WORKER.contains(pinned), "{pinned}");
-        }
     }
 
     #[test]
@@ -1115,26 +958,21 @@ mod tests {
             presets.matches("\"language\":").count(),
             super::PRESETS.len()
         );
-        let html = page(super::Transport::Server).unwrap();
-        // The old poem's reading is let go before the language changes, so neither poem is rendered
-        // in the other's voice.
-        assert!(html.contains("    readings = { A: null, B: null };\n    language = preset.language;\n    readingChanged();"));
-        assert!(html.contains("sl: 'sl_SI-artur-medium'"));
     }
 
     #[test]
-    fn the_site_answers_the_page_and_its_views() {
+    fn the_site_answers_its_data_and_views() {
         let site = super::Site::new(super::Transport::Server).unwrap();
         let get = |target: &str| site.respond(&super::Request::new("GET", target, String::new()));
-        assert_eq!(get("/").status, 200);
-        assert_eq!(
-            get("/strudel-globals.mjs").content_type,
-            "text/javascript; charset=utf-8"
-        );
-        // The reading's neural voices run in a worker the page loads beside itself.
-        let worker = get("/speech-worker.mjs");
-        assert_eq!(worker.content_type, "text/javascript; charset=utf-8");
-        assert_eq!(worker.body, super::SPEECH_WORKER);
+        let data = get("/site.json");
+        assert_eq!(data.status, 200);
+        assert_eq!(data.content_type, "application/json; charset=utf-8");
+        assert_eq!(data.body, site.data());
+        // The WebAssembly binding only posts.
+        let posted = site.respond(&super::Request::new("POST", "/site.json", String::new()));
+        assert_eq!(posted.body, site.data());
+        // The page itself is a file, served by whoever serves the built page.
+        assert_eq!(get("/").status, 404);
         assert_eq!(get("/pattern").status, 404, "a view is a POST");
         let pattern = site.respond(&super::Request::new("POST", "/pattern", SEED.to_owned()));
         assert_eq!(pattern.status, 200);
@@ -1146,51 +984,16 @@ mod tests {
     }
 
     #[test]
-    fn the_page_says_what_it_is_and_keeps_its_settings_in_folders() {
-        let html = page(super::Transport::Wasm).unwrap();
-        // An experiment, said at the top, defined in the welcome, with the source and a contact.
-        assert!(html.contains("<span class=\"tag\">an experiment</span>"));
-        assert!(html.contains("<dialog id=\"welcome\""));
-        assert!(html.contains("the patterns of rhythm and sound in poetry"));
-        assert!(html.contains("href=\"https://github.com/mpecan/prosody-experiment\""));
-        assert!(html.contains("href=\"mailto:me@prosody.rocks\""));
-        // Five folders, each a tab controlling its panel, and no panel outside them.
-        for folder in [
-            "folderRoll",
-            "folderSound",
-            "folderMappings",
-            "folderReading",
-            "folderViews",
-        ] {
-            assert!(
-                html.contains(&format!(
-                    "data-folder=\"{folder}\" aria-controls=\"{folder}\""
-                )),
-                "{folder}"
-            );
-            assert!(
-                html.contains(&format!("id=\"{folder}\" role=\"tabpanel\"")),
-                "{folder}"
-            );
-        }
-        assert!(
-            !html.contains("<details"),
-            "the old folding panels are gone"
-        );
-        // A neural voice is asked about before it downloads, and its download can be cancelled.
-        // The note circle lights each scale's own notes: phrygian dominant is 0 1 4 5 7 8 10.
-        assert!(html.contains("\"phrygian_dominant\":[0,1,4,5,7,8,10]"));
-        assert!(!html.contains("__SCALE_STEPS__"));
-        assert!(html.contains("<dialog id=\"download\""));
-        assert!(html.contains("needs a one-time download of"));
-        assert!(html.contains("<dialog id=\"loader\""));
-        assert!(html.contains("engines[name].cancel?.();"));
+    fn the_note_circle_lights_each_scales_own_notes() {
+        // Phrygian dominant is 0 1 4 5 7 8 10.
+        let data = site_json(super::Transport::Wasm).unwrap();
+        assert!(data.contains("\"phrygian_dominant\":[0,1,4,5,7,8,10]"));
     }
 
     #[test]
-    fn a_poem_cannot_break_out_of_the_script_element() {
-        // The seed poem is embedded in a `<script>` block, so `</script>` inside it would end the
-        // block early and the rest would render as markup.
+    fn json_strings_are_escaped() {
+        // Quotes, backslashes and control characters, and `<`, so the data can be inlined in a
+        // `<script>` element without `</script>` in a poem ending it early.
         let escaped = json_string("a </script> b \"c\" \\d\ne");
         assert!(!escaped.contains("</script>"), "{escaped}");
         assert!(escaped.contains("\\u003c"), "{escaped}");
@@ -1212,54 +1015,48 @@ mod tests {
     }
 
     #[test]
-    fn the_page_lists_every_mapping_the_core_can_leave_out() {
-        let html = page(super::Transport::Server).unwrap();
+    fn the_site_data_lists_every_mapping_the_core_can_leave_out() {
+        let data = site_json(super::Transport::Server).unwrap();
         for mapping in Mapping::ALL {
-            assert!(html.contains(mapping.describe()), "{mapping:?} missing");
+            assert!(
+                data.contains(&json_string(mapping.describe())),
+                "{mapping:?} missing"
+            );
         }
         // Each with its variants and its default, for the A/B selectors.
-        assert!(
-            html.contains("[\"off\",\"height\",\"syllables\",\"feet\"],\"height\"]"),
-            "the bass selector"
-        );
-        assert!(
-            html.contains("[\"off\",\"arrives\",\"stanza\",\"breath\"],\"breath\"]"),
-            "the reading selector"
-        );
-        assert!(
-            html.contains("[\"elastic\",\"steady\"],\"steady\"]"),
-            "the pulse selector"
-        );
-        assert!(
-            html.contains("[\"crossing\",\"straight\"],\"crossing\"]"),
-            "the stack selector"
-        );
-        assert!(
-            html.contains("[\"function-words\","),
-            "the function words' selector, by name"
-        );
-        assert!(
-            html.contains("[\"full\",\"light\"],\"full\"]"),
-            "the function words' selector"
-        );
-        assert!(
-            html.contains("[\"long-stanzas\","),
-            "the long stanzas' selector, by name"
-        );
-        assert!(
-            html.contains("[\"gradual\",\"erode\"],\"erode\"]"),
-            "the long stanzas' selector"
-        );
-        // B starts at each mapping's first variant — what preceded it — not at `off`, which the
-        // pulse does not have: so B is elastic and A steady until the writer chooses.
-        // Except the long stanzas, whose first variant is the quadratic arrangement: B starts
-        // eroding, as A does.
-        assert!(
-            html.contains("B: defaults((m) => (B_STARTS_AS_A.includes(m[0]) ? m[3] : m[2][0]))"),
-            "B's defaults"
-        );
-        assert!(html.contains("const B_STARTS_AS_A = ['long-stanzas'];"));
-        assert!(!html.contains("__MAPPINGS__"));
+        for (name, selector) in [
+            (
+                "bass",
+                "[\"off\",\"height\",\"syllables\",\"feet\"],\"default\":\"height\"}",
+            ),
+            (
+                "reading",
+                "[\"off\",\"arrives\",\"stanza\",\"breath\"],\"default\":\"breath\"}",
+            ),
+            ("pulse", "[\"elastic\",\"steady\"],\"default\":\"steady\"}"),
+            (
+                "stack",
+                "[\"crossing\",\"straight\"],\"default\":\"crossing\"}",
+            ),
+            (
+                "function-words",
+                "[\"full\",\"light\"],\"default\":\"full\"}",
+            ),
+            (
+                "long-stanzas",
+                "[\"gradual\",\"erode\"],\"default\":\"erode\"}",
+            ),
+        ] {
+            let at = data.find(&format!("{{\"name\":\"{name}\""));
+            assert!(at.is_some(), "{name} missing");
+            let at = at.unwrap();
+            let entry = &data[at..];
+            let entry = &entry[..=entry.find('}').unwrap()];
+            assert!(
+                entry.ends_with(&format!("\"variants\":{selector}")),
+                "{entry}"
+            );
+        }
     }
 
     #[test]
@@ -1420,12 +1217,13 @@ mod tests {
     #[test]
     fn the_harmony_is_a_selector_that_adds_a_chord_lane() {
         // On the page: four variants, off by default.
-        let html = page(super::Transport::Server).unwrap();
+        let data = site_json(super::Transport::Server).unwrap();
         assert!(
-            html.contains("[\"off\",\"rhyme\",\"cadence\",\"both\"],\"off\"]"),
+            data.contains(
+                "\"variants\":[\"off\",\"rhyme\",\"cadence\",\"both\"],\"default\":\"off\"}"
+            ),
             "the harmony selector"
         );
-        assert!(html.contains("id=\"chord_sound\"") && html.contains("id=\"chord_gain\""));
         // Off — the default — the pattern has no chord lane.
         let music =
             |query: &[(&str, &str)]| super::compile(&request(query, SEED), &Output::Pattern);
@@ -2005,27 +1803,6 @@ mod tests {
         let response = super::compile(&request(&[("bass_octave", "4")], SEED), &Output::Pattern);
         assert_eq!(response.status, 400);
         assert!(response.body.contains("bass_octave"), "{}", response.body);
-    }
-
-    #[test]
-    fn the_soundfont_shim_is_served_as_a_module() {
-        // The import map points `@strudel/core` and `@strudel/webaudio` here; a 404 or a text
-        // MIME type would leave every soundfont unregistered and the melody silent.
-        let html = page(super::Transport::Server).unwrap();
-        assert!(
-            html.contains("\"@strudel/webaudio\": \"./strudel-globals.mjs\""),
-            "import map"
-        );
-        let shim = include_str!("strudel-globals.mjs");
-        for name in [
-            "registerSound",
-            "getAudioContext",
-            "Pattern",
-            "noteToMidi",
-            "startPresetNote",
-        ] {
-            assert!(shim.contains(name), "{name}");
-        }
     }
 
     #[test]

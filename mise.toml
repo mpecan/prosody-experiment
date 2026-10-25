@@ -1,2 +1,4 @@
 [tools]
+# The page's build and tests (web/): an LTS release, which CI's `web` job uses too.
+node = "24.18.0"
 wrangler = { version = "latest", allow_builds = ["esbuild", "sharp", "workerd"] }

@@ -17,7 +17,7 @@ use prosody_web::{Request, Site, Transport};
 use wasm_bindgen::prelude::wasm_bindgen;
 
 thread_local! {
-    /// Rendered once: the page carries every preset and option list.
+    /// Made once: its data carries every preset and option list.
     static SITE: Option<Site> = Site::new(Transport::Wasm).ok();
 }
 

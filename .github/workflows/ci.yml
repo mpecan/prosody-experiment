@@ -1,4 +1,4 @@
-# The four gates from CLAUDE.md §3. They exist as commands so that "high quality" is a thing the
+# The gates from CLAUDE.md §3. They exist as commands so that "high quality" is a thing the
 # repository checks rather than a thing a contributor remembers.
 name: ci
 
@@ -58,9 +58,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.18.0"
       - name: wasm and native agree
         run: ./scripts/check-wasm.sh
+      # check-wasm built the site into target/site; the page is tested end to end on it, with the
+      # real compiler, in Chromium.
+      - name: browser
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: the page, end to end
+        working-directory: web
+        run: npm run e2e
+
+  # The page itself (web/): its types, its tests and its build. Node as mise.toml pins it.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: install
+        run: npm --prefix web ci
+      - name: typecheck, test, build
+        run: npm --prefix web run check
 
   # The grammar's own corpus tests. Separate from the Rust gates because they need node, and
   # because a grammar regression should be legible as a grammar regression.
