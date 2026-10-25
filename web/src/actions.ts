@@ -1,6 +1,8 @@
 // What the writer does on the page, beyond a single engine: choosing a poem or a palette, turning a
 // control, opening a folder, the theme and the notices.
 import { CONTROLS, choosePalette, presetOf, setControl, setControls } from './controls';
+import { site } from './data';
+import { suggest } from './settings';
 import { compile, piece, schedule } from './piece';
 import { readIn } from './reading';
 import { fitRoll, buildLit, watch } from './watch';
@@ -22,9 +24,12 @@ export function choosePreset(name: string): void {
   void compile();
 }
 
-/** A named palette from the Sound menu. */
-export function pickPalette(name: string): void {
-  if (choosePalette(name)) schedule();
+/** A style from the Sound folder: its palette, and on A the mappings it suggests. */
+export function pickStyle(name: string): void {
+  if (!choosePalette(name)) return;
+  const style = site.styles.find((s) => s.name === name);
+  if (style) suggest(name, style.suggests);
+  schedule();
 }
 
 /** One palette control turned. */

@@ -8,7 +8,7 @@ import { startControls } from '../src/controls';
 import { compile } from '../src/piece';
 import { engines, startReading } from '../src/reading';
 import { loadSettings } from '../src/settings';
-import { folder, language, poem, preset, rollShown, settings, sheetOpen } from '../src/store';
+import { folder, language, poem, preset, rollShown, settings, sheetOpen, suggested } from '../src/store';
 import { useFixture } from './site.fixture';
 
 // What the compiler answers, for any poem: a pattern of two bars, a reading of one line, a trace
@@ -42,6 +42,7 @@ function start() {
   folder.value = 'mixer';
   sheetOpen.value = false;
   rollShown.value = true;
+  suggested.value = {};
   preset.value = '';
   restorePage();
   startReading();
@@ -159,14 +160,16 @@ describe('the sound desk', () => {
     await waitFor(() => expect(document.getElementById('hubRoot')!.textContent).toBe('A'));
   });
 
-  it('turns a knob\'s arc with its value and calls the sound custom once it leaves every palette', async () => {
+  it('turns a knob\'s arc with its value and calls the sound custom once it leaves every style', async () => {
     start();
     const reverb = document.getElementById('reverb') as HTMLInputElement;
-    expect((document.getElementById('palette') as HTMLSelectElement).value).toBe('default');
+    const lit = () => document.querySelector<HTMLElement>('#styles [aria-pressed="true"]')?.dataset.style;
+    expect(lit()).toBe('default');
     fireEvent.input(reverb, { target: { value: '0.6' } });
     await waitFor(() => expect(document.getElementById('reverbOut')!.textContent).toBe('0.6'));
     expect(reverb.closest<HTMLElement>('.knob')!.style.getPropertyValue('--v')).toBe('0.6000');
-    expect((document.getElementById('palette') as HTMLSelectElement).value).toBe('custom');
+    expect(lit()).toBeUndefined();
+    expect(document.getElementById('folderSound')!.textContent).toContain('Custom: a control has been turned');
   });
 });
 
@@ -205,6 +208,32 @@ describe('the mixer', () => {
     fireEvent.input(voice, { target: { value: '1.5' } });
     await waitFor(() => expect(document.getElementById('readingLevelOut')!.textContent).toBe('1.50'));
     expect(JSON.parse(localStorage.getItem('prosody.reading')!).level).toBe(1.5);
+  });
+});
+
+describe('the styles', () => {
+  const card = (name: string) => document.querySelector<HTMLElement>(`#styles [data-style="${name}"]`)!;
+  const chosenA = (name: string) => document.querySelector<HTMLElement>(
+    `.mapping[data-name="${name}"] [aria-label="${name}, setting A"] button[aria-pressed="true"]`)!.dataset.value;
+
+  it('set their palette and suggest mappings for A, marked in Mappings, which A can be put back from', async () => {
+    start();
+    expect(card('jazz').textContent).toContain('suggests bass: syllables, pulse: elastic');
+    fireEvent.click(card('jazz'));
+    await waitFor(() => expect(card('jazz').getAttribute('aria-pressed')).toBe('true'));
+    expect(document.getElementById('hubScale')!.textContent).toBe('dorian');
+    expect(document.querySelector('.style-set')!.textContent).toContain('jazz also set A\'s bass to syllables and pulse to elastic.');
+    // On A only; B is as it was.
+    expect(chosenA('bass')).toBe('syllables');
+    expect(document.querySelector('.mapping[data-name="bass"] .tag')!.textContent).toBe('set on A by jazz');
+    expect(document.querySelector('.mapping[data-name="held"] .tag')).toBeNull();
+    fireEvent.click(document.getElementById('putBack')!);
+    await waitFor(() => expect(chosenA('bass')).toBe('height'));
+    expect(chosenA('pulse')).toBe('steady');
+    expect(document.querySelector('.mapping .tag')).toBeNull();
+    expect(document.getElementById('putBack')).toBeNull();
+    // The sound stays jazz: only the suggestions were put back.
+    expect(card('jazz').getAttribute('aria-pressed')).toBe('true');
   });
 });
 

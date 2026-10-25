@@ -406,6 +406,35 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Styles: six genres, and what they suggest the poem do
+
+The third of the four steps. The user approved the reading of I3 proposed with it: a style is
+palette, and what its genre would have the poem *do* is only ever suggested, on the page, on side A.
+
+- **Six genre presets** in `prosody-emit` after `jazz`, each with its instruments, its mix and a
+  feel (scale, swing, drum machine): `lofi`, `techno`, `ambient`, `bossa`, `chamber`, `hymn`. Ten
+  General MIDI instruments they need joined the soundfont list, each checked against
+  `@strudel/soundfonts` 1.3.0. A genre quietens the drums at most to `0.10`, never off — the pulse
+  is structure. Their levels are estimates from the default's measurements, like jazz's, not
+  measured; measuring them is a follow-up worth doing by ear.
+- **What a style suggests** lives in `prosody-web` (`STYLES`), beside a line saying what it
+  sounds like, and goes to the page in `site.json`; a test checks that every palette has an entry,
+  in order, and that every suggestion names a mapping and a variant the core has. Jazz suggests the
+  walking bass and cadences (the "structural half of jazz" candidates), lo-fi a chord a rhyme and
+  light function words, techno the bass on every foot and the straight stack, ambient the elastic
+  pulse and a chord a rhyme, bossa the bass on the feet and cadences, chamber a walking continuo and
+  cadences, hymn cadences, the bass on the feet and each stanza read through.
+- **On the page** the Sound folder opens with a card per style, the one the sound matches lit (none
+  once a control is turned: custom). Picking one applies its palette and sets its suggestions on
+  A; the folder says what it set, Mappings tags each row "set on A by …" and offers "Put A back as
+  it was", which restores what A had before any style. Setting a tagged row by hand makes it the
+  writer's own.
+- Tests: the genres' instruments and feel, hand-written from their descriptions (scale by name and
+  by steps, so a misspelt scale cannot fall back to minor unnoticed); every preset reads back
+  through its header; the styles table against the core's mappings; on the page, suggesting,
+  keeping the first "from" through a second style, putting back, a hand choice taking a row over,
+  and the cards, tags and button rendered.
+
 ### The desk, rearranged: a mixer, the roll on a switch, patch displays
 
 The second of the four steps: the redesign the user chose from the design canvas's second row

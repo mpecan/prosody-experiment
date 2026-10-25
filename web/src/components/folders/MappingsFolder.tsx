@@ -5,8 +5,9 @@ import { useState } from 'preact/hooks';
 
 import { site } from '../../data';
 import { schedule } from '../../piece';
-import { choose } from '../../settings';
-import { settings, type Side } from '../../store';
+import { choose, putBack } from '../../settings';
+import { settings, suggested, type Side } from '../../store';
+import { nameOf } from '../../names';
 import type { MappingInfo } from '../../site';
 import { More } from '../desk/More';
 import { Segmented } from '../desk/Segmented';
@@ -23,6 +24,7 @@ function Row({ mapping }: { mapping: MappingInfo }) {
       <div class="mapping-head">
         <code>{name}</code>
         <button type="button" class="why" aria-expanded={open} aria-label={`What ${name} does`} onClick={() => setOpen(!open)}>?</button>
+        {suggested.value[name] && <span class="tag">set on A by {nameOf(suggested.value[name].style)}</span>}
         <span class="flag">{differ ? 'A and B differ' : 'same on both'}</span>
       </div>
       {open && <p class="what">{what}</p>}
@@ -47,6 +49,12 @@ export function MappingsFolder() {
         <h2>Mappings</h2>
         <span class="hint">{differing === 1 ? '1 setting differs between A and B.' : `${differing} settings differ between A and B.`}</span>
       </div>
+      {Object.keys(suggested.value).length > 0 && (
+        <div class="suggested">
+          <p>A style set {Object.keys(suggested.value).length === 1 ? 'one of A\'s mappings' : `${Object.keys(suggested.value).length} of A's mappings`}, marked below. Change any of them, or:</p>
+          <button type="button" id="putBack" onClick={() => { putBack(); schedule(); }}>Put A back as it was</button>
+        </div>
+      )}
       <ul class="mappings" id="mappings">
         {site.mappings.map((mapping) => <Row key={mapping.name} mapping={mapping} />)}
       </ul>

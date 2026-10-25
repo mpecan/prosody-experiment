@@ -1,9 +1,42 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { loadSettings, restore, startingSettings } from '../src/settings';
+import { choose, loadSettings, putBack, restore, startingSettings, suggest } from '../src/settings';
+import { settings, suggested } from '../src/store';
 import { fixture, useFixture } from './site.fixture';
 
 beforeEach(() => { useFixture(); });
+
+describe('a style\'s suggestions', () => {
+  beforeEach(() => {
+    settings.value = startingSettings(fixture.mappings);
+    suggested.value = {};
+  });
+
+  it('are set on A only, each remembered with what A had', () => {
+    expect(suggest('jazz', { bass: 'syllables', pulse: 'steady', polka: 'on' })).toEqual(['bass']);
+    // The pulse was steady already, and there is no polka: only the bass changed.
+    expect(settings.value.A.bass).toBe('syllables');
+    expect(settings.value.B.bass).toBe('off');
+    expect(suggested.value).toEqual({ bass: { from: 'height', to: 'syllables', style: 'jazz' } });
+  });
+
+  it('keep what A had before any style, through a second one', () => {
+    suggest('jazz', { bass: 'syllables' });
+    suggest('hymn', { bass: 'feet' });
+    expect(suggested.value.bass).toEqual({ from: 'height', to: 'feet', style: 'hymn' });
+    putBack();
+    expect(settings.value.A.bass).toBe('height');
+    expect(suggested.value).toEqual({});
+  });
+
+  it('become the writer\'s own once A is set by hand', () => {
+    suggest('jazz', { bass: 'syllables', pulse: 'elastic' });
+    choose('A', 'bass', 'feet');
+    expect(Object.keys(suggested.value)).toEqual(['pulse']);
+    putBack();
+    expect(settings.value.A).toMatchObject({ bass: 'feet', pulse: 'steady' });
+  });
+});
 
 describe('the two settings being compared', () => {
   it('starts A at every default and B at what preceded each mapping', () => {

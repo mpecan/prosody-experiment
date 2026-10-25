@@ -183,9 +183,12 @@ pub const SYNTHS: &[&str] = &[
 /// Named as Strudel names them, because unlike [`SYNTHS`] there is nothing to translate — a GM
 /// program *is* a palette word with one meaning. The list is curated rather than complete: basses
 /// for the vowel-height bass, keys and mallets for the rhyme melody (`SPEC.md` §4.5 makes every
-/// rhyme word a struck note, so struck instruments suit it), a plucked string and a pad. Adding to
+/// rhyme word a struck note, so struck instruments suit it), a plucked string and a pad — and, for
+/// the genre presets, the instruments their genres are heard in: a cello and a double bass, a
+/// harpsichord and an organ, a sawtooth lead, a flute, strings, a choir and two more pads. Adding to
 /// it is palette work (`CLAUDE.md` §10); every name here must exist in `@strudel/soundfonts`' GM
-/// table, or it plays silence.
+/// table, or it plays silence (checked against `@strudel/soundfonts` 1.3.0's `dist/index.mjs`,
+/// 2026-10-25).
 pub const SOUNDFONTS: &[&str] = &[
     "gm_acoustic_bass",
     "gm_electric_bass_finger",
@@ -206,20 +209,35 @@ pub const SOUNDFONTS: &[&str] = &[
     "gm_orchestral_harp",
     "gm_pad_warm",
     "gm_string_ensemble_1",
+    "gm_cello",
+    "gm_contrabass",
+    "gm_harpsichord",
+    "gm_church_organ",
+    "gm_lead_2_sawtooth",
+    "gm_flute",
+    "gm_string_ensemble_2",
+    "gm_synth_strings_1",
+    "gm_choir_aahs",
+    "gm_pad_halo",
 ];
 
 /// Every named palette — a starting point a header or the page can pick with `preset = "…"`.
 ///
-/// A preset sets only the sound and the mix; scale, root, tempo window, swing and bank are left
-/// as they were, so choosing one never moves a note. See [`Style::preset`].
+/// `default`, `warm` and `raw` set only the sound and the mix; scale, root, tempo window, swing and
+/// bank are left as they were, so choosing one never moves a note. See [`Style::preset`].
 ///
-/// One exception, `jazz`: a jazz palette over a minor scale played straight is not a jazz palette,
-/// so it also sets a scale, a swing and a bank (see [`preset_keys`]). Every one of those is still
-/// palette — I3 lets a style move every note and every onset by a fraction of a beat, and no
-/// event — but choosing `jazz` does move notes, where the other three never do.
-pub const PRESETS: &[&str] = &["default", "warm", "raw", "jazz"];
+/// The genres — `jazz`, `lofi`, `techno`, `ambient`, `bossa`, `chamber`, `hymn` — set a feel as
+/// well: a jazz palette over a minor scale played straight is not a jazz palette, so each also sets
+/// a scale, a swing and a bank (see [`preset_keys`]). Every one of those is still palette — I3 lets
+/// a style move every note and every onset by a fraction of a beat, and no event — but choosing a
+/// genre does move notes, where the first three never do. What a genre would also have the poem
+/// *do* (a walking bass, cadences) is a mapping, not a style; the page may suggest one beside the
+/// genre, but a header naming a genre changes the sound and nothing else.
+pub const PRESETS: &[&str] = &[
+    "default", "warm", "raw", "jazz", "lofi", "techno", "ambient", "bossa", "chamber", "hymn",
+];
 
-/// The header keys a preset sets. Every preset sets the sound and the mix; `jazz` also sets its
+/// The header keys a preset sets. Every preset sets the sound and the mix; a genre also sets its
 /// scale, swing and bank. The page's Sound menu applies exactly these, so choosing `warm` after
 /// `jazz` changes the sound back and leaves the scale where `jazz` put it.
 #[must_use]
@@ -860,10 +878,10 @@ struct Feel {
     bank: &'static str,
 }
 
-/// Dorian, from [`Scale::ALL`] by name rather than duplicated, for the reason
-/// [`Scale::MINOR`] gives.
-fn dorian() -> Scale {
-    Scale::parse("dorian").unwrap_or(Scale::MINOR)
+/// A scale from [`Scale::ALL`] by name rather than duplicated, for the reason [`Scale::MINOR`]
+/// gives. A test checks that every name a preset asks for exists.
+fn scale(name: &str) -> Scale {
+    Scale::parse(name).unwrap_or(Scale::MINOR)
 }
 
 /// The named presets.
@@ -970,6 +988,7 @@ fn preset_palette(name: &str) -> Option<Preset> {
             },
         )),
         "jazz" => Some(jazz()),
+        "lofi" | "techno" | "ambient" | "bossa" | "chamber" | "hymn" => genre(name),
         _ => None,
     }
 }
@@ -1022,11 +1041,125 @@ fn jazz() -> Preset {
             density_level: Amount(50),
         },
         feel: Some(Feel {
-            scale: dorian(),
+            scale: scale("dorian"),
             swing: Swing(33),
             bank: "r8",
         }),
     }
+}
+
+/// The genre palettes after jazz: each the instruments its genre is heard in, a mix in its
+/// manner, and its feel — a scale, a swing and a drum machine. Every value is palette.
+///
+/// - **lofi** — a worn electric piano voicing rhyme words as seventh chords over a fingered bass
+///   and a warm pad, the TR-808, a lazy swing, dorian; dark (a low high cut), driven and squeezed,
+///   with the most human stray of any palette — the sound of a sampled record.
+/// - **techno** — a synth bass and a sawtooth lead over synth strings, the TR-909 straight, phrygian
+///   for its darkness; bright, driven and compressed hard, a short room, an echo on the lead and no
+///   stray at all: the machine is the point.
+/// - **ambient** — a celesta over a soft fretless bass and a halo pad, the drums almost gone, lydian
+///   for its floating fourth; a long, wet room and a long echo, the levels following density.
+/// - **bossa** — a flute over a nylon guitar's seventh chords and an upright bass, the ride and snare
+///   of the acoustic R-8, a light swing, major; a dry, close room.
+/// - **chamber** — a harpsichord over a cello, with strings, the drums almost gone, harmonic minor;
+///   a hall's reverb and no echo.
+/// - **hymn** — an organ over a double bass and a choir, the drums almost gone, major; a church's long
+///   room.
+///
+/// "Almost gone" is the lowest drum level a palette may have, `0.10`: the pulse still sounds, faintly,
+/// because the pulse is structure (`SPEC.md` §4.1) and a palette may not remove it (I3). The levels
+/// are estimates from the default's measurements, as jazz's are, not measured themselves; a pad or
+/// a choir sustains where a struck note decays, so those sit lower than a struck chord would.
+fn genre(name: &str) -> Option<Preset> {
+    let mix = |reverb, room_size, delay, high_cut, drive, compress, humanise| {
+        move |drums, bass, melody, chords, density| Mix {
+            reverb: Amount(reverb),
+            room_size,
+            delay: Amount(delay),
+            high_cut,
+            drive: Amount(drive),
+            compress: Amount(compress),
+            humanise: Amount(humanise),
+            drums_gain: Amount(drums),
+            bass_gain: Amount(bass),
+            melody_gain: Amount(melody),
+            chord_gain: Amount(chords),
+            density_level: Amount(density),
+        }
+    };
+    let feel = |name, swing, bank| {
+        Some(Feel {
+            scale: scale(name),
+            swing: Swing(swing),
+            bank,
+        })
+    };
+    let preset = |bass, melody, chords, kit, voicing, mix, feel| Preset {
+        bass,
+        melody,
+        chords,
+        kit,
+        voicing,
+        mix,
+        feel,
+    };
+    Some(match name {
+        "lofi" => preset(
+            "gm_electric_bass_finger",
+            "gm_epiano2",
+            "gm_pad_warm",
+            Kit::Machine,
+            Voicing::Seventh,
+            mix(30, 20, 20, 2400, 20, 45, 50)(26, 34, 60, 35, 50),
+            feel("dorian", 25, "tr808"),
+        ),
+        "techno" => preset(
+            "gm_synth_bass_2",
+            "gm_lead_2_sawtooth",
+            "gm_synth_strings_1",
+            Kit::Machine,
+            Voicing::Note,
+            mix(15, 10, 25, 9000, 30, 55, 0)(32, 36, 45, 30, 0),
+            feel("phrygian", 0, "tr909"),
+        ),
+        "ambient" => preset(
+            "gm_fretless_bass",
+            "gm_celesta",
+            "gm_pad_halo",
+            Kit::Machine,
+            Voicing::Note,
+            mix(80, 80, 45, 3000, 0, 25, 30)(10, 24, 55, 35, 50),
+            feel("lydian", 0, "linn"),
+        ),
+        "bossa" => preset(
+            "gm_acoustic_bass",
+            "gm_flute",
+            "gm_acoustic_guitar_nylon",
+            Kit::Ride,
+            Voicing::Seventh,
+            mix(25, 15, 10, 5000, 0, 30, 35)(20, 34, 55, 45, 50),
+            feel("major", 10, "r8"),
+        ),
+        "chamber" => preset(
+            "gm_cello",
+            "gm_harpsichord",
+            "gm_string_ensemble_2",
+            Kit::Machine,
+            Voicing::Note,
+            mix(40, 30, 0, 7000, 0, 20, 25)(10, 36, 60, 35, 50),
+            feel("harmonic_minor", 0, "linn"),
+        ),
+        "hymn" => preset(
+            "gm_contrabass",
+            "gm_church_organ",
+            "gm_choir_aahs",
+            Kit::Machine,
+            Voicing::Note,
+            mix(60, 60, 0, 5000, 0, 25, 15)(10, 30, 45, 35, 50),
+            feel("major", 0, "linn"),
+        ),
+        _ => return None,
+    })
 }
 
 impl Default for Style {
@@ -1706,6 +1839,148 @@ mod tests {
             Style::parse("+++\npreset = \"polka\"\n+++"),
             Err(StyleError::Unknown { .. })
         ));
+    }
+
+    /// A genre as its description says it is.
+    struct Genre {
+        name: &'static str,
+        melody: &'static str,
+        bass: &'static str,
+        chords: &'static str,
+        kit: Kit,
+        voicing: Voicing,
+        scale: &'static str,
+        steps: &'static [u8],
+        swing: u8,
+        bank: &'static str,
+    }
+
+    /// Checks one genre against what its description says, and that it moves no key or pace.
+    fn check_genre(genre: &Genre) {
+        let name = genre.name;
+        let style = Style::preset(name).unwrap();
+        assert_eq!(style.melody().get(), genre.melody, "{name}");
+        assert_eq!(style.bass().get(), genre.bass, "{name}");
+        assert_eq!(style.chord_sound().get(), genre.chords, "{name}");
+        assert_eq!(style.kit(), genre.kit, "{name}");
+        assert_eq!(style.voicing(), genre.voicing, "{name}");
+        // By name and by its notes: a misspelt scale would fall back to minor unnoticed.
+        assert_eq!(style.scale().name(), genre.scale, "{name}");
+        assert_eq!(style.scale().steps(), genre.steps, "{name}");
+        assert_eq!(style.swing(), Swing(genre.swing), "{name}");
+        assert_eq!(style.bank().get(), genre.bank, "{name}");
+        // Every instrument is one a header may name, so the page lists it.
+        for instrument in [genre.melody, genre.bass, genre.chords] {
+            assert!(
+                super::SOUNDFONTS.contains(&instrument),
+                "{name}: {instrument}"
+            );
+        }
+        // A genre sets its feel; the poem's key and pace stay the poem's.
+        let keys = super::preset_keys(name).unwrap();
+        for key in ["scale", "swing", "bank"] {
+            assert!(keys.contains(&key), "{name}: {key}");
+        }
+        assert!(
+            !keys.contains(&"root") && !keys.contains(&"tempo_range"),
+            "{name}"
+        );
+        assert_eq!(style.root(), Style::default().root(), "{name}");
+        assert_eq!(
+            style.tempo_range(),
+            Style::default().tempo_range(),
+            "{name}"
+        );
+    }
+
+    #[test]
+    fn each_genre_sets_its_instruments_and_its_feel() {
+        // Hand-written from the genres' own descriptions.
+        let major: &[u8] = &[0, 2, 4, 5, 7, 9, 11];
+        let genres = [
+            Genre {
+                name: "lofi",
+                melody: "gm_epiano2",
+                bass: "gm_electric_bass_finger",
+                chords: "gm_pad_warm",
+                kit: Kit::Machine,
+                voicing: Voicing::Seventh,
+                scale: "dorian",
+                steps: &[0, 2, 3, 5, 7, 9, 10],
+                swing: 25,
+                bank: "tr808",
+            },
+            Genre {
+                name: "techno",
+                melody: "gm_lead_2_sawtooth",
+                bass: "gm_synth_bass_2",
+                chords: "gm_synth_strings_1",
+                kit: Kit::Machine,
+                voicing: Voicing::Note,
+                scale: "phrygian",
+                steps: &[0, 1, 3, 5, 7, 8, 10],
+                swing: 0,
+                bank: "tr909",
+            },
+            Genre {
+                name: "ambient",
+                melody: "gm_celesta",
+                bass: "gm_fretless_bass",
+                chords: "gm_pad_halo",
+                kit: Kit::Machine,
+                voicing: Voicing::Note,
+                scale: "lydian",
+                steps: &[0, 2, 4, 6, 7, 9, 11],
+                swing: 0,
+                bank: "linn",
+            },
+            Genre {
+                name: "bossa",
+                melody: "gm_flute",
+                bass: "gm_acoustic_bass",
+                chords: "gm_acoustic_guitar_nylon",
+                kit: Kit::Ride,
+                voicing: Voicing::Seventh,
+                scale: "major",
+                steps: major,
+                swing: 10,
+                bank: "r8",
+            },
+            Genre {
+                name: "chamber",
+                melody: "gm_harpsichord",
+                bass: "gm_cello",
+                chords: "gm_string_ensemble_2",
+                kit: Kit::Machine,
+                voicing: Voicing::Note,
+                scale: "harmonic_minor",
+                steps: &[0, 2, 3, 5, 7, 8, 11],
+                swing: 0,
+                bank: "linn",
+            },
+            Genre {
+                name: "hymn",
+                melody: "gm_church_organ",
+                bass: "gm_contrabass",
+                chords: "gm_choir_aahs",
+                kit: Kit::Machine,
+                voicing: Voicing::Note,
+                scale: "major",
+                steps: major,
+                swing: 0,
+                bank: "linn",
+            },
+        ];
+        for genre in &genres {
+            check_genre(genre);
+        }
+        // The pulse is structure: a genre may quieten the drums, never silence them.
+        for name in super::PRESETS {
+            assert!(
+                Style::preset(name).unwrap().mix().drums_gain().hundredths() >= 10,
+                "{name}"
+            );
+        }
     }
 
     #[test]

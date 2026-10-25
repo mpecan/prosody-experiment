@@ -26,6 +26,15 @@ export interface Preset {
   palette: Palette;
 }
 
+/** A named palette as the style picker shows it, with the mapping variants it suggests for A. */
+export interface StyleInfo {
+  name: string;
+  /** What it sounds like, in a few words. */
+  what: string;
+  /** Mapping → variant: what its genre would have the poem do. Only ever a suggestion, set on A. */
+  suggests: Record<string, string>;
+}
+
 export interface SiteData {
   /** Where the page's questions go: the local server, or the compiler beside the page. */
   transport: 'server' | 'wasm';
@@ -44,6 +53,8 @@ export interface SiteData {
   palettes: Record<string, Palette>;
   /** The controls each named palette sets (`style::preset_keys`). */
   paletteKeys: Record<string, string[]>;
+  /** Every named palette, in order, for the style picker. */
+  styles: StyleInfo[];
   /** The poem the page opens with. */
   seed: string;
 }
