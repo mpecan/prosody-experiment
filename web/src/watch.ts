@@ -1,16 +1,20 @@
-// Watch: the roll and the lit poem.
+// Watch: the roll, the mixer's meters and the lit poem.
 //
 // Strudel's own drawing (`@strudel/draw`, the version matching the page's Strudel) is loaded only
 // once Strudel has started: its imports of `@strudel/core` are answered from the playing Strudel
 // by the import map, like the soundfonts'. Its `Drawer` calls back every animation frame with the
-// notes near the playhead and the scheduler's time; the same time lights the poem, so the roll
-// and the verse cannot disagree about what is sounding.
+// notes near the playhead and the scheduler's time; the same time draws the lane roll (roll.ts),
+// moves the mixer's meters and lights the poem, so none of them can disagree about what is
+// sounding.
 //
 // The lit verse is drawn by hand rather than rendered by Preact: it is re-cut on every compile and
 // relit every frame, and a frame's work is a few class changes on the pieces that changed.
 import type { Mark, Trace } from './answers';
 import { piece } from './piece';
-import { hearing, poem, rollBars, rollShown } from './store';
+import { site } from './data';
+import { audible, CHANNEL_OF_LAYER, layerOf } from './mix';
+import { laneRects, paintLanes } from './roll';
+import { hearing, poem, rollBars, rollShown, type Channel } from './store';
 import type { Hap, Pattern, Scheduler } from './strudel/globals';
 
 const DRAW = 'https://unpkg.com/@strudel/draw@1.2.6';
@@ -21,7 +25,6 @@ interface Drawer {
   invalidate(scheduler: Scheduler): void;
   setDrawTime(span: [number, number]): void;
 }
-type DrawPianoroll = (options: Record<string, unknown>) => void;
 
 /** Lit pieces of the verse: a run of its text, and the element showing it. */
 interface Piece {
@@ -32,7 +35,6 @@ interface Piece {
 
 export const watch = {
   drawer: null as Drawer | null,
-  drawRoll: null as DrawPianoroll | null,
   drawing: false,
   /** The trace of the pattern playing, evaluated: queried for which syllable sounds. */
   tracePattern: null as Pattern | null,
@@ -51,13 +53,11 @@ let lit: { trace: Trace | null; marks: HTMLSpanElement[][]; pieces: Piece[] } = 
 
 export async function startDrawing(): Promise<void> {
   try {
-    const [{ Drawer }, { drawPianoroll }] = await Promise.all([
-      import(/* @vite-ignore */ `${DRAW}/draw.mjs`) as Promise<{ Drawer: new (fn: (haps: Hap[], time: number) => void, span: [number, number]) => Drawer }>,
-      import(/* @vite-ignore */ `${DRAW}/pianoroll.mjs`) as Promise<{ drawPianoroll: DrawPianoroll }>,
-    ]);
-    watch.drawRoll = drawPianoroll;
+    const { Drawer } = await (import(/* @vite-ignore */ `${DRAW}/draw.mjs`) as
+      Promise<{ Drawer: new (fn: (haps: Hap[], time: number) => void, span: [number, number]) => Drawer }>);
     watch.drawer = new Drawer((haps, time) => {
       paintRoll(haps, time);
+      showActivity(haps, time);
       lightUp(time);
     }, rollWindow());
   } catch (error) {
@@ -114,35 +114,69 @@ function rollContext(): CanvasRenderingContext2D | null {
   return canvas.getContext('2d');
 }
 
-function paintRoll(haps: Hap[], time: number): void {
-  if (!watch.drawRoll || !rollShown.value) return;
-  const ctx = rollContext();
-  if (!ctx) return;
-  const span = rollWindow();
-  // Only the music: every layer of it carries a colour, and the reading's cues carry none.
-  watch.drawRoll({
-    ctx, time, haps: haps.filter((hap) => hap.value?.color),
-    drawTime: span, fold: 1,
-    background: '#18171f', playheadColor: '#e6e3ef', inactive: '#4a4760', active: '#ffffff',
-    colorizeInactive: 1, fillActive: 1,
-  });
-  // Bar lines, where one bar of the arrangement hands over to the next — at the trace's bar starts,
-  // repeated each time the piece loops round, so they fall where the music's bars change length.
-  const [from, to] = [time + span[0], time + span[1]];
-  const times = barTimes();
+/** Where the bar lines fall in the window `[from, to]` of the clock, as offsets from `from`: at
+ * the trace's bar starts, repeated each time the piece loops round. */
+export function barLines(times: number[], from: number, to: number): number[] {
   const length = times[times.length - 1] ?? 2;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(230, 227, 239, 0.16)';
-  ctx.lineWidth = Math.max(1, (window.devicePixelRatio || 1));
+  const lines: number[] = [];
+  if (!(length > 0)) return lines;
   for (let loop = Math.floor(from / length); loop * length <= to; loop++) {
     for (const start of times.slice(0, -1)) {
       const at = loop * length + start;
-      if (at < from || at > to) continue;
-      const x = Math.round(((at - from) / (to - from)) * ctx.canvas.width) + 0.5;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ctx.canvas.height); ctx.stroke();
+      if (at >= from && at <= to) lines.push(at - from);
     }
   }
-  ctx.restore();
+  return lines;
+}
+
+function paintRoll(haps: Hap[], time: number): void {
+  if (!rollShown.value) return;
+  const ctx = rollContext();
+  if (!ctx) return;
+  const span = rollWindow();
+  const scale = window.devicePixelRatio || 1;
+  // The lanes' names sit in a gutter of their own; the bars and the events share the rest.
+  const frame = { width: ctx.canvas.width, height: ctx.canvas.height, gutter: Math.round(72 * scale) };
+  const across = (frame.width - frame.gutter) / (span[1] - span[0]);
+  const bars = barLines(barTimes(), time + span[0], time + span[1]).map((at) => frame.gutter + at * across);
+  paintLanes(ctx, laneRects(haps, site.layers, time, span, frame), site.layers, bars, frame, scale);
+}
+
+// ---- The meters ----
+//
+// Each channel's meter rises to its fader's level while its layer sounds and falls away after, as
+// a desk's would: an envelope per channel, set as --a on the fader (styles.css). Only the music's
+// channels; the voice's meter follows the line being read (`setSpeaking`).
+const activity: Partial<Record<Channel, number>> = {};
+let lastFrame = 0;
+function showActivity(haps: Hap[], time: number): void {
+  const now = performance.now();
+  const fall = Math.exp(-(now - (lastFrame || now)) / 180);
+  lastFrame = now;
+  const sounding = new Set<Channel>();
+  for (const hap of haps) {
+    if (!hap.whole || time < hap.whole.begin.valueOf() || time >= hap.whole.end.valueOf()) continue;
+    const layer = layerOf(hap.value?.color);
+    const channel = layer ? CHANNEL_OF_LAYER[layer] : undefined;
+    if (channel && audible(channel)) sounding.add(channel);
+  }
+  for (const channel of ['drums', 'bass', 'melody', 'chords'] as Channel[]) {
+    const level = sounding.has(channel) ? 1 : (activity[channel] ?? 0) * fall;
+    activity[channel] = level;
+    setMeter(channel, level);
+  }
+}
+/** A channel's meter, 0–1 of its fader; null puts it back to showing the fader alone. */
+export function setMeter(channel: Channel, level: number | null): void {
+  const fader = document.querySelector<HTMLElement>(`.fader[data-channel="${channel}"]`);
+  if (!fader) return;
+  if (level === null) fader.style.removeProperty('--a');
+  else fader.style.setProperty('--a', level.toFixed(3));
+}
+/** Every meter back to its fader, as when nothing plays. */
+export function resetMeters(): void {
+  for (const channel of ['drums', 'bass', 'melody', 'chords', 'voice'] as Channel[]) setMeter(channel, null);
+  lastFrame = 0;
 }
 
 export function clearRoll(): void {
@@ -218,6 +252,8 @@ export let speaking: Speaking | null = null;
 export function setSpeaking(shown: Speaking | null, show = true): void {
   speaking = shown;
   if (show) showReading();
+  // The voice's meter: up while a line is heard, down between.
+  if (show) setMeter('voice', shown && audible('voice') ? 1 : 0);
 }
 let wordFrame = 0;
 function showReading(): void {

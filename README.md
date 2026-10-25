@@ -87,23 +87,30 @@ the browser's voice reports its words), so the voice and the music stay legible 
 the music colours the letters, the voice lights what lies behind them. Keep typing while it plays:
 the verse goes plain for the moment it takes to recompile, then lights again.
 
-Everything you set lives in **folders along the bottom edge**, the same on a phone and on a desk:
-the **Roll** (Strudel's own piano roll, `@strudel/draw`, showing a set number of bars — poem lines —
-with faint lines where one bar hands over to the next), **Sound** (the palette), **Mappings** (A and
-B), **Reading** and **Under the hood** (the pattern, what each word became, and the score). A tab
-opens its folder over the lower part of the page, another tab swaps it, the open one's tab closes
-it; the page remembers which was open. The page opens with a welcome — what *prosody* means and what
-this experiment does — which stays closed once closed (**about** reopens it); it follows the
-system's light or dark setting, or the reader's choice (the ◐ button). A neural voice is never
-downloaded unasked: the first time one is chosen the page says how big it is and asks, then shows
-its download with a progress bar, Hide and Cancel. Until then, and by default, the recorded
-readings read.
+Under the poem is the **roll**, shown or hidden from the top bar (**Roll**) whichever folder is
+open: a lane a layer — pulse, ornament, bass, rhyme, chords — each event a bar in its layer's
+colour, a higher note higher in its lane, scrolling past a playhead with faint lines where one bar
+of the arrangement hands over to the next, over a set number of bars. Everything you set lives in
+**folders**: a panel beside the poem on a wide screen, a sheet along the bottom edge on a phone
+that a tab opens and the open tab (or its handle) folds away. The **Mixer** has every level in one
+place — drums, bass, melody, chords and the voice — each with a meter that moves with what sounds,
+and **M**ute and **S**olo: heard at once, with nothing recompiled and nothing in the pattern
+changed, because the page plays each event through a filter that reads the switches, and a muted
+layer's events stay on the roll, faint. Then **Sound** (styles, the key, the tempo and the
+instruments), **Reading**, **Mappings** (A and B) and **Under the hood** (the pattern, what each
+word became, and the score); the page remembers which was open. It opens with a welcome — what
+*prosody* means and what this experiment does — which stays closed once closed (**about** reopens
+it); it follows the system's light or dark setting, or the reader's choice (the ◐ button). A neural
+voice is never downloaded unasked: the first time one is chosen the page says how big it is and
+asks, then shows its download with a progress bar, Hide and Cancel. Until then, and by default, the
+recorded readings read.
 
 The lighting is `SPEC.md` §8's traceability made visible: every lit syllable is the span the sound
 came from. The page gets it from `/trace` (`prosody_emit::trace`), a silent pattern of syllable ids
 built by the same walk of bars and beats as the music and on the same clock, so the light lands
-where the sound does. Each layer in the pattern carries `.color(...)` for the roll, which Strudel's
-drawing reads and its sound ignores; `pianoroll()` on strudel.cc uses it too.
+where the sound does. Each layer in the pattern carries `.color(...)`, which Strudel's sound ignores:
+the page's roll lays the layers out by it, its mixer mutes and solos by it (`site.json` names each
+layer's colour, from the emitter itself), and `pianoroll()` on strudel.cc draws it too.
 
 The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, swing, sample bank,
 the bass and melody instruments, and the mix. Changing one of them changes what you hear and

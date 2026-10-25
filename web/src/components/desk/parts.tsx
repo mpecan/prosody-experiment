@@ -44,9 +44,9 @@ export function Knob({ id, label, value, min, max, step, onInput, colour, title,
 }
 
 /** A fader: a rail with a meter beside it, the cap in its layer colour. */
-export function Fader({ id, label, value, min, max, step, onInput, colour, title, engraved, shown }: Range & { engraved: string }) {
+export function Fader({ id, label, value, min, max, step, onInput, colour, title, engraved, shown, channel }: Range & { engraved: string; channel?: string }) {
   return (
-    <label class="fader" style={{ '--c': colour, '--v': v(value, min, max) }} title={title}>
+    <label class="fader" data-channel={channel} style={{ '--c': colour, '--v': v(value, min, max) }} title={title}>
       <span class="rail">
         <span class="meter" />
         <input id={id} type="range" min={min} max={max} step={step} value={value} aria-label={label}

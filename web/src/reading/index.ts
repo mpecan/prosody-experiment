@@ -26,6 +26,7 @@ import {
 } from '../store';
 import { audioContext, evaluate, strudel, type Hap, type Pattern } from '../strudel/globals';
 import { followPace } from '../strudel';
+import { audible } from '../mix';
 import { followWords, setSpeaking, showSpoken, speaking, type Speaking } from '../watch';
 import {
   ENGINE_INFO, ENGINE_NAMES, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
@@ -495,7 +496,7 @@ function readLine(line: SpokenLine & { stanzaLast?: boolean }, rate: number, onE
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(line.text);
   utterance.rate = rate;
-  utterance.volume = Math.min(1, settingsNow().level);
+  utterance.volume = Math.min(1, voiceLevel());
   const voice = browserVoices.find((v) => v.name === voiceOf('browser'));
   if (voice) { utterance.voice = voice; utterance.lang = voice.lang; } else utterance.lang = language.value;
   // `cancel()` above ends the previous utterance asynchronously; its `end` must not clear the line
@@ -873,8 +874,19 @@ export function setVoice(voice: string): void {
 }
 export function setLevel(level: number): void {
   update({ level });
-  if (speech.bus) speech.bus.gain.setTargetAtTime(level, audioContext().currentTime, 0.02);
+  applyVoiceLevel();
   saveReading();
+}
+
+/** The voice's level as it is heard: its fader's, or nothing while the mixer mutes it (or solos
+ * another channel). */
+export function voiceLevel(): number {
+  return audible('voice') ? settingsNow().level : 0;
+}
+/** The voice's level, set on whatever is reading now. */
+export function applyVoiceLevel(): void {
+  if (speech.bus) speech.bus.gain.setTargetAtTime(voiceLevel(), audioContext().currentTime, 0.02);
+  if (!audible('voice') && 'speechSynthesis' in window) speechSynthesis.cancel();
 }
 
 /** A preset in another language: the old poem's reading is let go first — stopped, and its lines

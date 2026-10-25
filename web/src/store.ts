@@ -105,6 +105,11 @@ export interface ReadingMenus {
   voiceDisabled: boolean;
 }
 export const readingMenus = signal<ReadingMenus>({ engines: [], languages: [], voices: [], voice: '', voiceDisabled: false });
+/** The mixer's channels, and which are muted and soloed. Not remembered: a visit starts hearing
+ * everything. */
+export type Channel = 'drums' | 'bass' | 'melody' | 'chords' | 'voice';
+export const muted = signal<Partial<Record<Channel, boolean>>>({});
+export const soloed = signal<Partial<Record<Channel, boolean>>>({});
 /** Whether the reading ducks the music while a stanza is read. */
 export const duck = signal(true);
 

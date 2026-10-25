@@ -406,6 +406,33 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Mute, solo, live meters and the lane roll
+
+The fourth and last of the agreed steps.
+
+- **Mute and solo**, on every Mixer channel (drums, bass, melody, chords, voice). The page plays
+  the evaluated pattern through `withValue`, which Strudel applies as each event is queried, so a
+  switch is heard on the next tick with nothing recompiled; an event of a channel not heard plays at
+  gain 0 and is marked, and stays on the roll, faint. The compiled pattern is untouched — what is
+  shown and what pastes into strudel.cc is the poem's. The voice is muted at its bus (and the
+  browser's voice cancelled). With any channel soloed only the soloed are heard, as on a desk.
+  Not remembered: a visit starts hearing everything. Gain is the only level the emitter writes on
+  an event, so gain 0 is silence.
+- **Which layer an event is** comes from the colour the emitter already writes (`.color`, display
+  only to Strudel's sound); `strudel::layers()` now names each layer with its colour and
+  `site.json` carries it, so the page cannot drift from the emitter. A test checks that every
+  `.color` in a compiled poem is one of them.
+- **The lane roll** replaces `@strudel/draw`'s piano roll (its `Drawer` still supplies the frames):
+  a lane a layer with its name in a gutter, each event a bar across its time, a higher note higher
+  in a pitched lane, lit while it sounds, faint when muted, the bar lines and the playhead as
+  before (`roll.ts`, its geometry a pure function under test).
+- **Live meters**: each channel's meter rises to its fader while its layer sounds and falls after
+  (an envelope per channel from the same frames), the voice's while a line is heard; back to the
+  fader alone when stopped.
+- Tests: 68 in Vitest (mute and solo, the silenced and marked event, the voice's level, the lane
+  geometry worked by hand, bar lines round the loop, the strips dimming) and 7 end to end — the
+  new one plays the Tyger, solos the bass, and watches the drums' meter fall and the bass's move.
+
 ### Styles: six genres, and what they suggest the poem do
 
 The third of the four steps. The user approved the reading of I3 proposed with it: a style is

@@ -20,6 +20,8 @@ export interface Pattern {
   /** `dominant` true makes the callback the pattern's only output (@strudel/core pattern.mjs). */
   onTrigger(fn: (hap: Hap, currentTime: number, cps: number, targetTime: number) => void, dominant: boolean): Pattern;
   queryArc(begin: number, end: number): Hap[];
+  /** The same pattern with every event's value mapped — at query time, so `fn` may read state. */
+  withValue(fn: (value: Record<string, unknown>) => Record<string, unknown>): Pattern;
 }
 
 export interface Scheduler {
