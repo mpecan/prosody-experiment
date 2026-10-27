@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [master, main]
+    branches: [master, main, staging]
   pull_request:
 
 env:
@@ -75,9 +75,9 @@ jobs:
         working-directory: web
         run: npm run e2e
       # The site just checked, byte for byte and in a browser, is the one deployed: kept for the
-      # deploy job on a push to main.
+      # deploy job on a push to main or staging.
       - name: keep the site
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
         uses: actions/upload-artifact@v4
         with:
           name: site
@@ -158,3 +158,35 @@ jobs:
           # with a wrangler release.
           wranglerVersion: "4.152.0"
           command: deploy
+
+  # A push to staging that has passed every job above goes live at https://staging.prosody.rocks:
+  # the worker's redirects checked, then `wrangler deploy --env staging` of the site the wasm job
+  # built and tested.
+  deploy-staging:
+    needs: [gates, wasm, web, grammar]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.prosody.rocks
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.18.0"
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: target/site
+      - name: every way in reaches https://staging.prosody.rocks
+        run: node deploy/check-worker.mjs
+      - name: deploy staging
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.152.0"
+          command: deploy --env staging

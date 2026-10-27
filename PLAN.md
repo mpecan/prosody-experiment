@@ -406,6 +406,23 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Staging deployment: staging.prosody.rocks
+
+The user asked to deploy a staging version of the app to `staging.prosody.rocks` from a new branch
+`staging`.
+
+- **Wrangler environment (`wrangler.jsonc`).** Added `env.staging` with `name: "prosody-staging"`,
+  custom domain route `staging.prosody.rocks`, and `vars.CANONICAL_HOST = "staging.prosody.rocks"`.
+- **Worker & redirects (`deploy/worker.js`, `deploy/redirect.js`).** `redirectFor` accepts the
+  canonical host (defaulting to `prosody.rocks` in production and `staging.prosody.rocks` on
+  staging) so HTTP and `www.` requests on staging redirect cleanly to `https://staging.prosody.rocks/`
+  with HSTS, while preserving link preview generation for shared poems. Verified by
+  `deploy/check-worker.mjs`.
+- **CI automation (`.github/workflows/ci.yml`).** A push to `staging` that passes `gates`, `wasm`,
+  `web` and `grammar` runs the `deploy-staging` job to upload the artifact to Cloudflare with
+  `wrangler deploy --env staging` in a `staging` GitHub environment. `scripts/deploy.sh` also
+  supports `staging` for manual deploys from a local working copy.
+
 ### Sharing without storage: a creation is a link
 
 The user wants people to share what they make, with no storage — previews of a shared link allowed,

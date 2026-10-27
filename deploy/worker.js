@@ -15,7 +15,8 @@ import { HSTS, redirectFor } from './redirect.js';
 
 export default {
   async fetch(request, env) {
-    const moved = redirectFor(request.url);
+    const canonical = env?.CANONICAL_HOST || (new URL(request.url).hostname.startsWith('staging.') ? 'staging.prosody.rocks' : 'prosody.rocks');
+    const moved = redirectFor(request.url, canonical);
     if (moved) return Response.redirect(moved, 301);
     let response = await env.ASSETS.fetch(request);
     const url = new URL(request.url);
@@ -23,7 +24,7 @@ export default {
       && response.ok && (response.headers.get('content-type') ?? '').startsWith('text/html')) {
       const shared = await sharedIn(request.url);
       if (shared) {
-        const page = withPreview(await response.text(), previewOf(shared), request.url);
+        const page = withPreview(await response.text(), previewOf(shared, canonical), request.url);
         const headers = new Headers(response.headers);
         headers.delete('content-length');
         headers.delete('etag');
