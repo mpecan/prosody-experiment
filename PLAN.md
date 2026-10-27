@@ -406,6 +406,23 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### CI and build pipeline speedups
+
+The user asked to review CI performance and optimize build and tool installation times.
+
+- **Prebuilt wasm-bindgen-cli (`scripts/build-site.sh`, `ci.yml`, `deploy-staging-comment.yml`).**
+  `scripts/build-site.sh` now reuses an existing `wasm-bindgen` on `PATH` if the pinned version matches
+  or downloads the prebuilt binary using `cargo-binstall` before falling back to `cargo install`. CI
+  workflows install the prebuilt binary via `taiki-e/install-action@v2`, cutting ~6m of compilation time
+  from the `wasm` and `deploy-staging-comment` jobs.
+- **Test profile acceleration (`Cargo.toml`).** Added `[profile.dev.package."*"] opt-level = 2` and
+  `[profile.dev.package.prosody-lts] opt-level = 2` so dependencies and compute-heavy suites (grading
+  against the 117k-word CMU dictionary) execute in seconds rather than minutes in `cargo test`.
+- **Browser & package caching (`ci.yml`, `deploy-staging-comment.yml`).** Added Playwright Chromium cache
+  (`~/.cache/ms-playwright`) and npm dependency caching across all Node setups.
+- **Workflow concurrency (`ci.yml`).** Added top-level `concurrency` with `cancel-in-progress: true` for
+  PR branches so superseded commits terminate early.
+
 ### Staging deployment: staging.prosody.rocks
 
 The user asked to deploy a staging version of the app to `staging.prosody.rocks` from a new branch

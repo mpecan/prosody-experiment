@@ -58,3 +58,12 @@ indexing_slicing = "deny" # slicing a poem by index is how you panic on unicode
 float_cmp = "deny"
 todo = "deny"
 dbg_macro = "deny"
+
+# Optimize dependencies and compute-heavy crates in debug/test builds so test suites
+# (such as grading against the 117k-entry dictionary in prosody-lts) run in seconds rather
+# than minutes, while keeping iterative compilation fast.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev.package.prosody-lts]
+opt-level = 2

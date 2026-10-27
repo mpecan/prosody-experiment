@@ -100,6 +100,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24.18.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Prebuilt wasm-bindgen-cli matching Cargo.lock pinned version (0.2.129); avoids ~6m of compilation.
+      - name: prebuilt wasm-bindgen
+        if: steps.check.outputs.result == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.129
 
       - name: verify wasm and build site
         if: steps.check.outputs.result == 'true'

@@ -51,9 +51,16 @@ target_dir=$(cargo metadata --format-version 1 --no-deps |
 version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
 tools="$target_dir/tools"
 bindgen="$tools/bin/wasm-bindgen"
-if [ ! -x "$bindgen" ] || [ "$("$bindgen" --version)" != "wasm-bindgen $version" ]; then
-  echo "build-site: installing wasm-bindgen-cli $version into $tools (once)" >&2
-  cargo install --quiet --locked --root "$tools" wasm-bindgen-cli --version "$version"
+if [ ! -x "$bindgen" ] || [ "$("$bindgen" --version 2>/dev/null)" != "wasm-bindgen $version" ]; then
+  if command -v wasm-bindgen >/dev/null 2>&1 && [ "$(wasm-bindgen --version 2>/dev/null)" = "wasm-bindgen $version" ]; then
+    mkdir -p "$tools/bin"
+    ln -sf "$(command -v wasm-bindgen)" "$bindgen"
+  elif command -v cargo-binstall >/dev/null 2>&1 && cargo binstall --no-confirm --root "$tools" "wasm-bindgen-cli@$version"; then
+    : # prebuilt wasm-bindgen-cli installed into $tools
+  else
+    echo "build-site: installing wasm-bindgen-cli $version into $tools (once)" >&2
+    cargo install --quiet --locked --root "$tools" wasm-bindgen-cli --version "$version"
+  fi
 fi
 rm -f "$dir/prosody.wasm" # the name before the bindings were generated
 "$bindgen" --target web --no-typescript --out-name prosody --out-dir "$dir" \

@@ -8,6 +8,10 @@ on:
     branches: [master, main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -60,6 +64,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24.18.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Prebuilt wasm-bindgen-cli matching Cargo.lock pinned version (0.2.129); avoids ~6m of compilation.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen-cli@0.2.129
+
       # The Rust cache restores `target/`; the site is built from empty, so nothing an older build
       # left behind is tested or deployed with it.
       - name: a clean site
@@ -68,6 +80,11 @@ jobs:
         run: ./scripts/check-wasm.sh
       # check-wasm built the site into target/site; the page is tested end to end on it, with the
       # real compiler, in Chromium.
+      - name: cache playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
       - name: browser
         working-directory: web
         run: npx playwright install --with-deps chromium
