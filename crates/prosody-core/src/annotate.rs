@@ -34,6 +34,7 @@ use std::fmt::Write as _;
 
 use crate::arrange::Cause;
 use crate::bass::{BassNote, BassReason, Chromatic, Direction, Height};
+use crate::drums::Drum;
 use crate::harmony::{Chord, Harmony, Reason, Silence};
 use crate::mapping::Variant;
 use crate::meter::FootKind;
@@ -136,6 +137,7 @@ pub struct Syllable {
     foot: FootKind,
     velocity: Velocity,
     light: bool,
+    drum: Drum,
 }
 
 impl Syllable {
@@ -162,6 +164,12 @@ impl Syllable {
     #[must_use]
     pub const fn is_light(&self) -> bool {
         self.light
+    }
+
+    /// Which piece of the drum kit this syllable plays ([`Event::drum`]).
+    #[must_use]
+    pub const fn drum(&self) -> Drum {
+        self.drum
     }
 }
 
@@ -372,6 +380,10 @@ pub struct Annotated {
     function: Variant,
     /// [`Score::lightened`]: the syllables the light function words struck lightly.
     lightened: usize,
+    drums: Variant,
+    /// [`Score::articulated`]: the syllables whose drum piece differs from their layer's flat
+    /// piece.
+    articulated: usize,
     /// [`Arrangement::eroding`](crate::arrange::Arrangement::eroding): the bars played over an
     /// eroding loop.
     eroding: usize,
@@ -414,6 +426,19 @@ impl Annotated {
     #[must_use]
     pub const fn lightened(&self) -> usize {
         self.lightened
+    }
+
+    /// Which variant of the drums assigned each syllable's drum piece (`SPEC.md` §4.1, §4.2).
+    #[must_use]
+    pub const fn drums(&self) -> Variant {
+        self.drums
+    }
+
+    /// How many syllables play a drum piece different from their layer's flat default
+    /// ([`Score::articulated`]).
+    #[must_use]
+    pub const fn articulated(&self) -> usize {
+        self.articulated
     }
 
     /// How many bars play over a loop eroding under a long stanza's arrival (`SPEC.md` §4.6).
@@ -569,6 +594,8 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         straightened_beats: score.straightened_beats(),
         function: score.function(),
         lightened: score.lightened(),
+        drums: score.drums(),
+        articulated: score.articulated(),
         eroding: score.arrangement().eroding(),
         lengths: bar_lengths(score),
     }
@@ -597,6 +624,7 @@ const fn syllable(event: &Event) -> Syllable {
         foot: event.foot(),
         velocity: event.velocity(),
         light: event.is_light(),
+        drum: event.drum(),
     }
 }
 
@@ -701,6 +729,14 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             annotated.lightened()
         );
     }
+    if annotated.drums() == Variant::Articulated {
+        let _ = writeln!(
+            out,
+            "drums articulated · each syllable's drum piece is chosen by its layer, beat and \
+             stress: {} syllable(s) off the layer's flat piece (§4.1, §4.2)",
+            annotated.articulated()
+        );
+    }
     // The erosion of long stanzas (§4.6), named only where it happened: a piece whose stanzas
     // are all eight lines or fewer is transformed a line a pass under either variant.
     if annotated.eroding() > 0 {
@@ -772,7 +808,13 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
                 "token", "beat", "gain", "pitch", "modulation", "sharp", "bank"
             );
             for token in line.tokens() {
-                render_token(&mut out, source, token, walking);
+                render_token(
+                    &mut out,
+                    source,
+                    token,
+                    walking,
+                    annotated.drums() == Variant::Articulated,
+                );
             }
         }
         let _ = writeln!(out);
@@ -1245,7 +1287,13 @@ fn pitch_cell(token: &Annotation, nth: usize, walking: bool) -> String {
 }
 
 /// One token's row, or several when it sounds more than one syllable.
-fn render_token(out: &mut String, source: &str, token: &Annotation, walking: bool) {
+fn render_token(
+    out: &mut String,
+    source: &str,
+    token: &Annotation,
+    walking: bool,
+    articulated: bool,
+) {
     let text = token.span().text(source).unwrap_or("<lost>");
     if token.syllables().is_empty() {
         let _ = writeln!(
@@ -1322,6 +1370,9 @@ fn render_token(out: &mut String, source: &str, token: &Annotation, walking: boo
         // Per syllable, not per token: this gain is the light function words' (§4.2).
         if syllable.is_light() {
             from.push("function-words");
+        }
+        if articulated {
+            from.push(syllable.drum().annotation());
         }
 
         let _ = writeln!(

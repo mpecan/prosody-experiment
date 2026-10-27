@@ -87,12 +87,14 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20                pulse = elastic|steady (default steady);\n\
      \x20                stack = crossing|straight (default crossing);\n\
      \x20                function-words = full|light (default full);\n\
-     \x20                long-stanzas = gradual|erode (default erode)\n\
+     \x20                long-stanzas = gradual|erode (default erode);\n\
+     \x20                drums = flat|articulated (default flat)\n\
      \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
-     \x20                (the pulse, the stack, the function words and the long stanzas\n\
-     \x20                have no off: --without pulse is pulse=elastic, --without stack is\n\
+     \x20                (the pulse, the stack, the function words, the long stanzas and the\n\
+     \x20                drums have no off: --without pulse is pulse=elastic, --without stack is\n\
      \x20                stack=crossing, --without function-words is function-words=full,\n\
-     \x20                --without long-stanzas is long-stanzas=gradual)\n\
+     \x20                --without long-stanzas is long-stanzas=gradual, --without drums is\n\
+     \x20                drums=flat)\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
@@ -392,6 +394,12 @@ fn send(schedule: &Schedule, address: &str) -> Result<()> {
         eprintln!(
             "prosody: pulse = elastic is not applied to an OSC schedule: it is in beats, and \
              every bar lasts its beats"
+        );
+    }
+    if schedule.drums_unapplied() {
+        eprintln!(
+            "prosody: drums = articulated is not applied to an OSC schedule: messages carry the \
+             layer, foundation or flourish, not a drum piece"
         );
     }
     if schedule.unsent_chords() > 0 {

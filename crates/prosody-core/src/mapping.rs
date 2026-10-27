@@ -6,9 +6,10 @@
 //! a first variant that is what preceded the mapping ([`Variant::Off`] for every mapping but the
 //! pulse, which cannot be left out and goes back to [`Variant::Elastic`], the stack, whose
 //! lines always sound somehow and which goes back to [`Variant::Crossing`], and the function
-//! words, which are always struck somehow and go back to [`Variant::Full`], and the long stanzas,
+//! words, which are always struck somehow and go back to [`Variant::Full`], the long stanzas,
 //! whose arrivals always take the loop's place somehow and which go back to
-//! [`Variant::Gradual`]) — and one of them is
+//! [`Variant::Gradual`], and the drums, which always play a piece of the kit and go back to
+//! [`Variant::Flat`]) — and one of them is
 //! its default. A [`Mappings`] value picks one variant per
 //! mapping, so the same poem can be heard under each choice, side by side.
 //!
@@ -81,6 +82,12 @@ pub enum Mapping {
     /// for short stanzas under either variant — which made a stanza of *n* lines take about *n*
     /// passes of *n* bars. Stanzas of eight lines or fewer arrange the same under both.
     LongStanzas,
+    /// §4.1 and §4.2's drum kit articulation: which piece of the drum kit each syllable plays.
+    /// [`Variant::Flat`] (the default): one piece per layer — the pulse (`bd` / `rd`) on every
+    /// foundation syllable and the ornament (`hh` / `sd`) on every flourish syllable, as the
+    /// piece shipped. [`Variant::Articulated`]: each syllable's piece chosen from its layer, beat
+    /// parity (`beat % 2`, downbeat against backbeat) and stress within the foot (`crate::drums`).
+    Drums,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -139,6 +146,10 @@ pub enum Variant {
     /// The long stanzas' default: where either stanza is long, the running loop erodes under the
     /// arriving stanza — fewer of its syllables each pass, until it is silent.
     Erode,
+    /// The drums as they were, and their default: one drum piece per layer on every syllable.
+    Flat,
+    /// The drums articulated across the kit by layer, beat parity and stress within the foot.
+    Articulated,
 }
 
 impl Variant {
@@ -165,6 +176,8 @@ impl Variant {
             Self::Light => "light",
             Self::Gradual => "gradual",
             Self::Erode => "erode",
+            Self::Flat => "flat",
+            Self::Articulated => "articulated",
         }
     }
 }
@@ -216,9 +229,13 @@ const FUNCTION: &[Variant] = &[Variant::Full, Variant::Light];
 /// erode.
 const LONG_STANZAS: &[Variant] = &[Variant::Gradual, Variant::Erode];
 
+/// The drums' variants: flat first, because it is what preceded the mapping — every syllable
+/// always plays a piece of the kit, so there is no [`Variant::Off`] — then articulated.
+const DRUMS: &[Variant] = &[Variant::Flat, Variant::Articulated];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -230,6 +247,7 @@ impl Mapping {
         Self::Stack,
         Self::Function,
         Self::LongStanzas,
+        Self::Drums,
     ];
 
     /// Its name on a command line or in a query string.
@@ -247,6 +265,7 @@ impl Mapping {
             Self::Stack => "stack",
             Self::Function => "function-words",
             Self::LongStanzas => "long-stanzas",
+            Self::Drums => "drums",
         }
     }
 
@@ -297,13 +316,19 @@ impl Mapping {
                  loop thins out under it over three passes until silent (erode), or is replaced \
                  a line a pass (gradual); shorter stanzas are replaced a line a pass under both"
             }
+            Self::Drums => {
+                "which drum piece each syllable plays: one piece per layer (flat), or articulated \
+                 across kick/ride, snare, toms and closed hat by layer, beat parity and stress \
+                 within the foot (articulated)"
+            }
         }
     }
 
     /// Its variants, in a fixed order that starts with what preceded the mapping:
     /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`], the
     /// stack, which starts with [`Variant::Crossing`], the function words, which start with
-    /// [`Variant::Full`], and the long stanzas, which start with [`Variant::Gradual`].
+    /// [`Variant::Full`], the long stanzas, which start with [`Variant::Gradual`], and the drums,
+    /// which start with [`Variant::Flat`].
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
@@ -315,6 +340,7 @@ impl Mapping {
             Self::Stack => STACK,
             Self::Function => FUNCTION,
             Self::LongStanzas => LONG_STANZAS,
+            Self::Drums => DRUMS,
         }
     }
 
@@ -352,6 +378,10 @@ impl Mapping {
             // with the square of stanza length (Lowell's "Patterns": 1,331 bars). Only above the
             // threshold, so every shorter stanza is arranged as before (SPEC.md §4.6).
             Self::LongStanzas => Variant::Erode,
+            // A candidate the user approved for comparison: flat keeps every existing pattern as
+            // it was, while articulated distributes syllables across kick/ride, snare, toms and
+            // closed hat by beat parity and stress within the foot (`PLAN.md`).
+            Self::Drums => Variant::Flat,
         }
     }
 
@@ -376,8 +406,8 @@ impl Mapping {
     /// This mapping left out: its first variant, what preceded it — [`Variant::Off`] for every
     /// mapping but the pulse, which a piece cannot be without, and which goes back to
     /// [`Variant::Elastic`], the stack, which goes back to [`Variant::Crossing`], the function
-    /// words, which go back to [`Variant::Full`], and the long stanzas, which go back to
-    /// [`Variant::Gradual`].
+    /// words, which go back to [`Variant::Full`], the long stanzas, which go back to
+    /// [`Variant::Gradual`], and the drums, which go back to [`Variant::Flat`].
     #[must_use]
     pub const fn off(self) -> Choice {
         let variant = match self.variants() {
@@ -456,7 +486,7 @@ impl Mappings {
     }
 
     /// Whether `mapping` applies at all: any variant but [`Variant::Off`]. Always true of the
-    /// pulse, the stack, the function words and the long stanzas, which have no off.
+    /// pulse, the stack, the function words, the long stanzas and the drums, which have no off.
     #[must_use]
     pub fn has(&self, mapping: Mapping) -> bool {
         self.get(mapping) != Variant::Off
@@ -513,6 +543,7 @@ mod tests {
                 Mapping::Stack => Variant::Crossing,
                 Mapping::Function => Variant::Full,
                 Mapping::LongStanzas => Variant::Gradual,
+                Mapping::Drums => Variant::Flat,
                 _ => Variant::Off,
             };
             assert_eq!(mapping.variants().first(), Some(&preceded), "{mapping:?}");
@@ -621,7 +652,27 @@ mod tests {
         assert_eq!(all.get(Mapping::Stack), Variant::Crossing);
         assert_eq!(all.get(Mapping::Function), Variant::Full);
         assert_eq!(all.get(Mapping::LongStanzas), Variant::Erode);
+        assert_eq!(all.get(Mapping::Drums), Variant::Flat);
         assert_eq!(all.changed().count(), 0);
+    }
+
+    #[test]
+    fn the_drums_are_flat_unless_articulated_is_chosen() {
+        assert_eq!(
+            Mapping::Drums.variants(),
+            &[Variant::Flat, Variant::Articulated]
+        );
+        assert_eq!(Mapping::named("drums"), Some(Mapping::Drums));
+        assert_eq!(Mappings::all().get(Mapping::Drums), Variant::Flat);
+        assert!(Mapping::Drums.choose(Variant::Off).is_none());
+        assert!(Mapping::Drums.choose_named("off").is_none());
+        assert!(Mapping::Drums.choose_named("light").is_none());
+        let articulated = Mappings::all().with(Mapping::Drums.choose_named("articulated").unwrap());
+        assert_eq!(articulated.get(Mapping::Drums), Variant::Articulated);
+        assert_eq!(articulated.changed().count(), 1);
+        // Left out, it is what preceded it: flat, the default, so nothing is stored.
+        assert_eq!(articulated.without(Mapping::Drums), Mappings::all());
+        assert!(Mappings::all().has(Mapping::Drums));
     }
 
     #[test]
@@ -717,13 +768,12 @@ mod tests {
     #[test]
     fn every_combination_is_listed_once() {
         // Four on/off switches, a four-way bass, a four-way harmony, a four-way reading, a
-        // two-way pulse, a two-way stack, two-way function words and two-way long stanzas:
-        // 2^4 × 4 × 4 × 4 × 2 × 2 × 2 × 2 = 16384.
+        // two-way pulse, a two-way stack, two-way function words, two-way long stanzas and
+        // two-way drums: 2^4 × 4 × 4 × 4 × 2 × 2 × 2 × 2 × 2 = 32768.
         let every = Mappings::every();
-        assert_eq!(every.len(), 16384);
-        for (index, one) in every.iter().enumerate() {
-            assert!(!every[index + 1..].contains(one), "{one:?} twice");
-        }
+        assert_eq!(every.len(), 32768);
+        let unique: std::collections::BTreeSet<_> = every.iter().map(|m| &m.changed).collect();
+        assert_eq!(unique.len(), every.len());
         assert!(every.contains(&Mappings::all()));
     }
 }

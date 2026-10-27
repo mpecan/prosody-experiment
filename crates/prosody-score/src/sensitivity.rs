@@ -420,6 +420,7 @@ struct Heard {
     /// Every bar this event's instrument plays in, its own included.
     shares_with: Vec<usize>,
     layer: Option<Layer>,
+    drum: prosody_core::Drum,
     beat: BeatIndex,
     subdivision: Subdivision,
     velocity: Velocity,
@@ -443,6 +444,7 @@ impl Heard {
                 .map(|bars| bars.iter().copied().collect())
                 .unwrap_or_default(),
             layer: score.voice(event.voice()).map(|voice| voice.layer()),
+            drum: event.drum(),
             beat: event.beat(),
             subdivision: event.subdivision(),
             velocity: event.velocity(),

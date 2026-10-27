@@ -23,6 +23,8 @@
 //! - [`lower`] — §7.5, turning every analysis above into that IR.
 //! - [`accent`] — the light function words, a candidate: a one-syllable function word struck
 //!   lightly where the meter's scansion calls its position weak (§4.2's stress → accent).
+//! - [`drums`] — the articulated drum kit, a candidate: each syllable's drum piece chosen by its
+//!   layer, beat parity and stress within the foot rather than one piece per layer (§4.1, §4.2).
 //! - [`mapping`] — which variant of each candidate mapping applies, so each can be heard against
 //!   the others and against its absence.
 //! - [`bass`] — §4.6's bass: by vowel height, or walking on every syllable or every foot.
@@ -47,6 +49,7 @@ pub mod accent;
 pub mod annotate;
 pub mod arrange;
 pub mod bass;
+pub mod drums;
 pub mod harmony;
 pub mod lower;
 pub mod mapping;
@@ -66,6 +69,7 @@ pub mod voice;
 pub use annotate::{Annotated, AnnotatedLine, Annotation, Pass};
 pub use arrange::{Arrangement, Cause, Fit, Lane, Part, Placement, Slot};
 pub use bass::{BassNote, BassReason, Chromatic, Direction, Height, ScaleStep};
+pub use drums::Drum;
 pub use harmony::{Chord, Function, Harmony, Onset, Reason, Rest, Silence};
 pub use mapping::{Choice, Mapping, Mappings, Variant};
 pub use meter::{

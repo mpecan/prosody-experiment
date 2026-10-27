@@ -427,6 +427,52 @@ The user asked to deploy a staging version of the app to `staging.prosody.rocks`
   from a local working copy. Keeping `ci.yml` scoped to `master` and `main` avoids duplicate check
   runs on PR branches.
 
+### Drum kit articulation: a syllable's stress and beat position choose its piece of the kit
+
+The user asked to start with drum kit articulation, choosing **by beat position + stress** (`bd`/`rd`
+on even-beat primary stresses, `sd` on odd backbeat primary stresses, `hh` on unstressed off-beat
+subdivisions, and toms/snare/hat on flourish lines) as a **candidate `Mapping` selector**
+(`Mapping::Drums`, named `"drums"`, with `flat` as the default and `articulated` to compare against).
+
+- **In the core (`prosody_core::drums`, `Mapping::Drums`).** A new `Drum` enum (`Pulse`,
+  `Backbeat`, `Subdivision`, `Ornament`, `HighTom`, `MidTom`, `LowTom`) sits on every `Event`
+  (`Event::drum`). Under `Variant::Flat` (the default, so every committed snapshot and existing
+  behaviour is untouched), foundation syllables take `Drum::Pulse` and flourish syllables take
+  `Drum::Ornament`. Under `Variant::Articulated`, `drums::run` runs right after `accent::run` (so it
+  respects `function-words = light`):
+  - Foundation (`Layer::Foundation`): `Velocity::Unstressed` → `Drum::Subdivision` (`hh`);
+    `Velocity::Primary` or `Velocity::Secondary` → `Drum::Pulse` on even beats (`beat % 2 == 0`) and
+    `Drum::Backbeat` (`sd`) on odd backbeats (`beat % 2 == 1`). When a foot has two or more stressed
+    syllables (a full-force spondee), its first stressed syllable takes the beat's primary piece and
+    subsequent stressed syllables in the same beat alternate to the counterpart (`Pulse` ↔
+    `Backbeat`), splitting spondees across kick/ride and snare.
+  - Flourish (`Layer::Flourish`): `Velocity::Unstressed` → `Drum::Subdivision` (`hh`);
+    `Velocity::Primary` → `Drum::HighTom` (`ht`) on even beats and `Drum::Backbeat` (`sd`) on odd
+    beats (with second spondee stresses stepping to `MidTom` on even beats or `LowTom` on odd
+    beats); `Velocity::Secondary` → `Drum::MidTom` (`mt`) on even beats and `Drum::LowTom` (`lt`) on
+    odd beats.
+- **In the backends and views.**
+  - Strudel (`prosody-emit/src/strudel.rs`): `rhythm_layer` maps each event's `Drum` through the
+    palette's `Kit` (`Pulse` → `bd` under `Kit::Machine`, `rd` or its `RideFallback` `oh`/`cr`
+    under `Kit::Ride`; `Backbeat`/`Ornament` → `sd`; `Subdivision` → `hh`; `HighTom`/`MidTom`/`LowTom`
+    → `ht`/`mt`/`lt`), and `drums_header` discloses `drums = articulated` with the count of
+    syllables off the flat piece (`Score::articulated`).
+    `every_kit_asks_every_bank_for_a_sample_the_bank_has` now verifies every `Drum` variant across
+    all 6 allowed Strudel drum banks (`tr909`, `tr808`, `tr707`, `linn`, `casio`, `r8`) and both
+    kits (12 configurations).
+  - OSC (`prosody-emit/src/osc.rs`): wire messages carry the layer (`"foundation"` or `"flourish"`),
+    not a drum sample name, so `Schedule::drums_unapplied` and `# not applied here: drums =
+    articulated (…)` disclose it in the schedule header and on `--send`.
+  - Explain view (`prosody-core/src/annotate.rs`), CLI (`prosody-cli`), web (`prosody-web`), and
+    scorer sensitivity (`prosody-score/src/sensitivity.rs`): `Annotated` summarises `drums
+    articulated` and tags each syllable's `from` column with `drums(…)`; `Heard` includes `drum` so
+    the one-word edit test hears drum changes; `scripts/check-wasm.mjs` checks
+    `set=drums:articulated&profile=jazz` for native/Wasm parity.
+- **Invariants and measurements.** I1 (determinism), I2 (`i2_an_edit_leaves_other_stanzas_drums_alone`),
+  I3 (`i3_no_palette_can_change_the_articulated_drums`), and `articulated_changes_only_drum_pieces`
+  all hold; `./scripts/cycle.sh machine drums=articulated` preserves 100% of legibility across all
+  18 poems (mean overall 0.704).
+
 ### Sharing without storage: a creation is a link
 
 The user wants people to share what they make, with no storage — previews of a shared link allowed,

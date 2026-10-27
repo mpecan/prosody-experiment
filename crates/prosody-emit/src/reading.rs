@@ -529,7 +529,9 @@ impl Kind {
             | Variant::Full
             | Variant::Light
             | Variant::Gradual
-            | Variant::Erode => Self::Arrives,
+            | Variant::Erode
+            | Variant::Flat
+            | Variant::Articulated => Self::Arrives,
         }
     }
 }

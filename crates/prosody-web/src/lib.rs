@@ -1311,6 +1311,7 @@ mod tests {
                 "long-stanzas",
                 "[\"gradual\",\"erode\"],\"default\":\"erode\"}",
             ),
+            ("drums", "[\"flat\",\"articulated\"],\"default\":\"flat\"}"),
         ] {
             let at = data.find(&format!("{{\"name\":\"{name}\""));
             assert!(at.is_some(), "{name} missing");
@@ -2319,6 +2320,39 @@ mod tests {
                 &Output::Pattern
             )
             .status
+                >= 400
+        );
+    }
+
+    #[test]
+    fn articulated_drums_reach_the_pattern_and_the_explain_view() {
+        let tyger = body_of(SEED);
+        let articulated = &[("set", "drums:articulated")];
+        let pattern = super::compile(&request(articulated, tyger), &Output::Pattern);
+        let explain = super::compile(&request(articulated, tyger), &Output::Explain);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(explain.status, 200, "{}", explain.body);
+        assert!(
+            pattern.body.contains("//   drums = articulated:"),
+            "{}",
+            pattern.body
+        );
+        assert!(
+            pattern.body.contains("[[bd hh] [sd hh] [bd hh] sd]@4"),
+            "{}",
+            pattern.body
+        );
+        assert!(
+            explain.body.contains("drums=articulated")
+                && explain.body.contains("drums articulated ·")
+                && explain.body.contains(",drums(pulse)")
+                && explain.body.contains(",drums(backbeat)")
+                && explain.body.contains(",drums(subdivision)"),
+            "{}",
+            explain.body
+        );
+        assert!(
+            super::compile(&request(&[("set", "drums:off")], tyger), &Output::Pattern).status
                 >= 400
         );
     }
