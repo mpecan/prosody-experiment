@@ -415,9 +415,13 @@ The user asked to review CI performance and optimize build and tool installation
   or downloads the prebuilt binary using `cargo-binstall` before falling back to `cargo install`. CI
   workflows install the prebuilt binary via `taiki-e/install-action@v2`, cutting ~6m of compilation time
   from the `wasm` and `deploy-staging-comment` jobs.
-- **Test profile acceleration (`Cargo.toml`).** Added `[profile.dev.package."*"] opt-level = 2` and
-  `[profile.dev.package.prosody-lts] opt-level = 2` so dependencies and compute-heavy suites (grading
-  against the 117k-word CMU dictionary) execute in seconds rather than minutes in `cargo test`.
+- **Test profile acceleration (`Cargo.toml`).** Added `[profile.test] opt-level = 1` across the
+  workspace, alongside `opt-level = 2` for external dependencies and `prosody-lts`. This dropped test
+  execution from ~6m down to under 1m (e.g. `cli.rs` dropped from 64s to 6.7s, `prosody-web` from 50s to
+  5.0s) while keeping build times minimal.
+- **Concurrent parity verification (`scripts/check-wasm.mjs`).** Replaced sequential HTTP loop with
+  concurrent worker pool (`concurrency = 4`), allowing the multi-threaded native server to answer in
+  parallel and cutting check time from 6.5m to ~2m.
 - **Browser & package caching (`ci.yml`, `deploy-staging-comment.yml`).** Added Playwright Chromium cache
   (`~/.cache/ms-playwright`) and npm dependency caching across all Node setups.
 - **Workflow concurrency (`ci.yml`).** Added top-level `concurrency` with `cancel-in-progress: true` for

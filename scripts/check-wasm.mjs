@@ -38,25 +38,40 @@ const settings = [
 ];
 const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
 
-let compared = 0;
+const tasks = [];
 for (const file of readdirSync(examples).filter((name) => name.endsWith('.poem')).sort()) {
   const poem = readFileSync(join(examples, file), 'utf8');
   for (const query of settings) {
     for (const view of views) {
       const target = view + (query ? '?' + query : '');
-      const served = await fetch(server + target, { method: 'POST', body: poem });
-      const expected = { status: served.status, body: await served.text() };
-      const got = ask(target, poem);
-      if (got.status !== expected.status || got.body !== expected.body) {
-        const at = [...got.body].findIndex((c, i) => c !== [...expected.body][i]);
-        console.error(`check-wasm: ${file} ${target}: wasm ${got.status}, server ${expected.status}`);
-        console.error(`  first difference at character ${at}:`);
-        console.error(`  wasm:   ${JSON.stringify(got.body.slice(Math.max(0, at - 40), at + 40))}`);
-        console.error(`  server: ${JSON.stringify(expected.body.slice(Math.max(0, at - 40), at + 40))}`);
-        process.exit(1);
-      }
-      compared += 1;
+      tasks.push({ file, poem, target });
     }
   }
 }
+
+const concurrency = 4;
+let compared = 0;
+let index = 0;
+
+async function worker() {
+  while (index < tasks.length) {
+    const current = tasks[index++];
+    if (!current) break;
+    const { file, poem, target } = current;
+    const served = await fetch(server + target, { method: 'POST', body: poem });
+    const expected = { status: served.status, body: await served.text() };
+    const got = ask(target, poem);
+    if (got.status !== expected.status || got.body !== expected.body) {
+      const at = [...got.body].findIndex((c, i) => c !== [...expected.body][i]);
+      console.error(`check-wasm: ${file} ${target}: wasm ${got.status}, server ${expected.status}`);
+      console.error(`  first difference at character ${at}:`);
+      console.error(`  wasm:   ${JSON.stringify(got.body.slice(Math.max(0, at - 40), at + 40))}`);
+      console.error(`  server: ${JSON.stringify(expected.body.slice(Math.max(0, at - 40), at + 40))}`);
+      process.exit(1);
+    }
+    compared += 1;
+  }
+}
+
+await Promise.all(Array.from({ length: concurrency }, () => worker()));
 console.log(`check-wasm: ${compared} answers byte-identical between the wasm and native builds`);
