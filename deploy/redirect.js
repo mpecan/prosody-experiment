@@ -5,13 +5,13 @@ export const CANONICAL = 'prosody.rocks';
 export const HSTS = 'max-age=31536000';
 
 // Where `url` belongs, if not where it is: the canonical host over https, or null.
-export function redirectFor(url) {
+export function redirectFor(url, canonical = CANONICAL) {
   const at = new URL(url);
-  const ours = at.hostname === CANONICAL || at.hostname === `www.${CANONICAL}`;
+  const ours = at.hostname === canonical || at.hostname === `www.${canonical}`;
   if (!ours) return null;
-  if (at.protocol === 'https:' && at.hostname === CANONICAL) return null;
+  if (at.protocol === 'https:' && at.hostname === canonical) return null;
   at.protocol = 'https:';
-  at.hostname = CANONICAL;
+  at.hostname = canonical;
   at.port = '';
   return at.toString();
 }

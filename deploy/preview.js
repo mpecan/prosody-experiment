@@ -47,11 +47,11 @@ export async function sharedIn(url) {
 const clip = (text, most) => (text.length <= most ? text : text.slice(0, most - 1).trimEnd() + '…');
 
 /** What the preview says: the poem's first line as its title, the next few as its description. */
-export function previewOf({ poem, style }) {
+export function previewOf({ poem, style }, canonical = 'prosody.rocks') {
   const lines = poem.split('\n').map((line) => line.trim()).filter(Boolean);
   const title = clip(lines[0] ?? 'A poem', 80);
   const more = clip(lines.slice(1, 4).join(' / '), 160);
-  const what = `A poem played as music${style && style !== 'default' ? `, ${style}` : ''}, on prosody.rocks.`;
+  const what = `A poem played as music${style && style !== 'default' ? `, ${style}` : ''}, on ${canonical}.`;
   return { title: `${title} — prosody`, description: more ? `${more} — ${what}` : what };
 }
 

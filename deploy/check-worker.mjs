@@ -17,6 +17,15 @@ const cases = [
 ];
 for (const [from, to] of cases) assert.equal(redirectFor(from), to, from);
 
+const stagingCases = [
+  ['http://staging.prosody.rocks/', 'https://staging.prosody.rocks/'],
+  ['http://staging.prosody.rocks/index.html?x=1', 'https://staging.prosody.rocks/index.html?x=1'],
+  ['https://www.staging.prosody.rocks/', 'https://staging.prosody.rocks/'],
+  ['http://www.staging.prosody.rocks/prosody_bg.wasm', 'https://staging.prosody.rocks/prosody_bg.wasm'],
+  ['https://staging.prosody.rocks/', null],
+];
+for (const [from, to] of stagingCases) assert.equal(redirectFor(from, 'staging.prosody.rocks'), to, from);
+
 // Through the handler: a redirect is a 301 with the place; a page on https carries HSTS; a page
 // on any other host is the asset's own answer.
 const env = { ASSETS: { fetch: async () => new Response('page', { status: 200 }) } };
@@ -29,6 +38,15 @@ assert.equal(served.headers.get('strict-transport-security'), HSTS);
 assert.equal(await served.text(), 'page');
 const local = await worker.fetch(new Request('http://localhost:8787/'), env);
 assert.equal(local.headers.get('strict-transport-security'), null);
+
+const stagingEnv = { CANONICAL_HOST: 'staging.prosody.rocks', ASSETS: { fetch: async () => new Response('staging-page', { status: 200 }) } };
+const stagingMoved = await worker.fetch(new Request('http://staging.prosody.rocks/a'), stagingEnv);
+assert.equal(stagingMoved.status, 301);
+assert.equal(stagingMoved.headers.get('location'), 'https://staging.prosody.rocks/a');
+const stagingServed = await worker.fetch(new Request('https://staging.prosody.rocks/'), stagingEnv);
+assert.equal(stagingServed.status, 200);
+assert.equal(stagingServed.headers.get('strict-transport-security'), HSTS);
+assert.equal(await stagingServed.text(), 'staging-page');
 
 // A shared poem's preview. A link is made here as the page makes it (web/src/share.ts): JSON,
 // deflated raw, base64url.
@@ -70,4 +88,4 @@ assert.ok(previewed.includes(`<meta property="og:url" content="${escape(tyger)}"
 assert.equal(await (await worker.fetch(new Request('https://prosody.rocks/?s=junk'), pages)).text(), head);
 assert.equal(await (await worker.fetch(new Request('https://prosody.rocks/'), pages)).text(), head);
 
-console.log(`check-worker: ${cases.length} redirects, 3 answers and a shared poem's preview as expected`);
+console.log(`check-worker: ${cases.length + stagingCases.length} redirects, 5 answers and a shared poem's preview as expected`);

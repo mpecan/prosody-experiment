@@ -26,5 +26,19 @@
     { "pattern": "www.prosody.rocks", "custom_domain": true }
   ],
   // No preview hostname on workers.dev: the site lives at one address.
-  "workers_dev": false
+  "workers_dev": false,
+  "vars": {
+    "CANONICAL_HOST": "prosody.rocks"
+  },
+  "env": {
+    "staging": {
+      "name": "prosody-staging",
+      "vars": {
+        "CANONICAL_HOST": "staging.prosody.rocks"
+      },
+      "routes": [
+        { "pattern": "staging.prosody.rocks", "custom_domain": true }
+      ]
+    }
+  }
 }

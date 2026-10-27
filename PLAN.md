@@ -406,6 +406,27 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### Staging deployment: staging.prosody.rocks
+
+The user asked to deploy a staging version of the app to `staging.prosody.rocks` from a new branch
+`staging`.
+
+- **Wrangler environment (`wrangler.jsonc`).** Added `env.staging` with `name: "prosody-staging"`,
+  custom domain route `staging.prosody.rocks`, and `vars.CANONICAL_HOST = "staging.prosody.rocks"`.
+- **Worker & redirects (`deploy/worker.js`, `deploy/redirect.js`).** `redirectFor` accepts the
+  canonical host (defaulting to `prosody.rocks` in production and `staging.prosody.rocks` on
+  staging) so HTTP and `www.` requests on staging redirect cleanly to `https://staging.prosody.rocks/`
+  with HSTS, while preserving link preview generation for shared poems. Verified by
+  `deploy/check-worker.mjs`.
+- **Staging deployment automation (`.github/workflows/deploy-staging-comment.yml`).**
+  Staging deploys are triggered on-demand from pull requests rather than from a long-lived branch:
+  `deploy-staging-comment.yml` listens for PR comments matching `staging`, `deploy`, or `🚀`.
+  It acknowledges with a rocket emoji, checks out the PR branch, verifies Wasm parity and worker
+  redirects, deploys to `staging.prosody.rocks` via `wrangler deploy --env staging`, and comments back
+  on the PR with the deployment link. `scripts/deploy.sh` also supports `staging` for manual deploys
+  from a local working copy. Keeping `ci.yml` scoped to `master` and `main` avoids duplicate check
+  runs on PR branches.
+
 ### Sharing without storage: a creation is a link
 
 The user wants people to share what they make, with no storage — previews of a shared link allowed,
