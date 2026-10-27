@@ -72,17 +72,19 @@
 //! where they fall is the score's, and splitting them moves nothing. Under the walking variants
 //! one event can carry both, and then both layers play it.
 //!
-//! `Event::anchor` (§4.3's anaphora and epistrophe rows) is **not** rendered: Strudel places a
-//! step by its position in the cycle, so "downbeat-anchored" has nowhere to go that the position
-//! has not already decided. It is carried in the IR for the OSC backend, which schedules
-//! absolutely. Recorded in `PLAN.md` rather than left to be rediscovered.
+//! `Event::anchor` (§4.3's anaphora and epistrophe rows) is controlled by
+//! [`Mapping::Anchor`](prosody_core::mapping::Mapping::Anchor): unrendered by default
+//! ([`Variant::Off`]), or rendered under [`Variant::On`] with downbeat-anchored anaphora ostinatos
+//! accented and epistrophe cadences ringing through turnarounds.
+//! It is carried in the IR for the OSC backend, which schedules absolutely.
+//! Recorded in `PLAN.md` rather than left to be rediscovered.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use prosody_core::mapping::Variant;
 use prosody_core::role::Layer;
-use prosody_core::voice::{Event, Score, Subdivision, Voice};
+use prosody_core::voice::{Anchor, Event, Score, Subdivision, Voice};
 use prosody_core::{BassNote, Chord, Chromatic, Drum, Harmony, Silence, VoiceId};
 use rand_core::Rng as _;
 
@@ -833,6 +835,19 @@ fn rhyme_header(out: &mut String, score: &Score) {
     );
 }
 
+/// The header's line for repetition anchors under [`Variant::On`].
+fn anchor_header(out: &mut String, score: &Score) {
+    if score.anchor() != Variant::On {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   anchor = on: anaphora ostinatos accented on the downbeat, epistrophe cadences \
+         ring through turnarounds in {} syllable(s) (SPEC.md §4.3, candidate)",
+        score.anchored()
+    );
+}
+
 /// How many beats of the piece the straight stack fitted: [`Score::straightened_beats`], the
 /// count the explain view prints too.
 pub(crate) fn straightened(score: &Score) -> usize {
@@ -998,6 +1013,7 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     drums_header(out, score, style);
     rhyme_header(out, score);
     erosion_header(out, score);
+    anchor_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
         let _ = writeln!(
@@ -1507,7 +1523,14 @@ fn gains_of(
         lane,
         &|event, slot| {
             let level = density.get(slot).copied().unwrap_or(1.0);
-            fmt_param(velocity(event).as_f64() * level)
+            let vel = velocity(event).as_f64() * level;
+            let vel =
+                if lane.score.anchor() == Variant::On && event.anchor() == Some(Anchor::Downbeat) {
+                    (vel * 1.25).min(1.0)
+                } else {
+                    vel
+                };
+            fmt_param(vel)
         },
         "~",
     )
@@ -1523,7 +1546,16 @@ fn cutoffs(lane: Lane<'_>, style: &Style) -> String {
     let span = f64::from(style.mix().high_cut()) - 400.0;
     grid(
         lane,
-        &|event| fmt_param(400.0 + event.sharpness().as_f64() * span),
+        &|event| {
+            let base = 400.0 + event.sharpness().as_f64() * span;
+            let cutoff =
+                if lane.score.anchor() == Variant::On && event.anchor() == Some(Anchor::Downbeat) {
+                    (base * 1.5).min(f64::from(style.mix().high_cut()))
+                } else {
+                    base
+                };
+            fmt_param(cutoff)
+        },
         "~",
     )
 }
@@ -1532,7 +1564,18 @@ fn cutoffs(lane: Lane<'_>, style: &Style) -> String {
 fn attacks(lane: Lane<'_>) -> String {
     grid(
         lane,
-        &|event| fmt_param(0.04 * (1.0 - event.sharpness().as_f64())),
+        &|event| {
+            let attack = if lane.score.anchor() == Variant::On {
+                match event.anchor() {
+                    Some(Anchor::Downbeat) => 0.005,
+                    Some(Anchor::Cadence) => 0.035,
+                    None => 0.04 * (1.0 - event.sharpness().as_f64()),
+                }
+            } else {
+                0.04 * (1.0 - event.sharpness().as_f64())
+            };
+            fmt_param(attack)
+        },
         "~",
     )
 }
@@ -1545,7 +1588,16 @@ fn rooms(lane: Lane<'_>, style: &Style) -> String {
     let floor = style.mix().reverb().as_f64() * 0.5;
     grid(
         lane,
-        &|event| fmt_param(floor + event.sharpness().as_f64() * 0.4),
+        &|event| {
+            let base = floor + event.sharpness().as_f64() * 0.4;
+            let room =
+                if lane.score.anchor() == Variant::On && event.anchor() == Some(Anchor::Cadence) {
+                    (base + 0.35).min(0.95)
+                } else {
+                    base
+                };
+            fmt_param(room)
+        },
         "~",
     )
 }
@@ -2071,6 +2123,29 @@ mod tests {
             surprisal: &surprisal,
             roles: &roles,
         })
+        .unwrap()
+    }
+
+    fn score_of_with(source: &str, mappings: &prosody_core::mapping::Mappings) -> Score {
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let meter = meter::scan(&poem, &Spelled);
+        let rhyme = rhyme::analyse(&poem, &Spelled);
+        let repetition = repetition::analyse(&poem);
+        let sound = sound::analyse(&poem, &Spelled);
+        let surprisal = surprisal::analyse(&poem, &Spelled, &ByLength);
+        let roles = role::assign(&meter, &repetition).unwrap();
+        lower::run_with(
+            Analyses {
+                poem: &poem,
+                meter: &meter,
+                rhyme: &rhyme,
+                repetition: &repetition,
+                sound: &sound,
+                surprisal: &surprisal,
+                roles: &roles,
+            },
+            mappings,
+        )
         .unwrap()
     }
 
@@ -4371,5 +4446,30 @@ swing = 0.33
             super::one_a_cycle(names(17)),
             format!("[{}]@16 b16@1", first.join(" "))
         );
+    }
+
+    #[test]
+    fn anaphora_and_epistrophe_render_under_anchor_on() {
+        use prosody_core::mapping::{Mapping, Mappings, Variant};
+        use prosody_core::repetition::FigureKind;
+        let source = "teA bo rAn\nteA bo don\nteA bo ben\n";
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let repetition = repetition::analyse(&poem);
+        assert!(repetition.figures_of(FigureKind::Anaphora).next().is_some());
+
+        // Under anchor = off (the default), no anchor header is emitted.
+        let off_mappings = Mappings::all();
+        let off_score = score_of_with(source, &off_mappings);
+        let style = Style::default();
+        let off_pattern = Strudel::new().render(&off_score, &style).unwrap();
+        assert!(!off_pattern.contains("anchor = on"));
+
+        // Under anchor = on, the header discloses active anchor rendering and patterns differ.
+        let on_mappings = Mappings::all().with(Mapping::Anchor.choose(Variant::On).unwrap());
+        let on_score = score_of_with(source, &on_mappings);
+        assert!(on_score.anchored() > 0);
+        let on_pattern = Strudel::new().render(&on_score, &style).unwrap();
+        assert!(on_pattern.contains("//   anchor = on: anaphora ostinatos accented"));
+        assert_ne!(off_pattern, on_pattern);
     }
 }

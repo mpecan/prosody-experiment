@@ -587,6 +587,7 @@ pub struct Score {
     function: Variant,
     drums: Variant,
     rhyme: Variant,
+    anchor: Variant,
 }
 
 impl Score {
@@ -610,6 +611,7 @@ impl Score {
             function: Variant::Full,
             drums: Variant::Flat,
             rhyme: Variant::Strict,
+            anchor: Variant::Off,
         }
     }
 
@@ -724,6 +726,28 @@ impl Score {
     #[must_use]
     pub const fn rhyme(&self) -> Variant {
         self.rhyme
+    }
+
+    /// The same score, recording which variant of repetition anchor rendering was chosen.
+    pub(crate) const fn with_anchor(mut self, variant: Variant) -> Self {
+        self.anchor = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Anchor`](crate::mapping::Mapping::Anchor) was chosen for
+    /// repetition anchor rendering: [`Variant::Off`] or [`Variant::On`].
+    #[must_use]
+    pub const fn anchor(&self) -> Variant {
+        self.anchor
+    }
+
+    /// How many syllables of the poem carry an [`Anchor`] from an anaphora or epistrophe.
+    #[must_use]
+    pub fn anchored(&self) -> usize {
+        self.events
+            .iter()
+            .filter(|event| event.anchor().is_some())
+            .count()
     }
 
     /// The same score, with each line's harmony ([`crate::harmony`]).

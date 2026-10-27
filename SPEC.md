@@ -252,6 +252,14 @@ The last row is the one that earns the project. "burn / burning / burnt" → sam
 
 Suggested: `stem_match && phoneme_levenshtein <= k` → variation edge, with distance driving modulation depth.
 
+**Repetition anchor candidate selector** (*candidate, `Mapping::Anchor` (`anchor`), decided 2026-10-27 by the user:
+`off` is the default, `on` is a variant to compare*). How line-initial anaphora and line-final epistrophe figures are rendered:
+
+- **`off`** (the default) — repetition anchors are not rendered in Strudel (preserving baseline snapshot parity), though carried in the IR and scheduled absolutely by OSC.
+- **`on`** — renders `Event::anchor` in Strudel:
+  - **`Anchor::Downbeat` (Anaphora):** Boosts velocity/gain (1.25x), snaps attack time to immediate transient punch (0.005s), and opens the filter cutoff so the repeating line opening establishes an energetic downbeat ostinato.
+  - **`Anchor::Cadence` (Epistrophe):** Expands reverb wetness (up to 0.95 room) and provides a blooming attack (0.035s) so the cadence turnaround figure rings through the bar boundary into the next line.
+
 ### 4.4 Distinctiveness → sharpness
 
 Needs a real metric or it degenerates into vibes. Use:

@@ -104,11 +104,12 @@ the golden corpus genuinely does belong later; the acceptance test does not.
   poem-wide aggregate so no token span explains it (I4), and adding one syllable anywhere retunes
   the whole piece (I2-shaped, like the rhyme-degree question above). **Raised late — it should have
   been raised when it was written.**
-- ~~**`Event::anchor` is deliberately not rendered.**~~ **Answered at M9, and it was real.** The
-  OSC backend schedules in absolute beats, so an anaphora's words are pulled *onto* the pulse and
-  an epistrophe rings on where its neighbours are clipped. Both are still unexpressible in
-  mini-notation, so the two backends genuinely differ in what they can say — which is the argument
-  for the `Backend` trait having an associated `Output` rather than returning text.
+- ~~**`Event::anchor` is deliberately not rendered.**~~ **Answered: candidate selector `Mapping::Anchor` (`anchor`) renders in Strudel.**
+  The OSC backend schedules in absolute beats, so an anaphora's words are pulled *onto* the pulse and
+  an epistrophe rings on where its neighbours are clipped. Strudel now realizes `Event::anchor` under
+  the candidate mapping `anchor = on` by accenting anaphora ostinatos on the downbeat with punchy
+  transient attack and boosted gain, and expanding reverb space on epistrophe cadences so repeated line
+  endings ring through turnarounds, while `anchor = off` keeps baseline snapshots bit-identical.
 - **Scale degrees climb out of hearing.** `Scale::degree` keeps ascending so two rhyme classes
   never collide, which is right for I4 — but a poem with ~45 distinct rhyme classes reaches MIDI
   127, and past that the notes are inaudible, which defeats the I4 argument for climbing. Needs
