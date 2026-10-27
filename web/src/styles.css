@@ -259,7 +259,9 @@
   .module.fx .fx-title { width: 100%; }
   .module.key { flex-direction: column; align-items: center; }
   .module.tempo { flex-direction: column; }
-  .module.voices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* The instruments: one to a line, across the desk. Two to a line squeezed a patch's name to a
+     letter and pushed a switch's last choice off its edge. */
+  .module.voices { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); }
   .module.mixer { grid-column: 1 / -1; justify-content: space-around; align-items: flex-end; flex-wrap: nowrap; gap: .4rem; }
   /* A channel strip: its fader, then mute and solo. Dimmed while it is not heard. */
   .mixer .channel { display: flex; flex-direction: column; align-items: center; gap: .45rem; padding: .4rem .3rem .3rem; border-radius: 10px; }
