@@ -194,6 +194,48 @@ syllable's own word and its own line's feet, nothing else. The pattern's header 
 counts the syllables (`function-words = light: … in 24 syllable(s)` for The Tyger), as do the OSC
 schedule and the explain view, whose rows credit those gains to `function-words`.
 
+**Drum kit articulation** (*candidate, `Mapping::Drums` (`drums`), decided 2026-10-27 by the user:
+`flat` is the default, `articulated` is a variant to compare*). When every syllable of a foundation
+line triggers the same sample (`bd` in `Kit::Machine`, `rd` or its `RideFallback` in `Kit::Ride`)
+and every syllable of a flourish line triggers the flourish sample (`hh` in `Kit::Machine`, `sd` in
+`Kit::Ride`), stress is heard only as velocity (`gain`), not as which piece of the kit is struck.
+Because which drum piece a syllable plays is determined by its layer, beat position and stress, it
+is structure (I3), a selector `Mapping::Drums` (`drums`), with no `off` (every syllable always
+strikes a drum piece; its first variant is what preceded it):
+
+- **`flat`** (the default) — every foundation syllable is `Drum::Pulse` (`bd` under `Kit::Machine`,
+  `rd` or its fallback under `Kit::Ride`) and every flourish syllable is `Drum::Ornament` (`hh`
+  under `Kit::Machine`, `sd` under `Kit::Ride`), as before.
+- **`articulated`** — each syllable's `Drum` (`prosody_core::drums::Drum`) is assigned in the core
+  right after `accent::run`, so it respects `function-words = light`:
+  - **Foundation lines (`Layer::Foundation`):**
+    - `Velocity::Unstressed` → `Drum::Subdivision` (`hh`, closed hi-hat), except in an all-unstressed
+      foot (a pyrrhic) where the downbeat keeps `Drum::Pulse` so the beat pulse is not lost.
+    - `Velocity::Primary` or `Velocity::Secondary` → `Drum::Pulse` on even beats (`beat % 2 == 0`)
+      and `Drum::Backbeat` (`sd`, snare) on odd backbeats (`beat % 2 == 1`). When a foot has two or
+      more stressed syllables (a spondee at full force), its first stressed syllable takes the
+      beat's primary piece and subsequent stressed syllables in the same beat alternate to the
+      counterpart (`Pulse` ↔ `Backbeat`), so a spondee splits across kick/ride and snare instead of
+      repeating one sample.
+  - **Flourish lines (`Layer::Flourish`):**
+    - `Velocity::Unstressed` → `Drum::Subdivision` (`hh`).
+    - `Velocity::Primary` → `Drum::HighTom` (`ht`) on even beats and `Drum::Backbeat` (`sd`) on odd
+      beats, with second stressed syllables in a spondee stepping to `Drum::MidTom` (`mt`) on even
+      beats or `Drum::LowTom` (`lt`) on odd beats.
+    - `Velocity::Secondary` → `Drum::MidTom` (`mt`) on even beats and `Drum::LowTom` (`lt`) on odd
+      beats.
+
+Every sample (`bd`, `sd`, `hh`, `ht`, `mt`, `lt`, plus `rd`/`oh`/`cr` for the ride kit) is present
+across all 6 allowed Strudel drum banks (`tr909`, `tr808`, `tr707`, `linn`, `casio`, `r8`) and
+both kits (12 configurations, checked by `every_kit_asks_every_bank_for_a_sample_the_bank_has`). No
+event is added, removed or re-timed; every parameter after `s("…")` on the drum lane and every other
+lane in the pattern is byte-identical between `flat` and `articulated`. Locality holds (I2): a
+syllable's drum piece depends only on its own layer, beat index, stress and foot mates within the
+same line. The OSC schedule's wire messages carry the layer (`"foundation"` or `"flourish"`), not a
+drum sample name, so it discloses `# not applied here: drums = articulated (…)` in its header and
+on `--send`. The Strudel header and the explain view both name `drums = articulated` and count the
+syllables whose drum piece differs from the flat piece (`Score::articulated`).
+
 ### 4.3 Repetition → structure (highest-value pass)
 
 Repetition is not one thing. Distinguish:

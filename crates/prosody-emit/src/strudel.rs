@@ -83,7 +83,7 @@ use std::fmt::Write as _;
 use prosody_core::mapping::Variant;
 use prosody_core::role::Layer;
 use prosody_core::voice::{Event, Score, Subdivision, Voice};
-use prosody_core::{BassNote, Chord, Chromatic, Harmony, Silence, VoiceId};
+use prosody_core::{BassNote, Chord, Chromatic, Drum, Harmony, Silence, VoiceId};
 use rand_core::Rng as _;
 
 use crate::style::{Kit, Named, RideFallback, Style, Voicing};
@@ -798,6 +798,28 @@ fn function_header(out: &mut String, score: &Score) {
     );
 }
 
+/// The header's line for the articulated drum kit, which names the variant and how many syllables
+/// it moved off their layer's flat piece. Flat — one piece per layer — is the piece as it shipped,
+/// and says nothing new.
+fn drums_header(out: &mut String, score: &Score, style: &Style) {
+    if score.drums() != Variant::Articulated {
+        return;
+    }
+    let pulse = match style.kit() {
+        Kit::Machine => "kick",
+        Kit::Ride => ride_stand_in(style).map_or("ride", |_| style.ride_fallback().spoken()),
+    };
+    let _ = writeln!(
+        out,
+        "//   drums = articulated: foundation beats play {pulse} on even stresses, snare on odd \
+         backbeat stresses and closed hat on unstressed subdivisions; flourish beats play high \
+         tom on even stresses, snare on odd stresses, mid/low toms on secondary stresses and \
+         closed hat on unstressed subdivisions, in {} syllable(s) off the flat piece \
+         (SPEC.md §4.1, §4.2, candidate)",
+        score.articulated()
+    );
+}
+
 /// How many beats of the piece the straight stack fitted: [`Score::straightened_beats`], the
 /// count the explain view prints too.
 pub(crate) fn straightened(score: &Score) -> usize {
@@ -960,6 +982,7 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     pulse_header(out, score, style);
     stack_header(out, score);
     function_header(out, score);
+    drums_header(out, score, style);
     erosion_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
@@ -1038,7 +1061,6 @@ fn rhythm_layer(
     voice: Voice,
 ) -> Vec<(String, String)> {
     let events: Vec<&Event> = score.events_of(voice.id()).collect();
-    let sample = sample_for(style, voice.layer());
     let name = format!(
         "voice {} — {}",
         voice.id().get(),
@@ -1050,7 +1072,14 @@ fn rhythm_layer(
 
     let mut layers = Vec::new();
     for lane in Lane::all(score, &events, false) {
-        let mut layer = format!("  s(\"{}\")", grid(lane, &|_| sample.to_owned(), "~"));
+        let mut layer = format!(
+            "  s(\"{}\")",
+            grid(
+                lane,
+                &|event| sample_for_drum(style, event.drum()).to_owned(),
+                "~"
+            )
+        );
         // §4.2: stress becomes accent.
         let _ = write!(layer, ".gain(\"{}\")", gains(lane, density));
         // §4.4: distinctiveness drives brightness, attack and how wet the event sits.
@@ -1102,18 +1131,27 @@ fn rhythm_layer(
 /// sound nobody can trace (I4). Such a bank plays the palette's [`RideFallback`] instead — its
 /// open hat by default, the drum machine's usual stand-in for a ride, or its crash — and the
 /// pattern's header says so ([`ride_stand_in`]).
+#[cfg(test)]
 fn sample_for(style: &Style, layer: Layer) -> &'static str {
-    match (style.kit(), layer) {
-        (Kit::Machine, Layer::Foundation) => "bd",
-        (Kit::Machine, Layer::Flourish) => "hh",
-        (Kit::Ride, Layer::Foundation) => {
+    sample_for_drum(style, Drum::flat_for(layer))
+}
+
+/// Which sample a [`Drum`] plays under `style`'s [`Kit`] and [`RideFallback`].
+fn sample_for_drum(style: &Style, drum: Drum) -> &'static str {
+    match (style.kit(), drum) {
+        (Kit::Machine, Drum::Pulse) => "bd",
+        (Kit::Ride, Drum::Pulse) => {
             if bank_has(strudel_bank(style.bank()), RIDE) {
                 RIDE
             } else {
                 stand_in(style.ride_fallback())
             }
         }
-        (Kit::Ride, Layer::Flourish) => "sd",
+        (Kit::Machine, Drum::Ornament) | (_, Drum::Subdivision) => "hh",
+        (Kit::Ride, Drum::Ornament) | (_, Drum::Backbeat) => "sd",
+        (_, Drum::HighTom) => "ht",
+        (_, Drum::MidTom) => "mt",
+        (_, Drum::LowTom) => "lt",
     }
 }
 
@@ -2679,6 +2717,21 @@ mod tests {
                     assert!(
                         bank_has(strudel, sample),
                         "{kit} on {bank} ({fallback}) asks {strudel} for `{sample}` ({layer:?})"
+                    );
+                }
+                for drum in [
+                    prosody_core::Drum::Pulse,
+                    prosody_core::Drum::Backbeat,
+                    prosody_core::Drum::Subdivision,
+                    prosody_core::Drum::Ornament,
+                    prosody_core::Drum::HighTom,
+                    prosody_core::Drum::MidTom,
+                    prosody_core::Drum::LowTom,
+                ] {
+                    let sample = super::sample_for_drum(&style, drum);
+                    assert!(
+                        bank_has(strudel, sample),
+                        "{kit} on {bank} ({fallback}) asks {strudel} for `{sample}` ({drum:?})"
                     );
                 }
             }

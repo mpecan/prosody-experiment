@@ -228,6 +228,7 @@ pub struct Schedule {
     unsent_turnarounds: usize,
     unsent_bass: usize,
     elastic_unapplied: bool,
+    drums_unapplied: bool,
     straightened: Option<usize>,
     lightened: Option<usize>,
     eroding: usize,
@@ -307,6 +308,15 @@ impl Schedule {
         self.elastic_unapplied
     }
 
+    /// Whether the articulated drum kit was chosen for the score (`Mapping::Drums`), which this
+    /// schedule does not apply: its messages carry the layer (`foundation` or `flourish`), not a
+    /// drum piece. Said in [`Schedule::to_text`] and on `--send` (`CLAUDE.md` §6: a fallback must
+    /// be visible).
+    #[must_use]
+    pub const fn drums_unapplied(&self) -> bool {
+        self.drums_unapplied
+    }
+
     /// Under the straight stack (`Mapping::Stack`), how many beats it fitted a stacked line to its
     /// host in — applied here as in the Strudel pattern; `None` under crossing, the default.
     #[must_use]
@@ -380,6 +390,13 @@ impl Schedule {
                 out,
                 "# not applied here: pulse = elastic (onsets are in beats, so every bar lasts \
                  its beats: the pulse is steady)"
+            );
+        }
+        if self.drums_unapplied {
+            let _ = writeln!(
+                out,
+                "# not applied here: drums = articulated (messages carry the layer, foundation or \
+                 flourish, not a drum piece)"
             );
         }
         if let Some(beats) = self.straightened {
@@ -522,6 +539,7 @@ impl Backend for Osc {
                 .count(),
             unsent_bass,
             elastic_unapplied: score.pulse() == prosody_core::Variant::Elastic,
+            drums_unapplied: score.drums() == prosody_core::Variant::Articulated,
             straightened: (score.stack() == prosody_core::Variant::Straight)
                 .then(|| crate::strudel::straightened(score)),
             lightened: (score.function() == prosody_core::Variant::Light)

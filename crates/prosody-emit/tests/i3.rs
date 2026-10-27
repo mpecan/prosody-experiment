@@ -526,6 +526,33 @@ proptest::proptest! {
         );
     }
 
+    /// I3 with the articulated drum kit (`SPEC.md` §4.1, §4.2): no palette adds, moves or rests a
+    /// drum hit. Which sample bank and kit (`machine` or `ride`, and `ride_fallback`) translate
+    /// each `Drum` role into a sample name are palette; which syllable plays which role is the
+    /// score's.
+    #[test]
+    fn i3_no_palette_can_change_the_articulated_drums(
+        body in poem(),
+        one in palette(),
+        two in palette(),
+    ) {
+        let mappings = prosody_core::Mappings::all().with(
+            prosody_core::Mapping::Drums
+                .choose(prosody_core::Variant::Articulated)
+                .unwrap(),
+        );
+        let (score, style_one) = score_with(&format!("{one}{body}"), &mappings);
+        let (_, style_two) = score_with(&format!("{two}{body}"), &mappings);
+        let backend = Strudel::new();
+        let (Ok(a), Ok(b)) = (
+            backend.render(&score, &style_one),
+            backend.render(&score, &style_two),
+        ) else {
+            return Ok(());
+        };
+        proptest::prop_assert_eq!(arrangement(&a), arrangement(&b));
+    }
+
     /// The chord voicing, isolated: one palette rendered with each rhyme note alone and again with
     /// it voiced as a seventh chord. The claim `Voicing` makes against I3 is that this changes the
     /// realisation of each pitched event and nothing else — same events, same positions — so:

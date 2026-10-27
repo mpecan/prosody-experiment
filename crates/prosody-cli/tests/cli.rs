@@ -1110,3 +1110,77 @@ fn long_stanzas_erode_unless_set_gradual_and_have_no_off() {
         );
     }
 }
+
+#[test]
+fn drums_are_flat_unless_set_articulated_and_have_no_off() {
+    let poem = std::fs::read_to_string(examples().join("blake-tyger.poem")).unwrap();
+    let (flat, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!flat.contains("drums = articulated"), "{flat}");
+    let (without, _, _) = run(&["--without", "drums"], &poem);
+    assert_eq!(without, flat);
+    let (_, err, code) = run(&["--set", "drums=off"], &poem);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `drums` (it has flat, articulated)"),
+        "{err}"
+    );
+
+    let (view, err, code) = run(&["--explain", "--set", "drums=articulated"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    let marked = view
+        .lines()
+        .filter(|line| {
+            line.ends_with(",drums(backbeat)")
+                || line.ends_with(",drums(subdivision)")
+                || line.ends_with(",drums(high-tom)")
+                || line.ends_with(",drums(mid-tom)")
+                || line.ends_with(",drums(low-tom)")
+        })
+        .count();
+    assert!(marked > 0, "{view}");
+    assert!(
+        view.contains(&format!(
+            "drums articulated · each syllable's drum piece is chosen by its layer, beat and \
+             stress: {marked} syllable(s) off the layer's flat piece (§4.1, §4.2)"
+        )),
+        "{view}"
+    );
+
+    let (art, err, code) = run(&["--set", "drums=articulated"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        art.contains(&format!(
+            "//   drums = articulated: foundation beats play kick on even stresses, snare on odd \
+             backbeat stresses and closed hat on unstressed subdivisions; flourish beats play high \
+             tom on even stresses, snare on odd stresses, mid/low toms on secondary stresses and \
+             closed hat on unstressed subdivisions, in {marked} syllable(s) off the flat piece \
+             (SPEC.md §4.1, §4.2, candidate)"
+        )),
+        "{art}"
+    );
+    let (schedule, err, code) = run(&["--osc", "--set", "drums=articulated"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        schedule.contains(
+            "# not applied here: drums = articulated (messages carry the layer, foundation or \
+             flourish, not a drum piece)"
+        ),
+        "{schedule}"
+    );
+    // And the pattern is JavaScript Strudel can evaluate.
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-drums-articulated.js");
+        std::fs::write(&file, &art).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}

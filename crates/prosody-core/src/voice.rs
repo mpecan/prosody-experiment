@@ -73,6 +73,7 @@
 
 use crate::arrange::{Arrangement, Lane, Part, Placement, Slot};
 use crate::bass::BassNote;
+use crate::drums::Drum;
 use crate::harmony::{Chord, Harmony};
 use crate::mapping::Variant;
 use crate::meter::FootKind;
@@ -439,6 +440,7 @@ pub struct Event {
     anchor: Option<Anchor>,
     bank: Option<Phoneme>,
     light: bool,
+    drum: Drum,
 }
 
 impl Event {
@@ -495,6 +497,15 @@ impl Event {
     #[must_use]
     pub const fn is_light(self) -> bool {
         self.light
+    }
+
+    /// Which piece of the drum kit this syllable plays (`Mapping::Drums`, [`crate::drums`]). Under
+    /// [`Variant::Flat`] (the default), [`Drum::Pulse`] on a foundation voice and
+    /// [`Drum::Ornament`] on a flourish voice; under [`Variant::Articulated`], chosen by layer,
+    /// beat parity and stress within the foot.
+    #[must_use]
+    pub const fn drum(self) -> Drum {
+        self.drum
     }
 
     /// Its note, if this syllable is the one the line's rhyme rests on.
@@ -574,6 +585,7 @@ pub struct Score {
     pulse: Variant,
     stack: Variant,
     function: Variant,
+    drums: Variant,
 }
 
 impl Score {
@@ -595,6 +607,7 @@ impl Score {
             pulse: Variant::Steady,
             stack: Variant::Crossing,
             function: Variant::Full,
+            drums: Variant::Flat,
         }
     }
 
@@ -666,6 +679,35 @@ impl Score {
     #[must_use]
     pub fn lightened(&self) -> usize {
         self.events.iter().filter(|event| event.is_light()).count()
+    }
+
+    /// The same score, recording which variant of the drums assigned each syllable's drum piece.
+    pub(crate) const fn with_drums(mut self, variant: Variant) -> Self {
+        self.drums = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Drums`](crate::mapping::Mapping::Drums) assigned the piece's
+    /// drum roles ([`Event::drum`]): [`Variant::Flat`], one piece per layer, or
+    /// [`Variant::Articulated`], chosen by layer, beat parity and stress within the foot.
+    #[must_use]
+    pub const fn drums(&self) -> Variant {
+        self.drums
+    }
+
+    /// How many syllables of the poem play a [`Drum`] different from their voice's flat piece
+    /// ([`Drum::flat_for`]): each counted once in [`Score::events`], zero under [`Variant::Flat`].
+    #[must_use]
+    pub fn articulated(&self) -> usize {
+        self.events
+            .iter()
+            .filter(|event| {
+                let layer = self
+                    .voice(event.voice())
+                    .map_or(Layer::Flourish, |voice| voice.layer());
+                event.drum() != Drum::flat_for(layer)
+            })
+            .count()
     }
 
     /// The same score, with each line's harmony ([`crate::harmony`]).
@@ -1154,6 +1196,7 @@ impl Event {
             anchor: None,
             bank: None,
             light: false,
+            drum: Drum::Pulse,
         }
     }
 
@@ -1161,6 +1204,11 @@ impl Event {
     pub(crate) const fn lightened(mut self) -> Self {
         self.velocity = Velocity::SECONDARY;
         self.light = true;
+        self
+    }
+
+    pub(crate) const fn with_drum(mut self, drum: Drum) -> Self {
+        self.drum = drum;
         self
     }
 
