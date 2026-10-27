@@ -1184,3 +1184,53 @@ fn drums_are_flat_unless_set_articulated_and_have_no_off() {
         );
     }
 }
+
+#[test]
+fn rhyme_is_strict_unless_set_slant_and_has_no_off() {
+    let poem = std::fs::read_to_string(examples().join("wilde-theocritus.poem")).unwrap();
+    let (strict, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!strict.contains("rhyme = slant"), "{strict}");
+    let (without, _, _) = run(&["--without", "rhyme"], &poem);
+    assert_eq!(without, strict);
+    let (_, err, code) = run(&["--set", "rhyme=off"], &poem);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `rhyme` (it has strict, slant)"),
+        "{err}"
+    );
+
+    let (view, err, code) = run(&["--explain", "--set", "rhyme=slant"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        view.contains(
+            "rhyme slant · candidate tails from last stress and final syllable rime, with \
+             apocopated and continuous slant rhyme scoring (§4.5)"
+        ),
+        "{view}"
+    );
+
+    let (slant, err, code) = run(&["--set", "rhyme=slant"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        slant.contains(
+            "//   rhyme = slant: weak endings and shared codas score continuously as slant rhymes \
+             across candidate tails (SPEC.md §4.5, candidate)"
+        ),
+        "{slant}"
+    );
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-rhyme-slant.js");
+        std::fs::write(&file, &slant).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}

@@ -324,7 +324,7 @@ fn lower_poem(
     mappings: &Mappings,
 ) -> Result<(Score, PoemRoles)> {
     let meter = meter::scan(poem, phonemiser);
-    let rhyme = rhyme::analyse(poem, phonemiser);
+    let rhyme = rhyme::analyse_with(poem, phonemiser, mappings.get(Mapping::Rhyme));
     let repetition = repetition::analyse(poem);
     let sound = sound::analyse(poem, phonemiser);
     let surprisal = surprisal::analyse(poem, phonemiser, lexicon);

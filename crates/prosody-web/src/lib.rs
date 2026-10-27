@@ -940,7 +940,7 @@ fn lower_poem(
     mappings: &Mappings,
 ) -> Result<(Score, prosody_core::PoemRoles)> {
     let meter = meter::scan(poem, phonemiser);
-    let rhyme = rhyme::analyse(poem, phonemiser);
+    let rhyme = rhyme::analyse_with(poem, phonemiser, mappings.get(Mapping::Rhyme));
     let repetition = repetition::analyse(poem);
     let sound = sound::analyse(poem, phonemiser);
     let surprisal = surprisal::analyse(poem, phonemiser, lexicon);
@@ -1312,6 +1312,7 @@ mod tests {
                 "[\"gradual\",\"erode\"],\"default\":\"erode\"}",
             ),
             ("drums", "[\"flat\",\"articulated\"],\"default\":\"flat\"}"),
+            ("rhyme", "[\"strict\",\"slant\"],\"default\":\"strict\"}"),
         ] {
             let at = data.find(&format!("{{\"name\":\"{name}\""));
             assert!(at.is_some(), "{name} missing");
@@ -2353,6 +2354,38 @@ mod tests {
         );
         assert!(
             super::compile(&request(&[("set", "drums:off")], tyger), &Output::Pattern).status
+                >= 400
+        );
+    }
+
+    #[test]
+    fn slant_rhyme_reaches_the_pattern_and_the_explain_view() {
+        let theocritus = super::PRESETS
+            .iter()
+            .find(|(name, ..)| *name == "wilde-theocritus")
+            .map(|(_, _, _, text)| body_of(text))
+            .unwrap();
+        let slant = &[("set", "rhyme:slant")];
+        let pattern = super::compile(&request(slant, theocritus), &Output::Pattern);
+        let explain = super::compile(&request(slant, theocritus), &Output::Explain);
+        assert_eq!(pattern.status, 200, "{}", pattern.body);
+        assert_eq!(explain.status, 200, "{}", explain.body);
+        assert!(
+            pattern.body.contains("//   rhyme = slant:"),
+            "{}",
+            pattern.body
+        );
+        assert!(
+            explain.body.contains("rhyme=slant") && explain.body.contains("rhyme slant ·"),
+            "{}",
+            explain.body
+        );
+        assert!(
+            super::compile(
+                &request(&[("set", "rhyme:off")], theocritus),
+                &Output::Pattern
+            )
+            .status
                 >= 400
         );
     }

@@ -65,20 +65,23 @@ the golden corpus genuinely does belong later; the acceptance test does not.
 
 ### Open questions (raise, don't silently decide)
 
-- **The rhyme tail starts at the last *primary-stressed* vowel, which is wrong for polysyllabic
-  feminine rhyme.** Found by running `examples/wilde-theocritus.poem`, a real villanelle, which has
-  two rhymes and which the pipeline splits into **four** classes: `Persephone` alone, `Sicily`
-  alone, `bee`/`sea` together, and the `-ate` group. Every reader hears the first three as one
-  rhyme; the pass does not, because in `Persephone` the last primary stress is three syllables
-  before the sound the rhyme turns on. The rule is right for monosyllables and masculine rhyme, and
-  wrong for exactly the rhyme a villanelle is built from — so `SPEC.md` §4.5's "villanelle → a
-  two-note obsession" does not hold on an actual villanelle.
+- ~~**The rhyme tail starts at the last *primary-stressed* vowel, which is wrong for polysyllabic
+  feminine rhyme.**~~ **Answered: candidate tails score from the last stress and the final syllable, exposed as `Mapping::Rhyme`.**
+  Found by running `examples/wilde-theocritus.poem`, a real villanelle, which has two rhymes and which
+  the pipeline previously split into four classes.
 
-  The synthetic villanelle in `tests/corpus/` *does* collapse to two notes, because its rhyme words
-  are monosyllables. That is the difference between a fixture and a poem, and the argument for
-  `examples/` existing. A fix probably means scoring from the last *syllable* boundary as well as
-  the last stress and taking the better of the two, which is a change to what §4.5 maps — so:
-  **raised, not decided.**
+  Now implemented as a candidate selector `Mapping::Rhyme` (`rhyme`):
+  - `strict` (the default) keeps baseline masculine/strict-feminine scoring and 100% bit-identical
+    snapshots.
+  - `slant` evaluates candidate tails:
+    1. Stressed tail to stressed tail (masculine, standard feminine, and triple rhyme).
+    2. Final syllable tail to stressed tail when one word is unstressed at the end and the other is
+       stressed on its final syllable (apocopated rhyme, e.g. `Sicily` with `bee`).
+    3. Final syllable tail to final syllable tail when both words have polysyllabic weak endings
+       (e.g. `Persephone` with `Sicily`).
+  Shared codas score continuously as slant rhymes (`desolate` with `state` at 0.50), while disyllabic
+  trochees (`burning`/`singing`) continue to require agreement from the stressed vowel. Wilde's
+  villanelle resolves cleanly and slant rhymes detune as specified in `SPEC.md` §4.5.
 
 - **Every word carries a `Family`, including words that are alone in one.** §4.3's morphological
   row is about *near-repetition* — "burn / burning / burnt" — so a word sharing its family with

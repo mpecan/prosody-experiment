@@ -586,6 +586,7 @@ pub struct Score {
     stack: Variant,
     function: Variant,
     drums: Variant,
+    rhyme: Variant,
 }
 
 impl Score {
@@ -608,6 +609,7 @@ impl Score {
             stack: Variant::Crossing,
             function: Variant::Full,
             drums: Variant::Flat,
+            rhyme: Variant::Strict,
         }
     }
 
@@ -708,6 +710,20 @@ impl Score {
                 event.drum() != Drum::flat_for(layer)
             })
             .count()
+    }
+
+    /// The same score, recording which variant of rhyme scoring formed its rhyme classes.
+    pub(crate) const fn with_rhyme(mut self, variant: Variant) -> Self {
+        self.rhyme = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Rhyme`](crate::mapping::Mapping::Rhyme) scored line endings:
+    /// [`Variant::Strict`] (from the last stressed vowel only) or [`Variant::Slant`] (candidate
+    /// tails and continuous coda slant scoring).
+    #[must_use]
+    pub const fn rhyme(&self) -> Variant {
+        self.rhyme
     }
 
     /// The same score, with each line's harmony ([`crate::harmony`]).

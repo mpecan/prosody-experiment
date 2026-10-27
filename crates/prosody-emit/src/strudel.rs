@@ -820,6 +820,19 @@ fn drums_header(out: &mut String, score: &Score, style: &Style) {
     );
 }
 
+/// The header's line for slant rhyme scoring, which names the variant when slant is chosen.
+/// Strict rhyme — from the last stressed vowel only — is the piece as it shipped, and says nothing.
+fn rhyme_header(out: &mut String, score: &Score) {
+    if score.rhyme() != Variant::Slant {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   rhyme = slant: weak endings and shared codas score continuously as slant rhymes \
+         across candidate tails (SPEC.md §4.5, candidate)",
+    );
+}
+
 /// How many beats of the piece the straight stack fitted: [`Score::straightened_beats`], the
 /// count the explain view prints too.
 pub(crate) fn straightened(score: &Score) -> usize {
@@ -983,6 +996,7 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     stack_header(out, score);
     function_header(out, score);
     drums_header(out, score, style);
+    rhyme_header(out, score);
     erosion_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
