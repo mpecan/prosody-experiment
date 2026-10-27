@@ -418,14 +418,14 @@ The user asked to deploy a staging version of the app to `staging.prosody.rocks`
   staging) so HTTP and `www.` requests on staging redirect cleanly to `https://staging.prosody.rocks/`
   with HSTS, while preserving link preview generation for shared poems. Verified by
   `deploy/check-worker.mjs`.
-- **CI automation (`.github/workflows/ci.yml`, `.github/workflows/deploy-staging-comment.yml`).**
-  A push to `staging` that passes `gates`, `wasm`, `web` and `grammar` runs the `deploy-staging` job
-  to upload the artifact to Cloudflare with `wrangler deploy --env staging` in a `staging` GitHub
-  environment. Additionally, `deploy-staging-comment.yml` listens for PR comments matching
-  `staging`, `deploy`, or `🚀`: it acknowledges with a rocket emoji, checks out the PR branch,
-  verifies Wasm parity and worker redirects, deploys to `staging.prosody.rocks`, and comments back
+- **Staging deployment automation (`.github/workflows/deploy-staging-comment.yml`).**
+  Staging deploys are triggered on-demand from pull requests rather than from a long-lived branch:
+  `deploy-staging-comment.yml` listens for PR comments matching `staging`, `deploy`, or `🚀`.
+  It acknowledges with a rocket emoji, checks out the PR branch, verifies Wasm parity and worker
+  redirects, deploys to `staging.prosody.rocks` via `wrangler deploy --env staging`, and comments back
   on the PR with the deployment link. `scripts/deploy.sh` also supports `staging` for manual deploys
-  from a local working copy.
+  from a local working copy. Keeping `ci.yml` scoped to `master` and `main` avoids duplicate check
+  runs on PR branches.
 
 ### Sharing without storage: a creation is a link
 
