@@ -401,6 +401,37 @@ impl Pronunciation {
         }
         tail
     }
+
+    /// The final syllable's rime: nucleus and coda.
+    ///
+    /// For monosyllables and words with stressed final syllables, this is identical to
+    /// [`rhyme_tail`](Self::rhyme_tail). For polysyllabic words with unstressed final syllables,
+    /// this is the ending that light, weak, and apocopated rhymes turn on.
+    #[must_use]
+    pub fn final_syllable_tail(&self) -> Vec<Phoneme> {
+        self.syllables
+            .last()
+            .map(Syllable::rime)
+            .unwrap_or_default()
+    }
+
+    /// How many unstressed syllables follow the last stressed syllable.
+    ///
+    /// Zero for monosyllables and masculine endings ("burn", "brigade"); one for trochaic feminine
+    /// endings ("burning"); two or more for dactylic and polysyllabic weak endings ("Sicily",
+    /// "Persephone").
+    #[must_use]
+    pub fn post_stress_syllables(&self) -> usize {
+        let last_stressed = self
+            .syllables
+            .iter()
+            .rposition(|s| s.stress().is_stressed())
+            .or_else(|| self.syllables.len().checked_sub(1));
+        match last_stressed {
+            Some(idx) => (self.syllables.len().saturating_sub(1)).saturating_sub(idx),
+            None => 0,
+        }
+    }
 }
 
 /// Why a phone sequence could not be grouped into syllables.

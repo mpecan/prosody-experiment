@@ -39,6 +39,11 @@ fn pair(a: &str, b: &str) -> RhymeScore {
     rhyme::score(&p.pronounce(a).unwrap(), &p.pronounce(b).unwrap())
 }
 
+fn pair_with(a: &str, b: &str, variant: prosody_core::Variant) -> RhymeScore {
+    let p = phonemiser();
+    rhyme::score_with(&p.pronounce(a).unwrap(), &p.pronounce(b).unwrap(), variant)
+}
+
 #[test]
 fn real_perfect_rhymes_score_one() {
     for (a, b) in [
@@ -104,6 +109,74 @@ fn a_shakespearean_sonnet_ending_reads_as_a_couplet() {
     let source = "so long as men can breathe or eyes can see\n\
                   so long lives this and this gives life to thee\n";
     assert_eq!(schemes(source), ["AA"]);
+}
+
+#[test]
+fn polysyllabic_weak_rhymes_match_on_final_syllable() {
+    // Under strict:
+    assert!(pair("sicily", "bee") < rhyme::RHYME_THRESHOLD);
+
+    // Under slant:
+    assert_eq!(
+        pair_with("sicily", "bee", prosody_core::Variant::Slant),
+        RhymeScore::PERFECT
+    );
+    assert_eq!(
+        pair_with("sicily", "sea", prosody_core::Variant::Slant),
+        RhymeScore::PERFECT
+    );
+}
+
+#[test]
+fn a_slant_rhyme_scores_coda_match() {
+    // Under strict:
+    assert!(pair("desolate", "state") < rhyme::RHYME_THRESHOLD);
+
+    // Under slant:
+    let slant = pair_with("desolate", "state", prosody_core::Variant::Slant);
+    assert_eq!(slant, rhyme::RHYME_THRESHOLD);
+    assert!(!slant.is_perfect());
+}
+
+#[test]
+fn a_villanelle_with_feminine_and_slant_rhymes_collapses_classes() {
+    let poem = Poem::parse(include_str!("../../../examples/wilde-theocritus.poem")).unwrap();
+    // Default / strict splits into 5 classes.
+    let strict = rhyme::analyse(&poem, &phonemiser());
+    assert_eq!(strict.class_count(), 5);
+
+    // Slant variant collapses classes into 3: the -ate family (desolate, state, gate, fate, hecate),
+    // the -ee family (sicily, bee, sea), and the refrain (persephone).
+    let rhymes = rhyme::analyse_with(&poem, &phonemiser(), prosody_core::Variant::Slant);
+    assert_eq!(rhymes.class_count(), 3);
+    let all_lines: Vec<_> = rhymes
+        .stanzas()
+        .iter()
+        .flat_map(prosody_core::rhyme::StanzaRhyme::lines)
+        .collect();
+
+    // "Sicily" (line 2), "bee" (line 3), "sea" (line 9) share a class.
+    let sicily_class = all_lines[2].class().unwrap();
+    let bee_class = all_lines[3].class().unwrap();
+    let sea_class = all_lines[9].class().unwrap();
+    assert_eq!(sicily_class, bee_class);
+    assert_eq!(bee_class, sea_class);
+
+    // "desolate" (line 1), "state" (line 4), "gate" (line 7), "fate" (line 10) share a class.
+    let desolate_class = all_lines[1].class().unwrap();
+    let state_class = all_lines[4].class().unwrap();
+    let gate_class = all_lines[7].class().unwrap();
+    let fate_class = all_lines[10].class().unwrap();
+    assert_eq!(desolate_class, state_class);
+    assert_eq!(state_class, gate_class);
+    assert_eq!(gate_class, fate_class);
+
+    // And desolate scores as an exact slant rhyme (1/2 = RHYME_THRESHOLD).
+    assert_eq!(all_lines[1].score(), Some(rhyme::RHYME_THRESHOLD));
+    // While pure rhymes score as perfect (1.0).
+    assert_eq!(all_lines[2].score(), Some(RhymeScore::PERFECT));
+    assert_eq!(all_lines[3].score(), Some(RhymeScore::PERFECT));
+    assert_eq!(all_lines[4].score(), Some(RhymeScore::PERFECT));
 }
 
 #[test]

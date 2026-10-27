@@ -18,6 +18,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::mapping::Variant;
 use crate::parse::Poem;
 use crate::phoneme::{Phoneme, Phonemiser, Pronunciation, Provenance};
 use crate::span::Span;
@@ -130,13 +131,20 @@ impl RhymeClassId {
 
 /// Scores how closely two endings rhyme.
 ///
-/// English rhyme is reckoned from the last stressed vowel, which is what
-/// [`Pronunciation::rhyme_tail`] returns, and it aligns at the *end* of the word. So the score is
-/// the longest common suffix of the two tails over the longer tail: identical endings give 1,
-/// and a shared coda with a different vowel gives less.
+/// English rhyme is reckoned from the last stressed vowel for masculine and standard feminine
+/// rhymes, while polysyllabic words with light or weak endings can rhyme on their final syllable
+/// with monosyllables or other weak endings.
+///
+/// The score is the best alignment across the candidate tails:
+/// 1. Stressed tail to stressed tail (masculine, feminine, and triple rhyme).
+/// 2. Final syllable tail to stressed tail when one word is unstressed at the end and the other
+///    is stressed on its final syllable (apocopated rhyme, e.g. "Sicily" with "bee").
+/// 3. Final syllable tail to final syllable tail when both words have polysyllabic weak endings
+///    (e.g. "Persephone" with "Sicily").
 ///
 /// "Stressed" there means primary *or* secondary — unlike metre, which counts primary only.
 /// "Cavalcade" rhymes with "brigade" on a syllable carrying only secondary stress.
+///
 /// # A known asymmetry
 ///
 /// Because it is a *suffix* match, a difference at the very end of the tail costs everything
@@ -148,7 +156,13 @@ impl RhymeClassId {
 /// `PLAN.md` as a question for M4 rather than as a silent choice.
 #[must_use]
 pub fn score(left: &Pronunciation, right: &Pronunciation) -> RhymeScore {
-    score_tails(&left.rhyme_tail(), &right.rhyme_tail())
+    score_with(left, right, Variant::Strict)
+}
+
+/// Scores how closely two endings rhyme under the chosen [`Variant`].
+#[must_use]
+pub fn score_with(left: &Pronunciation, right: &Pronunciation, variant: Variant) -> RhymeScore {
+    score_ending_pair(&RhymeEnding::of(left), &RhymeEnding::of(right), variant)
 }
 
 /// One line's rhyme.
@@ -267,6 +281,7 @@ pub struct PoemRhyme {
     poem: crate::seed::Fingerprint,
     stanzas: Vec<StanzaRhyme>,
     classes: usize,
+    variant: Variant,
 }
 
 impl PoemRhyme {
@@ -292,6 +307,67 @@ impl PoemRhyme {
     pub const fn class_count(&self) -> usize {
         self.classes
     }
+
+    /// Which variant of [`Mapping::Rhyme`](crate::mapping::Mapping::Rhyme) scored the rhymes.
+    #[must_use]
+    pub const fn variant(&self) -> Variant {
+        self.variant
+    }
+
+    /// How many lines in the poem scored as slant rhymes (sharing a class with a score
+    /// below 1.0).
+    #[must_use]
+    pub fn slanted(&self) -> usize {
+        self.stanzas
+            .iter()
+            .flat_map(StanzaRhyme::lines)
+            .filter(|line| line.score().is_some_and(|s| !s.is_perfect()))
+            .count()
+    }
+}
+
+/// The rhyming profile of a pronunciation: its stressed tail, final syllable tail, and
+/// the number of unstressed syllables following the last stressed syllable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RhymeEnding {
+    stressed_tail: Vec<Phoneme>,
+    final_tail: Vec<Phoneme>,
+    post_stress_syllables: usize,
+}
+
+impl RhymeEnding {
+    fn of(pronunciation: &Pronunciation) -> Self {
+        Self {
+            stressed_tail: pronunciation.rhyme_tail(),
+            final_tail: pronunciation.final_syllable_tail(),
+            post_stress_syllables: pronunciation.post_stress_syllables(),
+        }
+    }
+}
+
+/// Computes the best rhyme score between two candidate endings.
+fn score_endings(a: &RhymeEnding, b: &RhymeEnding) -> RhymeScore {
+    let mut best = score_tails(&a.stressed_tail, &b.stressed_tail);
+
+    if a.post_stress_syllables > 0 && b.post_stress_syllables == 0 {
+        best = best.max(score_tails(&a.final_tail, &b.stressed_tail));
+    }
+    if b.post_stress_syllables > 0 && a.post_stress_syllables == 0 {
+        best = best.max(score_tails(&a.stressed_tail, &b.final_tail));
+    }
+    if a.post_stress_syllables >= 2 && b.post_stress_syllables >= 2 {
+        best = best.max(score_tails(&a.final_tail, &b.final_tail));
+    }
+
+    best
+}
+
+/// Scores two endings according to the given variant: strict tail only, or slant candidate tails.
+fn score_ending_pair(a: &RhymeEnding, b: &RhymeEnding, variant: Variant) -> RhymeScore {
+    match variant {
+        Variant::Slant => score_endings(a, b),
+        _ => score_tails(&a.stressed_tail, &b.stressed_tail),
+    }
 }
 
 /// The ending a line offers for rhyming.
@@ -300,21 +376,29 @@ struct Ending {
     pronunciation: Pronunciation,
 }
 
-/// Finds a poem's rhymes.
+/// Finds a poem's rhymes under the default mapping variant ([`Variant::Strict`]).
+#[must_use]
+pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser) -> PoemRhyme {
+    analyse_with(poem, phonemiser, Variant::Strict)
+}
+
+/// Finds a poem's rhymes under the chosen [`Variant`].
 ///
 /// Classes are poem-wide, not per-stanza: a refrain returning three stanzas later is the same
 /// rhyme, and a villanelle's repeated lines have to land together for §4.5's "two-note obsession"
 /// to come out.
 #[must_use]
-pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser) -> PoemRhyme {
+pub fn analyse_with(poem: &Poem, phonemiser: &impl Phonemiser, variant: Variant) -> PoemRhyme {
     // Pass one: place every line, in reading order, so classes number by first appearance.
-    let mut classes: Vec<Vec<Vec<Phoneme>>> = Vec::new();
+    let mut classes: Vec<Vec<(usize, RhymeEnding)>> = Vec::new();
     let mut stanzas: Vec<StanzaRhyme> = Vec::new();
+    let mut line_endings: Vec<(usize, RhymeEnding)> = Vec::new();
+    let mut line_counter = 0_usize;
 
     for stanza in poem.stanzas() {
         let mut lines = Vec::new();
         for line in stanza.lines() {
-            let Some(ending) = ending_of(line, poem, phonemiser, &classes) else {
+            let Some(ending) = ending_of(line, poem, phonemiser, &classes, variant) else {
                 lines.push(LineRhyme {
                     line: line.span(),
                     word: None,
@@ -323,14 +407,20 @@ pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser) -> PoemRhyme {
                     provenance: None,
                     score: None,
                 });
+                line_counter += 1;
                 continue;
             };
-            let tail = ending.pronunciation.rhyme_tail();
-            let class = classify_and_register(&tail, &mut classes);
+            let rhyme_ending = RhymeEnding::of(&ending.pronunciation);
+            let line_id = line_counter;
+            line_counter += 1;
+
+            let class = classify_and_register(line_id, &rhyme_ending, &mut classes, variant);
+            line_endings.push((line_id, rhyme_ending));
+
             lines.push(LineRhyme {
                 line: line.span(),
                 word: Some(ending.word),
-                tail,
+                tail: ending.pronunciation.rhyme_tail(),
                 class: Some(class),
                 provenance: Some(ending.pronunciation.provenance()),
                 score: None,
@@ -345,22 +435,29 @@ pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser) -> PoemRhyme {
     // Pass two: score each line against the *other* members of the class it ended up in. Doing
     // this after every line is placed is what makes the number independent of reading order —
     // and `SPEC.md` §4.5 turns it straight into pitch precision, so it had better be.
+    let mut ending_iter = line_endings.into_iter();
     for stanza in &mut stanzas {
         for line in &mut stanza.lines {
             let Some(class) = line.class else { continue };
+            let Some((line_id, ending)) = ending_iter.next() else {
+                continue;
+            };
             let Some(members) = classes.get(class.get()) else {
                 continue;
             };
-            line.score = members
-                .iter()
-                .filter(|member| member.as_slice() != line.tail.as_slice())
-                .map(|member| score_tails(&line.tail, member))
-                .max()
-                .or_else(|| {
-                    // Identical tails are the same rhyme, so a class of repeats is a perfect
-                    // rhyme with itself — a refrain, not a singleton.
-                    (members.len() > 1).then_some(RhymeScore::PERFECT)
-                });
+            line.score = match variant {
+                Variant::Slant => members
+                    .iter()
+                    .filter(|(id, _)| *id != line_id)
+                    .map(|(_, member)| score_ending_pair(&ending, member, variant))
+                    .max(),
+                _ => members
+                    .iter()
+                    .filter(|(_, member)| member.stressed_tail.as_slice() != line.tail.as_slice())
+                    .map(|(_, member)| score_tails(&line.tail, &member.stressed_tail))
+                    .max()
+                    .or_else(|| (members.len() > 1).then_some(RhymeScore::PERFECT)),
+            };
         }
     }
 
@@ -368,6 +465,7 @@ pub fn analyse(poem: &Poem, phonemiser: &impl Phonemiser) -> PoemRhyme {
         poem: poem.fingerprint(),
         stanzas,
         classes: classes.len(),
+        variant,
     }
 }
 
@@ -381,7 +479,8 @@ fn ending_of(
     line: &crate::parse::Line,
     poem: &Poem,
     phonemiser: &impl Phonemiser,
-    classes: &[Vec<Vec<Phoneme>>],
+    classes: &[Vec<(usize, RhymeEnding)>],
+    variant: Variant,
 ) -> Option<Ending> {
     for token in line.words().collect::<Vec<_>>().into_iter().rev() {
         let span = token.span();
@@ -390,11 +489,11 @@ fn ending_of(
         };
         let variants = phonemiser.variants(text);
         let mut best: Option<(RhymeScore, Pronunciation)> = None;
-        for variant in variants {
-            let tail = variant.rhyme_tail();
-            let score = best_match(&tail, classes).map_or(RhymeScore::NONE, |(_, s)| s);
+        for var in variants {
+            let ending = RhymeEnding::of(&var);
+            let score = best_match(&ending, classes, variant).map_or(RhymeScore::NONE, |(_, s)| s);
             if best.as_ref().is_none_or(|(seen, _)| score > *seen) {
-                best = Some((score, variant));
+                best = Some((score, var));
             }
         }
         if let Some((_, pronunciation)) = best {
@@ -413,11 +512,15 @@ fn ending_of(
 /// nothing about thresholds or class founding: variant choice needs the raw quality of the match,
 /// and an earlier version conflated "founds its own class" with "matches perfectly", so a
 /// heteronym's wrong sense won whenever the right sense's rival happened to match nothing.
-fn best_match(tail: &[Phoneme], classes: &[Vec<Vec<Phoneme>>]) -> Option<(usize, RhymeScore)> {
+fn best_match(
+    ending: &RhymeEnding,
+    classes: &[Vec<(usize, RhymeEnding)>],
+    variant: Variant,
+) -> Option<(usize, RhymeScore)> {
     let mut best: Option<(usize, RhymeScore)> = None;
     for (index, members) in classes.iter().enumerate() {
-        for member in members {
-            let score = score_tails(tail, member);
+        for (_, member) in members {
+            let score = score_ending_pair(ending, member, variant);
             if best.is_none_or(|(_, seen)| score > seen) {
                 best = Some((index, score));
             }
@@ -432,8 +535,12 @@ fn best_match(tail: &[Phoneme], classes: &[Vec<Vec<Phoneme>>]) -> Option<(usize,
 /// which is the order `SPEC.md` §4.5 assigns scale degrees in. A class is compared against *all*
 /// its members rather than only its founder, so joining does not depend on which line happened
 /// to open the class.
-fn classify(tail: &[Phoneme], classes: &[Vec<Vec<Phoneme>>]) -> RhymeClassId {
-    match best_match(tail, classes) {
+fn classify(
+    ending: &RhymeEnding,
+    classes: &[Vec<(usize, RhymeEnding)>],
+    variant: Variant,
+) -> RhymeClassId {
+    match best_match(ending, classes, variant) {
         Some((index, score)) if score >= RHYME_THRESHOLD => RhymeClassId(index),
         _ => RhymeClassId(classes.len()),
     }
@@ -458,20 +565,25 @@ fn score_tails(a: &[Phoneme], b: &[Phoneme]) -> RhymeScore {
 }
 
 /// Places a tail in a class and records it as a member.
-fn classify_and_register(tail: &[Phoneme], classes: &mut Vec<Vec<Vec<Phoneme>>>) -> RhymeClassId {
-    let class = classify(tail, classes);
+fn classify_and_register(
+    line_id: usize,
+    ending: &RhymeEnding,
+    classes: &mut Vec<Vec<(usize, RhymeEnding)>>,
+    variant: Variant,
+) -> RhymeClassId {
+    let class = classify(ending, classes, variant);
     if class.get() == classes.len() {
         classes.push(Vec::new());
     }
     if let Some(members) = classes.get_mut(class.get()) {
-        members.push(tail.to_vec());
+        members.push((line_id, ending.clone()));
     }
     class
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{RHYME_THRESHOLD, RhymeScore, analyse, score};
+    use super::{RHYME_THRESHOLD, RhymeScore, Variant, analyse, analyse_with, score, score_with};
     use crate::parse::Poem;
     use crate::phoneme::arpabet::ARPABET;
     use crate::phoneme::{
@@ -524,6 +636,49 @@ mod tests {
         ("crow", &[&[("K", W), ("R", W), ("OW", S)]]),
         // The bend first, the weapon second, as CMUdict lists them.
         ("bow", &[&[("B", W), ("AW", S)], &[("B", W), ("OW", S)]]),
+        ("bee", &[&[("B", W), ("IY", S)]]),
+        ("sea", &[&[("S", W), ("IY", S)]]),
+        (
+            "sicily",
+            &[&[
+                ("S", W),
+                ("IH", S),
+                ("S", W),
+                ("AH", W),
+                ("L", W),
+                ("IY", W),
+            ]],
+        ),
+        (
+            "persephone",
+            &[&[
+                ("P", W),
+                ("ER", W),
+                ("S", W),
+                ("EH", S),
+                ("F", W),
+                ("AH", W),
+                ("N", W),
+                ("IY", W),
+            ]],
+        ),
+        (
+            "desolate",
+            &[&[
+                ("D", W),
+                ("EH", S),
+                ("S", W),
+                ("AH", W),
+                ("L", W),
+                ("AH", W),
+                ("T", W),
+            ]],
+        ),
+        ("state", &[&[("S", W), ("T", W), ("EY", S), ("T", W)]]),
+        (
+            "singing",
+            &[&[("S", W), ("IH", S), ("NG", W), ("IH", W), ("NG", W)]],
+        ),
     ];
 
     fn build(phones: &[(&str, Stress)], provenance: Provenance) -> Pronunciation {
@@ -821,5 +976,63 @@ mod tests {
         let source = "the tide\nthe burn\nthe side\nthe turn\n\nthe wind\nthe mind\n";
         let poem = Poem::parse(source).unwrap();
         assert_eq!(analyse(&poem, &Fake), analyse(&poem, &Fake));
+    }
+
+    #[test]
+    fn polysyllabic_weak_rhymes_score_on_final_syllable() {
+        // Under strict rhyme (the default), Sicily and bee share only a weak final syllable,
+        // which scores below the threshold against the long stressed tail.
+        assert!(score(&say("sicily"), &say("bee")) < RHYME_THRESHOLD);
+
+        // Under slant rhyme, "Sicily" (-ly: IY) rhymes with monosyllable "bee" (IY) on its final syllable.
+        assert_eq!(
+            score_with(&say("sicily"), &say("bee"), Variant::Slant),
+            RhymeScore::PERFECT
+        );
+        // Polysyllabic weak endings rhyme with each other on the final syllable.
+        assert_eq!(
+            score_with(&say("persephone"), &say("sicily"), Variant::Slant),
+            RhymeScore::PERFECT
+        );
+    }
+
+    #[test]
+    fn polysyllabic_slant_rhyme_scores_coda_agreement() {
+        // Under strict rhyme, desolate and state score below threshold.
+        assert!(score(&say("desolate"), &say("state")) < RHYME_THRESHOLD);
+
+        // Under slant rhyme, "desolate" (-late: AH T) slant-rhymes with "state" (EY T) on the shared coda T.
+        let slant = score_with(&say("desolate"), &say("state"), Variant::Slant);
+        assert_eq!(slant, RHYME_THRESHOLD);
+        assert!(!slant.is_perfect());
+    }
+
+    #[test]
+    fn disyllabic_trochees_require_stressed_vowel_for_full_rhyme() {
+        // "burning" and "singing" share only the unstressed suffix "-ing":
+        // they do not achieve a perfect score under either variant.
+        let strict = score(&say("burning"), &say("singing"));
+        assert!(!strict.is_perfect());
+        assert_eq!(strict, RHYME_THRESHOLD);
+
+        let slant = score_with(&say("burning"), &say("singing"), Variant::Slant);
+        assert!(!slant.is_perfect());
+        assert_eq!(slant, RHYME_THRESHOLD);
+    }
+
+    #[test]
+    fn a_villanelle_scheme_collapses_weak_and_slant_rhymes() {
+        let source =
+            "the persephone\nthe desolate\nthe sicily\n\nthe bee\nthe state\nthe persephone\n";
+        let poem = Poem::parse(source).unwrap();
+        // Strict variant splits into 5 classes (persephone, desolate, sicily, bee, state).
+        let strict = analyse(&poem, &Fake);
+        assert_eq!(strict.class_count(), 5);
+
+        // Slant variant collapses into 2 true classes.
+        let slant = analyse_with(&poem, &Fake, Variant::Slant);
+        assert_eq!(slant.class_count(), 2);
+        assert_eq!(slant.stanzas()[0].scheme(), "ABA");
+        assert_eq!(slant.stanzas()[1].scheme(), "ABA");
     }
 }

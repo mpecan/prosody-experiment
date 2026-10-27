@@ -384,6 +384,7 @@ pub struct Annotated {
     /// [`Score::articulated`]: the syllables whose drum piece differs from their layer's flat
     /// piece.
     articulated: usize,
+    rhyme: Variant,
     /// [`Arrangement::eroding`](crate::arrange::Arrangement::eroding): the bars played over an
     /// eroding loop.
     eroding: usize,
@@ -439,6 +440,12 @@ impl Annotated {
     #[must_use]
     pub const fn articulated(&self) -> usize {
         self.articulated
+    }
+
+    /// Which variant of rhyme scoring formed the poem's rhyme classes (`SPEC.md` §4.5).
+    #[must_use]
+    pub const fn rhyme(&self) -> Variant {
+        self.rhyme
     }
 
     /// How many bars play over a loop eroding under a long stanza's arrival (`SPEC.md` §4.6).
@@ -596,6 +603,7 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         lightened: score.lightened(),
         drums: score.drums(),
         articulated: score.articulated(),
+        rhyme: score.rhyme(),
         eroding: score.arrangement().eroding(),
         lengths: bar_lengths(score),
     }
@@ -735,6 +743,13 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             "drums articulated · each syllable's drum piece is chosen by its layer, beat and \
              stress: {} syllable(s) off the layer's flat piece (§4.1, §4.2)",
             annotated.articulated()
+        );
+    }
+    if annotated.rhyme() == Variant::Slant {
+        let _ = writeln!(
+            out,
+            "rhyme slant · candidate tails from last stress and final syllable rime, with \
+             apocopated and continuous slant rhyme scoring (§4.5)",
         );
     }
     // The erosion of long stanzas (§4.6), named only where it happened: a piece whose stanzas

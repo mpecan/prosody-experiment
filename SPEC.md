@@ -273,6 +273,17 @@ Treat rhyme as an **equivalence relation**. Rhyme class → scale degree, assign
 
 Then the elegant part: **perfect rhyme → exact pitch; slant rhyme → detune or neighbour tone.** Rhyme precision maps to pitch precision. Score rhyme quality continuously (nucleus + coda phoneme match) rather than boolean.
 
+**Rhyme candidate selector** (*candidate, `Mapping::Rhyme` (`rhyme`), decided 2026-10-27 by the user:
+`strict` is the default, `slant` is a variant to compare*). How line endings are evaluated for rhyming:
+
+- **`strict`** (the default) — rhyme is reckoned strictly from the last stressed vowel onward (`Pronunciation::rhyme_tail`), matching masculine and standard feminine rhymes. Polysyllabic weak endings and shared coda slant rhymes do not match.
+- **`slant`** — candidate tails are evaluated across the last stressed vowel and final syllable rime:
+  - Stressed tail to stressed tail (masculine, feminine, and triple rhyme).
+  - Final syllable tail to stressed tail for apocopated rhymes (e.g. *Sicily* with *bee*).
+  - Final syllable tail to final syllable tail for polysyllabic weak endings ($\ge 2$ post-stress syllables, e.g. *Persephone* with *Sicily*).
+  - Shared codas score continuously as slant rhymes down to 0.50 (`RHYME_THRESHOLD`), mapping to detuned scale degrees (`SPEC.md` §4.5).
+  - Disyllabic trochees (*burning* / *singing*) continue to require agreement from the stressed vowel.
+
 ### 4.6 Arrangement — stanzas loop until something takes their place
 
 *Decided 2026-10-08, after the scorer measured every poem as a single line of sound.*

@@ -8,8 +8,9 @@
 //! lines always sound somehow and which goes back to [`Variant::Crossing`], and the function
 //! words, which are always struck somehow and go back to [`Variant::Full`], the long stanzas,
 //! whose arrivals always take the loop's place somehow and which go back to
-//! [`Variant::Gradual`], and the drums, which always play a piece of the kit and go back to
-//! [`Variant::Flat`]) — and one of them is
+//! [`Variant::Gradual`], the drums, which always play a piece of the kit and go back to
+//! [`Variant::Flat`], and the rhyme, which always rhymes line endings somehow and goes back to
+//! [`Variant::Strict`]) — and one of them is
 //! its default. A [`Mappings`] value picks one variant per
 //! mapping, so the same poem can be heard under each choice, side by side.
 //!
@@ -88,6 +89,11 @@ pub enum Mapping {
     /// piece shipped. [`Variant::Articulated`]: each syllable's piece chosen from its layer, beat
     /// parity (`beat % 2`, downbeat against backbeat) and stress within the foot (`crate::drums`).
     Drums,
+    /// §4.5's rhyme scoring: how line endings are rhymed. [`Variant::Strict`] (the default):
+    /// reckoned strictly from the last stressed vowel, masculine and standard feminine rhymes
+    /// only. [`Variant::Slant`]: candidate tails across the last stress and final syllable rime,
+    /// with apocopated endings and continuous coda slant scoring down to 0.5.
+    Rhyme,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -150,6 +156,11 @@ pub enum Variant {
     Flat,
     /// The drums articulated across the kit by layer, beat parity and stress within the foot.
     Articulated,
+    /// The rhyme pass as it was, and its default: from the last stressed vowel only.
+    Strict,
+    /// The rhyme pass with feminine and slant scoring: candidate tails and continuous coda slant
+    /// matches.
+    Slant,
 }
 
 impl Variant {
@@ -178,6 +189,8 @@ impl Variant {
             Self::Erode => "erode",
             Self::Flat => "flat",
             Self::Articulated => "articulated",
+            Self::Strict => "strict",
+            Self::Slant => "slant",
         }
     }
 }
@@ -233,9 +246,13 @@ const LONG_STANZAS: &[Variant] = &[Variant::Gradual, Variant::Erode];
 /// always plays a piece of the kit, so there is no [`Variant::Off`] — then articulated.
 const DRUMS: &[Variant] = &[Variant::Flat, Variant::Articulated];
 
+/// The rhyme's variants: strict first, because it is what preceded the mapping — line endings
+/// always rhyme somehow, so there is no [`Variant::Off`] — then slant.
+const RHYME: &[Variant] = &[Variant::Strict, Variant::Slant];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -248,6 +265,7 @@ impl Mapping {
         Self::Function,
         Self::LongStanzas,
         Self::Drums,
+        Self::Rhyme,
     ];
 
     /// Its name on a command line or in a query string.
@@ -266,6 +284,7 @@ impl Mapping {
             Self::Function => "function-words",
             Self::LongStanzas => "long-stanzas",
             Self::Drums => "drums",
+            Self::Rhyme => "rhyme",
         }
     }
 
@@ -321,14 +340,18 @@ impl Mapping {
                  across kick/ride, snare, toms and closed hat by layer, beat parity and stress \
                  within the foot (articulated)"
             }
+            Self::Rhyme => {
+                "how line endings are rhymed: from the last stressed vowel only (strict), or with \
+                 apocopated endings and continuous coda slant scoring across candidate tails (slant)"
+            }
         }
     }
 
     /// Its variants, in a fixed order that starts with what preceded the mapping:
     /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`], the
     /// stack, which starts with [`Variant::Crossing`], the function words, which start with
-    /// [`Variant::Full`], the long stanzas, which start with [`Variant::Gradual`], and the drums,
-    /// which start with [`Variant::Flat`].
+    /// [`Variant::Full`], the long stanzas, which start with [`Variant::Gradual`], the drums,
+    /// which start with [`Variant::Flat`], and the rhyme, which starts with [`Variant::Strict`].
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
@@ -341,6 +364,7 @@ impl Mapping {
             Self::Function => FUNCTION,
             Self::LongStanzas => LONG_STANZAS,
             Self::Drums => DRUMS,
+            Self::Rhyme => RHYME,
         }
     }
 
@@ -382,6 +406,10 @@ impl Mapping {
             // it was, while articulated distributes syllables across kick/ride, snare, toms and
             // closed hat by beat parity and stress within the foot (`PLAN.md`).
             Self::Drums => Variant::Flat,
+            // A candidate the user approved for comparison: strict keeps every existing pattern
+            // and score as it was, while slant scores weak endings and shared codas across
+            // candidate tails (`PLAN.md`).
+            Self::Rhyme => Variant::Strict,
         }
     }
 
@@ -407,7 +435,8 @@ impl Mapping {
     /// mapping but the pulse, which a piece cannot be without, and which goes back to
     /// [`Variant::Elastic`], the stack, which goes back to [`Variant::Crossing`], the function
     /// words, which go back to [`Variant::Full`], the long stanzas, which go back to
-    /// [`Variant::Gradual`], and the drums, which go back to [`Variant::Flat`].
+    /// [`Variant::Gradual`], the drums, which go back to [`Variant::Flat`], and the rhyme,
+    /// which goes back to [`Variant::Strict`].
     #[must_use]
     pub const fn off(self) -> Choice {
         let variant = match self.variants() {
@@ -486,7 +515,7 @@ impl Mappings {
     }
 
     /// Whether `mapping` applies at all: any variant but [`Variant::Off`]. Always true of the
-    /// pulse, the stack, the function words, the long stanzas and the drums, which have no off.
+    /// pulse, the stack, the function words, the long stanzas, the drums and the rhyme, which have no off.
     #[must_use]
     pub fn has(&self, mapping: Mapping) -> bool {
         self.get(mapping) != Variant::Off
@@ -544,6 +573,7 @@ mod tests {
                 Mapping::Function => Variant::Full,
                 Mapping::LongStanzas => Variant::Gradual,
                 Mapping::Drums => Variant::Flat,
+                Mapping::Rhyme => Variant::Strict,
                 _ => Variant::Off,
             };
             assert_eq!(mapping.variants().first(), Some(&preceded), "{mapping:?}");
@@ -653,6 +683,7 @@ mod tests {
         assert_eq!(all.get(Mapping::Function), Variant::Full);
         assert_eq!(all.get(Mapping::LongStanzas), Variant::Erode);
         assert_eq!(all.get(Mapping::Drums), Variant::Flat);
+        assert_eq!(all.get(Mapping::Rhyme), Variant::Strict);
         assert_eq!(all.changed().count(), 0);
     }
 
@@ -673,6 +704,25 @@ mod tests {
         // Left out, it is what preceded it: flat, the default, so nothing is stored.
         assert_eq!(articulated.without(Mapping::Drums), Mappings::all());
         assert!(Mappings::all().has(Mapping::Drums));
+    }
+
+    #[test]
+    fn the_rhyme_is_strict_unless_slant_is_chosen() {
+        assert_eq!(
+            Mapping::Rhyme.variants(),
+            &[Variant::Strict, Variant::Slant]
+        );
+        assert_eq!(Mapping::named("rhyme"), Some(Mapping::Rhyme));
+        assert_eq!(Mappings::all().get(Mapping::Rhyme), Variant::Strict);
+        assert!(Mapping::Rhyme.choose(Variant::Off).is_none());
+        assert!(Mapping::Rhyme.choose_named("off").is_none());
+        assert!(Mapping::Rhyme.choose_named("light").is_none());
+        let slant = Mappings::all().with(Mapping::Rhyme.choose_named("slant").unwrap());
+        assert_eq!(slant.get(Mapping::Rhyme), Variant::Slant);
+        assert_eq!(slant.changed().count(), 1);
+        // Left out, it is what preceded it: strict, the default, so nothing is stored.
+        assert_eq!(slant.without(Mapping::Rhyme), Mappings::all());
+        assert!(Mappings::all().has(Mapping::Rhyme));
     }
 
     #[test]
@@ -768,10 +818,10 @@ mod tests {
     #[test]
     fn every_combination_is_listed_once() {
         // Four on/off switches, a four-way bass, a four-way harmony, a four-way reading, a
-        // two-way pulse, a two-way stack, two-way function words, two-way long stanzas and
-        // two-way drums: 2^4 × 4 × 4 × 4 × 2 × 2 × 2 × 2 × 2 = 32768.
+        // two-way pulse, a two-way stack, two-way function words, two-way long stanzas,
+        // two-way drums and two-way rhyme: 2^4 × 4 × 4 × 4 × 2 × 2 × 2 × 2 × 2 × 2 = 65536.
         let every = Mappings::every();
-        assert_eq!(every.len(), 32768);
+        assert_eq!(every.len(), 65536);
         let unique: std::collections::BTreeSet<_> = every.iter().map(|m| &m.changed).collect();
         assert_eq!(unique.len(), every.len());
         assert!(every.contains(&Mappings::all()));

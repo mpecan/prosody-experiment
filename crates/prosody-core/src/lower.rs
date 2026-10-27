@@ -152,7 +152,8 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
         .with_stack(mappings.get(Mapping::Stack))
         // Already applied to the events above; recorded so the backends can name it.
         .with_function(function)
-        .with_drums(drums);
+        .with_drums(drums)
+        .with_rhyme(mappings.get(Mapping::Rhyme));
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,
