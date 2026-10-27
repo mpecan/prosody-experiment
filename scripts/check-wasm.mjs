@@ -37,6 +37,7 @@ const settings = [
   'set=long-stanzas:gradual&profile=jazz',
   'set=drums:articulated&profile=jazz',
   'set=rhyme:slant&profile=jazz',
+  'set=anchor:on&profile=jazz',
 ];
 const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
 

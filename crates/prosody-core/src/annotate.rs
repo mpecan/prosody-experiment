@@ -385,6 +385,9 @@ pub struct Annotated {
     /// piece.
     articulated: usize,
     rhyme: Variant,
+    anchor: Variant,
+    /// [`Score::anchored`]: the syllables carrying an anaphora or epistrophe anchor.
+    anchored: usize,
     /// [`Arrangement::eroding`](crate::arrange::Arrangement::eroding): the bars played over an
     /// eroding loop.
     eroding: usize,
@@ -446,6 +449,18 @@ impl Annotated {
     #[must_use]
     pub const fn rhyme(&self) -> Variant {
         self.rhyme
+    }
+
+    /// Which variant of repetition anchor rendering was chosen (`SPEC.md` §4.3).
+    #[must_use]
+    pub const fn anchor(&self) -> Variant {
+        self.anchor
+    }
+
+    /// How many syllables carry an anaphora or epistrophe anchor ([`Score::anchored`]).
+    #[must_use]
+    pub const fn anchored(&self) -> usize {
+        self.anchored
     }
 
     /// How many bars play over a loop eroding under a long stanza's arrival (`SPEC.md` §4.6).
@@ -604,6 +619,8 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         drums: score.drums(),
         articulated: score.articulated(),
         rhyme: score.rhyme(),
+        anchor: score.anchor(),
+        anchored: score.anchored(),
         eroding: score.arrangement().eroding(),
         lengths: bar_lengths(score),
     }
@@ -749,7 +766,15 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
         let _ = writeln!(
             out,
             "rhyme slant · candidate tails from last stress and final syllable rime, with \
-             apocopated and continuous slant rhyme scoring (§4.5)",
+             apocopated and continuous slant rhyme scoring (§4.5)"
+        );
+    }
+    if annotated.anchor() == Variant::On {
+        let _ = writeln!(
+            out,
+            "anchor on · anaphora ostinatos accented on the downbeat, epistrophe cadences \
+             ring through turnarounds: {} syllable(s) anchored (§4.3)",
+            annotated.anchored()
         );
     }
     // The erosion of long stanzas (§4.6), named only where it happened: a piece whose stanzas
@@ -829,6 +854,7 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
                     token,
                     walking,
                     annotated.drums() == Variant::Articulated,
+                    annotated.anchor() == Variant::On,
                 );
             }
         }
@@ -1308,6 +1334,7 @@ fn render_token(
     token: &Annotation,
     walking: bool,
     articulated: bool,
+    anchored: bool,
 ) {
     let text = token.span().text(source).unwrap_or("<lost>");
     if token.syllables().is_empty() {
@@ -1375,8 +1402,15 @@ fn render_token(
             if token.sharpness().is_some() {
                 from.push("surprisal");
             }
-            if token.anchor().is_some() {
-                from.push("repetition");
+            if let Some(anchor) = token.anchor() {
+                if anchored {
+                    from.push(match anchor {
+                        crate::voice::Anchor::Downbeat => "repetition,anchor(downbeat)",
+                        crate::voice::Anchor::Cadence => "repetition,anchor(cadence)",
+                    });
+                } else {
+                    from.push("repetition");
+                }
             }
             if token.provenance() == Some(Provenance::LetterToSound) {
                 from.push("phoneme(guessed)");

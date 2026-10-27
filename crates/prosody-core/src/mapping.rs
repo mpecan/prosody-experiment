@@ -94,6 +94,11 @@ pub enum Mapping {
     /// only. [`Variant::Slant`]: candidate tails across the last stress and final syllable rime,
     /// with apocopated endings and continuous coda slant scoring down to 0.5.
     Rhyme,
+    /// §4.3's repetition anchors: how line-initial anaphora and line-final epistrophe figures are
+    /// rendered. [`Variant::Off`] (the default): unrendered in Strudel. [`Variant::On`]:
+    /// downbeat-anchored anaphora ostinatos accented with punchy transients, and epistrophe
+    /// turnaround cadences ringing through the bar.
+    Anchor,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -252,7 +257,7 @@ const RHYME: &[Variant] = &[Variant::Strict, Variant::Slant];
 
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -266,6 +271,7 @@ impl Mapping {
         Self::LongStanzas,
         Self::Drums,
         Self::Rhyme,
+        Self::Anchor,
     ];
 
     /// Its name on a command line or in a query string.
@@ -285,6 +291,7 @@ impl Mapping {
             Self::LongStanzas => "long-stanzas",
             Self::Drums => "drums",
             Self::Rhyme => "rhyme",
+            Self::Anchor => "anchor",
         }
     }
 
@@ -344,6 +351,10 @@ impl Mapping {
                 "how line endings are rhymed: from the last stressed vowel only (strict), or with \
                  apocopated endings and continuous coda slant scoring across candidate tails (slant)"
             }
+            Self::Anchor => {
+                "how repetition figures anchor in Strudel: unrendered (off), or emphasizing \
+                 line-initial anaphora on the downbeat and ringing out line-final epistrophe cadences (on)"
+            }
         }
     }
 
@@ -355,7 +366,11 @@ impl Mapping {
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
-            Self::HeldLane | Self::RefrainLane | Self::StanzaPeriod | Self::Outro => SWITCH,
+            Self::HeldLane
+            | Self::RefrainLane
+            | Self::StanzaPeriod
+            | Self::Outro
+            | Self::Anchor => SWITCH,
             Self::Bass => BASS,
             Self::Reading => READING,
             Self::Harmony => HARMONY,
@@ -381,9 +396,10 @@ impl Mapping {
             // it (SPEC.md §4.7). `arrives` — the reading as it shipped — and `stanza` stay as
             // variants to hear against it.
             Self::Reading => Variant::Breath,
-            // A candidate the user approved for comparison, not yet the piece as specified: off
-            // keeps every existing pattern and score as it was (`PLAN.md`, the harmony proposal).
-            Self::Harmony => Variant::Off,
+            // Candidates the user approved for comparison, not yet the piece as specified: off
+            // keeps every existing pattern and score as it was (`PLAN.md`: the harmony proposal,
+            // and the repetition anchor proposal in Strudel).
+            Self::Harmony | Self::Anchor => Variant::Off,
             // The user decided (PLAN.md, "a steady beat"): a bar lasts as long as its beats, so
             // the beat is one speed throughout — SPEC.md §4.2's "foot → beat" taken at its word.
             // Elastic stays as a variant to compare against.
@@ -673,7 +689,11 @@ mod tests {
         // piece — is off.
         let all = Mappings::all();
         for mapping in Mapping::ALL {
-            assert_eq!(all.has(mapping), mapping != Mapping::Harmony, "{mapping:?}");
+            assert_eq!(
+                all.has(mapping),
+                mapping != Mapping::Harmony && mapping != Mapping::Anchor,
+                "{mapping:?}"
+            );
         }
         assert_eq!(all.get(Mapping::Pulse), Variant::Steady);
         assert_eq!(all.get(Mapping::Bass), Variant::Height);
@@ -684,7 +704,22 @@ mod tests {
         assert_eq!(all.get(Mapping::LongStanzas), Variant::Erode);
         assert_eq!(all.get(Mapping::Drums), Variant::Flat);
         assert_eq!(all.get(Mapping::Rhyme), Variant::Strict);
+        assert_eq!(all.get(Mapping::Anchor), Variant::Off);
         assert_eq!(all.changed().count(), 0);
+    }
+
+    #[test]
+    fn the_anchor_is_off_unless_on_is_chosen() {
+        assert_eq!(Mapping::Anchor.variants(), &[Variant::Off, Variant::On]);
+        assert_eq!(Mapping::named("anchor"), Some(Mapping::Anchor));
+        assert_eq!(Mappings::all().get(Mapping::Anchor), Variant::Off);
+        assert_eq!(Mapping::Anchor.default_variant(), Variant::Off);
+        let on = Mappings::all().with(Mapping::Anchor.choose_named("on").unwrap());
+        assert_eq!(on.get(Mapping::Anchor), Variant::On);
+        assert_eq!(on.changed().count(), 1);
+        assert_eq!(on.clone().without(Mapping::Anchor), Mappings::all());
+        assert!(!Mappings::all().has(Mapping::Anchor));
+        assert!(on.has(Mapping::Anchor));
     }
 
     #[test]
@@ -817,11 +852,11 @@ mod tests {
 
     #[test]
     fn every_combination_is_listed_once() {
-        // Four on/off switches, a four-way bass, a four-way harmony, a four-way reading, a
+        // Five on/off switches, a four-way bass, a four-way harmony, a four-way reading, a
         // two-way pulse, a two-way stack, two-way function words, two-way long stanzas,
-        // two-way drums and two-way rhyme: 2^4 × 4 × 4 × 4 × 2 × 2 × 2 × 2 × 2 × 2 = 65536.
+        // two-way drums and two-way rhyme: 2^5 × 4 × 4 × 4 × 2 × 2 × 2 × 2 × 2 × 2 = 131072.
         let every = Mappings::every();
-        assert_eq!(every.len(), 65536);
+        assert_eq!(every.len(), 131_072);
         let unique: std::collections::BTreeSet<_> = every.iter().map(|m| &m.changed).collect();
         assert_eq!(unique.len(), every.len());
         assert!(every.contains(&Mappings::all()));

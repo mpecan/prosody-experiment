@@ -1234,3 +1234,48 @@ fn rhyme_is_strict_unless_set_slant_and_has_no_off() {
         );
     }
 }
+
+#[test]
+fn anchor_is_off_unless_set_on() {
+    let poem = std::fs::read_to_string(examples().join("naidu-bazaars-of-hyderabad.poem")).unwrap();
+    let (off, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(!off.contains("anchor = on"), "{off}");
+    let (without, _, _) = run(&["--without", "anchor"], &poem);
+    assert_eq!(without, off);
+
+    let (view, err, code) = run(&["--explain", "--set", "anchor=on"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        view.contains(
+            "anchor on · anaphora ostinatos accented on the downbeat, epistrophe cadences \
+             ring through turnarounds: 27 syllable(s) anchored (§4.3)"
+        ),
+        "{view}"
+    );
+    assert!(view.contains("anchor(downbeat)"), "{view}");
+
+    let (on, err, code) = run(&["--set", "anchor=on"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        on.contains(
+            "//   anchor = on: anaphora ostinatos accented on the downbeat, epistrophe cadences \
+             ring through turnarounds in 27 syllable(s) (SPEC.md §4.3, candidate)"
+        ),
+        "{on}"
+    );
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-anchor-on.js");
+        std::fs::write(&file, &on).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}

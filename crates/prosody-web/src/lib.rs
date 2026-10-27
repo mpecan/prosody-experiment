@@ -1313,6 +1313,7 @@ mod tests {
             ),
             ("drums", "[\"flat\",\"articulated\"],\"default\":\"flat\"}"),
             ("rhyme", "[\"strict\",\"slant\"],\"default\":\"strict\"}"),
+            ("anchor", "[\"off\",\"on\"],\"default\":\"off\"}"),
         ] {
             let at = data.find(&format!("{{\"name\":\"{name}\""));
             assert!(at.is_some(), "{name} missing");
@@ -2387,6 +2388,32 @@ mod tests {
             )
             .status
                 >= 400
+        );
+    }
+
+    #[test]
+    fn anchor_reaches_the_pattern_and_the_explain_view() {
+        let naidu = include_str!("../../../examples/naidu-bazaars-of-hyderabad.poem");
+        let default_pattern = super::compile(&request(&[], naidu), &Output::Pattern);
+        assert_eq!(default_pattern.status, 200);
+        assert!(!default_pattern.body.contains("anchor = on"));
+
+        let anchor_on = &[("set", "anchor:on")];
+        let pattern = super::compile(&request(anchor_on, naidu), &Output::Pattern);
+        let explain = super::compile(&request(anchor_on, naidu), &Output::Explain);
+        assert_eq!(pattern.status, 200);
+        assert_eq!(explain.status, 200);
+        assert!(
+            pattern
+                .body
+                .contains("//   anchor = on: anaphora ostinatos accented"),
+            "{}",
+            pattern.body
+        );
+        assert!(
+            explain.body.contains("anchor=on") && explain.body.contains("anchor on ·"),
+            "{}",
+            explain.body
         );
     }
 
