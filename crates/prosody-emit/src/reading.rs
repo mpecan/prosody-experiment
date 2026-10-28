@@ -533,7 +533,8 @@ impl Kind {
             | Variant::Flat
             | Variant::Articulated
             | Variant::Strict
-            | Variant::Slant => Self::Arrives,
+            | Variant::Slant
+            | Variant::Assonance => Self::Arrives,
         }
     }
 }

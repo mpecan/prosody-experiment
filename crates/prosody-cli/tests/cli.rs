@@ -1279,3 +1279,54 @@ fn anchor_is_off_unless_set_on() {
         );
     }
 }
+
+#[test]
+fn melody_is_rhyme_unless_set_assonance_and_has_no_off() {
+    let poem = std::fs::read_to_string(examples().join("crane-in-the-desert.poem")).unwrap();
+    let (rhyme_default, err, code) = run(&[], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        !rhyme_default.contains("melody = assonance"),
+        "{rhyme_default}"
+    );
+    let (without, _, _) = run(&["--without", "melody"], &poem);
+    assert_eq!(without, rhyme_default);
+    let (_, err, code) = run(&["--set", "melody=off"], &poem);
+    assert_ne!(code, Some(0));
+    assert!(
+        err.contains("unknown variant `off` of mapping `melody` (it has rhyme, assonance)"),
+        "{err}"
+    );
+
+    let (view, err, code) = run(&["--explain", "--set", "melody=assonance"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        view.contains(
+            "melody assonance · line-internal assonance figures give melody to unrhymed lines"
+        ),
+        "{view}"
+    );
+
+    let (assonance, err, code) = run(&["--set", "melody=assonance"], &poem);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        assonance.contains(
+            "//   melody = assonance: line-internal assonance figures give melody to unrhymed lines"
+        ),
+        "{assonance}"
+    );
+    if let Some(node) = node() {
+        let file = std::env::temp_dir().join("prosody-melody-assonance.js");
+        std::fs::write(&file, &assonance).expect("writing the pattern");
+        let checked = Command::new(&node)
+            .arg("--check")
+            .arg(&file)
+            .output()
+            .expect("running node");
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+    }
+}

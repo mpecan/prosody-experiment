@@ -90,13 +90,14 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20                function-words = full|light (default full);\n\
      \x20                long-stanzas = gradual|erode (default erode);\n\
      \x20                drums = flat|articulated (default flat);\n\
-     \x20                rhyme = strict|slant (default strict)\n\
+     \x20                rhyme = strict|slant (default strict);\n\
+     \x20                melody = rhyme|assonance (default rhyme)\n\
      \x20 --without LIST shorthand for --set name=off, comma-separated names\n\
-     \x20                (the pulse, the stack, the function words, the long stanzas, the drums\n\
-     \x20                and the rhyme have no off: --without pulse is pulse=elastic, --without stack is\n\
+     \x20                (the pulse, the stack, the function words, the long stanzas, the drums,\n\
+     \x20                the rhyme and the melody have no off: --without pulse is pulse=elastic, --without stack is\n\
      \x20                stack=crossing, --without function-words is function-words=full,\n\
      \x20                --without long-stanzas is long-stanzas=gradual, --without drums is\n\
-     \x20                drums=flat, --without rhyme is rhyme=strict)\n\
+     \x20                drums=flat, --without rhyme is rhyme=strict, --without melody is melody=rhyme)\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\

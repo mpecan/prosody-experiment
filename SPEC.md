@@ -292,6 +292,12 @@ Then the elegant part: **perfect rhyme → exact pitch; slant rhyme → detune o
   - Shared codas score continuously as slant rhymes down to 0.50 (`RHYME_THRESHOLD`), mapping to detuned scale degrees (`SPEC.md` §4.5).
   - Disyllabic trochees (*burning* / *singing*) continue to require agreement from the stressed vowel.
 
+**Melody candidate selector** (*candidate, `Mapping::Melody` (`melody`), decided 2026-10-28 by the user:
+`rhyme` is the default, `assonance` is a variant to compare*). How melody notes are assigned to words:
+
+- **`rhyme`** (the default) — only words carrying a sounding line-ending rhyme receive melody notes. Unrhymed lines remain unpitched in the melody layer.
+- **`assonance`** — line-internal assonance figures (§4.3) with at least two stressed words provide melody notes to those words in lines where no end-rhyme sounds (such as unrhymed stanzas and free verse). Scale degrees are assigned to vowel nucleus equivalence classes in order of first appearance, beginning after the rhyme classes. Rhymed lines maintain their clean end-rhyme cadences.
+
 ### 4.6 Arrangement — stanzas loop until something takes their place
 
 *Decided 2026-10-08, after the scorer measured every poem as a single line of sound.*
