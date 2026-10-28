@@ -38,6 +38,7 @@ const settings = [
   'set=drums:articulated&profile=jazz',
   'set=rhyme:slant&profile=jazz',
   'set=anchor:on&profile=jazz',
+  'set=melody:assonance&profile=jazz',
 ];
 const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
 

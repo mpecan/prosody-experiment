@@ -34,7 +34,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::mapping::{Mapping, Mappings};
+use crate::mapping::{Mapping, Mappings, Variant};
 use crate::meter::PoemMeter;
 use crate::parse::Poem;
 use crate::phoneme::Phoneme;
@@ -42,7 +42,7 @@ use crate::repetition::{FigureKind, PoemRepetition, VoiceId};
 use crate::rhyme::PoemRhyme;
 use crate::role::PoemRoles;
 use crate::seed::{Domain, Seed};
-use crate::sound::SoundRepetition;
+use crate::sound::{SoundFigureKind, SoundRepetition};
 use crate::span::Span;
 use crate::surprisal::{PoemSurprisal, Surprisal};
 use crate::voice::{
@@ -121,7 +121,8 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
     let function = mappings.get(Mapping::Function);
     crate::accent::run(&mut events, analyses.surprisal, function);
     let degrees = degrees(analyses.rhyme);
-    melody(&mut events, analyses, &degrees);
+    let melody_variant = mappings.get(Mapping::Melody);
+    melody(&mut events, analyses, &degrees, melody_variant);
     // The harmony layer reads the rhyme and the roles and nothing the arrangement decides: a chord
     // is a fact about its line, and `Score::harmony_in` finds it wherever the line sounds. It comes
     // before the bass because W2's walk lands on the bar's chord tones.
@@ -154,7 +155,8 @@ pub fn run_with(analyses: Analyses<'_>, mappings: &Mappings) -> Result<Score, Di
         .with_function(function)
         .with_drums(drums)
         .with_rhyme(mappings.get(Mapping::Rhyme))
-        .with_anchor(mappings.get(Mapping::Anchor));
+        .with_anchor(mappings.get(Mapping::Anchor))
+        .with_melody(melody_variant);
     // Last, because it reads the finished material: a slot's length is its host line's beats.
     let arrangement = crate::arrange::run(
         analyses.poem,
@@ -316,7 +318,8 @@ fn rhythm(
     (events, bar, nuclei)
 }
 
-/// Gives the rhyming words their notes (`SPEC.md` §4.5).
+/// Gives the rhyming words their notes (`SPEC.md` §4.5), and under [`Variant::Assonance`],
+/// gives notes to words in line-internal assonance figures within unrhymed lines (`SPEC.md` §4.3).
 ///
 /// > Treat rhyme as an equivalence relation. Rhyme class → scale degree, assigned in order of
 /// > first appearance from the style's scale. […] perfect rhyme → exact pitch; slant rhyme →
@@ -328,13 +331,17 @@ fn rhythm(
 ///
 /// A line in a class of one has no pitch at all: it rhymes with nothing, so there is no melodic
 /// relation for a degree to express, and giving it one would invent a melody the poem never wrote.
+/// Under [`Variant::Assonance`], unrhymed lines draw melody from line-internal assonance figures
+/// with at least two stressed words, assigning scale degrees to distinct vowel nuclei in order of
+/// first appearance following the rhyme degrees.
 fn melody(
     events: &mut [Event],
     analyses: Analyses<'_>,
     degrees: &BTreeMap<crate::rhyme::RhymeClassId, usize>,
+    variant: Variant,
 ) {
     let sounding = sounding(analyses.rhyme);
-    let pitches: BTreeMap<Span, Pitch> = sounding
+    let mut pitches: BTreeMap<Span, Pitch> = sounding
         .iter()
         .filter_map(|(class, word, score)| {
             let degree = *degrees.get(class)?;
@@ -344,6 +351,52 @@ fn melody(
             ))
         })
         .collect();
+
+    if variant == Variant::Assonance {
+        let rhymed_lines: Vec<Span> = analyses
+            .rhyme
+            .stanzas()
+            .iter()
+            .flat_map(crate::rhyme::StanzaRhyme::lines)
+            .filter(|line| line.score().is_some())
+            .map(crate::rhyme::LineRhyme::line)
+            .collect();
+
+        let base_degree = degrees.values().max().map_or(0, |max| max + 1);
+        let mut assonance_degrees: BTreeMap<Phoneme, usize> = BTreeMap::new();
+
+        for figure in analyses.sound.figures_of(SoundFigureKind::Assonance) {
+            let in_rhymed_line = figure
+                .words()
+                .first()
+                .is_some_and(|first| rhymed_lines.iter().any(|line| line.contains(*first)));
+            if in_rhymed_line {
+                continue;
+            }
+
+            let stressed_words: Vec<Span> = figure
+                .words()
+                .iter()
+                .copied()
+                .filter(|&word| {
+                    events
+                        .iter()
+                        .any(|e| e.span() == word && e.velocity() != Velocity::UNSTRESSED)
+                })
+                .collect();
+
+            if stressed_words.len() >= 2 {
+                let phoneme = figure.phoneme();
+                let next_deg = base_degree + assonance_degrees.len();
+                let degree = *assonance_degrees.entry(phoneme).or_insert(next_deg);
+                for word in stressed_words {
+                    pitches
+                        .entry(word)
+                        .or_insert_with(|| Pitch::from_assonance(phoneme, degree));
+                }
+            }
+        }
+    }
 
     for event in events {
         if let Some(&pitch) = pitches.get(&event.span()) {

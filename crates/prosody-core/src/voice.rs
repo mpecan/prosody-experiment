@@ -302,13 +302,16 @@ pub struct Pitch {
 
 /// Where a note came from, for tracing it back (invariant I4).
 ///
-/// Only a rhyme gives an event a [`Pitch`] — the melody. The bass was a second source here until
-/// its walking variants needed a note under a rhyme word too; it is now [`Event::bass`], so one
-/// event can carry both.
+/// A melody event's [`Pitch`] comes from its rhyme class (`SPEC.md` §4.5) or an assonance figure
+/// in an unrhymed line (`SPEC.md` §4.3). The bass was a third source here until its walking
+/// variants needed a note under a rhyme word too; it is now [`Event::bass`], so one event can
+/// carry both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PitchSource {
     /// The word a rhyme rests on: its class's degree (`SPEC.md` §4.5).
     Rhyme(RhymeClassId),
+    /// A word in an assonance figure: its nucleus phoneme's degree (`SPEC.md` §4.3, §4.5).
+    Assonance(Phoneme),
 }
 
 impl Pitch {
@@ -329,6 +332,16 @@ impl Pitch {
     pub const fn class(self) -> Option<RhymeClassId> {
         match self.source {
             PitchSource::Rhyme(class) => Some(class),
+            PitchSource::Assonance(_) => None,
+        }
+    }
+
+    /// The vowel phoneme this came from, if assonance gave it.
+    #[must_use]
+    pub const fn phoneme(self) -> Option<Phoneme> {
+        match self.source {
+            PitchSource::Assonance(phoneme) => Some(phoneme),
+            PitchSource::Rhyme(_) => None,
         }
     }
 
@@ -588,6 +601,7 @@ pub struct Score {
     drums: Variant,
     rhyme: Variant,
     anchor: Variant,
+    melody: Variant,
 }
 
 impl Score {
@@ -612,6 +626,7 @@ impl Score {
             drums: Variant::Flat,
             rhyme: Variant::Strict,
             anchor: Variant::Off,
+            melody: Variant::Rhyme,
         }
     }
 
@@ -747,6 +762,33 @@ impl Score {
         self.events
             .iter()
             .filter(|event| event.anchor().is_some())
+            .count()
+    }
+
+    /// The same score, recording which variant of melody assignment was chosen.
+    pub(crate) const fn with_melody(mut self, variant: Variant) -> Self {
+        self.melody = variant;
+        self
+    }
+
+    /// Which variant of [`Mapping::Melody`](crate::mapping::Mapping::Melody) was chosen for
+    /// melody assignment: [`Variant::Rhyme`] (rhyme classes only) or [`Variant::Assonance`]
+    /// (assonance figures in unrhymed lines).
+    #[must_use]
+    pub const fn melody(&self) -> Variant {
+        self.melody
+    }
+
+    /// How many syllables of the poem play a note given by an assonance figure.
+    #[must_use]
+    pub fn assonant(&self) -> usize {
+        self.events
+            .iter()
+            .filter(|event| {
+                event
+                    .pitch()
+                    .is_some_and(|p| matches!(p.source(), PitchSource::Assonance(_)))
+            })
             .count()
     }
 
@@ -1186,6 +1228,14 @@ impl Pitch {
             degree: ScaleDegree::new(degree),
             detune,
             source: PitchSource::Rhyme(class),
+        }
+    }
+
+    pub(crate) const fn from_assonance(phoneme: Phoneme, degree: usize) -> Self {
+        Self {
+            degree: ScaleDegree::new(degree),
+            detune: Detune::EXACT,
+            source: PitchSource::Assonance(phoneme),
         }
     }
 }

@@ -1314,6 +1314,7 @@ mod tests {
             ("drums", "[\"flat\",\"articulated\"],\"default\":\"flat\"}"),
             ("rhyme", "[\"strict\",\"slant\"],\"default\":\"strict\"}"),
             ("anchor", "[\"off\",\"on\"],\"default\":\"off\"}"),
+            ("melody", "[\"rhyme\",\"assonance\"],\"default\":\"rhyme\"}"),
         ] {
             let at = data.find(&format!("{{\"name\":\"{name}\""));
             assert!(at.is_some(), "{name} missing");
@@ -2412,6 +2413,33 @@ mod tests {
         );
         assert!(
             explain.body.contains("anchor=on") && explain.body.contains("anchor on ·"),
+            "{}",
+            explain.body
+        );
+    }
+
+    #[test]
+    fn melody_reaches_the_pattern_and_the_explain_view() {
+        let crane = include_str!("../../../examples/crane-in-the-desert.poem");
+        let default_pattern = super::compile(&request(&[], crane), &Output::Pattern);
+        assert_eq!(default_pattern.status, 200);
+        assert!(!default_pattern.body.contains("melody = assonance"));
+
+        let melody_assonance = &[("set", "melody:assonance")];
+        let pattern = super::compile(&request(melody_assonance, crane), &Output::Pattern);
+        let explain = super::compile(&request(melody_assonance, crane), &Output::Explain);
+        assert_eq!(pattern.status, 200);
+        assert_eq!(explain.status, 200);
+        assert!(
+            pattern
+                .body
+                .contains("//   melody = assonance: line-internal assonance figures give melody"),
+            "{}",
+            pattern.body
+        );
+        assert!(
+            explain.body.contains("melody=assonance")
+                && explain.body.contains("melody assonance ·"),
             "{}",
             explain.body
         );

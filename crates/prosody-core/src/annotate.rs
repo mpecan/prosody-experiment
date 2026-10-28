@@ -388,6 +388,9 @@ pub struct Annotated {
     anchor: Variant,
     /// [`Score::anchored`]: the syllables carrying an anaphora or epistrophe anchor.
     anchored: usize,
+    melody: Variant,
+    /// [`Score::assonant`]: the syllables carrying a note from an assonance figure.
+    assonant: usize,
     /// [`Arrangement::eroding`](crate::arrange::Arrangement::eroding): the bars played over an
     /// eroding loop.
     eroding: usize,
@@ -461,6 +464,18 @@ impl Annotated {
     #[must_use]
     pub const fn anchored(&self) -> usize {
         self.anchored
+    }
+
+    /// Which variant of melody assignment was chosen (`SPEC.md` §4.3, §4.5).
+    #[must_use]
+    pub const fn melody(&self) -> Variant {
+        self.melody
+    }
+
+    /// How many syllables carry a note from an assonance figure ([`Score::assonant`]).
+    #[must_use]
+    pub const fn assonant(&self) -> usize {
+        self.assonant
     }
 
     /// How many bars play over a loop eroding under a long stanza's arrival (`SPEC.md` §4.6).
@@ -621,6 +636,8 @@ pub fn run(poem: &Poem, score: &Score, roles: &crate::role::PoemRoles) -> Annota
         rhyme: score.rhyme(),
         anchor: score.anchor(),
         anchored: score.anchored(),
+        melody: score.melody(),
+        assonant: score.assonant(),
         eroding: score.arrangement().eroding(),
         lengths: bar_lengths(score),
     }
@@ -775,6 +792,14 @@ pub fn render(poem: &Poem, annotated: &Annotated) -> String {
             "anchor on · anaphora ostinatos accented on the downbeat, epistrophe cadences \
              ring through turnarounds: {} syllable(s) anchored (§4.3)",
             annotated.anchored()
+        );
+    }
+    if annotated.melody() == Variant::Assonance {
+        let _ = writeln!(
+            out,
+            "melody assonance · line-internal assonance figures give melody to unrhymed lines: \
+             {} event(s) pitched (§4.3, §4.5)",
+            annotated.assonant()
         );
     }
     // The erosion of long stanzas (§4.6), named only where it happened: a piece whose stanzas
@@ -1387,8 +1412,11 @@ fn render_token(
 
         let mut from = vec!["meter"];
         if first {
-            if token.pitch().is_some() {
-                from.push("rhyme");
+            if let Some(pitch) = token.pitch() {
+                match pitch.source() {
+                    crate::voice::PitchSource::Rhyme(_) => from.push("rhyme"),
+                    crate::voice::PitchSource::Assonance(_) => from.push("assonance"),
+                }
             }
             match token.bass() {
                 Some(_) if walking => from.push("bass"),

@@ -9,8 +9,9 @@
 //! words, which are always struck somehow and go back to [`Variant::Full`], the long stanzas,
 //! whose arrivals always take the loop's place somehow and which go back to
 //! [`Variant::Gradual`], the drums, which always play a piece of the kit and go back to
-//! [`Variant::Flat`], and the rhyme, which always rhymes line endings somehow and goes back to
-//! [`Variant::Strict`]) — and one of them is
+//! [`Variant::Flat`], the rhyme, which always rhymes line endings somehow and goes back to
+//! [`Variant::Strict`], and the melody, which always assigns melody somehow and goes back to
+//! [`Variant::Rhyme`]) — and one of them is
 //! its default. A [`Mappings`] value picks one variant per
 //! mapping, so the same poem can be heard under each choice, side by side.
 //!
@@ -99,6 +100,10 @@ pub enum Mapping {
     /// downbeat-anchored anaphora ostinatos accented with punchy transients, and epistrophe
     /// turnaround cadences ringing through the bar.
     Anchor,
+    /// §4.3 and §4.5's melody assignment: how melody notes are assigned to events.
+    /// [`Variant::Rhyme`] (the default): from rhyme classes only. [`Variant::Assonance`]:
+    /// gives scale degrees to line-internal assonance figures in unrhymed lines.
+    Melody,
 }
 
 /// One way a [`Mapping`] can go. Which variants a mapping has is [`Mapping::variants`].
@@ -166,6 +171,8 @@ pub enum Variant {
     /// The rhyme pass with feminine and slant scoring: candidate tails and continuous coda slant
     /// matches.
     Slant,
+    /// Line-internal assonance melody: vowel nucleus equivalence classes in unrhymed lines.
+    Assonance,
 }
 
 impl Variant {
@@ -196,6 +203,7 @@ impl Variant {
             Self::Articulated => "articulated",
             Self::Strict => "strict",
             Self::Slant => "slant",
+            Self::Assonance => "assonance",
         }
     }
 }
@@ -255,9 +263,13 @@ const DRUMS: &[Variant] = &[Variant::Flat, Variant::Articulated];
 /// always rhyme somehow, so there is no [`Variant::Off`] — then slant.
 const RHYME: &[Variant] = &[Variant::Strict, Variant::Slant];
 
+/// The melody's variants: rhyme first, because it is what preceded the mapping — line endings
+/// always provide melody somehow, so there is no [`Variant::Off`] — then assonance.
+const MELODY: &[Variant] = &[Variant::Rhyme, Variant::Assonance];
+
 impl Mapping {
     /// Every mapping, in the order a page lists them.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::HeldLane,
         Self::RefrainLane,
         Self::Bass,
@@ -272,6 +284,7 @@ impl Mapping {
         Self::Drums,
         Self::Rhyme,
         Self::Anchor,
+        Self::Melody,
     ];
 
     /// Its name on a command line or in a query string.
@@ -292,6 +305,7 @@ impl Mapping {
             Self::Drums => "drums",
             Self::Rhyme => "rhyme",
             Self::Anchor => "anchor",
+            Self::Melody => "melody",
         }
     }
 
@@ -355,6 +369,10 @@ impl Mapping {
                 "how repetition figures anchor in Strudel: unrendered (off), or emphasizing \
                  line-initial anaphora on the downbeat and ringing out line-final epistrophe cadences (on)"
             }
+            Self::Melody => {
+                "how melody notes are assigned: from rhyme classes only (rhyme), or giving scale \
+                 degrees to line-internal assonance figures in unrhymed lines (assonance)"
+            }
         }
     }
 
@@ -362,7 +380,8 @@ impl Mapping {
     /// [`Variant::Off`], except for the pulse, which starts with [`Variant::Elastic`], the
     /// stack, which starts with [`Variant::Crossing`], the function words, which start with
     /// [`Variant::Full`], the long stanzas, which start with [`Variant::Gradual`], the drums,
-    /// which start with [`Variant::Flat`], and the rhyme, which starts with [`Variant::Strict`].
+    /// which start with [`Variant::Flat`], the rhyme, which starts with [`Variant::Strict`], and
+    /// the melody, which starts with [`Variant::Rhyme`].
     #[must_use]
     pub const fn variants(self) -> &'static [Variant] {
         match self {
@@ -380,6 +399,7 @@ impl Mapping {
             Self::LongStanzas => LONG_STANZAS,
             Self::Drums => DRUMS,
             Self::Rhyme => RHYME,
+            Self::Melody => MELODY,
         }
     }
 
@@ -426,6 +446,10 @@ impl Mapping {
             // and score as it was, while slant scores weak endings and shared codas across
             // candidate tails (`PLAN.md`).
             Self::Rhyme => Variant::Strict,
+            // A candidate the user approved for comparison: rhyme keeps every existing pattern
+            // and score as it was, while assonance pitches line-internal assonance figures in
+            // unrhymed lines (`PLAN.md`).
+            Self::Melody => Variant::Rhyme,
         }
     }
 
@@ -451,8 +475,9 @@ impl Mapping {
     /// mapping but the pulse, which a piece cannot be without, and which goes back to
     /// [`Variant::Elastic`], the stack, which goes back to [`Variant::Crossing`], the function
     /// words, which go back to [`Variant::Full`], the long stanzas, which go back to
-    /// [`Variant::Gradual`], the drums, which go back to [`Variant::Flat`], and the rhyme,
-    /// which goes back to [`Variant::Strict`].
+    /// [`Variant::Gradual`], the drums, which go back to [`Variant::Flat`], the rhyme,
+    /// which goes back to [`Variant::Strict`], and the melody, which goes back to
+    /// [`Variant::Rhyme`].
     #[must_use]
     pub const fn off(self) -> Choice {
         let variant = match self.variants() {
@@ -590,6 +615,7 @@ mod tests {
                 Mapping::LongStanzas => Variant::Gradual,
                 Mapping::Drums => Variant::Flat,
                 Mapping::Rhyme => Variant::Strict,
+                Mapping::Melody => Variant::Rhyme,
                 _ => Variant::Off,
             };
             assert_eq!(mapping.variants().first(), Some(&preceded), "{mapping:?}");
@@ -705,6 +731,7 @@ mod tests {
         assert_eq!(all.get(Mapping::Drums), Variant::Flat);
         assert_eq!(all.get(Mapping::Rhyme), Variant::Strict);
         assert_eq!(all.get(Mapping::Anchor), Variant::Off);
+        assert_eq!(all.get(Mapping::Melody), Variant::Rhyme);
         assert_eq!(all.changed().count(), 0);
     }
 
@@ -758,6 +785,25 @@ mod tests {
         // Left out, it is what preceded it: strict, the default, so nothing is stored.
         assert_eq!(slant.without(Mapping::Rhyme), Mappings::all());
         assert!(Mappings::all().has(Mapping::Rhyme));
+    }
+
+    #[test]
+    fn the_melody_is_rhyme_unless_assonance_is_chosen() {
+        assert_eq!(
+            Mapping::Melody.variants(),
+            &[Variant::Rhyme, Variant::Assonance]
+        );
+        assert_eq!(Mapping::named("melody"), Some(Mapping::Melody));
+        assert_eq!(Mappings::all().get(Mapping::Melody), Variant::Rhyme);
+        assert!(Mapping::Melody.choose(Variant::Off).is_none());
+        assert!(Mapping::Melody.choose_named("off").is_none());
+        assert!(Mapping::Melody.choose_named("light").is_none());
+        let assonance = Mappings::all().with(Mapping::Melody.choose_named("assonance").unwrap());
+        assert_eq!(assonance.get(Mapping::Melody), Variant::Assonance);
+        assert_eq!(assonance.changed().count(), 1);
+        // Left out, it is what preceded it: rhyme, the default, so nothing is stored.
+        assert_eq!(assonance.without(Mapping::Melody), Mappings::all());
+        assert!(Mappings::all().has(Mapping::Melody));
     }
 
     #[test]
@@ -854,9 +900,10 @@ mod tests {
     fn every_combination_is_listed_once() {
         // Five on/off switches, a four-way bass, a four-way harmony, a four-way reading, a
         // two-way pulse, a two-way stack, two-way function words, two-way long stanzas,
-        // two-way drums and two-way rhyme: 2^5 × 4 × 4 × 4 × 2 × 2 × 2 × 2 × 2 × 2 = 131072.
+        // two-way drums, two-way rhyme and two-way melody:
+        // 2^5 × 4 × 4 × 4 × 2 × 2 × 2 × 2 × 2 × 2 × 2 = 262144.
         let every = Mappings::every();
-        assert_eq!(every.len(), 131_072);
+        assert_eq!(every.len(), 262_144);
         let unique: std::collections::BTreeSet<_> = every.iter().map(|m| &m.changed).collect();
         assert_eq!(unique.len(), every.len());
         assert!(every.contains(&Mappings::all()));

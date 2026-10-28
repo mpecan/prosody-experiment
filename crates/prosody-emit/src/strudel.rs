@@ -848,6 +848,19 @@ fn anchor_header(out: &mut String, score: &Score) {
     );
 }
 
+/// The header's line for melody assignment under [`Variant::Assonance`].
+fn melody_header(out: &mut String, score: &Score) {
+    if score.melody() != Variant::Assonance {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "//   melody = assonance: line-internal assonance figures give melody to unrhymed lines \
+         in {} syllable(s) (SPEC.md §4.3, §4.5, candidate)",
+        score.assonant()
+    );
+}
+
 /// How many beats of the piece the straight stack fitted: [`Score::straightened_beats`], the
 /// count the explain view prints too.
 pub(crate) fn straightened(score: &Score) -> usize {
@@ -1014,6 +1027,7 @@ fn header(out: &mut String, score: &Score, style: &Style) {
     rhyme_header(out, score);
     erosion_header(out, score);
     anchor_header(out, score);
+    melody_header(out, score);
     let humanise = style.mix().humanise();
     if !humanise.is_off() {
         let _ = writeln!(
@@ -1714,6 +1728,9 @@ fn pitched_layer(
         role,
     );
     let name = match role {
+        Pitched::Melody if score.melody() == Variant::Assonance => {
+            "the melody — notes from rhyme words and unrhymed assonance"
+        }
         Pitched::Melody => "the melody — a note per rhyme word",
         Pitched::Bass => bass_name(score.bass()),
     };
@@ -4471,5 +4488,34 @@ swing = 0.33
         let on_pattern = Strudel::new().render(&on_score, &style).unwrap();
         assert!(on_pattern.contains("//   anchor = on: anaphora ostinatos accented"));
         assert_ne!(off_pattern, on_pattern);
+    }
+
+    #[test]
+    fn assonance_melody_pitches_unrhymed_lines_under_melody_assonance() {
+        use prosody_core::mapping::{Mapping, Mappings, Variant};
+        // An unrhymed line with internal assonance on 'A' (bAn and dAn).
+        let source = "bAn dAn ro\n";
+        let default_mappings = Mappings::all();
+        let style = Style::default();
+
+        let default_score = score_of_with(source, &default_mappings);
+        assert_eq!(default_score.assonant(), 0);
+        let default_pattern = Strudel::new().render(&default_score, &style).unwrap();
+        assert!(!default_pattern.contains("melody = assonance"));
+
+        let assonance_mappings =
+            Mappings::all().with(Mapping::Melody.choose(Variant::Assonance).unwrap());
+        let assonance_score = score_of_with(source, &assonance_mappings);
+        assert!(assonance_score.assonant() > 0);
+        let assonance_pattern = Strudel::new().render(&assonance_score, &style).unwrap();
+        assert!(
+            assonance_pattern.contains("//   melody = assonance: line-internal assonance figures")
+        );
+        assert_ne!(default_pattern, assonance_pattern);
+
+        // A rhymed couplet keeps rhyme melody and does not assign assonance pitches.
+        let rhymed_source = "bAn\ndAn\n";
+        let rhymed_score = score_of_with(rhymed_source, &assonance_mappings);
+        assert_eq!(rhymed_score.assonant(), 0);
     }
 }
