@@ -96,7 +96,7 @@
   .ab span { padding: .4rem .6rem; color: var(--dim); font-size: .8rem; }
   .ab button { border: 0; border-radius: 0; border-left: 1px solid var(--line); padding: .4rem .8rem; }
   .ab button[aria-pressed=true] { background: var(--accent); color: var(--on-accent); }
-  @media (max-width: 720px) {
+  @media (max-width: 720px), (max-height: 520px) {
     header.top {
       padding: calc(.5rem + env(safe-area-inset-top, 0px)) calc(.75rem + env(safe-area-inset-right, 0px)) .5rem calc(.75rem + env(safe-area-inset-left, 0px));
       gap: .45rem .6rem;
@@ -148,7 +148,7 @@
     font-weight: 400; letter-spacing: 0; white-space: pre-wrap; overflow-wrap: break-word;
     tab-size: 4; scrollbar-gutter: stable;
   }
-  @media (max-width: 720px) { #lit, #poem { font-size: 1.12rem; padding: 1.1rem 1rem 2rem; } }
+  @media (max-width: 720px), (max-height: 520px) { #lit, #poem { font-size: 1.12rem; padding: 1.1rem 1rem 2rem; } }
   #lit { overflow: hidden; color: var(--ink); pointer-events: none; }
   #poem {
     overflow-y: auto; resize: none; outline: 0; background: transparent;
@@ -415,10 +415,10 @@
   .rollbar .segmented button { padding: .15rem .55rem; min-height: 1.7rem; }
   /* On a phone the poem always keeps a few lines, the roll is a slim strip, and an open folder
      takes at most two fifths of the screen. */
-  @media (max-width: 720px) {
-    .stage > main { min-height: 6.5rem; }
+  @media (max-width: 720px), (max-height: 520px) {
+    .stage > main { min-height: 5rem; }
     .rollbar { display: none; }
-    #roll { height: 64px; margin: .45rem .75rem; }
+    #roll { height: 50px; margin: .3rem .75rem; }
     .sheet { max-height: 40dvh; }
   }
   .key { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .78rem; color: var(--dim); }
@@ -487,7 +487,7 @@
   }
   .segmented.wrap { flex-wrap: wrap; gap: .35rem; }
   .segmented.wrap button { flex: 0 1 auto; border-radius: 7px; margin-left: 0; white-space: normal; text-align: left; }
-  @media (max-width: 720px) { .segmented:not(.wrap) { overflow-x: auto; scrollbar-width: none; } }
+  @media (max-width: 720px), (max-height: 520px) { .segmented:not(.wrap) { overflow-x: auto; scrollbar-width: none; } }
 
   /* The styles: a card each, the one the sound matches lit. */
   .module.styles { grid-column: 1 / -1; flex-direction: column; align-items: stretch; }
