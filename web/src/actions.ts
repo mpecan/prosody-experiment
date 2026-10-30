@@ -122,6 +122,18 @@ export async function openShare(): Promise<void> {
 export async function copyShare(): Promise<void> {
   const open = shareLink.value;
   if (!open) return;
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: 'prosody — a poem as the source code for music',
+        url: open.link,
+      });
+      shareLink.value = { ...open, copied: true };
+      return;
+    } catch {
+      // User cancelled or share dismissed, fall back to clipboard copy
+    }
+  }
   try {
     await navigator.clipboard.writeText(open.link);
     shareLink.value = { ...open, copied: true };

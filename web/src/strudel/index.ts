@@ -18,9 +18,23 @@ let strudelReady = false;
 export let repl: Repl | null = null;
 
 async function startStrudel(): Promise<void> {
+  const localDrums = new URL('./drums/machines.json', document.baseURI).href;
+  const localDrumsBase = new URL('./drums/machines/', document.baseURI).href;
+  let drumMap = `${SAMPLES}/tidal-drum-machines.json`;
+  let drumBase = `${SAMPLES}/tidal-drum-machines/machines/`;
+  try {
+    const probe = await fetch(localDrums, { method: 'HEAD' });
+    if (probe.ok) {
+      drumMap = localDrums;
+      drumBase = localDrumsBase;
+    }
+  } catch {
+    // Keep CDN fallback
+  }
+
   const started = await strudel.initStrudel({
     prebake: () => Promise.all([
-      strudel.samples(`${SAMPLES}/tidal-drum-machines.json`, `${SAMPLES}/tidal-drum-machines/machines/`, {
+      strudel.samples(drumMap, drumBase, {
         prebake: true,
         tag: 'drum-machines',
       }),

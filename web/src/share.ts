@@ -279,7 +279,9 @@ export async function decode(code: string): Promise<Shared | null> {
 
 /** A link to `shared` on this page. */
 export async function linkTo(shared: Shared): Promise<string> {
-  const here = new URL(location.href);
+  const isTauri = typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window);
+  const base = isTauri ? 'https://prosody.rocks/' : location.href;
+  const here = new URL(base);
   here.search = '';
   here.hash = '';
   here.searchParams.set('s', await encode(shared));

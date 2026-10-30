@@ -9,6 +9,7 @@
 // (pattern, trace, reading, explanation), the other only measures, so a new pattern never waits
 // behind the scores of the last one. Each loads its own copy of the compiler; their answers are
 // the same bytes, which `scripts/check-wasm.sh` checks against the server.
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { site } from './data';
 
 interface Answer {
@@ -72,10 +73,21 @@ function compilerThread(): Thread {
   });
 }
 
+function tauriThread(): Thread {
+  return async (target: string, body: string) => {
+    return await invoke<Answer>('respond', { target, body });
+  };
+}
+
 let threads: { compile: Thread; measure: Thread } | null = null;
 /** The worker that answers `path`: scores apart from everything else. */
 export function threadFor(path: string): Thread {
   if (threads === null) {
+    if (isTauri()) {
+      const nativeThread = tauriThread();
+      threads = { compile: nativeThread, measure: nativeThread };
+      return path === '/score' ? threads.measure : threads.compile;
+    }
     try {
       threads = { compile: compilerThread(), measure: compilerThread() };
     } catch (error) {
@@ -96,6 +108,10 @@ export function threadFor(path: string): Thread {
 
 /** Asks the compiler for one view of `body` under the settings in `query`. */
 export async function ask(path: string, query: string, body: string): Promise<Response> {
+  if (isTauri()) {
+    const answer = await threadFor(path)(path + '?' + query, body);
+    return new NativeResponse(answer.body, { status: answer.status });
+  }
   if (site.transport === 'server') return fetch(new URL('.' + path + '?' + query, document.baseURI), { method: 'POST', body });
   const answer = await threadFor(path)(path + '?' + query, body);
   return new NativeResponse(answer.body, { status: answer.status });
