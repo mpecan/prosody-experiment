@@ -15,7 +15,8 @@ describe('the page\'s HTML', () => {
     expect(html).toContain('"@strudel/webaudio": "./strudel-globals.mjs"');
     // From beside the page, not a CDN: the phone app plays with no network.
     expect(html).toContain('<script vite-ignore src="./vendor/strudel-web.js"></script>');
-    expect(html).not.toMatch(/<script src="https?:/);
+    expect(html).not.toMatch(/<script[^>]* src="https?:/);
+    expect(html).not.toMatch(/<link[^>]* href="https?:/);
   });
 });
 
