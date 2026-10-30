@@ -102,11 +102,16 @@ export function toggleSolo(channel: Channel): void {
  * settings, which come back on a plain visit. */
 export function openShared(shared: Shared): void {
   const { sound, sides } = settingsOf(shared);
-  poem.value = shared.poem;
+  poem.value = shared.poem ?? '';
   setControls(sound, CONTROLS);
   settings.value = sides;
   hearing.value = shared.hear ?? 'A';
   if (shared.lang) readIn(shared.lang);
+  if (shared.base && !shared.slice && !shared.patch) {
+    preset.value = shared.base;
+  } else {
+    preset.value = '';
+  }
   sharedOpened.value = true;
 }
 /** Opens the share dialog with a link to the page as it is now. */
