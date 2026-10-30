@@ -6,6 +6,8 @@
 //
 // Apart from the worker so deploy/check-worker.mjs and the page's tests can check it on their own.
 
+import { resolveBase } from './catalog.js';
+
 /** The most a link may unpack to, as the page allows (share.ts `MOST`). */
 export const MOST = 64 * 1024;
 
@@ -37,8 +39,13 @@ export async function sharedIn(url) {
   if (!code || code.length > MOST) return null;
   try {
     const value = JSON.parse(await unpack(bytesOf(code)));
-    if (value?.v !== 1 || typeof value.poem !== 'string' || !value.poem.trim()) return null;
-    return { poem: value.poem, style: typeof value.style === 'string' ? value.style : null };
+    if (value?.v !== 1) return null;
+    let poem = typeof value.poem === 'string' && value.poem.trim() ? value.poem : null;
+    if (!poem && typeof value.base === 'string') {
+      poem = resolveBase(value.base, value.slice, value.patch);
+    }
+    if (!poem || !poem.trim()) return null;
+    return { poem, style: typeof value.style === 'string' ? value.style : null };
   } catch {
     return null;
   }

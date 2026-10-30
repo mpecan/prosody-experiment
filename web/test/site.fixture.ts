@@ -38,6 +38,11 @@ export const fixture: SiteData = {
   presets: [
     { name: 'blake-tyger', label: 'Blake — The Tyger', language: 'en', poem: 'Tyger Tyger, burning bright,\n', palette: defaultPalette },
     {
+      name: 'whitman-song-of-myself', label: 'Whitman — Song of Myself', language: 'en',
+      poem: 'I celebrate myself, and sing myself,\nAnd what I assume you shall assume,\nFor every atom belonging to me as good belongs to you.\n\nI loafe and invite my soul,\n',
+      palette: defaultPalette,
+    },
+    {
       name: 'preseren-zdravljica', label: 'Prešeren — Zdravljica', language: 'sl', poem: 'Spet trte so rodile,\n',
       palette: { ...defaultPalette, scale: 'dorian', root: 'D' },
     },

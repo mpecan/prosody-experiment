@@ -62,11 +62,34 @@ assert.deepEqual(previewOf(await sharedIn(tyger)), {
   title: 'Tyger Tyger, burning bright, — prosody',
   description: 'In the forests of the night; / What immortal hand or eye, / Could frame thy fearful symmetry? — A poem played as music, jazz, on prosody.rocks.',
 });
+
+// A base poem link resolves from the catalog without carrying the full text.
+const baseTyger = await linkTo({ v: 1, base: 'blake-tyger', style: 'jazz' });
+assert.deepEqual(previewOf(await sharedIn(baseTyger)), {
+  title: 'Tyger Tyger, burning bright, — prosody',
+  description: 'In the forests of the night; / What immortal hand or eye, / Could frame thy fearful symmetry? — A poem played as music, jazz, on prosody.rocks.',
+});
+assert.ok(baseTyger.length < 90, `baseTyger URL length ${baseTyger.length} should be under 90`);
+
+// Slices and patches resolve from the catalog as well.
+const slicedWhitman = await linkTo({ v: 1, base: 'whitman-song-of-myself', slice: [0, 3] });
+assert.deepEqual(previewOf(await sharedIn(slicedWhitman)), {
+  title: 'I celebrate myself, and sing myself, — prosody',
+  description: 'And what I assume you shall assume, / For every atom belonging to me as good belongs to you. — A poem played as music, on prosody.rocks.',
+});
+
+const patchedTyger = await linkTo({ v: 1, base: 'blake-tyger', patch: { 0: 'Lion Lion, burning bright,' } });
+assert.deepEqual(previewOf(await sharedIn(patchedTyger)), {
+  title: 'Lion Lion, burning bright, — prosody',
+  description: 'In the forests of the night; / What immortal hand or eye, / Could frame thy fearful symmetry? — A poem played as music, on prosody.rocks.',
+});
+
 // One line, the default style: a title and the site's line.
 assert.deepEqual(previewOf({ poem: 'a single line', style: 'default' }),
   { title: 'a single line — prosody', description: 'A poem played as music, on prosody.rocks.' });
-// Not a link to a poem: junk, a later format, an empty poem, or one made to unpack to too much.
+// Not a link to a poem: junk, a later format, an empty poem, an unknown base, or one made to unpack to too much.
 for (const url of ['https://prosody.rocks/?s=junk', await linkTo({ v: 2, poem: 'x' }), await linkTo({ v: 1, poem: '  \n' }),
+  await linkTo({ v: 1, base: 'non-existent-base-poem' }),
   await linkTo({ v: 1, poem: 'a'.repeat(4 * MOST) })]) {
   assert.equal(await sharedIn(url), null, url.slice(0, 60));
 }
