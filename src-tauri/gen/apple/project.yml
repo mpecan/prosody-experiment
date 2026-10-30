@@ -31,7 +31,6 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
-      - path: Externals
       - path: prosody-app_iOS
       - path: assets
         buildPhase: resources
@@ -81,9 +80,20 @@ targets:
       - sdk: UIKit.framework
       - sdk: WebKit.framework
     preBuildScripts:
-      - script: cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+      - script: |
+          if [ -n "$TAURI_CLI_PORT" ]; then
+              cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+          else
+              if [ "$PLATFORM_NAME" = "iphonesimulator" ]; then
+                  cargo build --manifest-path "$PROJECT_DIR/../../Cargo.toml" --target-dir "$PROJECT_DIR/../../target" -p prosody-app --target aarch64-apple-ios-sim
+                  mkdir -p "$PROJECT_DIR/Externals/arm64/$CONFIGURATION"
+                  cp "$PROJECT_DIR/../../target/aarch64-apple-ios-sim/$CONFIGURATION/libapp.a" "$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a"
+              else
+                  cargo build --manifest-path "$PROJECT_DIR/../../Cargo.toml" --target-dir "$PROJECT_DIR/../../target" -p prosody-app --target aarch64-apple-ios
+                  mkdir -p "$PROJECT_DIR/Externals/arm64/$CONFIGURATION"
+                  cp "$PROJECT_DIR/../../target/aarch64-apple-ios/$CONFIGURATION/libapp.a" "$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a"
+              fi
+          fi
         name: Build Rust Code
         basedOnDependencyAnalysis: false
-        outputFiles:
-          - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a

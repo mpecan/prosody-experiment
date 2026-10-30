@@ -11,7 +11,6 @@
 		12779DA794EDB6FCECC94D46 /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F503722F0465E0904250D77B /* QuartzCore.framework */; };
 		2425364835D64C1FA886E3F0 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = D35B3024429AE5A6E26678CC /* UIKit.framework */; };
 		2E7B827DC7136ABB903C6F1E /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = E8D6D299FFAF4D3D021B4AF9 /* LaunchScreen.storyboard */; };
-		3F46BA4DA8895E4F574D6761 /* libapp.a in Resources */ = {isa = PBXBuildFile; fileRef = 56C391B131746E1C40A91B07 /* libapp.a */; };
 		4CC2D648CE1A99D5EF1023CE /* libapp.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DFC634D82201DEE314F999BF /* libapp.a */; };
 		4E9442A63EF20F0CA1575FB4 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5BF95078515D2C96D5A046D /* CoreGraphics.framework */; };
 		A303993A6B75917F7FFB3006 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 7E0756765887565F61804A13 /* main.mm */; };
@@ -27,7 +26,6 @@
 		232A555066E2A255BE19AE94 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
 		4A2079F318AA1EDA33EB2915 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		5127D28E857A571B21EF38A7 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
-		56C391B131746E1C40A91B07 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		582FE8E934C5710BFE76C7AC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		7068AD2E03895EA7CAA373A8 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		7E0756765887565F61804A13 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
@@ -94,21 +92,12 @@
 				5127D28E857A571B21EF38A7 /* assets */,
 				B66F98BBF9B685C3F20E0B97 /* Assets.xcassets */,
 				E8D6D299FFAF4D3D021B4AF9 /* LaunchScreen.storyboard */,
-				B105908A1CF7C9DB10F79D22 /* Externals */,
 				15FB586411121952697A53F3 /* prosody-app_iOS */,
 				2509AC084CA22BB5E9CCF6B7 /* Sources */,
 				79172B9D4E4A115C024B48FB /* src */,
 				F74191ED4D2975165473C0FC /* Frameworks */,
 				18F174FB6F7C9A51C1E02B2D /* Products */,
 			);
-			sourceTree = "<group>";
-		};
-		72DE6B09EDE6DD6719DDB918 /* x86_64 */ = {
-			isa = PBXGroup;
-			children = (
-				93884818898C653C81EC5404 /* debug */,
-			);
-			path = x86_64;
 			sourceTree = "<group>";
 		};
 		79172B9D4E4A115C024B48FB /* src */ = {
@@ -119,22 +108,6 @@
 			);
 			name = src;
 			path = ../../src;
-			sourceTree = "<group>";
-		};
-		93884818898C653C81EC5404 /* debug */ = {
-			isa = PBXGroup;
-			children = (
-				56C391B131746E1C40A91B07 /* libapp.a */,
-			);
-			path = debug;
-			sourceTree = "<group>";
-		};
-		B105908A1CF7C9DB10F79D22 /* Externals */ = {
-			isa = PBXGroup;
-			children = (
-				72DE6B09EDE6DD6719DDB918 /* x86_64 */,
-			);
-			path = Externals;
 			sourceTree = "<group>";
 		};
 		E0F88F1E0648F79F374C256B /* prosody-app */ = {
@@ -167,13 +140,6 @@
 				232A555066E2A255BE19AE94 /* WebKit.framework */,
 			);
 			name = Frameworks;
-			sourceTree = "<group>";
-		};
-		"TEMP_3DA06DB0-E214-493E-9899-0604C81BF57D" /* arm64 */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = arm64;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -240,7 +206,6 @@
 				F8837DEAF2C22559BF802440 /* Assets.xcassets in Resources */,
 				2E7B827DC7136ABB903C6F1E /* LaunchScreen.storyboard in Resources */,
 				F11BEA44AB82B7D446CA7C21 /* assets in Resources */,
-				3F46BA4DA8895E4F574D6761 /* libapp.a in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -249,7 +214,6 @@
 /* Begin PBXShellScriptBuildPhase section */
 		1368C9DD899B90B503BA11D8 /* Build Rust Code */ = {
 			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -261,12 +225,10 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a",
-				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}";
+			shellScript = "if [ -n \"$TAURI_CLI_PORT\" ]; then\n    cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}\nelse\n    if [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n        cargo build --manifest-path \"$PROJECT_DIR/../../Cargo.toml\" --target-dir \"$PROJECT_DIR/../../target\" -p prosody-app --target aarch64-apple-ios-sim\n        mkdir -p \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION\"\n        cp \"$PROJECT_DIR/../../target/aarch64-apple-ios-sim/$CONFIGURATION/libapp.a\" \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a\"\n    else\n        cargo build --manifest-path \"$PROJECT_DIR/../../Cargo.toml\" --target-dir \"$PROJECT_DIR/../../target\" -p prosody-app --target aarch64-apple-ios\n        mkdir -p \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION\"\n        cp \"$PROJECT_DIR/../../target/aarch64-apple-ios/$CONFIGURATION/libapp.a\" \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a\"\n    fi\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -364,7 +326,7 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = rocks.prosody;
-				PRODUCT_NAME = "Prosody";
+				PRODUCT_NAME = Prosody;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = "arm64  x86_64";
@@ -397,7 +359,7 @@
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				PRODUCT_BUNDLE_IDENTIFIER = rocks.prosody;
-				PRODUCT_NAME = "Prosody";
+				PRODUCT_NAME = Prosody;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				VALID_ARCHS = "arm64  x86_64";

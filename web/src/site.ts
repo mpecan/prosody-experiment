@@ -67,8 +67,17 @@ export interface SiteData {
   seed: string;
 }
 
+import { invoke, isTauri } from '@tauri-apps/api/core';
+
 /** The page's data, fetched from beside the page. */
 export async function loadSite(): Promise<SiteData> {
+  if (isTauri()) {
+    const answer = await invoke<{ status: number; headers: Record<string, string>; body: string }>('respond', {
+      target: '/site.json',
+      body: '',
+    });
+    return JSON.parse(answer.body) as SiteData;
+  }
   const response = await fetch(new URL('./site.json', document.baseURI));
   if (!response.ok) throw new Error(`${response.status} for site.json`);
   return (await response.json()) as SiteData;
