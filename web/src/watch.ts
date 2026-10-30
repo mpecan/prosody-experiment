@@ -17,7 +17,8 @@ import { laneRects, paintLanes } from './roll';
 import { hearing, poem, rollBars, rollShown, type Channel } from './store';
 import type { Hap, Pattern, Scheduler } from './strudel/globals';
 
-const DRAW = 'https://unpkg.com/@strudel/draw@1.2.6';
+// Served from beside the page (vite.config.ts `vendored`), not a CDN.
+const DRAW = new URL('./vendor/strudel-draw.mjs', document.baseURI).href;
 
 interface Drawer {
   start(scheduler: Scheduler): void;
@@ -53,7 +54,7 @@ let lit: { trace: Trace | null; marks: HTMLSpanElement[][]; pieces: Piece[] } = 
 
 export async function startDrawing(): Promise<void> {
   try {
-    const { Drawer } = await (import(/* @vite-ignore */ `${DRAW}/draw.mjs`) as
+    const { Drawer } = await (import(/* @vite-ignore */ DRAW) as
       Promise<{ Drawer: new (fn: (haps: Hap[], time: number) => void, span: [number, number]) => Drawer }>);
     watch.drawer = new Drawer((haps, time) => {
       paintRoll(haps, time);

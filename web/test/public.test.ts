@@ -13,17 +13,30 @@ describe('the page\'s HTML', () => {
     // Relative, so the static page works from a subdirectory of a host as well as from `/`.
     expect(html).toContain('"@strudel/core": "./strudel-globals.mjs"');
     expect(html).toContain('"@strudel/webaudio": "./strudel-globals.mjs"');
-    expect(html).toContain('<script src="https://unpkg.com/@strudel/web@1.3.0"></script>');
+    // From beside the page, not a CDN: the phone app plays with no network.
+    expect(html).toContain('<script vite-ignore src="./vendor/strudel-web.js"></script>');
+    expect(html).not.toMatch(/<script src="https?:/);
   });
 });
 
 describe('the Strudel shim', () => {
-  it('exports what the soundfonts and the roll import from Strudel', () => {
+  // The names a vendored module imports from the packages the import map sends to the shim.
+  const importedFromShim = (file: string) =>
+    [...read(file).matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](@strudel\/core|@strudel\/webaudio|sfumato)["']/g)]
+      .flatMap((match) => match[1].split(','))
+      .map((name) => name.trim().split(/\s+as\s+/)[0])
+      .filter(Boolean);
+
+  it('exports every name the soundfonts and the roll import from Strudel', () => {
     // A name missing here leaves every soundfont unregistered and the melody silent.
     const shim = read('public/strudel-globals.mjs');
-    for (const name of ['registerSound', 'getAudioContext', 'Pattern', 'noteToMidi', 'startPresetNote', 'State', 'TimeSpan']) {
-      expect(shim, name).toContain(name);
-    }
+    const names = [
+      ...importedFromShim('node_modules/@strudel/soundfonts/dist/index.mjs'),
+      ...importedFromShim('node_modules/@strudel/draw/draw.mjs'),
+    ];
+    expect(names).toContain('registerSound');
+    expect(names).toContain('TimeSpan');
+    for (const name of names) expect(shim, name).toMatch(new RegExp(`\\b${name}\\b`));
   });
 });
 

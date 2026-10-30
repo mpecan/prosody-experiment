@@ -11,7 +11,7 @@ import { audioContext, evaluate, strudel, type Pattern, type Repl } from './glob
 // Where the sounds come from. The drum machines are the same sample map strudel.cc loads; without
 // it every `.bank(...)` asks for a sample nobody registered and the drums are silent.
 const SAMPLES = 'https://strudel.b-cdn.net';
-const SOUNDFONTS = 'https://unpkg.com/@strudel/soundfonts@1.3.0/dist/index.mjs';
+const SOUNDFONTS = new URL('./vendor/strudel-soundfonts.mjs', document.baseURI).href;
 
 let strudelReady = false;
 /** The running Strudel, once started. */
