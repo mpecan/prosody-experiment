@@ -8,7 +8,7 @@ const NAMES: Record<string, string> = {
   sine: 'Sine wave', sawtooth: 'Sawtooth wave', square: 'Square wave', triangle: 'Triangle wave',
   // General MIDI soundfonts.
   gm_acoustic_bass: 'Acoustic bass', gm_electric_bass_finger: 'Finger bass', gm_electric_bass_pick: 'Picked bass',
-  gm_fretless_bass: 'Fretless bass', gm_synth_bass_1: 'Synth bass 1', gm_synth_bass_2: 'Synth bass 2',
+  gm_synth_bass_1: 'Synth bass 1', gm_synth_bass_2: 'Synth bass 2',
   gm_epiano1: 'Electric piano', gm_epiano2: 'Electric piano 2', gm_piano: 'Piano', gm_vibraphone: 'Vibraphone',
   gm_marimba: 'Marimba', gm_celesta: 'Celesta', gm_music_box: 'Music box', gm_kalimba: 'Kalimba',
   gm_glockenspiel: 'Glockenspiel', gm_acoustic_guitar_nylon: 'Nylon guitar', gm_orchestral_harp: 'Harp',

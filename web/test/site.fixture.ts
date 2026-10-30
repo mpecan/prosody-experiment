@@ -23,6 +23,10 @@ export const fixture: SiteData = {
     dorian: [0, 2, 3, 5, 7, 9, 10],
     phrygian_dominant: [0, 1, 4, 5, 7, 8, 10],
   },
+  soundfonts: {
+    'gm_acoustic_bass:1': '0320_FluidR3_GM_sf2_file', 'gm_epiano1:1': '0040_FluidR3_GM_sf2_file',
+    'gm_pad_warm:3': '0890_FluidR3_GM_sf2_file', 'gm_vibraphone:3': '0110_FluidR3_GM_sf2_file',
+  },
   banks: ['tr909', 'tr808', 'linn'],
   instruments: ['triangle', 'gm_acoustic_bass', 'gm_epiano1', 'gm_pad_warm', 'gm_vibraphone'],
   kits: ['machine', 'jazz'],

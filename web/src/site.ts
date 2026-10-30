@@ -47,6 +47,8 @@ export interface SiteData {
   scales: string[];
   /** Each scale's semitones above its root, for the note circle. */
   scaleSteps: Record<string, number[]>;
+  /** The webaudiofont file each soundfont sound (`gm_cello:1`) loads. */
+  soundfonts: Record<string, string>;
   banks: string[];
   instruments: string[];
   kits: string[];

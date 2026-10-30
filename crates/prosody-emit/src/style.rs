@@ -189,11 +189,12 @@ pub const SYNTHS: &[&str] = &[
 /// it is palette work (`CLAUDE.md` §10); every name here must exist in `@strudel/soundfonts`' GM
 /// table, or it plays silence (checked against `@strudel/soundfonts` 1.3.0's `dist/index.mjs`,
 /// 2026-10-25).
+///
+/// Each plays the variant [`SOUNDFONT_VARIANTS`] names, not Strudel's first: see there.
 pub const SOUNDFONTS: &[&str] = &[
     "gm_acoustic_bass",
     "gm_electric_bass_finger",
     "gm_electric_bass_pick",
-    "gm_fretless_bass",
     "gm_synth_bass_1",
     "gm_synth_bass_2",
     "gm_epiano1",
@@ -220,6 +221,142 @@ pub const SOUNDFONTS: &[&str] = &[
     "gm_choir_aahs",
     "gm_pad_halo",
 ];
+
+/// One soundfont as it plays: the Strudel sound that selects its variant (`name:index`, the index
+/// into `@strudel/soundfonts`' list for that name), and the webaudiofont file that variant loads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoundfontVariant {
+    /// The instrument's name, one of [`SOUNDFONTS`].
+    pub name: &'static str,
+    /// What the pattern asks Strudel for: the name and the variant's index.
+    pub sound: &'static str,
+    /// The file that variant loads, without `.js` — what an offline copy has to hold.
+    pub file: &'static str,
+}
+
+const fn variant(name: &'static str, sound: &'static str, file: &'static str) -> SoundfontVariant {
+    SoundfontVariant { name, sound, file }
+}
+
+/// The variant each of [`SOUNDFONTS`] plays, in the same order: always one from a bank whose
+/// licence lets the app ship it (`FluidR3` GM, MIT; `GeneralUser` GS, free for any use). Strudel's
+/// first variant is `JCLive`, Aspirin or Chaos for every instrument here, and those banks carry no
+/// licence. Indices are into `@strudel/soundfonts` 1.3.0's `gm` table, which `web/e2e` checks
+/// against the vendored package, so an upgrade that reorders it fails rather than plays another
+/// bank. Choosing a variant is palette work (`CLAUDE.md` §10): it changes the sound, not the poem's
+/// structure.
+pub const SOUNDFONT_VARIANTS: &[SoundfontVariant] = &[
+    variant(
+        "gm_acoustic_bass",
+        "gm_acoustic_bass:1",
+        "0320_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_electric_bass_finger",
+        "gm_electric_bass_finger:3",
+        "0330_GeneralUserGS_sf2_file",
+    ),
+    variant(
+        "gm_electric_bass_pick",
+        "gm_electric_bass_pick:1",
+        "0340_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_synth_bass_1",
+        "gm_synth_bass_1:1",
+        "0380_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_synth_bass_2",
+        "gm_synth_bass_2:1",
+        "0390_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_epiano1", "gm_epiano1:1", "0040_FluidR3_GM_sf2_file"),
+    variant("gm_epiano2", "gm_epiano2:1", "0050_FluidR3_GM_sf2_file"),
+    variant("gm_piano", "gm_piano:1", "0000_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_vibraphone",
+        "gm_vibraphone:3",
+        "0110_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_marimba", "gm_marimba:3", "0120_FluidR3_GM_sf2_file"),
+    variant("gm_celesta", "gm_celesta:3", "0080_FluidR3_GM_sf2_file"),
+    variant("gm_music_box", "gm_music_box:3", "0100_FluidR3_GM_sf2_file"),
+    variant("gm_kalimba", "gm_kalimba:1", "1080_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_glockenspiel",
+        "gm_glockenspiel:3",
+        "0090_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_acoustic_guitar_nylon",
+        "gm_acoustic_guitar_nylon:3",
+        "0240_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_orchestral_harp",
+        "gm_orchestral_harp:1",
+        "0460_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_pad_warm", "gm_pad_warm:3", "0890_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_string_ensemble_1",
+        "gm_string_ensemble_1:2",
+        "0480_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_cello", "gm_cello:1", "0420_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_contrabass",
+        "gm_contrabass:2",
+        "0430_GeneralUserGS_sf2_file",
+    ),
+    variant(
+        "gm_harpsichord",
+        "gm_harpsichord:1",
+        "0060_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_church_organ",
+        "gm_church_organ:3",
+        "0190_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_lead_2_sawtooth",
+        "gm_lead_2_sawtooth:3",
+        "0810_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_flute", "gm_flute:2", "0730_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_string_ensemble_2",
+        "gm_string_ensemble_2:2",
+        "0490_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_synth_strings_1",
+        "gm_synth_strings_1:1",
+        "0500_GeneralUserGS_sf2_file",
+    ),
+    variant(
+        "gm_choir_aahs",
+        "gm_choir_aahs:2",
+        "0520_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_pad_halo", "gm_pad_halo:1", "0940_FluidR3_GM_sf2_file"),
+];
+
+/// The variant `name` plays, if it is one of [`SOUNDFONTS`].
+#[must_use]
+pub fn soundfont_variant(name: &str) -> Option<&'static SoundfontVariant> {
+    SOUNDFONT_VARIANTS
+        .iter()
+        .find(|variant| variant.name == name)
+}
+
+/// Instruments a palette once offered and no longer does, and what a header naming one now gets,
+/// so an old poem or shared link still compiles. `gm_fretless_bass` has no variant from a licensed
+/// bank (`@strudel/soundfonts` comments out the `FluidR3` and `GeneralUser` ones as crackling); the upright
+/// bass is the nearest soft, round bass.
+const RETIRED_INSTRUMENTS: &[(&str, &str)] = &[("gm_fretless_bass", "gm_acoustic_bass")];
 
 /// Every named palette — a starting point a header or the page can pick with `preset = "…"`.
 ///
@@ -890,7 +1027,7 @@ fn scale(name: &str) -> Scale {
 ///
 /// - **default** — what a poem with no header gets: an electric-piano melody over an acoustic
 ///   bass, a modest room, a little echo on the melody, light compression and a small human stray.
-/// - **warm** — softer and wider: vibraphone over fretless bass, a long room, more echo, a lower
+/// - **warm** — softer and wider: vibraphone over upright bass, a long room, more echo, a lower
 ///   high cut, a touch of saturation, and more stray; levels follow density at `0.5`.
 /// - **raw** — the palette as it was before soundfonts and a mix existed: triangle oscillators,
 ///   dry, on the grid. Kept so the difference stays audible, not as a recommendation.
@@ -947,7 +1084,7 @@ fn preset_palette(name: &str) -> Option<Preset> {
             },
         )),
         "warm" => Some(sound(
-            "gm_fretless_bass",
+            "gm_acoustic_bass",
             "gm_vibraphone",
             // Electric piano comping under the vibraphone.
             "gm_epiano1",
@@ -1057,7 +1194,7 @@ fn jazz() -> Preset {
 /// - **techno** — a synth bass and a sawtooth lead over synth strings, the TR-909 straight, phrygian
 ///   for its darkness; bright, driven and compressed hard, a short room, an echo on the lead and no
 ///   stray at all: the machine is the point.
-/// - **ambient** — a celesta over a soft fretless bass and a halo pad, the drums almost gone, lydian
+/// - **ambient** — a celesta over a soft upright bass and a halo pad, the drums almost gone, lydian
 ///   for its floating fourth; a long, wet room and a long echo, the levels following density.
 /// - **bossa** — a flute over a nylon guitar's seventh chords and an upright bass, the ride and snare
 ///   of the acoustic R-8, a light swing, major; a dry, close room.
@@ -1123,7 +1260,7 @@ fn genre(name: &str) -> Option<Preset> {
             feel("phrygian", 0, "tr909"),
         ),
         "ambient" => preset(
-            "gm_fretless_bass",
+            "gm_acoustic_bass",
             "gm_celesta",
             "gm_pad_halo",
             Kit::Machine,
@@ -1506,6 +1643,10 @@ impl Style {
 
 /// A pitched instrument: a synth name or a soundfont.
 fn instrument(key: &str, name: &str) -> Result<Named, StyleError> {
+    let name = RETIRED_INSTRUMENTS
+        .iter()
+        .find(|(retired, _)| *retired == name)
+        .map_or(name, |(_, now)| now);
     Named::parse(key, name, SYNTHS)
         .or_else(|_| Named::parse(key, name, SOUNDFONTS))
         .map_err(|_| StyleError::Unknown {
@@ -1616,7 +1757,42 @@ fn read_tempo(bounds: &[toml::Value]) -> Result<TempoRange, StyleError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Kit, Note, RideFallback, Scale, Style, StyleError, Swing, Voicing};
+    use super::{
+        Kit, Note, RideFallback, SOUNDFONT_VARIANTS, SOUNDFONTS, Scale, Style, StyleError, Swing,
+        Voicing,
+    };
+
+    #[test]
+    fn every_soundfont_plays_a_variant_from_a_licensed_bank() {
+        let names: Vec<_> = SOUNDFONT_VARIANTS.iter().map(|v| v.name).collect();
+        assert_eq!(
+            names, SOUNDFONTS,
+            "one variant per soundfont, in the same order"
+        );
+        for variant in SOUNDFONT_VARIANTS {
+            let (name, index) = variant.sound.split_once(':').unwrap();
+            assert_eq!(name, variant.name);
+            assert!(index.parse::<u8>().is_ok(), "{}", variant.sound);
+            assert!(
+                variant.file.ends_with("_FluidR3_GM_sf2_file")
+                    || variant.file.ends_with("_GeneralUserGS_sf2_file"),
+                "{} loads {}, from a bank with no licence",
+                variant.name,
+                variant.file
+            );
+        }
+    }
+
+    #[test]
+    fn a_retired_instrument_still_compiles_as_its_stand_in() {
+        // An old poem or shared link may still name the fretless bass.
+        let header = "+++\n[style]\nbass = \"gm_fretless_bass\"\n+++\n";
+        assert_eq!(
+            Style::parse(header).unwrap().bass().get(),
+            "gm_acoustic_bass"
+        );
+        assert!(!SOUNDFONTS.contains(&"gm_fretless_bass"));
+    }
 
     const HEADER: &str = "+++\n\
         [style]\n\
@@ -1925,7 +2101,7 @@ mod tests {
             Genre {
                 name: "ambient",
                 melody: "gm_celesta",
-                bass: "gm_fretless_bass",
+                bass: "gm_acoustic_bass",
                 chords: "gm_pad_halo",
                 kit: Kit::Machine,
                 voicing: Voicing::Note,

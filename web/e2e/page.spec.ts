@@ -106,7 +106,7 @@ test('solos a layer while it plays: the others fall silent on the meters and fai
   await page.click('#stop');
 });
 
-test('shares a poem as a link that opens to the same piece, for someone else', async ({ page, browser }) => {
+test('shares a poem as a link that opens to the same piece, for someone else', async ({ page, browser, baseURL }) => {
   await open(page);
   await page.selectOption('#preset', 'carroll-jabberwocky');
   await expect(page.locator('#status')).toContainText('bars from');
@@ -121,7 +121,7 @@ test('shares a poem as a link that opens to the same piece, for someone else', a
   // Someone else, with a browser of their own.
   const other = await (await browser.newContext()).newPage();
   await other.addInitScript(() => localStorage.setItem('prosody.welcomed', '1'));
-  await other.goto(link.replace('https://prosody.rocks', 'http://127.0.0.1:4802'));
+  await other.goto(link.replace('https://prosody.rocks', baseURL!));
   await expect(other.locator('#sharedNote')).toContainText('A shared poem.');
   await expect(other.locator('#poem')).toHaveValue(await page.locator('#poem').inputValue());
   await expect(other.locator('#hearB')).toHaveAttribute('aria-pressed', 'true');
@@ -130,4 +130,22 @@ test('shares a poem as a link that opens to the same piece, for someone else', a
   // And its A carries what techno suggested for it.
   await other.getByRole('tab', { name: 'Mappings' }).click();
   await expect(other.locator('.mapping[data-name="bass"] [aria-label="bass, setting A"] button[aria-pressed="true"]')).toHaveText('feet');
+});
+
+test('every soundfont plays the licensed variant the compiler names, in the Strudel the page ships', async ({ request }) => {
+  // The compiler asks for `gm_cello:1`; Strudel turns the index into a file from its own `gm` table.
+  // An upgrade that reordered that table would quietly play another bank, one with no licence.
+  const site = (await (await request.get('/site.json')).json()) as { soundfonts: Record<string, string> };
+  const module = await (await request.get('/vendor/strudel-soundfonts.mjs')).text();
+  const listed = (name: string) => {
+    const block = module.match(new RegExp(`\\n  ${name}: \\[([\\s\\S]*?)\\n  \\]`));
+    // Only the entries Strudel counts: a commented-out file is not in its list.
+    return block ? [...block[1].replace(/\/\/.*$/gm, '').matchAll(/"([^"]*)"/g)].map((m) => m[1]) : [];
+  };
+  const sounds = Object.entries(site.soundfonts);
+  expect(sounds.length).toBeGreaterThan(20);
+  for (const [sound, file] of sounds) {
+    const [name, index] = sound.split(':');
+    expect(listed(name)[Number(index)], sound).toBe(file);
+  }
 });

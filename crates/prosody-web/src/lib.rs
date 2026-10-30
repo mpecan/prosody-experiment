@@ -26,7 +26,8 @@ use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
 use prosody_emit::style::{
-    BANKS, KITS, PRESETS as PALETTES, RIDE_FALLBACKS, SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
+    BANKS, KITS, PRESETS as PALETTES, RIDE_FALLBACKS, SOUNDFONT_VARIANTS, SOUNDFONTS, SYNTHS,
+    VOICINGS, preset_keys,
 };
 use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading, trace};
 use prosody_lexicon::EnglishLexicon;
@@ -159,6 +160,7 @@ fn site_json(transport: Transport) -> Result<String> {
         ("transport", json_string(transport.name())),
         ("scales", list(&scales)),
         ("scaleSteps", scale_steps()),
+        ("soundfonts", soundfont_files()),
         ("banks", list(BANKS)),
         ("instruments", list(&instruments)),
         ("kits", list(KITS)),
@@ -195,7 +197,7 @@ const STYLES: &[StyleEntry] = &[
     },
     StyleEntry {
         name: "warm",
-        what: "vibraphone over a fretless bass, a long room and echo",
+        what: "vibraphone over an upright bass, a long room and echo",
         suggests: &[],
     },
     StyleEntry {
@@ -316,6 +318,23 @@ fn scale_steps() -> String {
         .map(|scale| {
             let steps: Vec<String> = scale.steps().iter().map(u8::to_string).collect();
             format!("{}:[{}]", json_string(scale.name()), steps.join(","))
+        })
+        .collect();
+    format!("{{{}}}", entries.join(","))
+}
+
+/// The webaudiofont file each soundfont sound loads, by the sound a pattern asks Strudel for
+/// (`gm_cello:1`): what an offline copy of the instruments has to hold, and what the page's tests
+/// check against the vendored `@strudel/soundfonts`.
+fn soundfont_files() -> String {
+    let entries: Vec<String> = SOUNDFONT_VARIANTS
+        .iter()
+        .map(|variant| {
+            format!(
+                "{}:{}",
+                json_string(variant.sound),
+                json_string(variant.file)
+            )
         })
         .collect();
     format!("{{{}}}", entries.join(","))
@@ -1503,7 +1522,7 @@ mod tests {
             assert_eq!(response.status, 200, "{}", response.body);
             assert!(response.body.contains("// the chords"), "{}", response.body);
             assert!(
-                response.body.contains(".sound(\"gm_vibraphone\")"),
+                response.body.contains(".sound(\"gm_vibraphone:3\")"),
                 "{variant}"
             );
             assert!(response.body.contains("//   chords by line: "), "{variant}");

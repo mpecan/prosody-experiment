@@ -464,8 +464,17 @@ impl Pitched {
 /// signature sound is the DX7 electric piano and its synth bass; physical modelling's classic
 /// case is a struck bar. An earlier version mapped all three to bare oscillators, which is why
 /// every example poem sounded like a test tone. The plain waveforms stay what they say.
+///
+/// A soundfont is asked for by its licensed variant (`style::SOUNDFONT_VARIANTS`), never by bare
+/// name, which would play Strudel's first, unlicensed one.
 fn strudel_instrument(instrument: Named, role: Pitched) -> &'static str {
-    let name = instrument.get();
+    let name = nearest_instrument(instrument.get(), role);
+    crate::style::soundfont_variant(name).map_or(name, |variant| variant.sound)
+}
+
+/// The instrument a palette name plays in a role, by name: a soundfont as named, a synth model as
+/// its nearest recording (see [`strudel_instrument`]).
+fn nearest_instrument(name: &'static str, role: Pitched) -> &'static str {
     if name.starts_with("gm_") {
         return name;
     }
@@ -2729,9 +2738,9 @@ mod tests {
         let text = render(source, &style);
         let melody = text.lines().find(|l| l.contains("the melody")).unwrap();
         let bass = text.lines().find(|l| l.contains("the bass")).unwrap();
-        assert!(melody.contains(".sound(\"gm_vibraphone\")"), "{melody}");
+        assert!(melody.contains(".sound(\"gm_vibraphone:3\")"), "{melody}");
         assert!(
-            bass.contains(".sound(\"gm_electric_bass_finger\")"),
+            bass.contains(".sound(\"gm_electric_bass_finger:3\")"),
             "{bass}"
         );
         // Hand-worked, C minor: the rhyme class is degree 0, so 60. "rot" is OW, a mid vowel, so
@@ -3116,11 +3125,11 @@ mod tests {
                 .unwrap()
                 .to_owned()
         };
-        assert_eq!(sound("karplus", "the melody"), "gm_acoustic_guitar_nylon");
-        assert_eq!(sound("karplus", "the bass"), "gm_acoustic_bass");
-        assert_eq!(sound("fm", "the melody"), "gm_epiano1");
-        assert_eq!(sound("fm", "the bass"), "gm_synth_bass_2");
-        assert_eq!(sound("physical", "the melody"), "gm_marimba");
+        assert_eq!(sound("karplus", "the melody"), "gm_acoustic_guitar_nylon:3");
+        assert_eq!(sound("karplus", "the bass"), "gm_acoustic_bass:1");
+        assert_eq!(sound("fm", "the melody"), "gm_epiano1:1");
+        assert_eq!(sound("fm", "the bass"), "gm_synth_bass_2:1");
+        assert_eq!(sound("physical", "the melody"), "gm_marimba:3");
         assert_eq!(sound("triangle", "the melody"), "triangle");
         assert_eq!(sound("subtractive", "the bass"), "sawtooth");
     }
@@ -3400,7 +3409,7 @@ mod tests {
         let one = "[48,51,55]@1 [50,53,56]@1";
         assert!(
             line.starts_with(&format!(
-                "  note(\"<{one} {one} {one} {one}>\").sound(\"gm_pad_warm\")"
+                "  note(\"<{one} {one} {one} {one}>\").sound(\"gm_pad_warm:3\")"
             )),
             "{line}"
         );
@@ -3494,12 +3503,12 @@ mod tests {
         // The voicing still shapes the chord lane: V of degree 0 is degree 4, G Bb D F from 48.
         assert!(chord_line(&on).contains("[55,58,62,65]"), "{on}");
         assert!(
-            on.contains("melody on gm_epiano1 as single notes over the chords"),
+            on.contains("melody on gm_epiano1:1 as single notes over the chords"),
             "{on}"
         );
         assert!(!off.contains("single notes"), "{off}");
         assert!(
-            off.contains("melody on gm_epiano1 as seventh chords"),
+            off.contains("melody on gm_epiano1:1 as seventh chords"),
             "{off}"
         );
         assert_eq!(
@@ -3660,7 +3669,7 @@ mod tests {
             argument(chord_line(&plain), "note"),
             argument(chord_line(&coloured), "note")
         );
-        assert!(chord_line(&coloured).contains(".sound(\"gm_vibraphone\")"));
+        assert!(chord_line(&coloured).contains(".sound(\"gm_vibraphone:3\")"));
     }
 
     #[test]
