@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "rocks.prosody",
   "build": {
-    "frontendDist": "../web/dist",
+    "frontendDist": "../target/site",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm --prefix ../web run dev -- --host",
-    "beforeBuildCommand": "cargo run -p prosody-web -- --site ../web/public && npm --prefix ../web run build"
+    "beforeBuildCommand": "../scripts/build-site.sh"
   },
   "app": {
     "windows": [

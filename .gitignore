@@ -1,7 +1,6 @@
 /target
 # Wrangler's local state (`wrangler dev`).
 /.wrangler
-/web/public/site.json
 
 # Editor and OS cruft
 .DS_Store

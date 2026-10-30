@@ -2374,12 +2374,6 @@ name = "prosody-app"
 version = "0.1.0"
 dependencies = [
  "log",
- "prosody-core",
- "prosody-emit",
- "prosody-score",
- "prosody-web",
- "serde",
- "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-log",

@@ -36,17 +36,35 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        run: cargo clippy --workspace --exclude prosody-app --all-targets --all-features --locked -- -D warnings
 
       # The accuracy floors in prosody-lts grade against 117k dictionary entries; release mode
       # keeps that under a second.
       - name: test
-        run: cargo test --workspace --locked
+        run: cargo test --workspace --exclude prosody-app --locked
 
       - name: docs
-        run: cargo doc --workspace --no-deps --locked
+        run: cargo doc --workspace --exclude prosody-app --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
+
+  # The phone app's shell (src-tauri): apart from the gates because on Linux Tauri links WebKitGTK,
+  # which the compiler's crates never need, and installing it would slow every gate run.
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.1"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: webkit
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
+      - name: clippy
+        run: cargo clippy -p prosody-app --all-targets --all-features --locked -- -D warnings
+      - name: test
+        run: cargo test -p prosody-app --locked
 
   # The page's browser build: the compiler as WebAssembly must answer every request byte for byte as
   # the native server does (invariant I1 across targets). Separate because it needs node and the

@@ -1,54 +1,16 @@
-//! Prosody Tauri application library.
+//! The phone app: a native window around the static site. The page compiles poems with the same
+//! wasm compiler it runs in a browser, in a worker, so the app holds no compiler of its own — a
+//! second one would be a second thing to keep byte-identical (I1) for no measurable gain.
 
-use prosody_web::{Request, Site, Transport};
-use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
-
-static SITE: OnceLock<Site> = OnceLock::new();
-
-/// An HTTP-like response from the native compiler.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Answer {
-    /// HTTP status code: 200, 400, or 404.
-    pub status: u16,
-    /// Response body: JSON or error message.
-    pub body: String,
-}
-
-/// Answers a compilation request natively on device.
-#[tauri::command]
-fn respond(target: String, body: String) -> Result<Answer, String> {
-    let site = SITE.get_or_init(|| {
-        Site::new(Transport::Server).expect("failed to initialize native prosody site")
-    });
-    let response = site.respond(&Request::new("POST", &target, body));
-    Ok(Answer {
-        status: response.status,
-        body: response.body,
-    })
-}
-
+/// Opens the app's window on the built site. A failure to start is logged and ends the process:
+/// there is nothing to show without the window.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
-        .invoke_handler(tauri::generate_handler![respond])
-        .run(tauri::generate_context!())
-        .expect("error while running prosody application");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_respond_compiles_poem() {
-        let answer = respond(
-            "/pattern".to_string(),
-            "Tyger Tyger, burning bright,\n".to_string(),
-        )
-        .unwrap();
-        assert_eq!(answer.status, 200);
-        assert!(answer.body.contains("stack("), "body: {}", answer.body);
+        .run(tauri::generate_context!());
+    if let Err(error) = result {
+        log::error!("prosody could not start: {error}");
+        std::process::exit(1);
     }
 }
