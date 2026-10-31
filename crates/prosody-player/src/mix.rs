@@ -175,10 +175,13 @@ impl Mixer {
     }
 
     /// Drops everything queued, for start of play `generation` — but not abruptly: the next
-    /// [`FADE`] frames of it, at the gains they would have had, are kept as a tail that fades to
-    /// nothing under whatever comes next. A tail still fading from a flush before goes on fading.
+    /// [`FADE`] frames of it, at the gains they would have had (the browser voice's duck
+    /// included), are kept as a tail that fades to nothing under whatever comes next. A tail still
+    /// fading from a flush before goes on fading. The count of underruns starts again: the page
+    /// says them per start of play, and a new Play is not to be blamed for the last one's.
     pub fn flush(&mut self, generation: u32) {
         self.generation = generation;
+        self.underruns = 0;
         let mut frames = 0;
         for k in 0..FADE {
             // The tail before, still to be heard: read at or ahead of where this one is written,
@@ -196,7 +199,10 @@ impl Mixer {
             if let Some((block, offset)) = at {
                 #[allow(clippy::cast_precision_loss)] // at most FADE
                 let fade = (FADE - k) as f64 / FADE as f64;
-                let duck = block.duck(offset);
+                // The music under both ducks, as `next_frame` mixes it: left out, a Stop during a
+                // line of the browser's voice would step the music up before fading it — the click
+                // FADE is there to prevent.
+                let duck = block.duck(offset) * self.outer;
                 for stem in 0..STEMS {
                     let ducked = if stem == SPEECH { 1.0 } else { duck };
                     let gain = self.gains.get(stem).copied().unwrap_or(1.0) * fade * ducked;

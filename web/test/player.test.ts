@@ -157,6 +157,21 @@ describe('the clock', () => {
     expect(marksAt(piece, 1.0)).toEqual([]);
   });
 
+  it('keeps a mark that runs over the loop\'s end lit once the piece comes round', () => {
+    // A swung last step: its mark begins at 1.9 s of a 2 s piece and lasts 0.25 s, to 2.15 s. At
+    // 2.1 s (0.1 s into the second time round) it is still lit, from the first round; at 2.2 s it
+    // is over. At 0.1 s of the first round nothing came before, so nothing is lit.
+    const piece = indexed({
+      ...performance([]),
+      marks: [{ from: 0, to: 3, lane: 'pulse', slot: 1, onset: 1.9, length: 0.25, fresh: true, melody: false, bass: false }],
+    });
+    expect(marksAt(piece, 2.1).map((m) => m.index)).toEqual([0]);
+    expect(marksAt(piece, 4.1).map((m) => m.index)).toEqual([0]);
+    expect(marksAt(piece, 2.2)).toEqual([]);
+    expect(marksAt(piece, 0.1)).toEqual([]);
+    expect(marksAt(piece, 2.0).map((m) => m.index)).toEqual([0]);
+  });
+
   it('finds the notes in a window, from each time round it spans', () => {
     // A 2 s piece with notes at 0.25 (0.5 long) and 1.8 (0.1 long). The window 1.7–2.5 holds the
     // second note and the first note of the next time round, at 2.25.
@@ -260,6 +275,40 @@ describe('the worklet mixer', () => {
     // After a flush the next block says where the count starts again.
     queue.push(block(9000, 4, 0, 0.1, 0.1));
     expect(queue.played).toBe(9000);
+  });
+
+  it('does not blame a new start of play for the last one\'s underruns', () => {
+    // Three frames queued, four asked for: one underrun.
+    const queue = new StemQueue();
+    queue.push(block(0, 3, 0, 0.1, 0.1));
+    const left = new Float32Array(4), right = new Float32Array(4);
+    queue.mix(left, right, ALL);
+    expect(queue.underruns).toBe(1);
+    // The next Play's flush starts the count again: the worklet tells the page the new generation
+    // with this count, and the page would say "ran dry 1 time(s)" of a piece that never did.
+    queue.flush();
+    expect(queue.underruns).toBe(0);
+    queue.push(block(8000, 4, 0, 0.1, 0.1));
+    queue.mix(left, right, ALL);
+    expect(queue.underruns).toBe(0);
+  });
+
+  it('fades a flush under the browser\'s voice from the ducked level, without a step', () => {
+    // The page asks for 0.6, and a second (48 000 frames, 12.5 of the fall's 3 840-frame time
+    // constants) brings the music to 0.6 + 0.4·e^−12.5 ≈ 0.6 of itself: 0.1 × 0.6 × MAKEUP. A Stop
+    // now: the tail's first frame is the next frame at fade (FADE − 0)/FADE = 1, so it must be where
+    // the music was — not 0.1 × MAKEUP, 4.4 dB up.
+    const queue = new StemQueue(48_000);
+    queue.push(block(0, 50_000, 0, 0.1, 0.1));
+    const left = new Float32Array(48_000), right = new Float32Array(48_000);
+    queue.mix(left, right, ALL, 0.6);
+    const last = left[47_999]!;
+    expect(last).toBeCloseTo(0.1 * 0.6 * MAKEUP, 6);
+    queue.flush();
+    const tail = new Float32Array(2), tailRight = new Float32Array(2);
+    queue.mix(tail, tailRight, ALL, 0.6);
+    expect(tail[0]).toBeCloseTo(last, 6);
+    expect(tail[1]).toBeCloseTo(last * (FADE - 1) / FADE, 6);
   });
 
   it('ducks the music under the reading and not the reading', () => {

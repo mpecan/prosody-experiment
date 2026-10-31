@@ -137,6 +137,43 @@ fn it_is_not_short_of_anything_before_the_first_block_nor_after_a_flush() {
 }
 
 #[test]
+fn a_new_start_of_play_is_not_blamed_for_the_last_ones_underruns() {
+    // Three frames queued, four asked for: one underrun, in start of play 0.
+    let mut mixer = Mixer::new(48_000.0);
+    mixer.push(block(0, 3, 0, 0.1, 0.1, 1.0));
+    mix(&mut mixer, 4, ALL);
+    assert_eq!(mixer.report().underruns, 1);
+    // The next Play flushes for start of play 1, and its count begins at nothing: the page would
+    // otherwise say "ran dry 1 time(s)" of a piece that never did.
+    mixer.flush(1);
+    assert_eq!(mixer.report().underruns, 0);
+    let mut next = block(8_000, 4, 0, 0.1, 0.1, 1.0);
+    next.generation = 1;
+    mixer.push(next);
+    mix(&mut mixer, 4, ALL);
+    assert_eq!(mixer.report().underruns, 0);
+}
+
+#[test]
+fn a_flush_under_the_browser_voice_fades_from_the_ducked_level_without_a_step() {
+    // The browser's voice reads, the page asks for 0.6, and a second (48 000 frames, 12.5 of the
+    // fall's 3 840-frame time constants) brings the music to 0.6 + 0.4·e^−12.5 ≈ 0.6 of itself:
+    // 0.1 × 0.6 × MAKEUP = 0.071929. A Stop now: the tail's first frame is the next frame at fade
+    // (FADE − 0)/FADE = 1, so it must be where the music was — not 0.1 × MAKEUP, 4.4 dB up.
+    let mut mixer = Mixer::new(48_000.0);
+    mixer.set_duck(0.6);
+    mixer.push(block(0, 50_000, 0, 0.1, 0.1, 1.0));
+    let (left, _) = mix(&mut mixer, 48_000, ALL);
+    let last = left[47_999];
+    close(last, 0.1 * 0.6 * MAKEUP, 1e-6);
+    mixer.flush(1);
+    let (tail, _) = mix(&mut mixer, 2, ALL);
+    close(tail[0], last, 1e-6);
+    #[allow(clippy::cast_precision_loss)] // FADE is 256
+    close(tail[1], last * (FADE - 1) as f64 / FADE as f64, 1e-6);
+}
+
+#[test]
 fn it_ducks_the_music_under_the_reading_and_not_the_reading() {
     // Melody 0.05 at a duck of 0.6 is 0.03; the reading's 0.05 is not ducked; together 0.08, and
     // through the makeup 0.08 × 1.19881 = 0.095905: the frame prosody_synth's master test works.

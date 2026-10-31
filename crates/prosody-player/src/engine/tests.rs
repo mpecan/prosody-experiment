@@ -277,6 +277,33 @@ fn a_note_whose_sound_was_never_loaded_is_counted_and_told() {
 }
 
 #[test]
+fn a_new_start_of_play_is_told_its_own_losses_not_the_last_ones() {
+    // One missing note in start of play 1, then Stop and Play the same piece again: the page reset
+    // its count at the Play, so the event must say 1 missing, not the 2 of both starts.
+    let mut engine = engine();
+    let piece = || handed(1, &record(0.0, 4.0, 0.0, f64::NAN), Vec::new(), Cast::new());
+    engine.play(1, piece(), Pace::Natural, unity());
+    engine.render();
+    engine.drain();
+    engine.stop(2);
+    assert_eq!(engine.losses(), Losses::default());
+    engine.play(3, piece(), Pace::Natural, unity());
+    engine.render();
+    let losses: Vec<Event> = engine
+        .drain()
+        .into_iter()
+        .filter(|event| matches!(event, Event::Losses(_)))
+        .collect();
+    assert_eq!(
+        losses,
+        vec![Event::Losses(Losses {
+            stolen: 0,
+            missing: 1
+        })]
+    );
+}
+
+#[test]
 fn a_line_let_go_gives_its_number_to_the_next() {
     let mut engine = engine();
     let line = || Sample::new(vec![0.1; 10], None, 48_000.0).unwrap();

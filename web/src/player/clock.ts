@@ -73,15 +73,24 @@ function firstFrom<T>(items: T[], onset: (item: T) => number, at: number): numbe
   return low;
 }
 
-/** The marks lit at `time` (any time round): each with its index in the Performance's marks. */
+/** The marks lit at `time` (any time round): each with its index in the Performance's marks. Once the
+ * piece has come round, a mark of the round before that runs over the loop's end is lit too: a
+ * swung onset (`docs/player.md` §9) can push the last step of a slice past the piece's length, and
+ * its mark would otherwise go dark the moment the piece comes round, as `notesBetween` keeps it. */
 export function marksAt(piece: Indexed, time: number): { mark: PerformedMark; index: number }[] {
-  const at = within(time, piece.performance.seconds);
-  const lit = [];
-  for (let i = firstFrom(piece.marks, (m) => m.mark.onset, at - piece.longestMark); i < piece.marks.length; i++) {
-    const entry = piece.marks[i]!;
-    if (entry.mark.onset > at) break;
-    if (at < entry.mark.onset + entry.mark.length) lit.push(entry);
-  }
+  const seconds = piece.performance.seconds;
+  const at = within(time, seconds);
+  const lit: { mark: PerformedMark; index: number }[] = [];
+  // The marks sounding `at` into a round: those begun by then and not yet over.
+  const sounding = (at: number) => {
+    for (let i = firstFrom(piece.marks, (m) => m.mark.onset, at - piece.longestMark); i < piece.marks.length; i++) {
+      const entry = piece.marks[i]!;
+      if (entry.mark.onset > at) break;
+      if (at < entry.mark.onset + entry.mark.length) lit.push(entry);
+    }
+  };
+  if (seconds > 0 && time >= seconds) sounding(at + seconds);
+  sounding(at);
   return lit;
 }
 

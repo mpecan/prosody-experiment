@@ -223,7 +223,7 @@ impl Renderer {
         self.frontier
     }
 
-    /// What it has lost so far.
+    /// What it has lost since it last stopped.
     #[must_use]
     pub const fn losses(&self) -> Losses {
         self.losses
@@ -301,8 +301,10 @@ impl Renderer {
     }
 
     /// Stops: every voice silenced, every line of the reading let go, nothing playing. The clock
-    /// keeps counting.
+    /// keeps counting; the losses start again, since what plays next is said on its own
+    /// (`CLAUDE.md` §6: a loss is told of the piece that had it).
     pub fn stop(&mut self) {
+        self.losses = Losses::default();
         self.now = None;
         self.next = None;
         self.pool.clear();

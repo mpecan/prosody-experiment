@@ -139,9 +139,12 @@ export class StemQueue {
   }
 
   /** Drops everything queued, after a stop or for a restart from the top — but not abruptly: the
-   * next `FADE` frames of it, at the gains they would have had, are kept as a tail that fades to
-   * nothing under whatever comes next. A tail still fading from a flush before goes on fading. */
+   * next `FADE` frames of it, at the gains they would have had (the browser voice's duck included),
+   * are kept as a tail that fades to nothing under whatever comes next. A tail still fading from a
+   * flush before goes on fading. The count of underruns starts again: the page says them per start
+   * of play, and a new Play is not to be blamed for the last one's. */
   flush(): void {
+    this.underruns = 0;
     let frames = 0;
     for (let k = 0; k < FADE; k++) {
       // The tail before, still to be heard: read at or ahead of where this one is written, so the
@@ -152,7 +155,10 @@ export class StemQueue {
       const at = this.frameAt(k);
       if (at) {
         const fade = (FADE - k) / FADE;
-        const duck = at.block.data[2 * STEMS * at.block.frames + at.offset] ?? 1;
+        // The music under both ducks, as mix() plays it: left out, a Stop during a line of the
+        // browser's voice would step the music up before fading it — the click FADE is there to
+        // prevent.
+        const duck = (at.block.data[2 * STEMS * at.block.frames + at.offset] ?? 1) * this.outer;
         for (let stem = 0; stem < STEMS; stem++) {
           const gain = this.gains[stem]! * fade * (stem === SPEECH ? 1 : duck);
           if (gain === 0) continue;

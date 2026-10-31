@@ -107,6 +107,9 @@ pub(crate) struct Status {
     /// Times the output itself ran short or over (an `AAudio` xrun): a glitch below the mix, which
     /// the queue's underruns do not count.
     glitches: AtomicU64,
+    /// The start of play `glitches` counts for: the page says them per start of play, as it does
+    /// the queue's underruns (which the mixer's flush starts again).
+    counting: AtomicU32,
     /// The most frames the output has asked for in one buffer since the page was last shown.
     buffer: AtomicU64,
 }
@@ -142,6 +145,15 @@ impl Status {
     /// The output glitched once more.
     pub(crate) fn glitched(&self) {
         self.glitches.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A flush for start of play `generation` is on its way to the output: a new one counts its
+    /// glitches from nothing, so a Play is not blamed for the last one's. The same one again — the
+    /// output reopened mid-play ([`Engine::reopened`]) — keeps its count, the failure among them.
+    pub(crate) fn begin(&self, generation: u32) {
+        if self.counting.swap(generation, Ordering::Relaxed) != generation {
+            self.glitches.store(0, Ordering::Relaxed);
+        }
     }
 
     /// The report as the page's worklet report was, as JSON; the peaks start again from here.
@@ -363,6 +375,7 @@ impl Shared {
             self.status.played.load(Ordering::Relaxed),
         );
         if let Some(generation) = engine.take_flush() {
+            self.status.begin(generation);
             outbox.push_back(ToAudio::Flush(generation));
         }
         while engine.due() {
@@ -726,6 +739,12 @@ pub(super) mod tests {
             ]
         );
         assert!(audio.from.try_recv().is_err());
+        // The reopened output plays the same start of play, so its glitch is still told; the next
+        // Play is a new one, and the page is not to blame it for the last one's glitch.
+        assert_eq!(shared.status.losses(), (0, 1));
+        play(&shared, 2, 0.0);
+        shared.pump(&mut Vec::new(), &mut outbox);
+        assert_eq!(shared.status.losses(), (0, 0));
     }
 
     #[test]

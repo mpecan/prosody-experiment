@@ -117,7 +117,7 @@ impl Engine {
         self.renderer.frontier()
     }
 
-    /// What the synth has lost so far.
+    /// What the synth has lost in this start of play.
     #[must_use]
     pub const fn losses(&self) -> Losses {
         self.renderer.losses()
@@ -149,7 +149,10 @@ impl Engine {
     /// Plays `handed` from its top, as start of play `generation`: everything sounding stops, and
     /// what is queued downstream is dropped ([`Engine::take_flush`]).
     pub fn play(&mut self, generation: u32, handed: Handed, pace: Pace, duck: Gain) {
+        // The renderer's losses start again with it, as the page's do: a Play is not told the last
+        // one's.
         self.renderer.stop();
+        self.told = Losses::default();
         self.restart(generation);
         self.renderer.set_duck(duck);
         let (piece, rest) = split(handed, self.rate());
@@ -183,6 +186,7 @@ impl Engine {
     pub fn stop(&mut self, generation: u32) {
         self.playing = false;
         self.renderer.stop();
+        self.told = Losses::default();
         self.reader.stop();
         self.restart(generation);
     }
