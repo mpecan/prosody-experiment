@@ -275,6 +275,9 @@ export async function play(): Promise<void> {
   const overtaken = () => mine !== attempt;
   const text = poem.value;
   const side = hearing.value;
+  // The poem edited, or the other side chosen, while this loaded: what it loaded is not what Play
+  // now means (`restart`).
+  const changed = () => text !== poem.value || side !== hearing.value;
   const fromTheTop = !playing.value || piece.fromTheTop;
   let running: Engine;
   try {
@@ -296,7 +299,7 @@ export async function play(): Promise<void> {
     const answer = await ask('/performance', query(side), text);
     if (!answer.ok) throw new Error('the Performance could not be made: ' + (await answer.text()));
     performance = (await answer.json()) as Performance;
-    if (overtaken() || text !== poem.value || side !== hearing.value) return;   // a newer one plays itself
+    if (overtaken() || changed()) return restart(mine);
     status('loading the sounds this piece uses…' + (playing.value ? ' · playing' : ''));
     failed = await loadSounds(running, performance);
   } catch (error) {
@@ -305,7 +308,7 @@ export async function play(): Promise<void> {
   } finally {
     closeLoader();
   }
-  if (overtaken() || text !== poem.value || side !== hearing.value) return;
+  if (overtaken() || changed()) return restart(mine);
   const message = {
     notes: records(performance, ids),
     bars: barStarts(performance),
@@ -345,6 +348,22 @@ export async function play(): Promise<void> {
     + (failed.length ? ' · not loaded: ' + failed.join(', ') : '');
   tell();
   if (!frame) frame = requestAnimationFrame(draw);
+}
+
+/** A play() that found the poem or the side heard changed while it loaded. While something plays,
+ * the edit's compile (piece.ts `compileOnce`) or the A/B switch (`hear`) calls play() for the newer
+ * one itself, so this one only gives up. Before anything plays they do not — they hand over only
+ * what is already playing — so giving up here would leave a pressed Play doing nothing and saying
+ * nothing: it starts again with the newest text and side instead. Its reading follows once that
+ * text's compile arrives, as a live edit's does. Overtaken by Stop or a newer play(), it gives up. */
+function restart(mine: number): Promise<void> {
+  if (mine !== attempt || playing.value) return Promise.resolve();
+  if (!poem.value.trim()) {
+    status('nothing to play: the poem was emptied while the player loaded');
+    return Promise.resolve();
+  }
+  status('the poem changed while the player loaded; loading its newest version…');
+  return play();
 }
 
 export function stop(): void {

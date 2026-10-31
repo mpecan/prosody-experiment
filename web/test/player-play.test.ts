@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { piece } from '../src/piece';
 import { engines } from '../src/reading';
-import { playing, poem, readingSettings } from '../src/store';
+import { hearing, playing, poem, readingSettings, statusText } from '../src/store';
 
 /** The one line the Performance's reading cues: line 0, where the piece begins, at the natural pace. */
 const CUE = { line: 0, stanza: 0, from: 0, to: 28, pace: 1, pause: 1.5, fitted: null, natural: { onset: 'arrives', slot: 0, at: 0 } };
@@ -15,8 +15,8 @@ const CUE = { line: 0, stanza: 0, from: 0, to: 28, pace: 1, pause: 1.5, fitted: 
 let answer: (() => void) | null = null;
 const asked = vi.fn();
 vi.mock('../src/compiler', () => ({
-  ask: vi.fn(async (path: string) => {
-    asked(path);
+  ask: vi.fn(async (path: string, _query: string, text: string) => {
+    asked(path, text);
     await new Promise<void>((resolve) => { answer = resolve; });
     return new Response(JSON.stringify({
       seconds: 2, cpm: 30, bars: [{ slot: 0, at: 0 }], notes: [], marks: [], cues: [CUE], unread: [], natural_unread: [],
@@ -80,6 +80,7 @@ beforeEach(() => {
   readingSettings.value = { engine: 'browser', pace: 'natural', level: 1, voices: {} };
   toWorker.length = 0;
   answer = null;
+  asked.mockClear();
 });
 
 afterEach(async () => {
@@ -193,6 +194,66 @@ describe('the Prosody player', () => {
     await playingNow;
     expect(starts()).toEqual([]);
     expect(playing.value).toBe(false);
+  });
+
+  it('plays the newest text when the poem is edited while the first Play loads', async () => {
+    // Nothing plays yet, so the edit's compile calls no play() of its own (it hands over only what
+    // is playing): were the first play() to give up, the pressed Play would do nothing, silently.
+    const prosody = await import('../src/player');
+    const playingNow = prosody.play();
+    await heldAtThePerformance();
+    const edited = 'Tyger Tyger, burning brighter,';
+    poem.value = edited;
+    const first = answer!;
+    answer = null;
+    first();
+    await heldAtThePerformance();
+    expect(statusText.value).toMatch(/changed while the player loaded/);
+    answer!();
+    await playingNow;
+    expect(asked.mock.calls.filter(([path]) => path === '/performance').map(([, text]) => text))
+      .toEqual(['Tyger Tyger, burning bright,', edited]);
+    expect(starts()).toEqual(['play']);
+    expect(playing.value).toBe(true);
+  });
+
+  it('plays the side chosen while the first Play loads', async () => {
+    const prosody = await import('../src/player');
+    const playingNow = prosody.play();
+    await heldAtThePerformance();
+    hearing.value = 'B';
+    const first = answer!;
+    answer = null;
+    first();
+    await heldAtThePerformance();
+    answer!();
+    await playingNow;
+    expect(starts()).toEqual(['play']);
+    expect(playing.value).toBe(true);
+    expect(statusText.value).toMatch(/^B · /);
+    hearing.value = 'A';
+  });
+
+  it('leaves a live edit\'s newer version to its own compile while playing', async () => {
+    // Playing, an edit's hand-over loads, and a second edit lands before it arrives: that edit's
+    // compile calls play() itself, so this one gives up rather than load the same text twice.
+    const prosody = await import('../src/player');
+    const first = prosody.play();
+    await heldAtThePerformance();
+    answer!();
+    await first;
+    toWorker.length = 0;
+    answer = null;
+    asked.mockClear();
+    poem.value = 'Tyger Tyger, burning brighter,';
+    const edit = prosody.play();
+    await heldAtThePerformance();
+    poem.value = 'Tyger Tyger, burning brightest,';
+    answer!();
+    await edit;
+    expect(starts()).toEqual([]);
+    expect(asked.mock.calls.filter(([path]) => path === '/performance')).toHaveLength(1);
+    expect(playing.value).toBe(true);
   });
 
   it('gives up a live edit\'s hand-over when Stop comes first', async () => {
