@@ -106,6 +106,21 @@ impl Compressor {
     /// A compressor set to `setting` at `rate` frames a second, at rest.
     #[must_use]
     pub fn new(setting: Setting, rate: f64) -> Self {
+        let mut compressor = Self {
+            setting,
+            attack: 0.0,
+            release: 0.0,
+            makeup: 0.0,
+            reduction: 0.0,
+        };
+        compressor.set(setting, rate);
+        compressor
+    }
+
+    /// Set to `setting` at `rate`, keeping the reduction it has reached: a live edit that changes
+    /// the curve moves the gain from where it is, at the new attack or release, rather than
+    /// starting again from rest (which would jump to the makeup alone for the attack's length).
+    pub fn set(&mut self, setting: Setting, rate: f64) {
         let coefficient = |seconds: f64| {
             if seconds > 0.0 {
                 math::exp(-1.0 / (seconds * rate))
@@ -113,13 +128,10 @@ impl Compressor {
                 0.0
             }
         };
-        Self {
-            setting,
-            attack: coefficient(setting.attack * ATTACK_SCALE),
-            release: coefficient(setting.release * RELEASE_SCALE),
-            makeup: setting.makeup(),
-            reduction: 0.0,
-        }
+        self.setting = setting;
+        self.attack = coefficient(setting.attack * ATTACK_SCALE);
+        self.release = coefficient(setting.release * RELEASE_SCALE);
+        self.makeup = setting.makeup();
     }
 
     /// Its setting.
@@ -197,5 +209,27 @@ mod tests {
             "{}",
             c.reduction
         );
+    }
+
+    #[test]
+    fn a_new_setting_carries_on_from_the_reduction_reached() {
+        // Settled at 0 dBFS under −24 dB 7:1, the reduction is −16.2857 dB. Set to −10 dB 2:1,
+        // whose curve at 0 dBFS is 0 + (½ − 1)·(10 − 5) = −2.5 dB and whose makeup is 1.5 dB, the
+        // reduction is kept; the next frame at 0 dBFS asks for less, so it moves by one release step
+        // (6 × 20 ms = 0.12 s, a = e^(−1/5760)): −16.2857·a − 2.5·(1 − a) = −16.28331 dB, and the
+        // gain is 10^((−16.28331 + 1.5)/20) = 0.18233. Started again from rest it would be
+        // 10^((−2.5·(1 − e^(−1/28.8)) + 1.5)/20) = 1.18.
+        let rate = 48_000.0;
+        let mut c = Compressor::new(Setting::layer(-24.0, 7.0), rate);
+        for _ in 0..4_800 {
+            c.gain(1.0);
+        }
+        let reached = c.reduction;
+        c.set(Setting::layer(-10.0, 2.0), rate);
+        assert_eq!(c.reduction.to_bits(), reached.to_bits());
+        assert_eq!(c.setting(), Setting::layer(-10.0, 2.0));
+        let g = c.gain(1.0);
+        assert!((c.reduction + 16.283_31).abs() < 1e-4, "{}", c.reduction);
+        assert!((g - 0.182_33).abs() < 1e-4, "{g}");
     }
 }

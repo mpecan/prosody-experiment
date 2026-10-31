@@ -51,6 +51,12 @@ impl EchoLine {
         self.left.len() == frames.max(1) && self.feedback.to_bits() == feedback.to_bits()
     }
 
+    /// Whether it has gone quiet: nothing sent for longer than its tail (or nothing ever sent), so
+    /// with nothing more sent it will only ever return silence.
+    pub(crate) const fn is_quiet(&self) -> bool {
+        self.quiet >= self.tail
+    }
+
     /// One frame: `x`, `y` in, the repeats out.
     pub(crate) fn process(&mut self, x: f64, y: f64) -> (f64, f64) {
         if x != 0.0 || y != 0.0 {
@@ -109,5 +115,38 @@ mod tests {
         // At 0.35, 0.35^14 = 4.1e-7 is the first repeat under a millionth: 15 repeats of 10 frames.
         let line = EchoLine::new(10, 0.35);
         assert_eq!(line.tail, 150);
+    }
+
+    #[test]
+    fn once_quiet_it_is_silent_and_nothing_left_comes_back() {
+        // A unit impulse at frame 0, then silence. At the 150th silent frame the 15th repeat
+        // (0.35^14 = 4.1e-7) comes out and goes back into the line as 0.35^15 = 1.4e-7; that frame
+        // reaches the tail, so the line counts as quiet from then on. The next silent frame is
+        // silence, and clears the line. A new impulse of 0.5 then returns 0.5 ten frames later and
+        // 0.175 ten after that, and exactly nothing anywhere else — without the clearing, the old
+        // 1.4e-7 would come round in its slot.
+        let mut line = EchoLine::new(10, 0.35);
+        line.process(1.0, 1.0);
+        for _ in 0..149 {
+            line.process(0.0, 0.0);
+        }
+        assert!(!line.is_quiet());
+        line.process(0.0, 0.0);
+        assert!(line.is_quiet());
+        assert!(line.left.iter().any(|x| *x != 0.0));
+        assert_eq!(line.process(0.0, 0.0), (0.0, 0.0));
+        assert!(line.left.iter().chain(&line.right).all(|x| *x == 0.0));
+        let out: Vec<(f64, f64)> = (0..30)
+            .map(|n| line.process(if n == 0 { 0.5 } else { 0.0 }, 0.0))
+            .collect();
+        for (n, (l, r)) in out.iter().enumerate() {
+            let expected = match n {
+                10 => 0.5,
+                20 => f64::from(0.175_f32),
+                _ => 0.0,
+            };
+            assert_eq!((*l, *r), (expected, 0.0), "frame {n}");
+        }
+        assert!(!line.is_quiet());
     }
 }

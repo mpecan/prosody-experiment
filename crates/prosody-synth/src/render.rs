@@ -327,16 +327,13 @@ impl Renderer {
         starts.sort_unstable();
         let mut cursor = from;
         for start in &starts {
-            self.render_voices(from, cursor, start.at);
+            // The stretch up to the note is finished before the note can change its channel's bus,
+            // so a change lands on the note's frame, not on the block's first.
+            self.render_stretch(stems, from, cursor, start.at);
             cursor = start.at;
             self.begin(*start);
         }
-        self.render_voices(from, cursor, to);
-        for (channel, bus) in Channel::ALL.iter().zip(&mut self.buses) {
-            if let Some((left, right)) = stems.sides_mut(*channel) {
-                bus.finish(left, right);
-            }
-        }
+        self.render_stretch(stems, from, cursor, to);
         self.starts = starts;
         if takeover.is_some_and(|at| at <= to) {
             self.now = self.next.take();
@@ -367,8 +364,9 @@ impl Renderer {
         }
     }
 
-    /// Renders every voice over output frames `from..to` of the block starting at `block`.
-    fn render_voices(&mut self, block: u64, from: u64, to: u64) {
+    /// Renders output frames `from..to` of the block starting at `block` into `stems`: every
+    /// voice into its bus, then every bus through its effects into its stem.
+    fn render_stretch(&mut self, stems: &mut Stems, block: u64, from: u64, to: u64) {
         if to <= from {
             return;
         }
@@ -376,6 +374,20 @@ impl Renderer {
         else {
             return;
         };
+        self.render_voices(offset, length);
+        let end = offset + length;
+        for (channel, bus) in Channel::ALL.iter().zip(&mut self.buses) {
+            if let Some((left, right)) = stems.sides_mut(*channel)
+                && let (Some(left), Some(right)) =
+                    (left.get_mut(offset..end), right.get_mut(offset..end))
+            {
+                bus.finish(offset, left, right);
+            }
+        }
+    }
+
+    /// Renders every voice over `length` frames from frame `offset` of the block.
+    fn render_voices(&mut self, offset: usize, length: usize) {
         for slot in self.pool.voices_mut() {
             let Some(voice) = slot else { continue };
             let Some(lanes) = self

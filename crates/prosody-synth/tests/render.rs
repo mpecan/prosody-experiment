@@ -11,8 +11,8 @@
 )]
 
 use prosody_synth::{
-    Bank, Channel, Effects, Gain, Hertz, Midi, Note, NoteSpec, Piece, Renderer, Repeat, STEMS,
-    Sample, SampleRate, Seconds, Source, Stems, VOICES,
+    Bank, Channel, Compression, Echo, Effects, Gain, Hertz, Midi, Note, NoteSpec, Piece, Renderer,
+    Repeat, STEMS, Sample, SampleRate, Seconds, Source, Stems, VOICES,
 };
 
 const RATE: u32 = 8_000;
@@ -247,7 +247,126 @@ fn the_same_piece_renders_the_same_samples() {
         run(&mut renderer, 120)
     };
     let (a, b) = (make(), make());
-    let bits =
-        |out: &Vec<Vec<f32>>| -> Vec<u32> { out.iter().flatten().map(|x| x.to_bits()).collect() };
+    assert_eq!(bits(&a), bits(&b));
+}
+
+/// Renders `frames` frames in blocks of `block`, and returns both sides of every stem, end to end.
+fn run_blocks(renderer: &mut Renderer, block: usize, frames: usize) -> Vec<Vec<f32>> {
+    let mut stems = Stems::new(block);
+    let mut out = vec![Vec::new(); 2 * STEMS];
+    for _ in 0..frames / block {
+        renderer.render(&mut stems);
+        for channel in Channel::ALL {
+            out[2 * channel.index()].extend_from_slice(stems.side(channel, false));
+            out[2 * channel.index() + 1].extend_from_slice(stems.side(channel, true));
+        }
+    }
+    out
+}
+
+fn bits(out: &[Vec<f32>]) -> Vec<u32> {
+    out.iter().flatten().map(|x| x.to_bits()).collect()
+}
+
+/// `note` with `effects`.
+fn with(note: &Note, effects: Effects) -> Note {
+    Note::new(NoteSpec {
+        effects,
+        ..*note.spec()
+    })
+    .unwrap()
+}
+
+fn compressed(threshold: f64, ratio: f64) -> Effects {
+    Effects {
+        compression: Compression::new(threshold, ratio),
+        ..Effects::DRY
+    }
+}
+
+/// A dry, looping piece of one drum at its top: what each history below is compared on.
+fn dry_piece() -> Piece {
+    piece(vec![hit(0, 0.0, Channel::Drums)], &[0.0], 1.0, Repeat::Loop)
+}
+
+#[test]
+fn a_piece_after_a_stop_sounds_as_it_does_on_a_fresh_renderer() {
+    // A compressed piece, stopped, then a dry one: the dry piece's stems are the bits a renderer
+    // that had played nothing gives it. A compressor kept from the first piece would lift the dry
+    // drum by its makeup (9.77 dB at −24 dB, 7:1).
+    let mut fresh = Renderer::new(rate(), burst_bank(300));
+    fresh.play(dry_piece());
+    let expected = run_blocks(&mut fresh, 100, 4_000);
+    let mut used = Renderer::new(rate(), burst_bank(300));
+    used.play(piece(
+        vec![with(&hit(0, 0.0, Channel::Drums), compressed(-24.0, 7.0))],
+        &[0.0],
+        1.0,
+        Repeat::Loop,
+    ));
+    run_blocks(&mut used, 100, 2_000);
+    used.stop();
+    used.play(dry_piece());
+    assert_eq!(bits(&run_blocks(&mut used, 100, 4_000)), bits(&expected));
+}
+
+#[test]
+fn a_dry_edit_after_a_compressed_piece_sounds_as_it_does_on_a_fresh_renderer() {
+    // The compressed piece has one bar, so an edit at frame 3 200 takes over when it comes round,
+    // at frame 8 000, from the dry piece's top. Its 300-frame drum ended long before, so from 8 000
+    // on the stems must be the dry piece's own, as a fresh renderer plays it from frame 0.
+    let mut fresh = Renderer::new(rate(), burst_bank(300));
+    fresh.play(dry_piece());
+    let expected = run_blocks(&mut fresh, 100, 4_000);
+    let mut used = Renderer::new(rate(), burst_bank(300));
+    used.play(piece(
+        vec![with(&hit(0, 0.0, Channel::Drums), compressed(-24.0, 7.0))],
+        &[0.0],
+        1.0,
+        Repeat::Loop,
+    ));
+    run_blocks(&mut used, 100, 3_200);
+    let placement = used.swap(dry_piece());
+    assert_eq!((placement.out_start, placement.piece_start), (8_000, 0));
+    run_blocks(&mut used, 100, 4_800);
+    assert_eq!(bits(&run_blocks(&mut used, 100, 4_000)), bits(&expected));
+}
+
+#[test]
+fn an_edit_that_changes_a_bus_sounds_the_same_whatever_the_block_size() {
+    // A one-second drum, compressed at −24 dB 7:1 and echoed every 0.25 s, is still sounding when
+    // an edit takes over at frame 4 000 (A's bar 1, from B's bar 1, frame 4 000). B's drum at its
+    // 0.55625 s, output frame 4 450, sets the channel's compressor to −10 dB 2:1 and its echo to
+    // 0.3 s. Frame 4 450 falls inside a block at both 100 frames (4 400..4 500) and 128
+    // (4 352..4 480); the change must land on frame 4 450 either way, so the bits are the same.
+    let render = |block: usize| {
+        let mut renderer = Renderer::new(rate(), burst_bank(8_000));
+        let mut first = compressed(-24.0, 7.0);
+        first.echo = Echo::new(Gain::new(0.5).unwrap(), seconds(0.25), 0.35);
+        let mut second = compressed(-10.0, 2.0);
+        second.echo = Echo::new(Gain::new(0.5).unwrap(), seconds(0.3), 0.35);
+        renderer.play(piece(
+            vec![with(&hit(0, 0.0, Channel::Drums), first)],
+            &[0.0, 0.5],
+            1.0,
+            Repeat::Loop,
+        ));
+        let mut out = run_blocks(&mut renderer, block, 3_200);
+        let placement = renderer.swap(piece(
+            vec![with(&hit(0, 0.556_25, Channel::Drums), second)],
+            &[0.0, 0.5],
+            1.0,
+            Repeat::Loop,
+        ));
+        assert_eq!((placement.out_start, placement.piece_start), (4_000, 4_000));
+        for (side, more) in out.iter_mut().zip(run_blocks(&mut renderer, block, 9_600)) {
+            side.extend(more);
+        }
+        out
+    };
+    let (a, b) = (render(100), render(128));
+    // The edit's drum did start at 4 450: the stem steps up there, by the second drum's level.
+    let drums = &a[2 * Channel::Drums.index()];
+    assert!((drums[4_450] - drums[4_449]).abs() > 0.1);
     assert_eq!(bits(&a), bits(&b));
 }
