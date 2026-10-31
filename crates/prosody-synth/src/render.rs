@@ -341,7 +341,7 @@ impl Renderer {
 
     /// Cuts the reading off at output frame `at`: a line sounding there fades out over
     /// [`crate::CUT_FADE`] frames, one placed to start at or after it is let go, and the music
-    /// rises back from there.
+    /// rises back from there (after [`crate::DUCK_RELEASE_DELAY`]), its hold not kept.
     pub fn cut_speech(&mut self, at: u64) {
         self.speech.cut(at);
     }
@@ -349,12 +349,6 @@ impl Renderer {
     /// The music's level under a line of the reading, from the frontier on: 1 for no duck.
     pub fn set_duck(&mut self, level: Gain) {
         self.speech.set_level(level);
-    }
-
-    /// The lines of the reading placed and not yet finished, by number.
-    #[must_use]
-    pub fn speaking(&self) -> Vec<u32> {
-        self.speech.speaking().collect()
     }
 
     /// Renders the next `stems.frames()` frames into `stems`, replacing what it held.

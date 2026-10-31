@@ -440,7 +440,6 @@ fn a_line_of_the_reading_sounds_on_its_own_stem_over_the_music_and_ducks_it() {
         })
         .unwrap();
     assert_eq!((spoken.start, spoken.end), (250, 300));
-    assert_eq!(renderer.speaking(), vec![3]);
     let mut stems = Stems::new(400);
     renderer.render(&mut stems);
     assert_eq!(onsets(stems.side(Channel::Drums, false)), vec![0]);
@@ -496,5 +495,4 @@ fn a_stop_lets_the_reading_go_with_the_music() {
     renderer.render(&mut stems);
     assert!(stems.side(Channel::Speech, false).iter().all(|x| *x == 0.0));
     assert!(stems.duck().iter().all(|x| (*x - 1.0).abs() < 1e-9));
-    assert!(renderer.speaking().is_empty());
 }
