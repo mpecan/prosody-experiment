@@ -442,8 +442,25 @@ Step 5 of `docs/player.md` for Android (iOS later); what reality changed in the 
   held and the session `PLAYING` throughout; the emulator's output reported two xruns in the long run
   and the playhead ended 3.5 s behind the wall clock there (within 0.5 s in the 60 s run). A headset
   pause dispatched with the screen off (`cmd media_session dispatch pause`) stopped the music and the
-  session; `input keyevent` media keys are not routed with the emulator's screen off. Left: the output
-  stream stays open, playing silence, while stopped.
+  session; `input keyevent` media keys are not routed with the emulator's screen off.
+- **Review remediation.** A failed output (a route change, the audio server restarting: cpal's
+  `DeviceNotAvailable`) is reopened by the render thread, which now holds the stream, at the same
+  rate, on a new channel to a fresh mixer, the engine going on from its frontier in the same start of
+  play (`Engine::reopened`); it counts as one glitch, is reopened only while something plays, and a
+  reopen that fails is told once and retried every second. Nothing playing for a second, the stream
+  pauses and the render thread parks until a command; the page asks every 500 ms instead of 40 ms
+  while stopped. The lead narrows again: twice the largest buffer since the page was last shown while
+  shown, twice the largest ever while hidden (`player_view`, `Engine::keep` replacing `widen`). A
+  lock-screen Play is kept 5 s, and a stop cancels it. `PlaybackService` keeps the latest state asked
+  for, so a Stop during its creation brings it up stopped and gone; a refused audio focus stops the
+  music. The notification is told of starts and stops under the player's lock. Pinned by tests that
+  fail without the fixes: the render thread's rounds against a pretend output (a loss reopened and
+  played on from the frontier, a failing reopen told once and retried, no reopen while stopped, the
+  idle pause and the resume, a stuck resume reopened), a lost output's replacement channel, the lead
+  narrowing and widening, a stale Play let go, the notification told under the lock, the engine's
+  `keep` and `reopened` (Rust); the idle poll and the hiding told (Vitest). The Kotlin compiles
+  (`compileUniversalDebugKotlin`) and the app passes clippy for `aarch64-linux-android`; none of it
+  has been run on a device yet.
 
 ### The player, step 4 — the reading through the player, and Strudel's runtime gone
 

@@ -582,8 +582,10 @@ departs from §5 and §7 above, and why:
   the app (`__TAURI_INTERNALS__` present) the page opens the native player instead of the worker and
   the worklet (`player_open`), posts the same messages (`player_post`), sends the worklet's mute,
   solo and duck (`player_mix`), and asks for the output's report and the engine's events every 40 ms
-  (`player_poll`). Polled, not pushed: a paused WebView would pile up a call for every report while
+  while it plays, every half second while it does not (`player_poll`; a message posted brings the
+  next ask forward). Polled, not pushed: a paused WebView would pile up a call for every report while
   the screen is off; the app keeps what happened (up to 4 096 events, and says how many it let go).
+  It also says when it is hidden or shown (`player_view`), for the lead below.
   A buffer cannot cross Android's WebView bridge — Tauri sends every call there as JSON, since that
   WebView cannot read a request body — so samples, records and recorded lines go as base64 of their
   little-endian bytes. The page still decodes the samples (the same FLAC, at its own rate, §11), so
@@ -600,9 +602,32 @@ departs from §5 and §7 above, and why:
   what has arrived, reads the stems' gains from atomics, mixes, writes its report to atomics. It
   takes no lock and frees nothing (finished blocks go back to be rendered into), and what the channel
   has no room for waits in the render thread's outbox, in order. **The lead is at least twice the
-  output's largest buffer** (`Engine::widen`), since a phone's buffer can grow, and a lead shorter
-  than a buffer runs dry inside it. An output xrun (cpal's `Xrun`) is counted and said with the
-  losses ("the phone's audio output glitched"), not reported as a failure.
+  output's largest buffer** (`Engine::keep`), since a phone's buffer can grow, and a lead shorter
+  than a buffer runs dry inside it. Every frame of lead is also a frame later that a live edit is
+  heard (a swap takes over at the first bar after the frontier), so the lead does not stay wide for
+  the rest of the session: while the page is shown it is twice the largest buffer *since it was last
+  shown*, back to the half second once the buffers are small again; while it is hidden (the screen
+  off) it is twice the largest buffer *ever seen*, widened the moment the page hides rather than
+  after the buffer has grown and the queue run dry inside it. A lead that narrows lets go of nothing
+  already rendered — the engine waits for the output to catch up. If the page's hiding never reaches
+  the app, the lead still widens as the buffer grows, as before. An output xrun (cpal's `Xrun`) is
+  counted and said with the losses ("the phone's audio output glitched"), not reported as a failure.
+- **A failed output is reopened by the render thread.** Any other stream error — on Android a route
+  change (headphones or Bluetooth in or out) or the audio server restarting, which cpal reports as
+  `DeviceNotAvailable` — ends an AAudio stream's callbacks for good, and AAudio must not be reopened
+  from its own callback. The error callback only marks the output lost (and counts one glitch: what
+  was in flight is not heard); the render thread, which holds the stream, drops it and opens the
+  default output again at the same rate (the engine's, and the rate the page decoded its samples
+  at; AAudio resamples), on a new channel to a fresh mixer, and the engine goes on from its frontier
+  in the same start of play (`Engine::reopened`: a flush tells the new mixer where its count starts).
+  It is reopened only when something plays, and if it will not open the page is told once and it is
+  tried again every second. Before, the player stayed silent until the page was reloaded.
+- **Nothing playing, the output pauses and the render thread sleeps.** After about a second with
+  nothing playing and nothing to send (long past a stop's fade, so Stop then Play does not cycle the
+  stream), the render thread pauses the stream and parks until a command wakes it; a Play resumes the
+  stream in the same round that renders its first blocks. An open AAudio stream keeps the phone's
+  audio path powered, and before API 30 nothing freezes an idle app, so the silence it played after
+  the first Play, the 5 ms loop and the page's 40 ms ask all ran for as long as the app was open.
 - **The screen off is a foreground service.** Android freezes or kills an app with nothing in the
   foreground; one that plays music says so with a service of type `mediaPlayback` and its media
   notification (`PlaybackService`, platform `MediaSession` and `Notification.MediaStyle`, so no new
@@ -612,8 +637,17 @@ departs from §5 and §7 above, and why:
   user anything: a media session's notification needs no `POST_NOTIFICATIONS`. **Prosody has no
   pause**, so the notification and lock screen show Stop while playing and Play after: Stop (or a
   headset's pause) stops the music in the app at once — the page may be asleep — and the page follows
-  when it wakes; Play asks the page to play, since only the page can make the piece, so with the page
-  asleep it waits for it.
+  when it wakes; Play asks the page to play, since only the page can make the piece. That ask is kept
+  for 5 s: an awake page hears it within half a second, and a page asleep (the screen off) does not
+  start the music whenever it next wakes, perhaps hours after whoever pressed Play gave up; a stop
+  after it cancels it. So with the page asleep the lock screen's Play does nothing (Android shows it
+  anyway; hiding it while the page sleeps would need the page to say it sleeps, which a paused page
+  cannot). The audio focus is asked for and checked: refused (a phone call is on), the music stops
+  at once rather than playing over the call. The service keeps the latest state asked for, so a Stop
+  that arrives while Android is still creating the service (after a Play that started it) brings it
+  up stopped and gone, not playing with a wake lock and the focus that nothing would release. The
+  notification hears of each start and stop while the player is held, so a headset's stop and the
+  page's next Play reach it in the order they happened.
 - **Debug builds optimise the synth.** Measured on the emulator, a debug app's render thread took
   36% of a core at opt-level 0, and the system's work as the screen went off or came back on starved
   it past its half-second lead (the queue ran dry, 3 to 47 buffers at a time); at opt-level 2 it
@@ -631,6 +665,7 @@ departs from §5 and §7 above, and why:
   and the queue never dry, and the playhead within half a second of the wall clock over a minute off
   — except in one run of 3 min 15 s, six screen-offs, where the emulator's output reported two xruns
   and the playhead was 3.5 s behind: the output itself stalling, below the queue; a headset pause dispatched with the screen off stopped
-  the music and the session, and the page showed it stopped when woken. Not done: the output stream
-  stays open, playing silence, while nothing plays (it is closed only when the page reopens the player
-  or the app ends); pausing it when idle would save battery and is left for a measured reason.
+  the music and the session, and the page showed it stopped when woken. The reopened output, the
+  idle pause, the narrowing lead and the service's fixes after review are tested on the host (a
+  pretend output for the render thread's rounds) and compiled for Android, not yet run on a device:
+  a route change on the emulator and on the Pixel is the check still owed.
