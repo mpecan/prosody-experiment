@@ -52,12 +52,36 @@ const POEMS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Every case: a fixture name, a corpus poem, and the page's query — the palette and the
-/// mappings. Every poem under the defaults, and then settings chosen to reach every parameter and
-/// every way a note is placed: swing under both pulses (the elastic one reaching Strudel's
-/// `swingBy` departures, which the parity test names), humanise and density, chords and their
-/// turnarounds, walking basses, the straight stack, anchors, articulated drums, slant rhymes,
-/// assonance, oscillators, no compression and no echo.
+/// A poem the corpus does not have: a stanza longer than `arrange::LONG_STANZA` (eight lines) whose
+/// loop the next stanza arrives over, so the arrival erodes it (`SPEC.md` §4.6, erosion) — the
+/// default for long stanzas, and a way a note is placed that no corpus poem reaches (their stanzas
+/// are at most four lines). Every line two iambs, so both stanzas are one layer and one loop.
+const LONG_STANZA: &str = "\
+the river runs
+the willow bends
+the morning comes
+the meadow wakes
+the swallow flies
+the shadow falls
+the water turns
+the evening ends
+the lantern burns
+
+the summer goes
+the winter stays
+";
+
+/// Every case: a fixture name, a poem, and the page's query — the palette and the mappings. Every
+/// corpus poem under the defaults, and then settings chosen to reach the parameters and the ways a
+/// note is placed that the defaults do not: swing under both pulses (the elastic one reaching
+/// Strudel's `swingBy` departures, which the parity test names), humanise and density, chords and
+/// their turnarounds, chords at a density level below one, walking basses, the straight stack,
+/// anchors, articulated drums, slant rhymes, assonance, oscillators, no compression and no echo, a
+/// long stanza eroding under an arrival and the same stanza handed over line by line with no outro.
+///
+/// Not every combination: a placement or parameter the cases do not reach is compared only through
+/// the Rust properties (`prosody-emit/tests/perform.rs`), not against Strudel.
+/// `the_cases_reach_what_they_claim` checks that the cases named for a placement do reach it.
 const CASES: &[(&str, &str, &str)] = &[
     ("pentameter", "pentameter", ""),
     ("free-verse", "free-verse", ""),
@@ -97,7 +121,29 @@ const CASES: &[(&str, &str, &str)] = &[
         "set=stack:straight,bass:syllables,function-words:light,harmony:cadence,pulse:elastic\
          &swing=0.5&scale=lydian&root=F%23&humanise=1",
     ),
+    // Chords in bars that hold several lines, at a density level: the chord lane's gain below 1.
+    (
+        "villanelle-harmony-density",
+        "villanelle",
+        "set=harmony:both&density_level=0.7",
+    ),
+    // A long stanza eroding under the next (the default), and handed over line by line instead,
+    // with the outro switched off.
+    ("long-stanza", "long-stanza", ""),
+    (
+        "long-stanza-gradual",
+        "long-stanza",
+        "set=long-stanzas:gradual&off=outro",
+    ),
 ];
+
+/// The poem a case names: a corpus poem, or [`LONG_STANZA`].
+fn poem_named(name: &str) -> &'static str {
+    if name == "long-stanza" {
+        return LONG_STANZA;
+    }
+    POEMS.iter().find(|(poem, _)| *poem == name).unwrap().1
+}
 
 /// Where the fixtures live: beside the page's tests.
 fn directory() -> PathBuf {
@@ -150,8 +196,7 @@ fn the_parity_fixtures_are_what_the_compiler_makes() {
     let bless = std::env::var_os("PROSODY_BLESS").is_some();
     let mut stale = Vec::new();
     for (name, poem, query) in CASES {
-        let text = POEMS.iter().find(|(p, _)| p == poem).unwrap().1;
-        let made = fixture(&site, name, text, query);
+        let made = fixture(&site, name, poem_named(poem), query);
         let path = directory().join(format!("{name}.json"));
         if bless {
             std::fs::create_dir_all(directory()).unwrap();
@@ -182,4 +227,46 @@ fn the_parity_fixtures_are_what_the_compiler_makes() {
             "{file} is no case's fixture"
         );
     }
+}
+
+/// The text and the Performance of a case, made now.
+fn made(site: &Site, case: &str) -> (String, String) {
+    let (_, poem, query) = CASES.iter().find(|(name, ..)| *name == case).unwrap();
+    let ask = |view: &str| {
+        let target = if query.is_empty() {
+            view.to_owned()
+        } else {
+            format!("{view}?{query}")
+        };
+        let response = site.respond(&Request::new("POST", &target, poem_named(poem).to_owned()));
+        assert_eq!(response.status, 200, "{case} {target}: {}", response.body);
+        response.body
+    };
+    (ask("/pattern"), ask("/performance"))
+}
+
+#[test]
+fn the_cases_reach_what_they_claim() {
+    // A case added for a placement or a parameter is only a guard while it still reaches it: a
+    // change to the arrangement or to a palette default could quietly move it off, and the parity
+    // test would keep passing over notes that no longer exercise anything.
+    let site = Site::new(Transport::Server).unwrap();
+
+    // Chords whose gain is a density level below one. Each note's JSON starts at its `from`.
+    let (_, performance) = made(&site, "villanelle-harmony-density");
+    let quiet_chords = performance
+        .split("{\"from\":")
+        .filter(|note| note.contains("\"channel\":\"chords\""))
+        .filter(|note| !note.contains("\"gain\":1.000000,"))
+        .count();
+    assert!(quiet_chords > 0, "no chord below gain 1: {performance}");
+
+    // The long stanza erodes under the default, and not under `gradual`.
+    let (eroding, _) = made(&site, "long-stanza");
+    assert!(
+        eroding.contains("long-stanzas = erode: 6 bar(s) over an eroding loop"),
+        "{eroding}"
+    );
+    let (gradual, _) = made(&site, "long-stanza-gradual");
+    assert!(!gradual.contains("over an eroding loop"), "{gradual}");
 }
