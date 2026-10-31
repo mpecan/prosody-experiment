@@ -63,6 +63,12 @@ prints (`prosody_emit::perform`), so the two backends cannot drift. It is realis
 style may be read (I3); no mapping changed. A parity test plays the Strudel text with Strudel itself
 and compares it note for note.
 
+**And the rest (steps 2–4):** `prosody-synth` renders the Performance to stems in a worker, and since
+step 4 it is the page's and the app's only player — the reading included (§4.7): its lines are
+placed on the music's clock by the render worker, from the Performance's cues. Strudel's runtime is
+no longer loaded; Strudel/Tidal text remains what the compiler writes, and the page shows, copies,
+shares and links it to strudel.cc. No mapping changed.
+
 ---
 
 ## 4. Mappings
@@ -667,8 +673,8 @@ voice. Not a style key: the CLI never reads aloud, and no palette moves a cue (I
   `Onset`), deterministic and hand-tested, and travel in the `/reading` answer per line (`lines`,
   with `pace`, `pause`, `ends`, `onset`, `slot`, `stanza` and each word's syllables) and in the
   header comments of a second cue pattern (`natural`), whose cues are the onset bars. The rest is
-  timed by the page on the audio clock, from the time Strudel's `onTrigger` gives for each onset
-  bar, because only it knows how long a voice takes. **Past the end** at this pace: a line that
+  timed by the player's render worker on the music's clock, from each onset bar's time in the
+  Performance's cues, because only it knows how long a voice takes (`docs/player.md` §5). **Past the end** at this pace: a line that
   would start at or after the piece's end is not read that time round, and the page says so in its
   status (`not read this time round: line …`); a stanza the music never begins is listed in the
   answer's `natural_unread`. **Disclosed against I2:** a stanza's start can depend on how long the
@@ -732,17 +738,19 @@ the page — `load(onProgress)`, `voices(language)`, `render(text, { voice, spee
   line's text or its pace fails until they are rendered again.
 
 The neural engines each run in a module worker of their own (`speech-worker.mjs`), so their
-computing never blocks the thread Strudel's scheduler ticks on. A model downloads only once its
+computing never blocks the page's own thread. A model downloads only once its
 engine is chosen (the default on the first play), with its progress in the status bar, and is kept
 by the browser. After each compile every line is **rendered ahead**, at the speed the pace asks for
 — the line's pace (render-time speed, so no pitch shift), or under `fitted` its rate — and kept by
 engine, voice, speed and text, so a recompile reuses every line it did not change. A rendered line
-is trimmed of the model's silence, keeping 10 ms either side, and is **started exactly on the
-audio clock** by an `AudioBufferSourceNode`, its speech beginning at the time the cue's bar begins
-(or the chain gives) — never by a timer. A line not rendered by its turn: at the natural pace the
-chain waits for it and the status says so; at the fitted pace the browser's voice reads it. The
-voice goes through the page's master stage at its own **reading level**, and the music is ducked
-while any line of a stanza is read (kept down through the pauses between them). The word marker
+is trimmed of the model's silence, keeping 10 ms either side, and is **placed exactly on the
+music's clock**: the player's render worker puts it on the reading's stem by the frame, its speech
+beginning where the cue's bar begins (or the chain gives) — never by a timer. A line not rendered by
+its turn: at the natural pace the chain waits for it and the status says so; at the fitted pace the
+browser's voice reads it. The browser's voice cannot be placed in a stream: it starts when the
+playhead reaches its line, not in step with the music, and says so. The voice goes through the
+master stage at its own **reading level**, and the music is ducked while any line of a stanza is
+read (kept down through the pauses between them), the duck written from the same placements. The word marker
 follows the voice's word boundaries where it reports them, and otherwise spreads a rendered line's
 words over its length by their syllable counts.
 
@@ -774,16 +782,15 @@ is still being read (the browser's voice runs past the seam, or a neural line is
 the new round starts once that line has finished, from its first cue, after its breath; a line of
 the old round it leaves unread is said in the status bar, never dropped in silence.
 
-"In order" holds from the first bar. Strudel's scheduler keeps its cycle count when it is handed a
-new pattern, so a change while playing would start the new piece partway through. The page
-therefore restarts the clock at bar 1 when the poem is replaced by a preset or the listener
-switches A/B, and reads from the first line. A live edit keeps the clock running, because the
-writer is listening in place: the reading carries on from the bar the clock has reached, and any
-line before that bar waits until the arrangement loops round. A line already queued or being
-spoken from the previous version is dropped when the new one starts. The cue pattern's comments
-escape line terminators and control characters (a pasted U+2028 would otherwise end the comment
-early), and the page evaluates the cue pattern separately, so a reading it cannot cue never stops
-the music.
+"In order" holds from the first bar. The player starts a piece from bar 1 when the poem is
+replaced by a preset or the listener switches A/B, and reads from the first line. A live edit hands
+over at the next bar instead, because the writer is listening in place: the reading carries on from
+that bar, any line before it waits until the arrangement loops round, and a stanza still waits its
+silent bar after the old version's last line. A line already placed or being spoken from the
+previous version is cut off where the new one takes over. The cue pattern's comments escape line
+terminators and control characters (a pasted U+2028 would otherwise end the comment early); the
+page no longer evaluates it — it is shown under the pattern, for reading — and a reading the
+compiler cannot plan never stops the music.
 
 ---
 

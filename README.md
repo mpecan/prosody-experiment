@@ -95,8 +95,9 @@ of the arrangement hands over to the next, over a set number of bars. Everything
 that a tab opens and the open tab (or its handle) folds away. The **Mixer** has every level in one
 place — drums, bass, melody, chords and the voice — each with a meter that moves with what sounds,
 and **M**ute and **S**olo: heard at once, with nothing recompiled and nothing in the pattern
-changed, because the page plays each event through a filter that reads the switches, and a muted
-layer's events stay on the roll, faint. Then **Sound** (styles, the key, the tempo and the
+changed, because each channel is a stem of the page's player and mute and solo are only its gain
+(glided over 5 ms, so a mute mid-note does not click), and a muted layer's events stay on the roll,
+faint. Then **Sound** (styles, the key, the tempo and the
 instruments), **Reading**, **Mappings** (A and B) and **Under the hood** (the pattern, what each
 word became, and the score); the page remembers which was open. It opens with a welcome — what
 *prosody* means and what this experiment does — which stays closed once closed (**about** reopens
@@ -112,17 +113,19 @@ bytes to a couple of kilobytes — and whoever opens it hears the same piece, co
 browser; a line says it is a shared poem, and nothing the link holds is saved over the visitor's
 own settings. Where the link is pasted, its preview shows the poem's own first lines: the site's
 worker reads the link as it passes and puts them in the page's title and description
-(`deploy/preview.js`), keeping nothing. A link opens a stranger's poem in the page, which runs what
-it compiles to, so a test pins that no text of a poem reaches that code
-(`no_poem_text_reaches_the_code_the_page_runs`): the compiled pattern, the reading's cues and the
-trace carry no word of it.
+(`deploy/preview.js`), keeping nothing. A link opens a stranger's poem in the page. The page runs
+nothing it compiles — its player reads the Performance as data — but the pattern is code that
+strudel.cc runs when someone pastes it there, so a test pins that no text of a poem reaches it
+(`no_poem_text_reaches_the_code_the_page_runs`, from when the page ran the pattern too): the
+compiled pattern, the reading's cues and the trace carry no word of it.
 
 The lighting is `SPEC.md` §8's traceability made visible: every lit syllable is the span the sound
-came from. The page gets it from `/trace` (`prosody_emit::trace`), a silent pattern of syllable ids
-built by the same walk of bars and beats as the music and on the same clock, so the light lands
-where the sound does. Each layer in the pattern carries `.color(...)`, which Strudel's sound ignores:
-the page's roll lays the layers out by it, its mixer mutes and solos by it (`site.json` names each
-layer's colour, from the emitter itself), and `pianoroll()` on strudel.cc draws it too.
+came from. The page plays the piece's **Performance** (`prosody_emit::perform`, `docs/player.md`): every
+note and every syllable's light resolved by the compiler, with its time and its words, so the light
+lands where the sound does — both are read at the player's playhead. Each layer in the pattern text
+carries `.color(...)`, which Strudel's sound ignores and `pianoroll()` on strudel.cc draws; the
+page's roll and mixer use the same colours (`site.json` names each layer's colour, from the emitter
+itself).
 
 The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, swing, sample bank,
 the bass and melody instruments, and the mix. Changing one of them changes what you hear and
@@ -204,8 +207,8 @@ refrains in its lane or repeats in the outro. Under `stanza`, a stanza's lines a
 from the first bar any of them is heard in, so a stanza that transforms a loop (one new line a
 pass, five bars apart in The Tyger under `arrives`) is read straight through while the music is
 still turning into it, with no pause after the stanza before it. Under `off`, nothing is read.
-Strudel's own clock fires each line, so it stays on the bar; a line still being spoken when the
-next is due is cut off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
+The page's player places each line on the music's own clock as it renders the music around it, so
+it stays on the bar; a line still being spoken when the next is due is cut off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
 0.6–1.6 — at the **fitted** pace. The default pace is **natural**: each line at the voice's own
 speed, a little faster or slower line by line (0.92–1.08, from the line's own seed), the next after
 a pause from how the line ends (0.25 s running on, 0.45 s at a comma, 0.8 s at a full stop, 1.5 s
@@ -219,34 +222,34 @@ you edit has no recording and is read live, which the status bar says) or your b
 while a model downloads, or if one fails to load or stops working — the status bar says so in red;
 choose the engine again to retry). Each download shows its progress in the status bar
 and is kept by the browser; every line is rendered ahead after each compile, the line due next
-first, and started exactly on the music's clock. A line the reading leaves out — the piece came
+first, and placed by the frame on the player's reading stem, with the music ducked under it from the
+same timeline. Your browser's own voice cannot be placed in the music: it starts when the playhead
+reaches its line, so it is not in step with the music, and the status bar says so. A line the reading leaves out — the piece came
 round, or ended, before its turn — is said in the status bar. At the fitted pace a rendered line too long for its bar is rendered again,
 faster, to fit. An example poem sets its own **language** — Prešeren's Zdravljica is read in
 Slovenian, which only Piper (`sl_SI-artur-medium`) and perhaps your browser can speak. The page
 remembers the engine, pace, level and a voice per engine and language; untick **duck** to stop the
 music dipping while a stanza is read. Add `?device=wasm` to the page's address to keep every
 engine off WebGPU. The Pattern tab shows the cue pattern under the music's, and the
-browser console logs every line as it is cued and started: which bar, which bytes, which rate or
-pace, which engine, and how late if a render was. Picking a
+browser console logs every line as it is placed: when, which bytes, which pace, which engine, and
+how late if a render was. Picking a
 preset or switching A/B while playing starts the piece again from bar 1, so the reading begins at
 the first line. A live edit keeps playing from where it is, and the reading carries on from there.
-If Strudel's scheduler ever falls behind — it skips a tick it reaches too late, and every note and
-cue in that tick is lost, saying so only on the console — the status bar says so in red:
-`Strudel fell behind: 58 tick(s) not played, their notes unheard; not read: line 10`.
-Nothing the page does should cause that: it parses a new pattern's mini-notation ahead, a few
-milliseconds at a time between the scheduler's ticks, and remembers what it has parsed, so a live
-edit to "Patterns" while it plays — about 1,200 strings, a second to parse — swaps in the new
-version without a gap (an edit changes only the strings of the voices it touches).
+The music and the reading are rendered about half a second ahead, in a worker, and only mixed on
+the audio thread, so a busy page cannot make a note or a line late (`docs/player.md`); if the
+audio ever runs dry anyway, the status bar says so in red.
 It is a
 candidate mapping and a page-only one — the CLI's pattern and strudel.cc know nothing of it
 (`SPEC.md` §4.7).
 
 It binds to `127.0.0.1` only, and deliberately: it compiles arbitrary text from a request body,
-which is exactly right on your own machine and exactly wrong on a network. Playback loads Strudel,
-the drum-machine samples (the map strudel.cc uses) and the General MIDI soundfonts from CDNs, so
-the first Play needs an internet connection; each instrument a pattern uses is loaded before it
-starts. The page's output goes through a gentle compressor and then a soft clipper that cannot
-exceed 0.95, so a dense bar bends rather than clips.
+which is exactly right on your own machine and exactly wrong on a network. Playback needs no
+network: the player is Prosody's own (`docs/player.md`) — a synth in Rust, compiled to WebAssembly,
+rendering in a worker — and the drum kits, the soundfonts (lossless zones converted from the
+licensed General MIDI files) and the recorded readings are all served beside the page; each sound a
+piece uses is loaded before it starts. Only a neural voice, once chosen, downloads its model. Strudel's runtime is not loaded at all: the pattern is shown,
+copied and shared as text for strudel.cc (Path B). The page's output goes through a gentle
+compressor and then a soft clipper that cannot exceed 0.95, so a dense bar bends rather than clips.
 
 ### Path A′ — the same page, without a server
 
@@ -341,15 +344,18 @@ rather than keeping it under the new pace. Adding a voice is a line in `scripts/
    ```
 2. Open **<https://strudel.cc>**.
 3. Select everything in the editor and paste over it, then add this line above it — strudel.cc
-   has the same GM soundfonts as this page, but not its drum kits:
+   has the same General MIDI soundfonts as this page (its own copies of the files the page's
+   lossless zones were converted from), but not its drum kits:
    ```js
    samples('https://prosody.rocks/drums/strudel.json')
    ```
 4. Press **Ctrl+Enter** (or the ▶ button). The first run downloads the drum samples, so give it a
    second.
-   The instruments then sound as they do on the page. One difference: strudel.cc honours `.nudge` only for samples, so
-   there the humanise stray moves the drums and not the bass or melody (their softening still
-   applies); the local page applies it to every sound.
+   The instruments then sound much as they do on the page: the page's player plays the same notes
+   (a parity test checks every one against Strudel's own evaluation of the text) and was matched to
+   Strudel's sound by measurement, the reverb aside (`docs/player.md` §11). One difference:
+   strudel.cc honours `.nudge` only for samples, so there the humanise stray moves the drums and
+   not the bass or melody (their softening still applies); the page applies it to every sound.
 
 That is the whole loop. Edit the poem, recompile, paste again — or keep a terminal open with
 `--watch` and paste whenever you like something.
@@ -389,8 +395,8 @@ It plays the oscillators only for now, with every effect the pattern asks for (r
 vowel, shape, compressor) and the page's master stage: the drums and the soundfonts are FLAC files
 beside the page (`web/public/drums`, `web/public/soundfonts`), which need a FLAC decoder the CLI
 does not have yet, and it says how many notes it left out. A header of `synth = "subtractive"`
-puts the bass and melody on oscillators. On the page, the Mixer's **Player** switch plays the piece
-through the same synth, every sound from beside the page.
+puts the bass and melody on oscillators. The page plays every piece through the same synth, every
+sound from beside the page.
 
 A note's arguments are `beats layer voice gain note detune sharpness family sustain noteGain`.
 `gain` is the drum's accent, always the syllable's own stress; `noteGain` is the pitched note's,
@@ -612,7 +618,8 @@ A piece of more than 16 bars is written in groups (`strudel::nested`): runs of r
 one rest as long, then bars bracketed sixteen at a time (`<[a@3 b@4 …]@58 …>`). The same notes at
 the same times — every hap of every example's whole loop compared under the page's Strudel — but
 Strudel visits every element of a sequence on every query, and the flat 284-bar sequence cost more
-per scheduler tick than a tick lasts: the page played about a sixth of "Patterns". Grouped, it
+per scheduler tick than a tick lasts: the page, which then played through Strudel, played about a
+sixth of "Patterns". Grouped, it
 plays all of it (a query costs 3.9 ms instead of 49 ms). The text of the 13 examples over 16 bars
 changed with it; nothing they play did.
 

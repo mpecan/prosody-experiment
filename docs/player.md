@@ -1,9 +1,9 @@
 # The player — design
 
-*Draft, 2026-10-31. Status: steps 1 (the Performance), 2 (first sound) and 3 (everything the text
-asks for) built; steps 4–5 not started. The open questions of §8 are decided (§8). What building
-step 1 changed in this design is in §9, step 2 in §10, and step 3 in §11, with the measurements
-against Strudel.*
+*Draft, 2026-10-31. Status: steps 1 (the Performance), 2 (first sound), 3 (everything the text
+asks for) and 4 (the reading, and the Prosody player the only one) built; step 5 not started. The
+open questions of §8 are decided (§8). What building step 1 changed in this design is in §9, step 2
+in §10, step 3 in §11, with the measurements against Strudel, and step 4 in §12.*
 
 Prosody plays a poem today by writing Strudel text and handing it to Strudel's runtime
 (`@strudel/web`, its scheduler and the `superdough` synth). This document designs a player of
@@ -471,3 +471,70 @@ departs from §3–§7 above, and why:
 - **Not done in this step.** The CLI still renders oscillators only: decoding FLAC in Rust needs a
   decoder crate to argue for (`CLAUDE.md` §10), now that every sample is FLAC. The device profile
   (§6, "Device") was not rerun: the Pixel was not connected when this step was built.
+
+## 12. What building step 4 changed
+
+Step 4 is in `crates/prosody-synth` (`speech`: the reading's lines on the fifth stem, and the duck),
+`crates/prosody-synth-wasm` (the worker's calls for them), `web/src/player/reader.ts` (the reading's
+timing, in the render worker), `web/src/player/speech.ts` (the page's side of it), the worklet's
+duck for the browser's voice, and the removal of Strudel's runtime from the page and so from the app.
+Where it departs from §5 and §7 above, and why:
+
+- **The synth places lines; the worker decides when.** `Renderer::speak` puts a recorded line (mono
+  PCM at its own rate, resampled by the sampler's Catmull–Rom read) on the speech stem from an output
+  frame and returns the frame it ends on; `cut_speech` fades every line out over 256 frames from a
+  frame and lets go of those placed after it. The duck lane is written from the same placements:
+  the music falls towards the duck's level (0.6, the page's `DUCK`) from where a line's speech begins
+  with a 0.08 s time constant, and rises back with 0.15 s from 0.05 s after the line ends and its hold
+  (the pause before the stanza's next line) — the page's own Strudel-era automation, as a one-pole
+  approach frame by frame, so a stanza ducks the music once. A placement holds its recording, so a
+  line the worker lets go while it is placed still plays. Hand-worked tests pin each part, and a
+  render with no reading is the same bits as before (the golden hashes did not move).
+- **The reading's timing is the page's chaining, in the worker, on output frames.** `reader.ts`
+  finds the cues of the pace being read that fall in each block before it is rendered — on the piece
+  that plays there, round its loop — and places the line. The natural pace's chain is
+  `reading/index.ts`'s `naturalCue` and friends, moved unchanged in what they decide (§5 said "at
+  first"); "now" is the render frontier, so a line that is late starts where nothing is rendered yet,
+  never inside what the worklet has queued. A fitted cue cuts the line before it at its bar, as the
+  browser's voice always was.
+- **Who reads each line is the page's call (the cast).** Only the page knows which engines have
+  loaded and which lines they have rendered, so it sends, per piece, each line's render key — or null
+  for the browser's voice, or nothing for a line not read — and sends again whenever that may change
+  (a render arrives, a refit is ready, an engine loads or fails, a setting changes). The worker asks
+  for the recordings it is cast with and does not hold (`want`), and says which it let go
+  (`dropped`: those no piece handed over casts; a Stop keeps them, for the Play after); the page sends a piece's rendered lines *before* the piece, so its first line is in the
+  worker when its first block is rendered — asked for after, it waited out the whole half-second lead.
+  The e2e checks that the first line is placed on its frame.
+- **The browser's voice stays on the page and says it is unsynchronised.** The worker tells the
+  page when such a line is due; the page speaks it when its playhead gets there (each animation
+  frame), notes "read by the browser voice, off the playhead and not in step with the music", and,
+  at the natural pace, tells the worker the playhead frame it ended on so the chain goes on from
+  there. Its line is due at the time the chain gives, not held to the render frontier, since nothing
+  of it is rendered. Its duck cannot be in the block's lane, so the page asks the worklet for it, and
+  the worklet approaches it with the renderer's two time constants.
+- **A hand-over cuts the old reading where the new piece takes over, and keeps the breath.** The
+  Strudel page cut the reading the moment an edit was evaluated; now the old version's lines play on
+  until the new piece's first frame (at most a bar and the lead later), where they fade out and its
+  pending lines are dropped. The new piece's chain starts from where the old one's last line ended
+  (cut there if it ran over), so its next stanza still waits its silent bar. A change of voice,
+  engine, pace or language lets go of everything from the frontier on: what the worklet already holds
+  (about half a second) still plays, and the reading picks up at the next cue. The duck switch acts
+  from the frontier for rendered lines and at once for the browser's voice; the reading's level and
+  its mute are the speech stem's gain, at once.
+- **Strudel's runtime is gone from the page and the app** (decision 1). `@strudel/web`,
+  `@strudel/draw` and `@strudel/soundfonts` are no longer dependencies; the import map, the globals
+  shim, the vendored files, the warm-up, the parse-ahead, the dropped-tick watcher, the `Drawer` and
+  the Player switch went with them, and `build-site.sh` removes an older build's `vendor/` so the app
+  cannot ship it. `@strudel/core`, `@strudel/mini` and `@strudel/transpiler` stay dev dependencies for
+  the parity test alone. The page shows, copies and shares the Strudel text and its strudel.cc
+  instructions as before (the drum map at `drums/strudel.json` is unchanged). **The page no longer
+  runs any code it compiles**: there is no `eval` left — the player reads the Performance as data.
+- **One check went with Strudel.** The e2e that read the shipped `@strudel/soundfonts` table to
+  confirm `gm_x:n` named the licensed file guarded the Strudel the page shipped; there is none now,
+  and strudel.cc plays whatever its own, current table says, which no pinned test could reach. In its
+  place, every soundfont the compiler can name must be beside the page as our zones.
+- **The Pattern view still shows the reading's cue pattern** under the music's, as text: nothing
+  evaluates it, but it says in Strudel's terms when each line is read.
+- **The device profile (§6, "Device") is still to rerun:** the Pixel was not connected when this
+  step was built. The rebuilt Android app was checked on an emulator instead: 18 s of The Tyger with
+  zero underruns and every line on its cue (`PLAN.md`'s step 4 entry).

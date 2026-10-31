@@ -410,6 +410,41 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The player, step 4 — the reading through the player, and Strudel's runtime gone
+
+Step 4 of `docs/player.md`; what reality changed in the design is in its §12.
+
+- **`prosody-synth`** (`speech`): a recorded line placed on the fifth stem from an output frame,
+  resampled to the output's rate, cut off with a 256-frame fade; the duck written into each block's
+  lane from the same placements (0.08 s fall, 0.15 s rise, 0.05 s after a line and its hold — the
+  page's own automation). `prosody-synth-wasm` gives the worker `add_line`, `speak`, `cut_speech`,
+  `set_duck`.
+- **The render worker times the reading** (`web/src/player/reader.ts`): the Performance's cues of
+  the pace read, found in each block before it is rendered, round the loop and across a hand-over;
+  the natural pace's chain moved from the page unchanged in what it decides, on output frames, "now"
+  being the render frontier; the breath carried across a live edit. The page casts each line (a
+  render key, or the browser's voice) and sends a piece's rendered lines ahead of the piece; the
+  browser's voice is spoken by the page off the playhead, ducked by the worklet, and said to be
+  unsynchronised.
+- **Strudel's runtime removed** from the page and the app (decision 1): `@strudel/web`, `draw` and
+  `soundfonts`, the import map and globals, the warm-up, parse-ahead, dropped-tick watcher, `Drawer`
+  and the Player switch. `@strudel/core`, `mini` and `transpiler` stay dev dependencies for the
+  parity test. The page runs no code it compiles. The Strudel text, its copy and share links and the
+  strudel.cc instructions are unchanged.
+- **Tests**: hand-worked units for placement, resampling, late starts, cuts, the duck's fall and
+  rise and a stanza's single duck (`speech`), the renderer and the wasm binding with a line among
+  notes; the reader at both paces (bars, loops, the breath, a line waited for, the browser's voice
+  chained on its end, a stanza the piece ends before, a hand-over with the breath carried, a change
+  of pace, what is wanted); the worklet's browser-voice duck; the page handing the worker the
+  reading; e2e: playing and reading with every other host refused, a recorded line placed exactly on
+  its cue and lit, a muted voice silent on its stem and heard again, every soundfont beside the page.
+- **Device.** The Android app was rebuilt (`cargo tauri android build --debug --target aarch64
+  --apk`, with the site built first: run from the repository, the config's `beforeBuildCommand`
+  looks for `scripts/build-site.sh` inside `src-tauri` and fails); its binary carries the synth and
+  no Strudel file. On the emulator, attached over CDP, The Tyger played 18 s with zero underruns,
+  nothing missing, and all eight lines placed on their cues. The Pixel (58131FDCQ009PT) was not
+  connected, so the profile of §6 was not rerun.
+
 ### The player, step 3 — everything the text asks for, matched to Strudel by measurement
 
 Step 3 of `docs/player.md`; what reality changed in the design, and every measurement, is in its
