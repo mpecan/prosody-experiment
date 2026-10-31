@@ -900,7 +900,7 @@ fn note_json(note: &Note, place: &dyn Fn(prosody_core::span::Span) -> (usize, us
     let compressor = note.compressor().map(|compressor| {
         format!(
             "{{\"threshold\":{},\"ratio\":{}}}",
-            fmt_param(compressor.threshold()),
+            fmt_param(compressor.threshold().get()),
             fmt_param(compressor.ratio())
         )
     });
@@ -942,9 +942,11 @@ fn note_json(note: &Note, place: &dyn Fn(prosody_core::span::Span) -> (usize, us
 ///   where the pattern leaves it to the player's default.
 /// - `marks`: every syllable's light — its word, `lane`, `slot`, `onset`, `length`, and whether it
 ///   is `fresh`, and also carries a `melody` or `bass` note.
-/// - `cues`: every line of the reading — its `line`, `stanza`, words (`from`, `to`), natural
+/// - `cues`: every line the reading speaks — its `line`, `stanza`, words (`from`, `to`), natural
 ///   `pace` and `pause`, and where it is spoken at each pace: `fitted` (`slot`, `at`, `rate`) and
 ///   `natural` (`onset`, `slot`, `at`), either `null` where that pace does not read it.
+/// - `unread` and `natural_unread`: each line a pace leaves unread although the reading is on —
+///   its `line`, words (`from`, `to`) and `why` — as `/reading` lists them, for the page to say.
 ///
 /// Parameters are at the pattern's three decimals, times at nine, a note's level at six.
 fn performance_json(performance: &Performance, source: &str, typed: &str) -> String {
@@ -1027,14 +1029,36 @@ fn performance_json(performance: &Performance, source: &str, typed: &str) -> Str
         })
         .collect();
     format!(
-        "{{\"seconds\":{},\"cpm\":{},\"swing\":{swing},\"bars\":[{}],\"notes\":[{}],\"marks\":[{}],\"cues\":[{}]}}\n",
+        "{{\"seconds\":{},\"cpm\":{},\"swing\":{swing},\"bars\":[{}],\"notes\":[{}],\"marks\":[{}],\"cues\":[{}],\"unread\":[{}],\"natural_unread\":[{}]}}\n",
         seconds(performance.seconds().get()),
         fmt_param(performance.cycles_per_minute()),
         bars.join(","),
         notes.join(","),
         marks.join(","),
         cues.join(","),
+        unread_json(performance.unread(), &place),
+        unread_json(performance.natural_unread(), &place),
     )
+}
+
+/// The lines a pace of the Performance's reading leaves out, and why, so the page can say so
+/// (`CLAUDE.md` §6: a loss is visible).
+fn unread_json(
+    unread: &[reading::Unread],
+    place: &dyn Fn(prosody_core::span::Span) -> (usize, usize),
+) -> String {
+    unread
+        .iter()
+        .map(|line| {
+            let (from, to) = place(line.span());
+            format!(
+                "{{\"line\":{},\"from\":{from},\"to\":{to},\"why\":{}}}",
+                line.line(),
+                json_string(line.why().says()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// A reading as JSON, for the page to speak at either pace (`SPEC.md` §4.7).
@@ -2040,6 +2064,34 @@ mod tests {
                 // last one is for the page to find out, and say.
                 && unread.ends_with("Praise him.\"}],\"natural_unread\":[]}\n"),
             "{unread}"
+        );
+        // The Performance, which the player will read from (docs/player.md §5), says the same:
+        // line 10 is not cued, and is listed with its reason, on the words of "Praise him."
+        let performance = super::compile(
+            &request(&[("set", "reading:breath,outro:off")], &poem),
+            &Output::Performance,
+        );
+        assert_eq!(performance.status, 200, "{}", performance.body);
+        // Where the line is in the text box, in UTF-16 units, as every `from` is.
+        let praise = poem[..poem.find("Praise him.").unwrap()]
+            .encode_utf16()
+            .count();
+        let (resolved, lost) = performance.body.split_once("\"unread\":").unwrap();
+        // Its cue is the natural pace's alone: the fitted pace does not read it.
+        let (_, cue) = resolved.split_once("{\"line\":10,").unwrap();
+        assert!(
+            cue.split_once("},{")
+                .map_or(cue, |(cue, _)| cue)
+                .contains("\"fitted\":null,\"natural\":{"),
+            "{cue}"
+        );
+        assert_eq!(
+            lost,
+            format!(
+                "[{{\"line\":10,\"from\":{praise},\"to\":{},\"why\":\"the piece ends before its \
+                 turn\"}}],\"natural_unread\":[]}}\n",
+                praise + "Praise him.".len()
+            )
         );
         // Not among the fitted cues; the natural pace's lines still list it.
         let (fitted, natural) = cues.split_once("\"lines\":[").unwrap();

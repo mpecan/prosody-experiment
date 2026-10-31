@@ -29,7 +29,7 @@ use prosody_core::surprisal::{Lexicon, Rarity};
 use prosody_core::voice::Score;
 use prosody_core::{Mapping, Mappings, Poem, Span, Variant};
 use prosody_core::{meter, repetition, rhyme, role, sound, surprisal};
-use prosody_emit::perform::{Lane, Note};
+use prosody_emit::perform::{Cycles, Lane, Note};
 use prosody_emit::{Backend as _, Perform, Performance, Style, reading};
 
 /// Spelling is pronunciation, so a test can choose a poem's shape by writing it.
@@ -241,6 +241,41 @@ fn place(note: &Note, body_start: usize) -> (usize, usize, Lane, usize, (u128, u
     )
 }
 
+/// The latest a nudge strikes, in seconds: thirty milliseconds at `humanise = 1`
+/// (`perform::MAX_LATE`), printed at three decimals.
+const MAX_LATE: f64 = 0.030;
+
+/// When each bar begins, in seconds, in slot order.
+fn bar_begins(performance: &Performance) -> Vec<f64> {
+    performance
+        .bars()
+        .iter()
+        .map(|bar| bar.at().get())
+        .collect()
+}
+
+/// Where each bar ends, in cycles and in seconds: where the next begins, or the piece's end.
+fn bar_ends(performance: &Performance) -> Vec<(Cycles, f64)> {
+    let bars = performance.bars();
+    (0..bars.len())
+        .map(|slot| {
+            bars.get(slot + 1).map_or(
+                (performance.cycles(), performance.seconds().get()),
+                |next| (next.cycle(), next.at().get()),
+            )
+        })
+        .collect()
+}
+
+/// How far past its bar's end a note may sound: swing's delay (`x / 2n` of a cycle, in seconds at
+/// the piece's tempo), the nudge, and a nanosecond for the floats.
+fn late(performance: &Performance) -> f64 {
+    let swing = performance.swing().map_or(0.0, |swing| {
+        swing.delay().as_f64() * 60.0 / performance.cycles_per_minute()
+    });
+    swing + MAX_LATE + 1e-9
+}
+
 /// Every token span of the poem: the words a note may point at.
 fn words(poem: &Poem) -> BTreeSet<Span> {
     poem.stanzas()
@@ -264,21 +299,34 @@ proptest! {
     }
 
     /// I4: every note stands on a word of the poem, every light on a word, every cue on its line;
-    /// and every note sounds within the piece, in the bar it says.
+    /// and every note sounds within the piece, in the bar it says: its place in the pattern within
+    /// that bar's cycles, and its onset no earlier than the bar begins and no later than the next
+    /// one does, but for swing's delay and the nudge.
     #[test]
     fn i4_every_note_resolves_to_a_word(body in poem(), header in palette(), chosen in mappings()) {
         let source = format!("{header}{body}");
         let Some((poem, performance)) = performed(&source, &chosen) else { return Ok(()) };
         let words = words(&poem);
+        let (begins, ends) = (bar_begins(&performance), bar_ends(&performance));
         for note in performance.notes() {
             prop_assert!(words.contains(&note.span()), "{:?} is not a word", note.span());
             prop_assert!(note.span().text(poem.source()).is_some_and(|text| !text.is_empty()));
-            let bar = performance.bars()[note.slot()].at().get();
-            prop_assert!(note.onset().get() >= bar);
+            let bar = &performance.bars()[note.slot()];
+            prop_assert!(bar.cycle() <= note.grid(), "{:?} before {:?}", note.grid(), bar);
+            prop_assert!(note.grid() < ends[note.slot()].0, "{:?} past slot {}", note.grid(), note.slot());
+            prop_assert!(note.onset().get() >= begins[note.slot()]);
+            prop_assert!(
+                note.onset().get() < ends[note.slot()].1 + late(&performance),
+                "{} s is past slot {}, which ends at {} s",
+                note.onset().get(), note.slot(), ends[note.slot()].1
+            );
             prop_assert!(note.length().get() > 0.0);
         }
         for mark in performance.marks() {
             prop_assert!(words.contains(&mark.span()));
+            // A light has no nudge: only swing may carry it past its bar's end.
+            prop_assert!(mark.onset().get() >= begins[mark.slot()]);
+            prop_assert!(mark.onset().get() < ends[mark.slot()].1 + late(&performance) - MAX_LATE);
         }
         for cue in performance.cues() {
             prop_assert!(cue.span().text(poem.source()).is_some_and(|text| !text.trim().is_empty()));

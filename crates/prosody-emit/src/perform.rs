@@ -24,10 +24,12 @@
 //! # Time
 //!
 //! Exact until the end. A note's place in the pattern is an exact fraction of a cycle
-//! ([`Rational`]); swing moves it by an exact fraction; the tempo the text prints (`.cpm`, at three
+//! ([`Cycles`]); swing moves it by an exact fraction; the tempo the text prints (`.cpm`, at three
 //! decimals) is an exact number of thousandths; and the nudge the text prints is an exact number of
-//! milliseconds. So every onset is an exact number of seconds, notes are sorted without a float in
-//! sight (`CLAUDE.md` §4), and each is turned into an `f64` once, when it is read.
+//! milliseconds. So every onset is an exact number of seconds ([`ExactSeconds`]), notes are sorted
+//! without a float in sight (`CLAUDE.md` §4), and each is turned into an `f64` once, when it is
+//! read. Cycles and seconds are different types (`CLAUDE.md` §5): the piece's clock is the one
+//! place that turns one into the other, so a place in the pattern cannot be read as a time.
 //!
 //! **Swing** follows Strudel's documented `swingBy(x, n)`: each cycle is cut into `n` slices, and
 //! an event in the second half of a slice is delayed by `x` of a half-slice. Strudel's own
@@ -874,13 +876,14 @@ pub(crate) fn tempo(score: &Score, style: &Style) -> u16 {
 // Time.
 // ---------------------------------------------------------------------------------------------
 
-/// A non-negative exact fraction: a place in the pattern in cycles, or a time in seconds.
+/// A non-negative exact fraction: the arithmetic under [`Cycles`] and [`ExactSeconds`], which say
+/// what it counts. It never crosses the module's public surface bare (`CLAUDE.md` §5).
 ///
 /// Kept in lowest terms. Every operation saturates rather than overflowing: the denominators are a
 /// bar's steps times a beat's parts times the printed tempo, small enough that saturation is never
 /// reached by a poem, and a panic in a live-reload loop would kill the session (`CLAUDE.md` §3).
 #[derive(Debug, Clone, Copy)]
-pub struct Rational {
+pub(crate) struct Rational {
     numerator: u128,
     denominator: u128,
 }
@@ -937,7 +940,7 @@ impl Rational {
 
     /// The exact fraction, `(numerator, denominator)`.
     #[must_use]
-    pub const fn parts(self) -> (u128, u128) {
+    pub(crate) const fn parts(self) -> (u128, u128) {
         (self.numerator, self.denominator)
     }
 
@@ -945,7 +948,7 @@ impl Rational {
     /// exact fraction.
     #[must_use]
     #[allow(clippy::cast_precision_loss)] // a value only: the exact fraction is what is compared
-    pub fn as_f64(self) -> f64 {
+    pub(crate) fn as_f64(self) -> f64 {
         self.numerator as f64 / self.denominator as f64
     }
 }
@@ -982,6 +985,82 @@ const fn gcd(mut a: u128, mut b: u128) -> u128 {
     a
 }
 
+/// A place in the pattern, in cycles: exact.
+///
+/// What the pattern's structure is measured in — where a slot begins, where a note falls before
+/// swing — and what no palette moves (I3). Only the piece's clock turns it into time, at the
+/// piece's tempo; there is deliberately no way to read it as seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Cycles(Rational);
+
+impl Cycles {
+    /// `numerator / denominator` cycles.
+    pub(crate) const fn new(numerator: u128, denominator: u128) -> Self {
+        Self(Rational::new(numerator, denominator))
+    }
+
+    /// A whole number of cycles.
+    pub(crate) const fn whole(value: u64) -> Self {
+        Self(Rational::whole(value))
+    }
+
+    /// The sum.
+    pub(crate) const fn plus(self, other: Self) -> Self {
+        Self(self.0.plus(other.0))
+    }
+
+    /// Times a whole number.
+    pub(crate) const fn times(self, factor: u64) -> Self {
+        Self(self.0.times(factor))
+    }
+
+    /// Over a whole number (zero counts as one).
+    pub(crate) const fn over(self, divisor: u64) -> Self {
+        Self(self.0.over(divisor))
+    }
+
+    /// The exact number of cycles, `(numerator, denominator)`, in lowest terms.
+    #[must_use]
+    pub const fn parts(self) -> (u128, u128) {
+        self.0.parts()
+    }
+
+    /// The number of cycles as a float: a value only. Ordering and equality use the exact fraction.
+    #[must_use]
+    pub fn as_f64(self) -> f64 {
+        self.0.as_f64()
+    }
+}
+
+/// A time in seconds, exact: for ordering notes and comparing times without a float
+/// (`CLAUDE.md` §4). [`Seconds`] is the same time as a number to play.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ExactSeconds(Rational);
+
+impl ExactSeconds {
+    /// `numerator / denominator` seconds.
+    pub(crate) const fn new(numerator: u128, denominator: u128) -> Self {
+        Self(Rational::new(numerator, denominator))
+    }
+
+    /// The sum.
+    pub(crate) const fn plus(self, other: Self) -> Self {
+        Self(self.0.plus(other.0))
+    }
+
+    /// The exact number of seconds, `(numerator, denominator)`, in lowest terms.
+    #[must_use]
+    pub const fn parts(self) -> (u128, u128) {
+        self.0.parts()
+    }
+
+    /// The time as a float, to play.
+    #[must_use]
+    pub fn seconds(self) -> Seconds {
+        Seconds(self.0.as_f64())
+    }
+}
+
 /// A time in seconds.
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Seconds(f64);
@@ -1012,6 +1091,18 @@ pub struct Hertz(f64);
 
 impl Hertz {
     /// The frequency.
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+/// A level in decibels: a compressor's threshold.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Decibels(f64);
+
+impl Decibels {
+    /// The number of decibels.
     #[must_use]
     pub const fn get(self) -> f64 {
         self.0
@@ -1071,16 +1162,22 @@ impl Swing {
 
     /// Where an event that begins at `cycle` sounds: delayed by `x / 2n` cycles when it begins in
     /// a slice's second half.
-    fn place(self, cycle: Rational) -> Rational {
+    fn place(self, cycle: Cycles) -> Cycles {
         let slices = u64::from(self.slices.max(1));
-        if cycle.times(slices).fraction() >= Rational::new(1, 2) {
-            cycle.plus(Rational::new(
-                u128::from(self.hundredths),
-                200 * u128::from(slices),
-            ))
+        if cycle.0.times(slices).fraction() >= Rational::new(1, 2) {
+            cycle.plus(self.delay())
         } else {
             cycle
         }
+    }
+
+    /// How far an event in a slice's second half is delayed: `x / 2n` cycles.
+    #[must_use]
+    pub fn delay(self) -> Cycles {
+        Cycles::new(
+            u128::from(self.hundredths),
+            200 * u128::from(self.slices.max(1)),
+        )
     }
 }
 
@@ -1114,34 +1211,34 @@ impl Clock {
     }
 
     /// Where slot `slot` begins and how long it lasts, in cycles.
-    fn slot(&self, slot: usize) -> (Rational, Rational) {
+    fn slot(&self, slot: usize) -> (Cycles, Cycles) {
         (
-            Rational::whole(self.starts.get(slot).copied().unwrap_or(0)),
-            Rational::whole(self.weights.get(slot).copied().unwrap_or(1)),
+            Cycles::whole(self.starts.get(slot).copied().unwrap_or(0)),
+            Cycles::whole(self.weights.get(slot).copied().unwrap_or(1)),
         )
     }
 
-    /// Cycles of the pattern, as seconds.
-    const fn seconds(&self, cycles: Rational) -> Rational {
-        cycles.mul(Rational::new(60_000, self.cpm))
+    /// Cycles of the pattern, as seconds: the one place one becomes the other.
+    const fn seconds(&self, cycles: Cycles) -> ExactSeconds {
+        ExactSeconds(cycles.0.mul(Rational::new(60_000, self.cpm)))
     }
 
     /// Where a note at `grid` sounds, after swing, in seconds — before any nudge.
-    fn onset(&self, grid: Rational) -> Rational {
+    fn onset(&self, grid: Cycles) -> ExactSeconds {
         let swung = self.swing.map_or(grid, |swing| swing.place(grid));
         self.seconds(swung)
     }
 
-    /// The piece's length in seconds: the cycle it loops round on.
-    fn length(&self) -> Rational {
-        self.seconds(Rational::whole(self.starts.last().copied().unwrap_or(0)))
+    /// The piece's length in cycles: the cycle it loops round on.
+    fn cycles(&self) -> Cycles {
+        Cycles::whole(self.starts.last().copied().unwrap_or(0))
     }
 }
 
 /// A nudge as the text prints it, in exact seconds.
-fn nudged(onset: Rational, nudge: Option<f64>) -> Rational {
+fn nudged(onset: ExactSeconds, nudge: Option<f64>) -> ExactSeconds {
     nudge.map_or(onset, |nudge| {
-        onset.plus(Rational::new(
+        onset.plus(ExactSeconds::new(
             u128::try_from(thousandths(nudge)).unwrap_or(0),
             1000,
         ))
@@ -1287,14 +1384,14 @@ impl Sends {
 /// A layer's compressor (`.compressor`, `.compressorRatio`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Compressor {
-    threshold: f64,
+    threshold: Decibels,
     ratio: f64,
 }
 
 impl Compressor {
-    /// The threshold, in dB.
+    /// The threshold.
     #[must_use]
-    pub const fn threshold(&self) -> f64 {
+    pub const fn threshold(&self) -> Decibels {
         self.threshold
     }
 
@@ -1312,9 +1409,9 @@ pub struct Note {
     channel: Channel,
     lane: Lane,
     slot: usize,
-    grid: Rational,
-    onset: Rational,
-    length: Rational,
+    grid: Cycles,
+    onset: ExactSeconds,
+    length: ExactSeconds,
     sound: Sound,
     pitch: Option<Midi>,
     gain: Level,
@@ -1352,26 +1449,26 @@ impl Note {
     /// Where it falls in the pattern, in cycles, before swing: the score's structure, which no
     /// palette moves (I3).
     #[must_use]
-    pub const fn grid(&self) -> Rational {
+    pub const fn grid(&self) -> Cycles {
         self.grid
     }
 
     /// When it sounds, after swing and nudge.
     #[must_use]
     pub fn onset(&self) -> Seconds {
-        Seconds(self.onset.as_f64())
+        self.onset.seconds()
     }
 
     /// The exact onset, for ordering.
     #[must_use]
-    pub const fn exact_onset(&self) -> Rational {
+    pub const fn exact_onset(&self) -> ExactSeconds {
         self.onset
     }
 
     /// How long it is held: its step of the pattern.
     #[must_use]
     pub fn length(&self) -> Seconds {
-        Seconds(self.length.as_f64())
+        self.length.seconds()
     }
 
     /// What makes its sound.
@@ -1421,6 +1518,7 @@ impl Note {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BarMark {
     slot: usize,
+    cycle: Cycles,
     at: Seconds,
 }
 
@@ -1429,6 +1527,12 @@ impl BarMark {
     #[must_use]
     pub const fn slot(&self) -> usize {
         self.slot
+    }
+
+    /// The cycle of the pattern it begins on: where the grid of its notes ([`Note::grid`]) starts.
+    #[must_use]
+    pub const fn cycle(&self) -> Cycles {
+        self.cycle
     }
 
     /// When it begins.
@@ -1448,8 +1552,8 @@ pub struct Mark {
     span: Span,
     lane: Lane,
     slot: usize,
-    onset: Rational,
-    length: Rational,
+    onset: ExactSeconds,
+    length: ExactSeconds,
     fresh: bool,
     melody: bool,
     bass: bool,
@@ -1477,13 +1581,19 @@ impl Mark {
     /// When it lights.
     #[must_use]
     pub fn onset(&self) -> Seconds {
-        Seconds(self.onset.as_f64())
+        self.onset.seconds()
+    }
+
+    /// When it lights, exactly.
+    #[must_use]
+    pub const fn exact_onset(&self) -> ExactSeconds {
+        self.onset
     }
 
     /// How long it stays lit.
     #[must_use]
     pub fn length(&self) -> Seconds {
-        Seconds(self.length.as_f64())
+        self.length.seconds()
     }
 
     /// Whether its line is heard anew here rather than looping (`crate::trace::Mark::fresh`).
@@ -1610,15 +1720,19 @@ impl Cue {
     }
 }
 
-/// A whole piece, resolved: every note, every bar, every syllable's light, every line's cue.
+/// A whole piece, resolved: every note, every bar, every syllable's light, and every line of the
+/// reading — a cue for each line it speaks, and the reason for each line it leaves unread.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Performance {
-    seconds: Rational,
+    cycles: Cycles,
+    seconds: ExactSeconds,
     cpm: f64,
     swing: Option<Swing>,
     bars: Vec<BarMark>,
     notes: Vec<Note>,
     cues: Vec<Cue>,
+    unread: Vec<reading::Unread>,
+    natural_unread: Vec<reading::Unread>,
     marks: Vec<Mark>,
 }
 
@@ -1626,7 +1740,13 @@ impl Performance {
     /// How long the piece lasts, tails excluded: where it loops round.
     #[must_use]
     pub fn seconds(&self) -> Seconds {
-        Seconds(self.seconds.as_f64())
+        self.seconds.seconds()
+    }
+
+    /// How long the piece lasts in cycles of the pattern: where its last bar ends.
+    #[must_use]
+    pub const fn cycles(&self) -> Cycles {
+        self.cycles
     }
 
     /// The `.cpm` the text prints: the pattern's cycles a minute.
@@ -1653,10 +1773,27 @@ impl Performance {
         &self.notes
     }
 
-    /// Every line of the reading, in reading order: empty until [`Performance::read`].
+    /// Every line the reading speaks at either pace, in reading order: empty until
+    /// [`Performance::read`]. A line it speaks at neither is not here but in
+    /// [`Performance::unread`] and [`Performance::natural_unread`], with why.
     #[must_use]
     pub fn cues(&self) -> &[Cue] {
         &self.cues
+    }
+
+    /// The lines the fitted pace leaves unread although the reading is on, and why
+    /// ([`Reading::unread`]) — so a player that reads from the Performance can still say what it
+    /// loses (`CLAUDE.md` §6). Empty until [`Performance::read`].
+    #[must_use]
+    pub fn unread(&self) -> &[reading::Unread] {
+        &self.unread
+    }
+
+    /// The lines the natural pace has no onset for, and why ([`Reading::natural_unread`]). Empty
+    /// until [`Performance::read`].
+    #[must_use]
+    pub fn natural_unread(&self) -> &[reading::Unread] {
+        &self.natural_unread
     }
 
     /// Every syllable's light, sorted as the notes are.
@@ -1665,7 +1802,8 @@ impl Performance {
         &self.marks
     }
 
-    /// The same piece, with its reading's cues on the piece's clock.
+    /// The same piece, with its reading's cues on the piece's clock, and the lines it leaves
+    /// unread with their reasons.
     ///
     /// Separate from [`Backend::render`] because a reading needs the poem's lines and the chosen
     /// mappings, which a backend is not given; `reading` must be planned from the same score and
@@ -1675,7 +1813,7 @@ impl Performance {
         let per_cycle = Rational::new(60_000, self.cpm_thousandths());
         let at_slot = |slot: usize| {
             let start = reading.bars().get(slot).copied().unwrap_or(0);
-            Seconds(Rational::whole(start).mul(per_cycle).as_f64())
+            ExactSeconds(Rational::whole(start).mul(per_cycle)).seconds()
         };
         let blank = |spoken: &reading::Spoken| Cue {
             line: spoken.line(),
@@ -1707,6 +1845,8 @@ impl Performance {
             });
         }
         self.cues = cues.into_values().collect();
+        self.unread = reading.unread().to_vec();
+        self.natural_unread = reading.natural_unread().to_vec();
         self
     }
 
@@ -1781,18 +1921,25 @@ impl Backend for Perform {
                 .then(a.lane.cmp(&b.lane))
         });
         let bars = (0..score.arrangement().slots().len())
-            .map(|slot| BarMark {
-                slot,
-                at: Seconds(clock.seconds(clock.slot(slot).0).as_f64()),
+            .map(|slot| {
+                let cycle = clock.slot(slot).0;
+                BarMark {
+                    slot,
+                    cycle,
+                    at: clock.seconds(cycle).seconds(),
+                }
             })
             .collect();
         Ok(Performance {
-            seconds: clock.length(),
+            cycles: clock.cycles(),
+            seconds: clock.seconds(clock.cycles()),
             cpm: quantised(strudel::cycles_per_minute(score, style)),
             swing: clock.swing,
             bars,
             notes,
             cues: Vec::new(),
+            unread: Vec::new(),
+            natural_unread: Vec::new(),
             marks,
         })
     }
@@ -1811,8 +1958,8 @@ struct Context<'a> {
 struct Timed<'a> {
     event: &'a Event,
     slot: usize,
-    grid: Rational,
-    length: Rational,
+    grid: Cycles,
+    length: Cycles,
 }
 
 impl Context<'_> {
@@ -1841,7 +1988,7 @@ impl Context<'_> {
         (
             Level(quantised(postgain(level, share))),
             compressor(self.style).map(|(threshold, ratio)| Compressor {
-                threshold: quantised(threshold),
+                threshold: Decibels(quantised(threshold)),
                 ratio: quantised(ratio),
             }),
         )
@@ -1854,7 +2001,7 @@ impl Context<'_> {
     }
 
     /// A note's onset, after swing and its nudge.
-    fn onset(&self, grid: Rational, event: &Event) -> Rational {
+    fn onset(&self, grid: Cycles, event: &Event) -> ExactSeconds {
         nudged(
             self.clock.onset(grid),
             nudge(&self.strays, event, self.style),
@@ -2041,7 +2188,7 @@ impl Context<'_> {
         {
             let (begin, length) = self.clock.slot(slot);
             let half = length.over(2);
-            let held: Vec<(Chord, Rational, Rational)> = match harmony {
+            let held: Vec<(Chord, Cycles, Cycles)> = match harmony {
                 None => Vec::new(),
                 Some(Harmony::Turning { own, turn }) => own
                     .map(|own| (own, begin, half))
@@ -2101,7 +2248,7 @@ mod tests {
     use prosody_core::voice::Score;
     use prosody_core::{Poem, meter, repetition, rhyme, role, sound, surprisal};
 
-    use super::{Channel, Perform, Rational, Swing, quantised, thousandths};
+    use super::{Channel, Cycles, Perform, Rational, Swing, quantised, thousandths};
     use crate::{Backend as _, Strudel, Style};
 
     /// Spelling is pronunciation: `A` and `o` are stressed vowels, `e` unstressed.
@@ -2209,7 +2356,7 @@ mod tests {
         };
         let placed: Vec<(u128, u128)> = [(0, 1), (1, 4), (1, 2), (3, 4)]
             .iter()
-            .map(|(n, d)| swing.place(Rational::new(*n, *d)).parts())
+            .map(|(n, d)| swing.place(Cycles::new(*n, *d)).parts())
             .collect();
         assert_eq!(placed, vec![(0, 1), (1, 4), (3, 4), (1, 1)]);
         // Two slices a cycle: the second half of the first slice is [1/4, 1/2), and the delay is
@@ -2218,12 +2365,13 @@ mod tests {
             hundredths: 33,
             slices: 2,
         };
-        assert_eq!(swing.place(Rational::new(1, 8)).parts(), (1, 8));
+        assert_eq!(swing.place(Cycles::new(1, 8)).parts(), (1, 8));
         assert_eq!(
-            swing.place(Rational::new(1, 4)).parts(),
+            swing.place(Cycles::new(1, 4)).parts(),
             Rational::new(1, 4).plus(Rational::new(33, 400)).parts()
         );
-        assert_eq!(swing.place(Rational::new(1, 2)).parts(), (1, 2));
+        assert_eq!(swing.delay().parts(), (33, 400));
+        assert_eq!(swing.place(Cycles::new(1, 2)).parts(), (1, 2));
     }
 
     #[test]
@@ -2335,5 +2483,147 @@ mod tests {
         assert_eq!(fitted.slot(), 0);
         assert!(close(fitted.at().get(), 0.0));
         assert!(cue.natural().is_some());
+    }
+
+    #[test]
+    fn a_later_line_is_cued_on_its_own_bars_clock() {
+        // Two stanzas of two-beat lines at 100 beats a minute. Under the steady pulse a cycle is a
+        // beat, so a cycle lasts 60 / 100 = 0.6 s, and slot `n` begins on cycle 2n: at 1.2·n s.
+        // Which slot each line is read in is the reading's to say (`reading::plan`, tested
+        // there); this pins how its slots become seconds. 100 rather than 120 so that a slot
+        // read as seconds, or a cycle read as half a second, cannot pass.
+        let source = "teA bAn\nreA dAn\n\nbo dos rot\nteA rot\n";
+        let poem = Poem::parse(source.to_owned()).unwrap();
+        let score = score_of(source);
+        let at_100 = Style::parse("+++\ntempo_range = [100, 100]\n+++").unwrap();
+        let reading =
+            crate::reading::plan(&poem, &score, &at_100, &prosody_core::Mappings::all()).unwrap();
+        let performance = Perform::new()
+            .render(&score, &at_100)
+            .unwrap()
+            .read(&reading);
+        let fitted: Vec<(usize, f64)> = performance
+            .cues()
+            .iter()
+            .map(|cue| {
+                let fitted = cue.fitted().unwrap();
+                (fitted.slot(), fitted.at().get())
+            })
+            .collect();
+        // Each stanza's lines a bar apart; the second stanza from the bar after its arrival.
+        let want = [(0, 0.0), (1, 1.2), (3, 3.6), (4, 4.8)];
+        assert_eq!(fitted.len(), want.len(), "{fitted:?}");
+        for ((slot, at), (want_slot, want_at)) in fitted.iter().zip(want) {
+            assert_eq!(*slot, want_slot, "{fitted:?}");
+            assert!(close(*at, want_at), "{fitted:?}");
+            // The reading's clock and the piece's are one clock.
+            assert!(
+                close(*at, performance.bars()[*slot].at().get()),
+                "{fitted:?}"
+            );
+        }
+        // The second stanza's first line, at the natural pace, waits for its breath in slot 2,
+        // which begins on cycle 4: 2.4 s.
+        let natural = performance.cues()[2].natural().unwrap();
+        assert_eq!(natural.onset().slot(), Some(2));
+        assert!(close(natural.at().unwrap().get(), 2.4));
+        assert!(close(performance.bars()[2].at().get(), 2.4));
+        // A line that only follows the one before has no slot of its own to wait for.
+        assert_eq!(performance.cues()[3].natural().unwrap().at(), None);
+    }
+
+    #[test]
+    fn a_mark_lights_what_the_trace_lights_on_the_beat() {
+        // "teA bAn / teA bAn bAn / reA dAn", humanised. One stanza, so three stated bars and then
+        // the outro's three, which loop. "bAn", "bAn" and "dAn" end their lines and rhyme on
+        // AA N: the melody's. The bass takes every other stressed vowel (the height bass leaves
+        // rhyme words to the melody): the A of teA and reA, and the middle bAn.
+        let source = "teA bAn\nteA bAn bAn\nreA dAn\n";
+        let score = score_of(source);
+        let human = style("humanise = 1\n");
+        let performance = Perform::new().render(&score, &human).unwrap();
+        let marks: Vec<(&str, usize, f64, bool, bool, bool)> = performance
+            .marks()
+            .iter()
+            .map(|mark| {
+                (
+                    mark.span().text(source).unwrap(),
+                    mark.slot(),
+                    mark.onset().get(),
+                    mark.fresh(),
+                    mark.melody(),
+                    mark.bass(),
+                )
+            })
+            .collect();
+        // Bars of two beats at 120 beats a minute, a beat half a second: the first bar's two
+        // beats split [te A] and [bAn], so its syllables light at 0, 0.25 and 0.5 s — on the
+        // beat, though every one of their notes is nudged late.
+        let want_first_bar = [
+            ("teA", 0, 0.0, true, false, false),
+            ("teA", 0, 0.25, true, false, true),
+            ("bAn", 0, 0.5, true, true, false),
+        ];
+        // The second line's second beat splits [bAn bAn]: the first carries the bass, the second
+        // — the line's rhyme word — the melody.
+        let want_second_bar = [
+            ("teA", 1, 1.0, true, false, false),
+            ("teA", 1, 1.25, true, false, true),
+            ("bAn", 1, 1.5, true, false, true),
+            ("bAn", 1, 1.75, true, true, false),
+        ];
+        for (got, want) in marks
+            .iter()
+            .zip(want_first_bar.iter().chain(&want_second_bar))
+        {
+            assert_eq!(got.0, want.0, "{marks:?}");
+            assert_eq!(got.1, want.1, "{marks:?}");
+            assert!(close(got.2, want.2), "{marks:?}");
+            assert_eq!((got.3, got.4, got.5), (want.3, want.4, want.5), "{marks:?}");
+        }
+        // The second syllable's note is nudged; its light is not.
+        let note = performance
+            .notes()
+            .iter()
+            .find(|note| {
+                note.slot() == 0
+                    && note.channel() == Channel::Drums
+                    && note.grid() == Cycles::new(1, 2)
+            })
+            .unwrap();
+        assert!(note.onset().get() > 0.25, "{:?}", note.onset());
+        // The outro loops: every mark of its three bars is not fresh, the stated three are.
+        assert!(marks.iter().all(|mark| mark.3 == (mark.1 < 3)), "{marks:?}");
+        assert_eq!(marks.len(), 20, "{marks:?}");
+        // And the Performance lights exactly what the trace pattern lights: the same syllables,
+        // in the same colours, fresh, melody and bass alike.
+        let trace = crate::trace::plan(&score, &human);
+        let traced: std::collections::BTreeSet<_> = trace
+            .marks()
+            .iter()
+            .map(|mark| {
+                (
+                    mark.span(),
+                    mark.colour(),
+                    mark.fresh(),
+                    mark.melody(),
+                    mark.bass(),
+                )
+            })
+            .collect();
+        let lit: std::collections::BTreeSet<_> = performance
+            .marks()
+            .iter()
+            .map(|mark| {
+                (
+                    mark.span(),
+                    mark.lane().hex(),
+                    mark.fresh(),
+                    mark.melody(),
+                    mark.bass(),
+                )
+            })
+            .collect();
+        assert_eq!(lit, traced);
     }
 }

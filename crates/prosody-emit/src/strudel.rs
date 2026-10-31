@@ -94,8 +94,8 @@ use prosody_core::{BassNote, Chord, Harmony, Silence};
 
 pub use crate::perform::melody_voicing;
 use crate::perform::{
-    self, EventKey, MAX_LATE, MAX_SOFTEN, Pitched, Rational, Stray, chord_share, density,
-    level_for, lines_sounding, ride_stand_in, sample_for_drum, strays, strudel_bank, under_harmony,
+    self, Cycles, EventKey, MAX_LATE, MAX_SOFTEN, Pitched, Stray, chord_share, density, level_for,
+    lines_sounding, ride_stand_in, sample_for_drum, strays, strudel_bank, under_harmony,
 };
 use crate::style::{Kit, Named, Style, Voicing};
 use crate::{Backend, fmt_param};
@@ -1149,11 +1149,7 @@ impl<'a> Line<'a> {
     /// slot begins and how long it lasts — the same arithmetic mini-notation does on what
     /// [`Line::write`] writes: a cycle split equally between the steps, a step between its parts
     /// by their weights.
-    pub(crate) fn timed(
-        &self,
-        begin: Rational,
-        length: Rational,
-    ) -> Vec<(&'a Event, Rational, Rational)> {
+    pub(crate) fn timed(&self, begin: Cycles, length: Cycles) -> Vec<(&'a Event, Cycles, Cycles)> {
         let count = u64::try_from(self.steps.len()).unwrap_or(u64::MAX).max(1);
         let step = length.over(count);
         let mut out = Vec::new();
