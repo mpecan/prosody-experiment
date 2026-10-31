@@ -1,26 +1,38 @@
 //! `prosody render`: the piece through the player's synth, to a WAV file (`docs/player.md` §7,
-//! step 2).
+//! steps 2 and 3): every effect the text asks for, through the master stage.
 //!
 //! The Performance says every note; this hands the synth the ones it can sound here and says
-//! which it cannot. The drums are FLAC files and the soundfonts MP3 zones inside webaudiofont
-//! files: the page has the browser decode both, but decoding either in Rust needs a decoder, and
-//! a decoder is a dependency `CLAUDE.md` §10 asks to be argued for. Until it is (with the soundfont
-//! conversion of `docs/player.md` §8, decision 3), a render here plays the oscillators and names
-//! every note it leaves out, rather than leaving them out silently (`CLAUDE.md` §6).
+//! which it cannot. The drums and, since step 3, the soundfonts are FLAC files beside the page
+//! (`docs/player.md` §8, decision 3): the page has the browser decode them, but decoding FLAC in
+//! Rust needs a decoder, a dependency `CLAUDE.md` §10 asks to be argued for. Until it is, a render
+//! here plays the oscillators and names every note it leaves out, rather than leaving them out
+//! silently (`CLAUDE.md` §6).
 
 use anyhow::{Context as _, Result};
-use prosody_emit::perform::{Channel, Note as Performed, Performance, Sound, Wave};
+use prosody_emit::perform::{Channel, Note as Performed, Performance, Sound, Vowel, Wave};
 use prosody_synth::{
-    Bank, Gain, Hertz, Losses, Midi, Note, NoteSpec, Piece, Renderer, Repeat, STEMS, SampleRate,
-    Seconds, Source, Stems, master, wav,
+    Bank, Compression, Crush, Echo, Effects, Gain, Hertz, Losses, Midi, Note, NoteSpec, Piece,
+    Renderer, Repeat, Room, STEMS, SampleRate, Seconds, Shape, Source, Stems, master::Master, wav,
 };
 
 /// The rate a render is written at.
 const RATE: u32 = 48_000;
 
-/// How long a render runs past the piece's end, for the last notes' releases. The longest release
-/// the text sets is the chords' 0.6 s.
+/// How long a render runs past the piece's end, for the last notes' releases and the reverb's tail.
+/// The longest release the text sets is the chords' 0.6 s; the reverb rings for its `roomsize`
+/// in seconds (at most 10), which [`tail`] adds.
 const TAIL: f64 = 1.0;
+
+/// The render's tail: [`TAIL`], and the longest reverb any note sends to.
+fn tail(performance: &Performance) -> f64 {
+    let room = performance
+        .notes()
+        .iter()
+        .filter(|note| note.sends().room().get() > 0.0)
+        .map(|note| note.sends().room_size())
+        .fold(0.0, f64::max);
+    TAIL + room.clamp(0.0, Room::MAX_SIZE)
+}
 
 /// A rendered piece and what it could not play.
 pub(crate) struct Rendered {
@@ -32,10 +44,62 @@ pub(crate) struct Rendered {
     pub(crate) played: usize,
     /// Drum notes left out: no FLAC decoder.
     pub(crate) drums: usize,
-    /// Soundfont notes left out: no MP3 decoder.
+    /// Soundfont notes left out: no FLAC decoder.
     pub(crate) fonts: usize,
     /// What the synth itself lost.
     pub(crate) losses: Losses,
+}
+
+/// What a Performance's note `tag` asks of the effects, checked as the synth takes it: a value the
+/// synth cannot mean is an error naming the note, never a silent drop (`CLAUDE.md` §6).
+fn effects(tag: u32, note: &Performed) -> Result<Effects> {
+    let voice = note.voice();
+    let sends = note.sends();
+    let bad = |what: &str| format!("note {tag}'s {what} is out of the synth's range");
+    let crush = voice
+        .crush()
+        .map(|bits| Crush::new(f64::from(bits)).with_context(|| bad("crush")))
+        .transpose()?;
+    let shape = voice
+        .shape()
+        .map(|shape| Shape::new(shape.get()).with_context(|| bad("shape")))
+        .transpose()?;
+    let vowel = voice.vowel().map(|vowel| match vowel {
+        Vowel::A => prosody_synth::Vowel::A,
+        Vowel::E => prosody_synth::Vowel::E,
+        Vowel::I => prosody_synth::Vowel::I,
+        Vowel::O => prosody_synth::Vowel::O,
+        Vowel::U => prosody_synth::Vowel::U,
+    });
+    let room = if sends.room().get() > 0.0 {
+        let send = Gain::new(sends.room().get()).with_context(|| bad("room"))?;
+        let size = Seconds::new(sends.room_size()).with_context(|| bad("room size"))?;
+        Some(Room::new(send, size).with_context(|| bad("room size"))?)
+    } else {
+        None
+    };
+    let echo = sends
+        .delay()
+        .map(|echo| {
+            let send = Gain::new(echo.level().get()).with_context(|| bad("delay"))?;
+            let time = Seconds::new(echo.time().get()).with_context(|| bad("delay time"))?;
+            Echo::new(send, time, echo.feedback().get()).with_context(|| bad("delay"))
+        })
+        .transpose()?;
+    let compression = note
+        .compressor()
+        .map(|c| {
+            Compression::new(c.threshold().get(), c.ratio()).with_context(|| bad("compressor"))
+        })
+        .transpose()?;
+    Ok(Effects {
+        crush,
+        vowel,
+        shape,
+        room,
+        echo,
+        compression,
+    })
 }
 
 /// The note the synth plays for a Performance's note `tag`, or `None` for one it cannot sound
@@ -75,6 +139,7 @@ fn synth_note(tag: u32, note: &Performed) -> Result<Option<Note>> {
             .release()
             .and_then(|release| Seconds::new(release.get())),
         lpf: Hertz::new(voice.lpf().get()).with_context(|| format!("note {tag}'s cutoff"))?,
+        effects: effects(tag, note)?,
     };
     Ok(Some(Note::new(spec)?))
 }
@@ -101,14 +166,15 @@ pub(crate) fn render(performance: &Performance) -> Result<Rendered> {
     let length = Seconds::new(performance.seconds().get()).context("the piece's length")?;
     let mut renderer = Renderer::new(rate, Bank::new());
     renderer.play(Piece::new(notes, &bars, length, Repeat::Once, rate));
-    let end = Seconds::new(length.get() + TAIL)
+    let end = Seconds::new(length.get() + tail(performance))
         .context("the render's length")?
         .frames(rate);
     let mut stems = Stems::new(2_048);
+    let mut master = Master::new(f64::from(RATE));
     let mut pcm = Vec::new();
     while renderer.frontier() < end {
         renderer.render(&mut stems);
-        master::mix(&stems, [1.0; STEMS], &mut pcm);
+        master.mix(&stems, [1.0; STEMS], &mut pcm);
     }
     let wav = wav::encode(&pcm, RATE).context("the render is too long for a WAV file")?;
     #[allow(clippy::cast_precision_loss)] // a frame count far below 2^52

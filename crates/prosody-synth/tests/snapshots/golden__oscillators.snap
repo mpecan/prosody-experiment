@@ -2,5 +2,5 @@
 source: crates/prosody-synth/tests/golden.rs
 expression: "describe(\"oscillators\", Bank::new(), notes, 4.0)"
 ---
-oscillators: 216064 frames, peak 0.5445, rms 0.2379, stolen 0, missing 0
-blake3 2d17de79d43ae5fc467853dffe9af706b976fc70639a81c24c489c4478f538fe
+oscillators: 216064 frames, peak 0.2701, rms 0.0924, stolen 0, missing 0
+blake3 7b72fd84e0a647a82cdfb4bc261b559c391844edb83cefe5a1f3fdb40049ba32

@@ -159,6 +159,39 @@ test('plays from beside the page: only the soundfonts come from anywhere else', 
   await page.click('#stop');
 });
 
+test('the Prosody player plays everything from beside the page, the soundfonts too', async ({ page, baseURL }) => {
+  // Its soundfonts are our own FLAC zones (scripts/render-soundfonts.mjs), not the webaudiofont
+  // files Strudel fetches: every other host is refused, and nothing may be missing.
+  const elsewhere = new Set<string>();
+  const fonts: string[] = [];
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin === new URL(baseURL!).origin) {
+      if (url.pathname.includes('/soundfonts/')) fonts.push(url.pathname);
+      return route.continue();
+    }
+    elsewhere.add(url.host);
+    return route.abort();
+  });
+  await open(page);
+  // Jazz: soundfont bass and electric piano, compressed, with room and echo.
+  await page.getByRole('tab', { name: 'Sound' }).click();
+  await page.locator('#styles [data-style="jazz"]').click();
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Mixer' }).click();
+  await page.locator('#player button[data-value="prosody"]').click();
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  type Stats = { underruns: number; playhead: number | null; missing: number; peak: number };
+  const stats = () => page.evaluate(() => (globalThis as unknown as { prosodyPlayer: { stats(): Stats } }).prosodyPlayer.stats());
+  await expect.poll(async () => (await stats()).peak, { timeout: 20_000 }).toBeGreaterThan(0.01);
+  expect((await stats()).missing).toBe(0);
+  expect(fonts.some((path) => path.endsWith('0320_FluidR3_GM_sf2_file.json'))).toBe(true);
+  expect(fonts.some((path) => path.endsWith('.flac'))).toBe(true);
+  expect([...elsewhere]).toEqual([]);
+  await page.click('#stop');
+});
+
 test('every drum a pattern can ask for is beside the page, in a form the browser can play', async ({ page }) => {
   await open(page);
   const decoded = await page.evaluate(async () => {

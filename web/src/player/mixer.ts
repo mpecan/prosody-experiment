@@ -1,10 +1,22 @@
 // What the AudioWorklet does with the blocks the render worker sends (`docs/player.md` §5): queue
 // them, mix each stem at its gain — mute and solo are a gain of 0, glided to over a few ms — through
-// the master's soft clip, and count the times the queue ran dry. Kept apart from the worklet itself
-// so it can be tested without an audio thread; `worklet.ts` is the thin shell that runs it.
+// the master stage, and count the times the queue ran dry. Kept apart from the worklet itself so it
+// can be tested without an audio thread; `worklet.ts` is the thin shell that runs it.
+//
+// The master is the chain the page built for Strudel (strudel/index.ts `limitTheMaster`), in its
+// order, and the same as `prosody_synth::master` does for a file: the stems at their gains; the music
+// (every stem but the reading's) at the duck the block carries; the glue compressor on the music and
+// the reading together; the soft clip. The page fed its WaveShaper a quarter of the signal because a
+// curve spans −1…1 and its curve covered ±4; computed on the sample itself here, that quarter and the
+// curve's ×4 cancel.
 
-/** The stems a block holds, each stereo (prosody_synth::STEMS). */
-export const STEMS = 4;
+/** The stems a block holds, each stereo (prosody_synth::STEMS): drums, bass, melody, chords and the
+ * reading. */
+export const STEMS = 5;
+/** The reading's stem: the duck lowers the music under it, never it. */
+export const SPEECH = 4;
+/** Numbers a block holds a frame: two a stem, and the duck (prosody_synth `Stems::PER_FRAME`). */
+export const PER_FRAME = 2 * STEMS + 1;
 
 /** Frames a stem's gain takes to go all the way from 1 to 0 or back: about 5 ms at 48 kHz. A gain
  * switched from one sample to the next is a step in a sounding wave — a click on every mute and
@@ -17,7 +29,7 @@ export const FADE = 256;
 
 // The master's ceiling, as the page's Strudel master has it (strudel/index.ts `softClipCurve`) and
 // as `prosody_synth::master` does for a file: transparent below the knee, bending smoothly towards
-// the ceiling above it, flat beyond the range. The glue compressor ahead of it comes in step 3.
+// the ceiling above it, flat beyond the range.
 const CLIP_KNEE = 0.6, CLIP_CEILING = 0.95, CLIP_RANGE = 4;
 export function softClip(x: number): number {
   const a = Math.min(Math.abs(x), CLIP_RANGE);
@@ -26,8 +38,45 @@ export function softClip(x: number): number {
   return x < 0 ? -shaped : shaped;
 }
 
+// The glue: the page's DynamicsCompressorNode settings (−6 dB, 8:1, a 6 dB knee, 3 ms attack, 150 ms
+// release), as `prosody_synth::dynamics` computes a compressor — a quadratic knee from the threshold,
+// the reduction smoothed in decibels (attack × ATTACK_SCALE, release × RELEASE_SCALE, fitted to
+// Chrome's node), and Web Audio's makeup gain (1/curve(0 dBFS))^0.6. docs/player.md §11 has the
+// measurements. The two must stay the same; player.test.ts pins this one with the numbers the
+// Rust tests pin that one with.
+const GLUE = { threshold: -6, ratio: 8, knee: 6, attack: 0.003, release: 0.15 };
+const ATTACK_SCALE = 0.2, RELEASE_SCALE = 6;
+/** The glue's static curve: level out for level in, in dB. */
+export function glueCurve(x: number): number {
+  const over = x - GLUE.threshold, slope = 1 / GLUE.ratio - 1;
+  if (over <= 0) return x;
+  if (over < GLUE.knee) return x + slope * over * over / (2 * GLUE.knee);
+  return x + slope * (over - GLUE.knee / 2);
+}
+/** The glue's makeup, as a factor: 10^(−0.6·curve(0)/20) = 1.575 dB. */
+export const MAKEUP = 10 ** (-0.6 * glueCurve(0) / 20);
+
+/** The glue compressor's running state. */
+export class Glue {
+  private reduction = 0;
+  private readonly attack: number;
+  private readonly release: number;
+  constructor(rate: number) {
+    this.attack = Math.exp(-1 / (GLUE.attack * ATTACK_SCALE * rate));
+    this.release = Math.exp(-1 / (GLUE.release * RELEASE_SCALE * rate));
+  }
+  /** The gain for a frame whose louder side is `level`. */
+  gain(level: number): number {
+    const x = 20 * Math.log10(Math.max(Math.abs(level), 1e-5));
+    const wanted = glueCurve(x) - x;
+    const a = wanted < this.reduction ? this.attack : this.release;
+    this.reduction = a * this.reduction + (1 - a) * wanted;
+    return 10 ** (this.reduction / 20) * MAKEUP;
+  }
+}
+
 /** A rendered block: `frames` frames from render frame `frame`, the stems planar (each stem's left
- * side, then its right). */
+ * side, then its right), then the duck. */
 export interface Block {
   frame: number;
   frames: number;
@@ -57,6 +106,12 @@ export class StemQueue {
   private tailRight = new Float32Array(FADE);
   private tailFrames = 0;
   private tailAt = 0;
+  private glue: Glue;
+
+  /** A queue playing at `rate` frames a second (the glue's time constants are in seconds). */
+  constructor(rate = 48_000) {
+    this.glue = new Glue(rate);
+  }
 
   /** A block, in the order rendered. The first after a flush says where the count starts. */
   push(block: Block): void {
@@ -83,8 +138,9 @@ export class StemQueue {
       const at = this.frameAt(k);
       if (at) {
         const fade = (FADE - k) / FADE;
+        const duck = at.block.data[2 * STEMS * at.block.frames + at.offset] ?? 1;
         for (let stem = 0; stem < STEMS; stem++) {
-          const gain = this.gains[stem]! * fade;
+          const gain = this.gains[stem]! * fade * (stem === SPEECH ? 1 : duck);
           if (gain === 0) continue;
           const base = stem * 2 * at.block.frames + at.offset;
           l += gain * at.block.data[base]!;
@@ -117,22 +173,32 @@ export class StemQueue {
     return this.blocks.reduce((sum, block) => sum + block.frames, 0) - this.offset;
   }
 
-  /** Fills `left` and `right` with the next frames, each stem at its gain (gliding to the `gains`
-   * asked for, a 1/`GLIDE` step a frame), plus any tail fading from a flush, through the soft clip.
-   * Frames the queue cannot fill are silence, and a quantum short of music counts one underrun. */
+  /** Fills `left` and `right` with the next frames: each stem at its gain (gliding to the `gains`
+   * asked for, a 1/`GLIDE` step a frame), the music at the block's duck, plus any tail fading from a
+   * flush, through the glue and the soft clip. Frames the queue cannot fill are silence, and a
+   * quantum short of music counts one underrun. */
   mix(left: Float32Array, right: Float32Array, gains: readonly number[]): void {
     let short = false;
     for (let i = 0; i < left.length; i++) {
       let l = 0, r = 0;
       const block = this.blocks[0];
       if (block) {
+        let sl = 0, sr = 0;
         for (let stem = 0; stem < STEMS; stem++) {
           const gain = this.glide(stem, gains[stem] ?? 1);
           if (gain === 0) continue;
           const base = stem * 2 * block.frames + this.offset;
-          l += gain * block.data[base]!;
-          r += gain * block.data[base + block.frames]!;
+          if (stem === SPEECH) {
+            sl += gain * block.data[base]!;
+            sr += gain * block.data[base + block.frames]!;
+          } else {
+            l += gain * block.data[base]!;
+            r += gain * block.data[base + block.frames]!;
+          }
         }
+        const duck = block.data[2 * STEMS * block.frames + this.offset] ?? 1;
+        l = l * duck + sl;
+        r = r * duck + sr;
         this.fresh = false;
         this.offset += 1;
         this.played += 1;
@@ -148,8 +214,9 @@ export class StemQueue {
         r += this.tailRight[this.tailAt]!;
         this.tailAt += 1;
       }
-      left[i] = softClip(l);
-      right[i] = softClip(r);
+      const glue = this.glue.gain(Math.max(Math.abs(l), Math.abs(r)));
+      left[i] = softClip(glue * l);
+      right[i] = softClip(glue * r);
     }
     if (short && this.started) this.underruns += 1;
   }

@@ -5,14 +5,15 @@ import { describe, expect, it } from 'vitest';
 
 import type { Performance, PerformedNote } from '../src/answers';
 import { indexed, marksAt, notesBetween, pieceTime, settle, within } from '../src/player/clock';
-import { FADE, GLIDE, softClip, StemQueue } from '../src/player/mixer';
+import { FADE, GLIDE, Glue, glueCurve, MAKEUP, PER_FRAME, softClip, StemQueue } from '../src/player/mixer';
 import { barStarts, records, sampledOf, STRIDE } from '../src/player/notes';
-import { parseZones, zonesFor } from '../src/player/samples';
+import { zonesFor } from '../src/player/samples';
 
 function note(overrides: Partial<PerformedNote>): PerformedNote {
   return {
     from: 0, to: 3, channel: 'melody', lane: 'rhyme', slot: 0, onset: 0.25, length: 0.5,
     sound: { kind: 'wave', wave: 'sawtooth' }, pitch: 64, gain: 0.8, attack: null, release: 0.1, lpf: 3000, postgain: 1,
+    crush: null, vowel: null, shape: null, room: 0, roomsize: 2.5, delay: null, compressor: null,
     ...overrides,
   };
 }
@@ -32,14 +33,31 @@ describe('note records', () => {
   it('lays a note out as the synth reads it', () => {
     // The same record as crates/prosody-synth-wasm's `record(3, 2, 1, 64)`: tag 3, melody (2), an
     // oscillator (2), sawtooth (1), at 0.25 s for 0.5 s, MIDI 64, gain 0.8, postgain 1, no attack,
-    // release 0.1, cutoff 3 kHz.
+    // release 0.1, cutoff 3 kHz; no crush, vowel or shape (NaN), no room (0, size 2.5), no delay
+    // (NaN, 0, 0), no compressor (NaN, 1).
     const piece = performance([note({}), note({}), note({}), note({})]);
     const out = records(piece, new Map());
     expect(out.length).toBe(4 * STRIDE);
     const fourth = [...out.slice(3 * STRIDE, 4 * STRIDE)];
     expect(fourth.slice(0, 9)).toEqual([3, 2, 2, 1, 0.25, 0.5, 64, 0.8, 1]);
     expect(Number.isNaN(fourth[9])).toBe(true);
-    expect(fourth.slice(10)).toEqual([0.1, 3000]);
+    expect(fourth.slice(10, 12)).toEqual([0.1, 3000]);
+    expect(fourth.slice(12, 15).every(Number.isNaN)).toBe(true);
+    expect(fourth.slice(15, 17)).toEqual([0, 2.5]);
+    expect(Number.isNaN(fourth[17])).toBe(true);
+    expect(fourth.slice(18, 20)).toEqual([0, 0]);
+    expect(Number.isNaN(fourth[20])).toBe(true);
+    expect(fourth[21]).toBe(1);
+  });
+
+  it('writes the effects as the synth reads them', () => {
+    // The same effects as crates/prosody-synth-wasm's `a_records_effects_are_read_field_by_field`:
+    // 8 bits, /o/ (3), shape 0.1, room 0.35 at 2.5 s, an echo of 0.2 at 0.3 s and 0.35, −24 dB at 7:1.
+    const out = records(performance([note({
+      crush: 8, vowel: 'o', shape: 0.1, room: 0.35, roomsize: 2.5,
+      delay: { level: 0.2, time: 0.3, feedback: 0.35 }, compressor: { threshold: -24, ratio: 7 },
+    })]), new Map());
+    expect([...out.slice(12, 22)]).toEqual([8, 3, 0.1, 0.35, 2.5, 0.2, 0.3, 0.35, -24, 7]);
   });
 
   it('numbers sampled sounds by the ids given, and a drum has no pitch', () => {
@@ -127,21 +145,26 @@ describe('the clock', () => {
 });
 
 describe('the worklet mixer', () => {
-  /** A block of `frames` frames whose stem `stem` holds `left` and `right` throughout. */
-  function block(frame: number, frames: number, stem: number, left: number, right: number) {
-    const data = new Float32Array(8 * frames);
+  /** A block of `frames` frames whose stem `stem` holds `left` and `right` throughout, at `duck`. */
+  function block(frame: number, frames: number, stem: number, left: number, right: number, duck = 1) {
+    const data = new Float32Array(PER_FRAME * frames);
     data.fill(left, stem * 2 * frames, stem * 2 * frames + frames);
     data.fill(right, stem * 2 * frames + frames, (stem + 1) * 2 * frames);
+    data.fill(duck, 10 * frames, 11 * frames);
     return { frame, frames, data };
   }
+  // Every level below is far under the glue's −6 dB threshold, so the glue is its makeup alone:
+  // ×MAKEUP, 10^(1.575/20) = 1.19881, from its first frame.
+  const ALL = [1, 1, 1, 1, 1];
 
   it('mixes the stems at their gains and counts from the first block', () => {
     const queue = new StemQueue();
-    queue.push(block(1000, 4, 0, 0.25, 0.5));
+    queue.push(block(1000, 4, 0, 0.1, 0.2));
     const left = new Float32Array(2), right = new Float32Array(2);
-    queue.mix(left, right, [1, 1, 1, 1]);
-    expect([...left]).toEqual([0.25, 0.25]);
-    expect([...right]).toEqual([0.5, 0.5]);
+    queue.mix(left, right, ALL);
+    expect(left[0]).toBeCloseTo(0.1 * MAKEUP, 6);
+    expect(left[1]).toBeCloseTo(0.1 * MAKEUP, 6);
+    expect(right[0]).toBeCloseTo(0.2 * MAKEUP, 6);
     expect(queue.played).toBe(1002);
     expect(queue.underruns).toBe(0);
   });
@@ -149,38 +172,38 @@ describe('the worklet mixer', () => {
   it('glides a stem to a new gain rather than stepping, and starts at the gains asked for', () => {
     const queue = new StemQueue();
     // A stem muted before play is silent from its first frame: nothing sounded to glide from.
-    queue.push(block(0, 1000, 0, 0.5, 0.5));
+    queue.push(block(0, 1000, 0, 0.2, 0.2));
     const two = new Float32Array(2), other = new Float32Array(2);
-    queue.mix(two, other, [0, 1, 1, 1]);
+    queue.mix(two, other, [0, 1, 1, 1, 1]);
     expect([...two]).toEqual([0, 0]);
-    // Unmuted, it rises by 1/GLIDE a frame: 0.5 × 1/256, then × 2/256.
-    queue.mix(two, other, [1, 1, 1, 1]);
-    expect(two[0]).toBeCloseTo(0.5 / GLIDE, 9);
-    expect(two[1]).toBeCloseTo(0.5 * 2 / GLIDE, 9);
+    // Unmuted, it rises by 1/GLIDE a frame: 0.2 × 1/256, then × 2/256 (each through the makeup).
+    queue.mix(two, other, ALL);
+    expect(two[0]).toBeCloseTo(0.2 / GLIDE * MAKEUP, 7);
+    expect(two[1]).toBeCloseTo(0.2 * 2 / GLIDE * MAKEUP, 7);
     // After GLIDE frames it is all the way up, and stays there.
     const long = new Float32Array(GLIDE), side = new Float32Array(GLIDE);
-    queue.mix(long, side, [1, 1, 1, 1]);
-    expect(long[GLIDE - 3]).toBeCloseTo(0.5, 9);
-    expect(long[GLIDE - 1]).toBeCloseTo(0.5, 9);
+    queue.mix(long, side, ALL);
+    expect(long[GLIDE - 3]).toBeCloseTo(0.2 * MAKEUP, 7);
+    expect(long[GLIDE - 1]).toBeCloseTo(0.2 * MAKEUP, 7);
     // Muted again: down by 1/GLIDE a frame, no step to 0.
-    queue.mix(two, other, [0, 1, 1, 1]);
-    expect(two[0]).toBeCloseTo(0.5 * (GLIDE - 1) / GLIDE, 9);
-    expect(two[1]).toBeCloseTo(0.5 * (GLIDE - 2) / GLIDE, 9);
+    queue.mix(two, other, [0, 1, 1, 1, 1]);
+    expect(two[0]).toBeCloseTo(0.2 * (GLIDE - 1) / GLIDE * MAKEUP, 7);
+    expect(two[1]).toBeCloseTo(0.2 * (GLIDE - 2) / GLIDE * MAKEUP, 7);
   });
 
   it('fades what was queued out over FADE frames when it is flushed', () => {
     const queue = new StemQueue();
     queue.push(block(0, 1000, 1, 0.4, 0.2));
     const two = new Float32Array(2), other = new Float32Array(2);
-    queue.mix(two, other, [1, 1, 1, 1]);
+    queue.mix(two, other, ALL);
     queue.flush();
     // The next FADE frames of the dropped music, falling linearly: frame k at (FADE − k)/FADE.
     const out = new Float32Array(FADE + 4), outRight = new Float32Array(FADE + 4);
-    queue.mix(out, outRight, [1, 1, 1, 1]);
-    expect(out[0]).toBeCloseTo(0.4, 6);
-    expect(outRight[0]).toBeCloseTo(0.2, 6);
-    expect(out[FADE / 2]).toBeCloseTo(0.4 * 0.5, 6);
-    expect(out[FADE - 1]).toBeCloseTo(0.4 / FADE, 6);
+    queue.mix(out, outRight, ALL);
+    expect(out[0]).toBeCloseTo(0.4 * MAKEUP, 6);
+    expect(outRight[0]).toBeCloseTo(0.2 * MAKEUP, 6);
+    expect(out[FADE / 2]).toBeCloseTo(0.4 * 0.5 * MAKEUP, 6);
+    expect(out[FADE - 1]).toBeCloseTo(0.4 / FADE * MAKEUP, 6);
     expect([...out.slice(FADE)]).toEqual([0, 0, 0, 0]);
     // Silence after a flush is no shortfall, and the count is not moved by the tail.
     expect(queue.underruns).toBe(0);
@@ -193,11 +216,11 @@ describe('the worklet mixer', () => {
     queue.push(block(0, 3, 1, 0.1, 0.1));
     queue.push(block(3, 3, 1, 0.2, 0.2));
     const left = new Float32Array(4), right = new Float32Array(4);
-    queue.mix(left, right, [1, 1, 1, 1]);
-    expect([...left].map((x) => Math.round(x * 10) / 10)).toEqual([0.1, 0.1, 0.1, 0.2]);
+    queue.mix(left, right, ALL);
+    expect([...left].map((x) => Math.round(x / MAKEUP * 10) / 10)).toEqual([0.1, 0.1, 0.1, 0.2]);
     expect(queue.queued).toBe(2);
-    queue.mix(left, right, [1, 1, 1, 1]);
-    expect([...left].map((x) => Math.round(x * 10) / 10)).toEqual([0.2, 0.2, 0, 0]);
+    queue.mix(left, right, ALL);
+    expect([...left].map((x) => Math.round(x / MAKEUP * 10) / 10)).toEqual([0.2, 0.2, 0, 0]);
     expect(queue.underruns).toBe(1);
     expect(queue.played).toBe(6);
   });
@@ -205,14 +228,41 @@ describe('the worklet mixer', () => {
   it('is not short of anything before the first block, nor after a flush', () => {
     const queue = new StemQueue();
     const left = new Float32Array(4), right = new Float32Array(4);
-    queue.mix(left, right, [1, 1, 1, 1]);
+    queue.mix(left, right, ALL);
     queue.push(block(50, 4, 0, 0.1, 0.1));
     queue.flush();
-    queue.mix(left, right, [1, 1, 1, 1]);
+    queue.mix(left, right, ALL);
     expect(queue.underruns).toBe(0);
     // After a flush the next block says where the count starts again.
     queue.push(block(9000, 4, 0, 0.1, 0.1));
     expect(queue.played).toBe(9000);
+  });
+
+  it('ducks the music under the reading and not the reading', () => {
+    // Melody 0.05 at a duck of 0.6 is 0.03; the reading's 0.05 is not ducked; together 0.08, and
+    // through the makeup 0.08 × 1.19881 = 0.095905: the frame prosody_synth's master test works.
+    const queue = new StemQueue();
+    const b = block(0, 2, 2, 0.05, 0.05, 0.6);
+    b.data.fill(0.05, 4 * 2 * 2, 4 * 2 * 2 + 2);
+    queue.push(b);
+    const left = new Float32Array(1), right = new Float32Array(1);
+    queue.mix(left, right, ALL);
+    expect(left[0]).toBeCloseTo(0.095905, 5);
+  });
+
+  it('glues as prosody_synth::dynamics does', () => {
+    // The curve: −6 dB, 8:1, a 6 dB knee from the threshold. 3 dB in: −3 + (1/8 − 1)·9/12 =
+    // −3.65625; at 0 dBFS, the knee's end: −2.625, so the makeup is 0.6 × 2.625 = 1.575 dB.
+    expect(glueCurve(-20)).toBe(-20);
+    expect(glueCurve(-3)).toBeCloseTo(-3.65625, 9);
+    expect(glueCurve(0)).toBeCloseTo(-2.625, 9);
+    expect(20 * Math.log10(MAKEUP)).toBeCloseTo(1.575, 9);
+    // Held at 0 dBFS it settles at the curve's 2.625 dB of reduction and the makeup: −1.05 dB,
+    // ×0.8861; the attack's time constant is 0.6 ms, so 5 ms is long enough.
+    const glue = new Glue(48_000);
+    let g = 0;
+    for (let i = 0; i < 240; i++) g = glue.gain(1);
+    expect(g).toBeCloseTo(10 ** (-1.05 / 20), 3);
   });
 
   it('clips as the page master does', () => {
@@ -225,59 +275,23 @@ describe('the worklet mixer', () => {
   });
 });
 
-describe('a soundfont file', () => {
-  // The shape of a webaudiofont file, with made-up values: two zones with samples, one without.
-  const file = `console.log('load _tone_x');
-var _tone_x={
-	zones:[
-		{
-			midi:32
-			,originalPitch:2800
-			,keyRangeLow:0
-			,keyRangeHigh:40
-			,loopStart:100
-			,loopEnd:900
-			,coarseTune:0
-			,fineTune:-50
-			,sampleRate:44100
-			,ahdsr:true
-			,file:'AAAA'
-		}
-		,{
-			midi:32
-			,originalPitch:6000
-			,keyRangeLow:41
-			,keyRangeHigh:70
-			,loopStart:0
-			,loopEnd:0
-			,coarseTune:2
-			,fineTune:0
-			,sampleRate:22050
-			,file:'QUJD+/8='
-		}
-		,{
-			midi:32
-			,originalPitch:7200
-			,keyRangeLow:71
-			,keyRangeHigh:127
-		}
-	]
-};`;
-
-  it('reads each zone with a sample, its root less its tuning', () => {
-    const zones = parseZones(file);
-    expect(zones.length).toBe(2);
-    // 2 800 cents is MIDI 28; fine-tuned −50 cents it sounds as 28.5 at its own rate.
-    expect(zones[0]).toEqual({ low: 0, high: 40, root: 28.5, loopStart: 100, loopEnd: 900, sampleRate: 44100, file: 'AAAA' });
-    // 6 000 cents, coarse-tuned up 2 semitones: it sounds as 58.
-    expect(zones[1]).toMatchObject({ low: 41, high: 70, root: 58, sampleRate: 22050, file: 'QUJD+/8=' });
+describe('a soundfont\'s zones', () => {
+  // Three zones as scripts/render-soundfonts.mjs writes them, with made-up values.
+  const zone = (position: number, low: number, high: number) => ({
+    position, low, high, root: 60, loopStart: null, loopEnd: null, rate: 32_000, file: `zones/${position}.flac`,
   });
+  const zones = [zone(0, 0, 40), zone(1, 41, 70), zone(2, 60, 80)];
 
   it('loads only the zones the keys need, by the synth\'s rule', () => {
-    const zones = parseZones(file);
+    // Each key is looked up one below, as Strudel plays it: 30 as 29, 50 as 49.
     expect(zonesFor(zones, [30])).toEqual([zones[0]]);
-    expect(zonesFor(zones, [30, 50, 64])).toEqual(zones);
-    // Key 100 is in no zone with a sample: the nearest (41–70) plays it.
-    expect(zonesFor(zones, [100])).toEqual([zones[1]]);
+    expect(zonesFor(zones, [30, 50])).toEqual([zones[0], zones[1]]);
+    // Key 41, the second zone's lowest, plays the zone below it.
+    expect(zonesFor(zones, [41])).toEqual([zones[0]]);
+    // Key 65 looks up 64, in two zones: the first in the file plays it, as prosody_synth
+    // `Instrument::zone` chooses.
+    expect(zonesFor(zones, [65])).toEqual([zones[1]]);
+    // Key 100 looks up 99, in none: the nearest (60–80) plays it.
+    expect(zonesFor(zones, [100])).toEqual([zones[2]]);
   });
 });

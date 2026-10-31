@@ -364,7 +364,7 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
             if rendered.drums + rendered.fonts > 0 {
                 eprintln!(
                     "prosody: {} drum and {} soundfont notes are not in the render: the CLI cannot \
-                     decode their samples yet (FLAC drums, MP3 soundfont zones); the page plays them",
+                     decode their samples yet (FLAC drums and soundfont zones); the page plays them",
                     rendered.drums, rendered.fonts
                 );
             }

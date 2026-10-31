@@ -6,9 +6,10 @@
 //     ▲                                                                          │
 //     └──────────────────────────── frames played ◄──────────────────────────────┘
 //
-// Step 2 of the design: the drums, the bass, the melody and the chords, with gain, envelope and
-// low-pass. Room, echo, crush, vowel, shape and the compressor arrive in step 3, and the reading in
-// step 4; until then the status line says the reading is not played here.
+// Steps 2 and 3 of the design: the drums, the bass, the melody and the chords, with everything the
+// text asks of them — gain, envelope, low-pass, vowel, crush, shape, each channel's compressor, echo
+// and reverb — mixed as five stems through the page's master. The reading comes in step 4; until
+// then its stem is silent and the status line says the reading is not played here.
 import workletUrl from './worklet?worker&url';
 
 import type { Mark, Performance } from '../answers';
@@ -24,7 +25,7 @@ import {
   clearRoll, drawFrame, elementsBetween, fitRoll, lightMarks, litVersion, resetMeters, rollWindow, watch,
 } from '../watch';
 import { indexed, marksAt, notesBetween, pieceTime, settle, type Indexed, type Placement } from './clock';
-import { barStarts, CHANNELS, records, sampledOf } from './notes';
+import { barStarts, records, sampledOf, STEM_CHANNELS } from './notes';
 import { decodeDrum, decodeFont, zoneName } from './samples';
 
 /** Frames the worker renders at a time. */
@@ -149,7 +150,7 @@ function tell(): void {
 }
 
 /** Loads every sampled sound `performance` needs that the worker does not have. */
-async function loadSounds(context: AudioContext, worker: Worker, performance: Performance): Promise<string[]> {
+async function loadSounds(worker: Worker, performance: Performance): Promise<string[]> {
   const failed: string[] = [];
   await Promise.all([...sampledOf(performance)].map(async ([key, { sound, keys }]) => {
     const have = loadedKeys.get(key);
@@ -162,11 +163,11 @@ async function loadSounds(context: AudioContext, worker: Worker, performance: Pe
     }
     try {
       if (sound.kind === 'drum') {
-        const drum = await decodeDrum(context, sound.bank, sound.piece);
+        const drum = await decodeDrum(sound.bank, sound.piece);
         worker.postMessage({ op: 'drum', id, ...drum }, [drum.left.buffer, drum.right.buffer]);
       } else {
         const zones = loadedZones.get(key) ?? new Set<string>();
-        for (const zone of await decodeFont(context, sound.file, wanted, zones)) {
+        for (const zone of await decodeFont(sound.file, wanted, zones)) {
           worker.postMessage({ op: 'zone', id, ...zone }, [zone.left.buffer, zone.right.buffer]);
           zones.add(zoneName(zone));
         }
@@ -213,7 +214,7 @@ export async function play(): Promise<void> {
     performance = (await answer.json()) as Performance;
     if (overtaken() || text !== poem.value || side !== hearing.value) return;   // a newer one plays itself
     status('loading the sounds this piece uses…' + (playing.value ? ' · playing' : ''));
-    failed = await loadSounds(running.context, running.worker, performance);
+    failed = await loadSounds(running.worker, performance);
   } catch (error) {
     if (!overtaken()) status('the Prosody player could not play this: ' + (error as Error).message, true);
     return;
@@ -277,7 +278,7 @@ export function stop(): void {
 
 /** Mute and solo, as stem gains in the worklet: heard within about 5 ms (mixer.ts `GLIDE`). */
 export function sendGains(): void {
-  ready?.node.port.postMessage({ gains: CHANNELS.map((channel) => (audible(channel as Channel) ? 1 : 0)) });
+  ready?.node.port.postMessage({ gains: STEM_CHANNELS.map((channel) => (audible(channel as Channel) ? 1 : 0)) });
 }
 
 /** The render frame at the speaker now, or null before anything has played: the worklet's count

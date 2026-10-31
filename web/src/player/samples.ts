@@ -1,16 +1,13 @@
-// The samples the Prosody player plays, fetched and decoded on the page's thread with the browser's
-// own decoder (`docs/player.md` §5: FLAC drums, the soundfonts' zones), then handed to the render
-// worker once. Only the sounds a Performance uses are loaded, and of a soundfont only the zones its
-// notes' keys fall in.
+// The samples the Prosody player plays, fetched and decoded on the page's thread, then handed to the
+// render worker once (`docs/player.md` §5). Only the sounds a Performance uses are loaded, and of a
+// soundfont only the zones its notes' keys fall in.
 //
-// The soundfonts are the webaudiofont files the page's Strudel already plays (the licensed variant
-// `style::SOUNDFONT_VARIANTS` names), from the same host. Each is a script assigning one object:
-// `zones`, each with its key range, its root (`originalPitch`, in cents), its tuning, its loop in
-// the sample's frames, its sample rate, and the sample itself as a base64 MP3 (`file`). It is read
-// as data here — its fields picked out by pattern — never run.
-
-/** Where the webaudiofont files come from: the host the page's Strudel loads them from. */
-export const SOUNDFONT_BASE = 'https://felixroos.github.io/webaudiofontdata/sound/';
+// Everything is beside the page and lossless: the drums (`drums/`, scripts/render-drums.mjs) and the
+// soundfonts (`soundfonts/`, scripts/render-soundfonts.mjs: a JSON file a soundfont describing its
+// zones, each zone's recording a FLAC). Each file is decoded at its own rate, by an
+// OfflineAudioContext made at that rate, so the browser decodes and never resamples: FLAC is
+// lossless, so every browser hands the synth the same samples, and the synth moves them to the
+// output's rate itself (`docs/player.md` §8, decision 3).
 
 /** A decoded sample: its channels and the rate they were decoded at. */
 export interface Decoded {
@@ -19,23 +16,35 @@ export interface Decoded {
   rate: number;
 }
 
-/** One soundfont zone as the file states it. */
+/** One soundfont zone as its JSON states it (scripts/render-soundfonts.mjs). */
 export interface RawZone {
+  /** Its index among its soundfont's zones. */
+  position: number;
   low: number;
   high: number;
-  /** The MIDI note the sample sounds at its own rate: `originalPitch` cents, less the tuning. */
+  /** The MIDI note the recording sounds at its own rate. */
   root: number;
-  loopStart: number;
-  loopEnd: number;
-  sampleRate: number;
-  /** The sample, base64. */
+  /** Its loop, in the recording's frames, or null for none. */
+  loopStart: number | null;
+  loopEnd: number | null;
+  /** The recording's rate. */
+  rate: number;
+  /** The recording, beside the JSON. */
   file: string;
 }
 
-/** A soundfont zone, decoded, with its loop in the decoded sample's frames. */
+/** A soundfont's JSON. */
+export interface Manifest {
+  name: string;
+  source: string;
+  licence: string;
+  zones: RawZone[];
+}
+
+/** A soundfont zone, decoded, its loop in its recording's frames (NaN for none). */
 export interface Zone extends Decoded {
-  /** Its index among its file's zones (as `parseZones` reads them): the synth chooses between zones
-   * that could both play a key by it, so the choice does not depend on which was loaded first. */
+  /** Its index among its soundfont's zones: the synth chooses between zones that could both play a
+   * key by it, so the choice does not depend on which was loaded first. */
   position: number;
   low: number;
   high: number;
@@ -44,40 +53,13 @@ export interface Zone extends Decoded {
   loopEnd: number;
 }
 
-/** Every zone of a webaudiofont file that has a sample, in its order. Zones whose sample is
- * missing are left out; a file with none reads as no zones, and the notes needing it are then
- * counted missing by the synth. */
-export function parseZones(text: string): RawZone[] {
-  const zones: RawZone[] = [];
-  for (const block of text.split(/\{\s*\n?\s*midi\s*:/).slice(1)) {
-    const number = (name: string) => {
-      const found = block.match(new RegExp(`[,{\\s]${name}\\s*:\\s*(-?[0-9.]+)`));
-      return found ? Number(found[1]) : NaN;
-    };
-    const file = block.match(/[,\s]file\s*:\s*'([A-Za-z0-9+/=]*)'/)?.[1];
-    if (!file) continue;
-    const coarse = number('coarseTune'), fine = number('fineTune');
-    zones.push({
-      low: number('keyRangeLow'),
-      high: number('keyRangeHigh'),
-      // SoundFont 2 §8.1.3: tuning raises the pitch a sample sounds at, so the key it sounds as at
-      // its own rate is the root less the tuning.
-      root: number('originalPitch') / 100 - (Number.isFinite(coarse) ? coarse : 0) - (Number.isFinite(fine) ? fine / 100 : 0),
-      loopStart: number('loopStart'),
-      loopEnd: number('loopEnd'),
-      sampleRate: number('sampleRate'),
-      file,
-    });
-  }
-  return zones.filter((zone) => Number.isFinite(zone.low) && Number.isFinite(zone.high) && Number.isFinite(zone.root));
-}
-
-/** The zones a set of keys needs: for each key, the first zone whose range holds it, or else the
- * nearest — the synth's own rule (prosody_synth `Instrument::zone`), so every zone it may pick is
- * loaded. */
+/** The zones a set of keys needs: for each key, the first zone whose range holds the key below it
+ * (Strudel's choice, measured), or else the nearest — the synth's own rule (prosody_synth
+ * `Instrument::zone`, which says why), so every zone it may pick is loaded. */
 export function zonesFor(zones: RawZone[], keys: Iterable<number>): RawZone[] {
   const chosen = new Set<RawZone>();
-  for (const key of keys) {
+  for (const played of keys) {
+    const key = Math.max(0, played - 1);
     const holding = zones.find((zone) => zone.low <= key && key <= zone.high);
     if (holding) { chosen.add(holding); continue; }
     let nearest: RawZone | null = null, distance = Infinity;
@@ -90,14 +72,6 @@ export function zonesFor(zones: RawZone[], keys: Iterable<number>): RawZone[] {
   return zones.filter((zone) => chosen.has(zone));
 }
 
-/** Base64 to bytes. */
-function bytesOf(base64: string): ArrayBuffer {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
-
 /** An AudioBuffer's channels, copied out (a mono buffer gives an empty right channel). */
 function channelsOf(buffer: AudioBuffer): Decoded {
   return {
@@ -107,35 +81,45 @@ function channelsOf(buffer: AudioBuffer): Decoded {
   };
 }
 
-/** A drum of a kit, from beside the page. */
-export async function decodeDrum(context: BaseAudioContext, bank: string, piece: string): Promise<Decoded> {
+/** `bytes`, a file recorded at `rate`, decoded at that rate: an OfflineAudioContext decodes to its
+ * own rate, so one made at the file's decodes without resampling. */
+async function decodeAt(bytes: ArrayBuffer, rate: number): Promise<Decoded> {
+  return channelsOf(await new OfflineAudioContext(1, 1, rate).decodeAudioData(bytes));
+}
+
+/** A drum of a kit, from beside the page, at its own rate (the drums are 44.1 kHz). */
+export async function decodeDrum(bank: string, piece: string): Promise<Decoded> {
   const response = await fetch(new URL(`./drums/${bank}/${piece}.flac`, document.baseURI));
   if (!response.ok) throw new Error(`${response.status} for drums/${bank}/${piece}.flac`);
-  return channelsOf(await context.decodeAudioData(await response.arrayBuffer()));
+  return decodeAt(await response.arrayBuffer(), DRUM_RATE);
 }
+
+/** The rate scripts/render-drums.mjs writes every drum at. */
+export const DRUM_RATE = 44_100;
 
 /** A zone's name among its file's zones: its key range. */
 export const zoneName = (zone: { low: number; high: number }) => `${zone.low}-${zone.high}`;
 
-/** The zones of soundfont `file` that `keys` need, decoded, less those named in `have` (loaded
- * already, for other keys). The browser decodes at the context's rate, so a zone's loop, stated in
- * its own sample rate's frames, is scaled to the decoded ones. */
-export async function decodeFont(context: BaseAudioContext, file: string, keys: Iterable<number>, have: ReadonlySet<string>): Promise<Zone[]> {
-  const response = await fetch(`${SOUNDFONT_BASE}${file}.js`);
+/** The zones of soundfont `file` that `keys` need, decoded at their own rates, less those named in
+ * `have` (loaded already, for other keys). */
+export async function decodeFont(file: string, keys: Iterable<number>, have: ReadonlySet<string>): Promise<Zone[]> {
+  const base = new URL(`./soundfonts/`, document.baseURI);
+  const response = await fetch(new URL(`${file}.json`, base));
   if (!response.ok) throw new Error(`${response.status} for the soundfont ${file}`);
-  const all = parseZones(await response.text());
-  const wanted = zonesFor(all, keys).filter((zone) => !have.has(zoneName(zone)));
+  const manifest = await response.json() as Manifest;
+  const wanted = zonesFor(manifest.zones, keys).filter((zone) => !have.has(zoneName(zone)));
   return Promise.all(wanted.map(async (zone) => {
-    const decoded = channelsOf(await context.decodeAudioData(bytesOf(zone.file)));
-    const scale = zone.sampleRate > 0 ? decoded.rate / zone.sampleRate : 1;
+    const recording = await fetch(new URL(zone.file, base));
+    if (!recording.ok) throw new Error(`${recording.status} for soundfonts/${zone.file}`);
+    const decoded = await decodeAt(await recording.arrayBuffer(), zone.rate);
     return {
       ...decoded,
-      position: all.indexOf(zone),
+      position: zone.position,
       low: zone.low,
       high: zone.high,
       root: zone.root,
-      loopStart: zone.loopStart * scale,
-      loopEnd: zone.loopEnd * scale,
+      loopStart: zone.loopStart ?? NaN,
+      loopEnd: zone.loopEnd ?? NaN,
     };
   }));
 }

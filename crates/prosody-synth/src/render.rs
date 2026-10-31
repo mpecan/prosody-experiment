@@ -5,9 +5,10 @@
 //! piece loops round and where an edit takes over are decided without a float (`CLAUDE.md` §4).
 //! A note's time in seconds becomes a frame once, when the piece is made.
 
-use crate::note::Note;
+use crate::bus::Bus;
+use crate::note::{Channel, Note};
 use crate::sample::Bank;
-use crate::stems::Stems;
+use crate::stems::{STEMS, Stems};
 use crate::units::{SampleRate, Seconds};
 use crate::voice::{Pool, Unplayable, Voice};
 
@@ -170,6 +171,8 @@ pub struct Renderer {
     rate: SampleRate,
     bank: Bank,
     pool: Pool,
+    /// Each channel's bus, in stem order.
+    buses: Vec<Bus>,
     /// The next output frame to render.
     frontier: u64,
     now: Option<Segment>,
@@ -187,6 +190,9 @@ impl Renderer {
             rate,
             bank,
             pool: Pool::new(),
+            buses: (0..STEMS)
+                .map(|_| Bus::new(f64::from(rate.get())))
+                .collect(),
             frontier: 0,
             now: None,
             next: None,
@@ -294,11 +300,17 @@ impl Renderer {
         self.now = None;
         self.next = None;
         self.pool.clear();
+        for bus in &mut self.buses {
+            bus.clear();
+        }
     }
 
     /// Renders the next `stems.frames()` frames into `stems`, replacing what it held.
     pub fn render(&mut self, stems: &mut Stems) {
         stems.clear();
+        for bus in &mut self.buses {
+            bus.begin(stems.frames());
+        }
         let from = self.frontier;
         let frames = u64::try_from(stems.frames()).unwrap_or(0);
         let to = from + frames;
@@ -315,11 +327,16 @@ impl Renderer {
         starts.sort_unstable();
         let mut cursor = from;
         for start in &starts {
-            self.render_voices(stems, from, cursor, start.at);
+            self.render_voices(from, cursor, start.at);
             cursor = start.at;
             self.begin(*start);
         }
-        self.render_voices(stems, from, cursor, to);
+        self.render_voices(from, cursor, to);
+        for (channel, bus) in Channel::ALL.iter().zip(&mut self.buses) {
+            if let Some((left, right)) = stems.sides_mut(*channel) {
+                bus.finish(left, right);
+            }
+        }
         self.starts = starts;
         if takeover.is_some_and(|at| at <= to) {
             self.now = self.next.take();
@@ -339,6 +356,9 @@ impl Renderer {
         };
         match Voice::new(note, &self.bank, self.rate, start.at) {
             Ok(voice) => {
+                if let Some(bus) = self.buses.get_mut(note.spec().channel.index()) {
+                    bus.configure(&note.spec().effects);
+                }
                 if self.pool.start(voice, &self.bank).is_some() {
                     self.losses.stolen += 1;
                 }
@@ -348,7 +368,7 @@ impl Renderer {
     }
 
     /// Renders every voice over output frames `from..to` of the block starting at `block`.
-    fn render_voices(&mut self, stems: &mut Stems, block: u64, from: u64, to: u64) {
+    fn render_voices(&mut self, block: u64, from: u64, to: u64) {
         if to <= from {
             return;
         }
@@ -358,10 +378,14 @@ impl Renderer {
         };
         for slot in self.pool.voices_mut() {
             let Some(voice) = slot else { continue };
-            let Some((left, right)) = stems.sides_mut(voice.channel(), offset, length) else {
+            let Some(lanes) = self
+                .buses
+                .get_mut(voice.channel().index())
+                .and_then(|bus| bus.slice(offset, length))
+            else {
                 continue;
             };
-            if !voice.render(&self.bank, left, right) {
+            if !voice.render(&self.bank, lanes) {
                 *slot = None;
             }
         }

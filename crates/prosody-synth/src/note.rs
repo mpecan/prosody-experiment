@@ -7,17 +7,28 @@
 //! the note to its words (invariant I4).
 
 use crate::SynthError;
+use crate::effects::Effects;
 use crate::osc::Wave;
 use crate::units::{Gain, Hertz, Midi, Seconds};
 
 /// The player's default attack, where the text sets none (`docs/player.md` §9: a parameter the
 /// text leaves unset is `None` in the Performance, and the player decides it here, once): a
-/// millisecond, enough to keep a note's start from clicking. To be matched to Strudel's by
-/// measurement in step 3.
+/// millisecond. Strudel's, measured (`docs/player.md` §11): a sine with no attack is at full level
+/// within its first period.
 pub const DEFAULT_ATTACK: f64 = 0.001;
 
-/// The player's default release, where the text sets none: ten milliseconds, likewise.
+/// The player's default release, where the text sets none: ten milliseconds, Strudel's, measured
+/// (a sine with no release falls silent 10 ms after its end, in a straight line).
 pub const DEFAULT_RELEASE: f64 = 0.01;
+
+/// The decay an oscillator note falls through when the text sets neither its attack nor its
+/// release: 50 ms, to [`DEFAULT_SUSTAIN`]. Strudel's, measured: a sine with no envelope set starts
+/// at full level and falls in a straight line to 0.6 of it over 50 ms; one with either set holds
+/// at full level. A soundfont note measured no such fall, and a drum plays its sample through.
+pub const DEFAULT_DECAY: f64 = 0.05;
+
+/// The level that decay holds at.
+pub const DEFAULT_SUSTAIN: f64 = 0.6;
 
 /// The stem a note plays on: what mute and solo silence together (`docs/player.md` §4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -30,11 +41,21 @@ pub enum Channel {
     Melody,
     /// The chord lane.
     Chords,
+    /// The reading. No note of a Performance plays on it yet: the reading comes to the player in
+    /// step 4 (`docs/player.md` §7), and its stem is silent until then. The master treats it apart
+    /// from the music: the duck lowers the music under it, never it (`crate::master`).
+    Speech,
 }
 
 impl Channel {
     /// Every channel, in stem order.
-    pub const ALL: [Self; 4] = [Self::Drums, Self::Bass, Self::Melody, Self::Chords];
+    pub const ALL: [Self; 5] = [
+        Self::Drums,
+        Self::Bass,
+        Self::Melody,
+        Self::Chords,
+        Self::Speech,
+    ];
 
     /// Its stem's place in [`crate::Stems`].
     #[must_use]
@@ -44,6 +65,7 @@ impl Channel {
             Self::Bass => 1,
             Self::Melody => 2,
             Self::Chords => 3,
+            Self::Speech => 4,
         }
     }
 
@@ -55,6 +77,7 @@ impl Channel {
             1 => Some(Self::Bass),
             2 => Some(Self::Melody),
             3 => Some(Self::Chords),
+            4 => Some(Self::Speech),
             _ => None,
         }
     }
@@ -96,6 +119,8 @@ pub struct NoteSpec {
     pub release: Option<Seconds>,
     /// Its low-pass cutoff.
     pub lpf: Hertz,
+    /// Its colour and its sends.
+    pub effects: Effects,
 }
 
 /// A note the synth can play: a [`NoteSpec`] that has been checked.
@@ -139,11 +164,25 @@ impl Note {
             .or_else(|| Seconds::new(DEFAULT_RELEASE))
             .unwrap_or(self.0.length)
     }
+
+    /// Its decay and the level it holds at: [`DEFAULT_DECAY`] to [`DEFAULT_SUSTAIN`] for an
+    /// oscillator note that sets neither attack nor release, and otherwise none, held at full
+    /// level — Strudel's envelope, measured (`docs/player.md` §11).
+    #[must_use]
+    pub fn decay(&self) -> Option<(Seconds, f64)> {
+        let bare = self.0.attack.is_none() && self.0.release.is_none();
+        let oscillator = matches!(self.0.source, Source::Wave(_));
+        (bare && oscillator)
+            .then(|| Seconds::new(DEFAULT_DECAY))
+            .flatten()
+            .map(|decay| (decay, DEFAULT_SUSTAIN))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Channel, Note, NoteSpec, Source};
+    use crate::effects::Effects;
     use crate::osc::Wave;
     use crate::units::{Gain, Hertz, Midi, Seconds};
 
@@ -160,6 +199,7 @@ mod tests {
             attack: None,
             release: Seconds::new(0.2),
             lpf: Hertz::new(5_000.0).unwrap(),
+            effects: Effects::DRY,
         }
     }
 
@@ -176,6 +216,15 @@ mod tests {
         let note = Note::new(spec(Source::Wave(Wave::Sawtooth), Some(60.0))).unwrap();
         assert!((note.attack().get() - super::DEFAULT_ATTACK).abs() < 1e-12);
         assert!((note.release().get() - 0.2).abs() < 1e-12);
+        // A release is set, so no decay; with neither set, an oscillator decays and a soundfont
+        // does not.
+        assert_eq!(note.decay(), None);
+        let mut bare = spec(Source::Wave(Wave::Sine), Some(60.0));
+        bare.release = None;
+        let decay = Note::new(bare).unwrap().decay().unwrap();
+        assert!((decay.0.get() - 0.05).abs() < 1e-12 && (decay.1 - 0.6).abs() < 1e-12);
+        bare.source = Source::Font(0);
+        assert_eq!(Note::new(bare).unwrap().decay(), None);
     }
 
     #[test]
@@ -183,6 +232,6 @@ mod tests {
         for channel in Channel::ALL {
             assert_eq!(Channel::from_index(channel.index()), Some(channel));
         }
-        assert_eq!(Channel::from_index(4), None);
+        assert_eq!(Channel::from_index(5), None);
     }
 }

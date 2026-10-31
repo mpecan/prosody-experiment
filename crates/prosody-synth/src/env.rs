@@ -1,23 +1,23 @@
-//! A note's envelope (`docs/player.md` §4): a linear attack, held for the note's length, then an
-//! exponential release.
+//! A note's envelope (`docs/player.md` §4): a linear attack, a linear decay to its sustain, held for
+//! the note's length, then a linear release.
 //!
-//! Linear up, because the text's attacks are short and a linear ramp is what "attack" means in
-//! Strudel's documentation; exponential down, because that is how a struck or plucked sound dies
-//! and how a listener hears an even fade. The release falls to −60 dB (one thousandth) in exactly
-//! its length and the voice ends there, so a release of 0.6 s takes 0.6 s whatever level the note
-//! was released from.
-
-use crate::math;
+//! Every segment is a straight line because Strudel's are, measured (`docs/player.md` §11): a
+//! sine with `.release(0.3)` loses the same amplitude every millisecond until it is silent at
+//! 0.3 s, and one with `.attack(0.02)` gains the same amplitude every millisecond until it is full
+//! at 20 ms. A release starts from wherever the level is and reaches silence in exactly its length,
+//! and the voice ends there.
 
 /// Where an envelope is.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Stage {
     /// Rising: `frame` frames in of `of`.
     Attack { frame: u32, of: u32 },
-    /// At full level until released.
+    /// Falling from full level to the sustain: `frame` frames in of `of`.
+    Decay { frame: u32, of: u32 },
+    /// At the sustain level until released.
     Hold,
-    /// Falling, `left` frames to go, by `factor` a frame.
-    Release { left: u32, factor: f64 },
+    /// Falling to silence, `left` frames to go, by `step` a frame.
+    Release { left: u32, step: f64 },
     /// Finished: silent for good.
     Done,
 }
@@ -27,26 +27,51 @@ enum Stage {
 pub struct Envelope {
     stage: Stage,
     level: f64,
+    /// The decay's length in frames.
+    decay: u32,
+    /// The level it holds at.
+    sustain: f64,
     /// The release's length in frames, fixed when the note starts.
     release: u32,
 }
 
 impl Envelope {
-    /// An envelope rising over `attack` frames and, once released, falling over `release` frames.
+    /// An envelope rising over `attack` frames to full level, held there, and once released,
+    /// falling over `release` frames.
     #[must_use]
     pub const fn new(attack: u32, release: u32) -> Self {
-        let stage = if attack == 0 {
-            Stage::Hold
+        Self::with_decay(attack, 0, 1.0, release)
+    }
+
+    /// An envelope rising over `attack` frames, falling over `decay` frames to `sustain` (0..=1),
+    /// held there, and once released falling over `release` frames.
+    #[must_use]
+    pub const fn with_decay(attack: u32, decay: u32, sustain: f64, release: u32) -> Self {
+        let sustain = sustain.clamp(0.0, 1.0);
+        let (stage, level) = if attack > 0 {
+            (
+                Stage::Attack {
+                    frame: 0,
+                    of: attack,
+                },
+                0.0,
+            )
+        } else if decay > 0 {
+            (
+                Stage::Decay {
+                    frame: 0,
+                    of: decay,
+                },
+                1.0,
+            )
         } else {
-            Stage::Attack {
-                frame: 0,
-                of: attack,
-            }
+            (Stage::Hold, sustain)
         };
-        let level = if attack == 0 { 1.0 } else { 0.0 };
         Self {
             stage,
             level,
+            decay,
+            sustain,
             release,
         }
     }
@@ -61,11 +86,24 @@ impl Envelope {
             self.level = 0.0;
             return;
         }
-        let factor = math::exp2(math::LOG2_THOUSANDTH / f64::from(self.release));
         self.stage = Stage::Release {
             left: self.release,
-            factor,
+            step: self.level / f64::from(self.release),
         };
+    }
+
+    /// After the attack: into the decay, or straight to the hold.
+    const fn after_attack(&mut self) {
+        if self.decay > 0 {
+            self.stage = Stage::Decay {
+                frame: 0,
+                of: self.decay,
+            };
+            self.level = 1.0;
+        } else {
+            self.stage = Stage::Hold;
+            self.level = self.sustain;
+        }
     }
 
     /// The level for this frame, then a step on.
@@ -75,24 +113,33 @@ impl Envelope {
             Stage::Attack { frame, of } => {
                 let next = frame + 1;
                 if next >= of {
-                    self.stage = Stage::Hold;
-                    self.level = 1.0;
+                    self.after_attack();
                 } else {
                     self.stage = Stage::Attack { frame: next, of };
                     self.level = f64::from(next) / f64::from(of);
                 }
             }
+            Stage::Decay { frame, of } => {
+                let next = frame + 1;
+                if next >= of {
+                    self.stage = Stage::Hold;
+                    self.level = self.sustain;
+                } else {
+                    self.stage = Stage::Decay { frame: next, of };
+                    self.level = 1.0 - (1.0 - self.sustain) * f64::from(next) / f64::from(of);
+                }
+            }
             Stage::Hold | Stage::Done => {}
-            Stage::Release { left, factor } => {
+            Stage::Release { left, step } => {
                 if left <= 1 {
                     self.stage = Stage::Done;
                     self.level = 0.0;
                 } else {
                     self.stage = Stage::Release {
                         left: left - 1,
-                        factor,
+                        step,
                     };
-                    self.level *= factor;
+                    self.level = (self.level - step).max(0.0);
                 }
             }
         }
@@ -112,7 +159,7 @@ impl Envelope {
         match self.stage {
             Stage::Release { left, .. } => Some(left),
             Stage::Done => Some(0),
-            Stage::Attack { .. } | Stage::Hold => None,
+            Stage::Attack { .. } | Stage::Decay { .. } | Stage::Hold => None,
         }
     }
 }
@@ -134,21 +181,37 @@ mod tests {
     }
 
     #[test]
-    fn the_release_reaches_a_thousandth_in_its_length_then_ends() {
-        // 1 000 frames of release from full level: after 500, √0.001 ≈ 0.0316 (half the decibels,
-        // −30 dB); the voice ends on the 1 000th.
+    fn the_release_is_a_straight_line_to_silence_in_its_length() {
+        // 1 000 frames of release from full level: a thousandth lost each frame, so half after
+        // 500, and the voice ends on the 1 000th.
         let mut envelope = Envelope::new(0, 1_000);
         assert!((envelope.next_level() - 1.0).abs() < 1e-12);
         envelope.release();
         let levels: Vec<f64> = (0..1_001).map(|_| envelope.next_level()).collect();
         assert!((levels[0] - 1.0).abs() < 1e-12);
-        assert!(
-            (levels[500] - 0.001_f64.sqrt()).abs() < 1e-9,
-            "{}",
-            levels[500]
-        );
-        assert!((levels[999] - 0.001 / (0.001_f64).powf(1.0 / 1000.0)).abs() < 1e-9);
+        assert!((levels[500] - 0.5).abs() < 1e-9, "{}", levels[500]);
+        assert!((levels[999] - 0.001).abs() < 1e-9);
         assert!(levels[1_000].abs() < 1e-12);
+        assert!(envelope.done());
+    }
+
+    #[test]
+    fn the_decay_falls_in_a_straight_line_to_the_sustain() {
+        // Strudel's envelope with nothing set, measured: up at once, down to 0.6 over 50 ms. In
+        // frames: no attack, 100 frames of decay to 0.6 — 0.8 halfway, 0.6 from the 100th on —
+        // and a release from 0.6 takes its 10 frames, 0.06 a frame.
+        let mut envelope = Envelope::with_decay(0, 100, 0.6, 10);
+        let levels: Vec<f64> = (0..150).map(|_| envelope.next_level()).collect();
+        assert!((levels[0] - 1.0).abs() < 1e-12);
+        assert!((levels[50] - 0.8).abs() < 1e-12);
+        assert!((levels[100] - 0.6).abs() < 1e-12);
+        assert!((levels[149] - 0.6).abs() < 1e-12);
+        envelope.release();
+        assert!((envelope.next_level() - 0.6).abs() < 1e-12);
+        assert!((envelope.next_level() - 0.54).abs() < 1e-12);
+        for _ in 0..8 {
+            envelope.next_level();
+        }
         assert!(envelope.done());
     }
 

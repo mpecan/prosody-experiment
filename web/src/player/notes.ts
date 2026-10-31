@@ -4,9 +4,15 @@
 import type { Performance, PerformedNote, PerformedSound } from '../answers';
 
 /** Numbers a note's record holds. */
-export const STRIDE = 12;
-/** The stems, in the synth's order: a channel's index is its stem. */
+export const STRIDE = 22;
+/** The channels a note can play on, in the synth's order: a channel's index is its stem. */
 export const CHANNELS = ['drums', 'bass', 'melody', 'chords'] as const;
+/** Every stem, in the synth's order, by the mixer's channel each answers to: the four a note plays
+ * on, and the reading's (prosody_synth `Channel::Speech`), silent until the reading comes to the
+ * player in step 4. */
+export const STEM_CHANNELS = [...CHANNELS, 'voice'] as const;
+/** The vowels, in the synth's order. */
+export const VOWELS = ['a', 'e', 'i', 'o', 'u'] as const;
 /** The oscillator waves, in the synth's order. */
 export const WAVES = ['sine', 'sawtooth', 'square', 'triangle'] as const;
 
@@ -62,6 +68,16 @@ function record(note: PerformedNote, tag: number, ids: Map<string, number>, out:
     note.attack ?? NaN,
     note.release ?? NaN,
     note.lpf,
+    note.crush ?? NaN,
+    note.vowel === null ? NaN : VOWELS.indexOf(note.vowel as typeof VOWELS[number]),
+    note.shape ?? NaN,
+    note.room,
+    note.roomsize,
+    note.delay?.level ?? NaN,
+    note.delay?.time ?? 0,
+    note.delay?.feedback ?? 0,
+    note.compressor?.threshold ?? NaN,
+    note.compressor?.ratio ?? 1,
   ], at);
 }
 

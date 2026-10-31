@@ -27,6 +27,25 @@ pub enum Wave {
     Triangle,
 }
 
+impl Wave {
+    /// The level a wave plays at, relative to its textbook amplitude: the sine and the triangle at
+    /// 1, the sawtooth and the square at 1/1.1790 = 0.8482.
+    ///
+    /// Matched to Strudel by measurement (`docs/player.md` §11): its sawtooth's and square's
+    /// harmonics measured exactly 1/n of the fundamental, but the fundamental itself 0.848 of the
+    /// sine's — the Wilbraham–Gibbs constant, (2/π)·Si(π) = 1.1790, the overshoot of a band-limited
+    /// jump. Strudel's waves behave as if scaled so that overshoot peaks at full level, which is
+    /// what Web Audio's built-in oscillator does; the sine and the triangle have no jump to
+    /// overshoot.
+    #[must_use]
+    pub const fn level(self) -> f64 {
+        match self {
+            Self::Sine | Self::Triangle => 1.0,
+            Self::Sawtooth | Self::Square => 0.848_190_992_838_221_2,
+        }
+    }
+}
+
 /// The polynomial band-limited step's residual: what to add to a naive unit step at phase 0 to
 /// smooth it, for a phase `t` in 0..1 advancing `dt` a sample.
 fn blep(t: f64, dt: f64) -> f64 {

@@ -11,8 +11,8 @@
 )]
 
 use prosody_synth::{
-    Bank, Channel, Gain, Hertz, Midi, Note, NoteSpec, Piece, Renderer, Repeat, Sample, SampleRate,
-    Seconds, Source, Stems, VOICES,
+    Bank, Channel, Effects, Gain, Hertz, Midi, Note, NoteSpec, Piece, Renderer, Repeat, STEMS,
+    Sample, SampleRate, Seconds, Source, Stems, VOICES,
 };
 
 const RATE: u32 = 8_000;
@@ -39,6 +39,7 @@ fn hit(tag: u32, onset: f64, channel: Channel) -> Note {
         attack: Seconds::new(0.0),
         release: None,
         lpf: Hertz::new(20_000.0).unwrap(),
+        effects: Effects::DRY,
     })
     .unwrap()
 }
@@ -62,7 +63,7 @@ fn piece(notes: Vec<Note>, bars: &[f64], length: f64, repeat: Repeat) -> Piece {
 /// Renders `blocks` blocks of 100 frames, and returns each channel's left side, end to end.
 fn run(renderer: &mut Renderer, blocks: usize) -> Vec<Vec<f32>> {
     let mut stems = Stems::new(100);
-    let mut out = vec![Vec::new(); 4];
+    let mut out = vec![Vec::new(); STEMS];
     for _ in 0..blocks {
         renderer.render(&mut stems);
         for channel in Channel::ALL {

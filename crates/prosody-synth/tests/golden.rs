@@ -15,8 +15,9 @@
 )]
 
 use prosody_synth::{
-    Bank, Channel, Gain, Hertz, Loop, Midi, Note, NoteSpec, Piece, Renderer, Repeat, STEMS, Sample,
-    SampleRate, Seconds, Source, Stems, Wave, Zone, master, wav,
+    Bank, Channel, Compression, Crush, Echo, Effects, Gain, Hertz, Loop, Midi, Note, NoteSpec,
+    Piece, Renderer, Repeat, Room, STEMS, Sample, SampleRate, Seconds, Shape, Source, Stems, Vowel,
+    Wave, Zone, master::Master, wav,
 };
 
 const RATE: u32 = 48_000;
@@ -48,6 +49,7 @@ fn note(
         attack: Seconds::new(0.005),
         release: Seconds::new(0.15),
         lpf: Hertz::new(lpf).unwrap(),
+        effects: Effects::DRY,
     })
     .unwrap()
 }
@@ -85,11 +87,12 @@ fn describe(name: &str, bank: Bank, notes: Vec<Note>, seconds: f64) -> String {
     let length = Seconds::new(seconds).unwrap();
     renderer.play(Piece::new(notes, &[], length, Repeat::Once, rate()));
     let mut stems = Stems::new(1_024);
+    let mut master = Master::new(f64::from(RATE));
     let mut pcm = Vec::new();
     let frames = length.frames(rate()) + u64::from(RATE) / 2;
     while renderer.frontier() < frames {
         renderer.render(&mut stems);
-        master::mix(&stems, [1.0; STEMS], &mut pcm);
+        master.mix(&stems, [1.0; STEMS], &mut pcm);
     }
     if let Some(dir) = std::env::var_os("PROSODY_GOLDEN_WAV") {
         let path = std::path::Path::new(&dir).join(format!("{name}.wav"));
@@ -234,4 +237,73 @@ fn soundfont_zones() {
         })
         .collect();
     insta::assert_snapshot!(describe("soundfont_zones", bank, notes, 2.6));
+}
+
+#[test]
+fn effects() {
+    // Every effect the text asks for, each on its own note so a change to one moves its own part
+    // of the sound: a saw through each vowel; drums crushed to 4 and 8 bits; a bass shaped at 0.3
+    // and compressed (−24 dB, 7:1); a melody sent to a 1.5 s room and a 0.25 s echo at 0.35.
+    let mut bank = Bank::new();
+    bank.set_drum(0, Sample::new(burst(12_000, 5), None, 48_000.0).unwrap())
+        .unwrap();
+    let mut notes = Vec::new();
+    let mut tag = 0;
+    let mut add = |channel, source, onset, pitch, effects: Effects| {
+        let mut spec = *note(tag, channel, source, onset, 0.25, pitch, 0.6, 9_000.0).spec();
+        spec.effects = effects;
+        notes.push(Note::new(spec).unwrap());
+        tag += 1;
+    };
+    for (i, vowel) in Vowel::ALL.into_iter().enumerate() {
+        let effects = Effects {
+            vowel: Some(vowel),
+            ..Effects::DRY
+        };
+        add(
+            Channel::Melody,
+            Source::Wave(Wave::Sawtooth),
+            i as f64 * 0.3,
+            Some(45.0),
+            effects,
+        );
+    }
+    for (i, bits) in [4.0, 8.0].into_iter().enumerate() {
+        let effects = Effects {
+            crush: Crush::new(bits),
+            ..Effects::DRY
+        };
+        add(
+            Channel::Drums,
+            Source::Drum(0),
+            1.5 + i as f64 * 0.3,
+            None,
+            effects,
+        );
+    }
+    let bass = Effects {
+        shape: Shape::new(0.3),
+        compression: Compression::new(-24.0, 7.0),
+        ..Effects::DRY
+    };
+    add(
+        Channel::Bass,
+        Source::Wave(Wave::Triangle),
+        2.1,
+        Some(36.0),
+        bass,
+    );
+    let melody = Effects {
+        room: Room::new(Gain::new(0.5).unwrap(), Seconds::new(1.5).unwrap()),
+        echo: Echo::new(Gain::new(0.4).unwrap(), Seconds::new(0.25).unwrap(), 0.35),
+        ..Effects::DRY
+    };
+    add(
+        Channel::Melody,
+        Source::Wave(Wave::Square),
+        2.5,
+        Some(72.0),
+        melody,
+    );
+    insta::assert_snapshot!(describe("effects", bank, notes, 4.5));
 }

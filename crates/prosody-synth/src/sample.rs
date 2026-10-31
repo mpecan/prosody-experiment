@@ -249,8 +249,17 @@ pub enum Instrument {
 
 impl Instrument {
     /// The zone that plays `pitch` (rounded to a key), and its index here: of the zones whose range
-    /// holds it, the first in its file; or else the nearest by key, ties to the first in the file,
-    /// so a note outside every range still sounds, from the closest recording.
+    /// holds the key below it, the first in its file; or else the nearest by key, ties to the first
+    /// in the file, so a note outside every range still sounds, from the closest recording.
+    ///
+    /// **The key below**, not the key itself, because that is what Strudel plays, measured
+    /// (`docs/player.md` §11): the lowest key of every zone's range sounds the zone beneath it —
+    /// `gm_epiano1:1` at key 64 (zone 64–69) was the recording of zone 58–63 to −46 dB, key 70 that
+    /// of 64–69, `gm_acoustic_bass:1` at 37 that of 30–36 and at 29 that of 0–28 — and every other
+    /// key the zone holding it. The `SoundFont` 2 specification reads a range as inclusive; following
+    /// it would give one key in five or six another recording than the Strudel text plays, pitched
+    /// the other way. Which recording sounds is timbre, not structure (`SPEC.md` §6, I3), so the
+    /// player matches the text's sound.
     ///
     /// The choice goes by the file's order, not the order zones were loaded in. The page loads a
     /// font's zones as pieces need them, so which arrived first depends on what played before;
@@ -264,7 +273,7 @@ impl Instrument {
         };
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         // clamped to 0..=127 first
-        let key = pitch.round().clamp(0.0, 127.0) as u8;
+        let key = (pitch.round().clamp(0.0, 127.0) as u8).saturating_sub(1);
         let holding = zones
             .iter()
             .enumerate()
@@ -405,10 +414,14 @@ mod tests {
             (1, zone(41, 60)),
             (2, zone(70, 80)),
         ]);
+        // Each key looks up the key below it.
         assert_eq!(font.zone(35.0).map(|(i, _)| i), Some(0));
-        assert_eq!(font.zone(40.6).map(|(i, _)| i), Some(1)); // rounds to key 41
-        assert_eq!(font.zone(64.0).map(|(i, _)| i), Some(1)); // 4 above 60, 6 below 70
-        assert_eq!(font.zone(66.0).map(|(i, _)| i), Some(2)); // 6 above 60, 4 below 70
+        assert_eq!(font.zone(41.6).map(|(i, _)| i), Some(1)); // rounds to 42, looks up 41
+        assert_eq!(font.zone(41.0).map(|(i, _)| i), Some(0)); // a range's lowest key: the zone below
+        assert_eq!(font.zone(61.0).map(|(i, _)| i), Some(1)); // looks up 60, inside 41–60
+        assert_eq!(font.zone(64.0).map(|(i, _)| i), Some(1)); // 63: 3 above 60, 7 below 70
+        assert_eq!(font.zone(67.0).map(|(i, _)| i), Some(2)); // 66: 6 above 60, 4 below 70
+        assert_eq!(font.zone(0.0).map(|(i, _)| i), Some(0)); // no key below 0: key 0, nearest 30
         assert_eq!(font.zone(10.0).map(|(i, _)| i), Some(0));
         assert!(Instrument::Drum(ramp(4)).zone(60.0).is_none());
     }
@@ -416,8 +429,9 @@ mod tests {
     #[test]
     fn the_zone_chosen_does_not_depend_on_the_order_zones_were_loaded_in() {
         // A file's zones: 0 is keys 40..=50, 1 is 56..=70, 2 is 45..=60 (overlapping both). Key 48
-        // lies in 0 and 2, so 0, first in the file; key 53 in 2 only; key 75 is nearest 1 (5 above
-        // 70). With only 0 and 1 loaded, key 53 is 3 from each, so 0, first in the file.
+        // looks up 47, in 0 and 2, so 0, first in the file; key 53 looks up 52, in 2 only; key 75
+        // looks up 74, nearest 1 (4 above 70). With only 0 and 1 loaded, 52 is 2 above 0 and 4 below
+        // 1, so 0.
         let zone = |low: u8, high: u8| Zone::new(ramp(4), f64::from(low), low, high, None).unwrap();
         let file = [(0, zone(40, 50)), (1, zone(56, 70)), (2, zone(45, 60))];
         let chosen = |order: &[usize], key: f64| {

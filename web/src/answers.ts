@@ -111,7 +111,20 @@ export interface PerformedNote {
   attack: number | null;
   release: number | null;
   lpf: number;
+  /** Bit depth, or null for none. */
+  crush: number | null;
+  /** The formant vowel, or null for none. */
+  vowel: string | null;
+  /** The waveshaper's amount, or null for none. */
+  shape: number | null;
+  /** The reverb send, and the reverb's RT60 in seconds. */
+  room: number;
+  roomsize: number;
+  /** The echo, or null for none. */
+  delay: { level: number; time: number; feedback: number } | null;
   postgain: number;
+  /** The layer's compressor, or null for none. */
+  compressor: { threshold: number; ratio: number } | null;
 }
 
 /** A syllable lighting up while it sounds. */
@@ -129,7 +142,7 @@ export interface PerformedMark {
 
 /** Every note of the piece, resolved (`docs/player.md` §3; `performance_json` in
  * crates/prosody-web/src/lib.rs). Times are seconds; the piece loops round at `seconds`. Fields the
- * player does not read yet (room, delay, crush, the reading's cues) are left out of the type. */
+ * player does not read yet (the reading's cues) are left out of the type. */
 export interface Performance {
   seconds: number;
   cpm: number;

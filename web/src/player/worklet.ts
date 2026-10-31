@@ -20,8 +20,8 @@ const TELL_WORKER = 1024;
 const TELL_PAGE = Math.round(sampleRate * 0.05);
 
 class PlayerProcessor extends AudioWorkletProcessor {
-  private queue = new StemQueue();
-  private gains = [1, 1, 1, 1];
+  private queue = new StemQueue(sampleRate);
+  private gains = [1, 1, 1, 1, 1];
   private worker: MessagePort | null = null;
   /** Which start of play the blocks wanted belong to: blocks still in flight from before a stop or
    * a restart are dropped, not heard. */

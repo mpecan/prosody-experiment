@@ -1,5 +1,5 @@
-//! A block of rendered audio, one stereo stem per channel (`docs/player.md` §4: the render's output
-//! is stems, and the mix happens after, where mute and solo are a gain).
+//! A block of rendered audio, one stereo stem per channel, and the duck (`docs/player.md` §4: the
+//! render's output is stems, and the mix happens after, where mute and solo are a gain).
 
 use crate::note::Channel;
 
@@ -7,7 +7,12 @@ use crate::note::Channel;
 pub const STEMS: usize = Channel::ALL.len();
 
 /// A block of stems, planar: each channel's left side, then its right, `frames` samples each, in
-/// [`Channel::index`] order. The page's worklet reads this layout from the transferred buffer.
+/// [`Channel::index`] order; then the duck, `frames` more — the music's level under the reading at
+/// each frame, 1 for none. The page's worklet reads this layout from the transferred buffer.
+///
+/// The duck is written by the renderer because the reading's timeline will be the renderer's
+/// (`docs/player.md` §5, "The reading"): until the reading comes to the player in step 4, it is 1
+/// throughout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stems {
     frames: usize,
@@ -15,13 +20,18 @@ pub struct Stems {
 }
 
 impl Stems {
-    /// A silent block `frames` long.
+    /// Numbers a block holds per frame: two a stem and the duck.
+    pub const PER_FRAME: usize = 2 * STEMS + 1;
+
+    /// A silent block `frames` long, the duck at 1.
     #[must_use]
     pub fn new(frames: usize) -> Self {
-        Self {
+        let mut stems = Self {
             frames,
-            data: vec![0.0; frames * 2 * STEMS],
-        }
+            data: vec![0.0; frames * Self::PER_FRAME],
+        };
+        stems.clear();
+        stems
     }
 
     /// How many frames it holds.
@@ -30,9 +40,13 @@ impl Stems {
         self.frames
     }
 
-    /// Back to silence, to be rendered again.
+    /// Back to silence, the duck at 1, to be rendered again.
     pub fn clear(&mut self) {
-        self.data.fill(0.0);
+        let stems = 2 * STEMS * self.frames;
+        let split = stems.min(self.data.len());
+        let (sound, duck) = self.data.split_at_mut(split);
+        sound.fill(0.0);
+        duck.fill(1.0);
     }
 
     /// Every sample, in the planar layout.
@@ -48,43 +62,52 @@ impl Stems {
         self.data.get(start..start + self.frames).unwrap_or(&[])
     }
 
-    /// Both sides of a stem, from frame `from`, `length` frames: where a voice adds itself.
-    pub(crate) fn sides_mut(
-        &mut self,
-        channel: Channel,
-        from: usize,
-        length: usize,
-    ) -> Option<(&mut [f32], &mut [f32])> {
+    /// The duck: the music's level at each frame.
+    #[must_use]
+    pub fn duck(&self) -> &[f32] {
+        let start = 2 * STEMS * self.frames;
+        self.data.get(start..start + self.frames).unwrap_or(&[])
+    }
+
+    /// The duck, to write: what the reading will set from step 4 (`docs/player.md` §7).
+    pub fn duck_mut(&mut self) -> &mut [f32] {
+        let start = 2 * STEMS * self.frames;
+        let end = start + self.frames;
+        self.data.get_mut(start..end).unwrap_or(&mut [])
+    }
+
+    /// Both sides of a stem, whole.
+    pub(crate) fn sides_mut(&mut self, channel: Channel) -> Option<(&mut [f32], &mut [f32])> {
         let frames = self.frames;
         let stem = self
             .data
             .get_mut(channel.index() * 2 * frames..(channel.index() + 1) * 2 * frames)?;
-        let (left, right) = stem.split_at_mut(frames);
-        Some((
-            left.get_mut(from..from + length)?,
-            right.get_mut(from..from + length)?,
-        ))
+        Some(stem.split_at_mut(frames))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Stems;
+    use super::{STEMS, Stems};
     use crate::note::Channel;
 
     #[test]
-    fn each_stem_is_left_then_right_in_channel_order() {
+    fn each_stem_is_left_then_right_in_channel_order_then_the_duck() {
         let mut stems = Stems::new(4);
-        let (left, right) = stems.sides_mut(Channel::Melody, 1, 2).unwrap();
-        left.fill(1.0);
-        right.fill(2.0);
-        // Melody is stem 2: its left side is samples 16..20, its right 20..24.
+        let (left, right) = stems.sides_mut(Channel::Melody).unwrap();
+        left[1..3].fill(1.0);
+        right[1..3].fill(2.0);
+        // Melody is stem 2: its left side is samples 16..20, its right 20..24; the duck follows
+        // all five stems, at 40..44, and is 1.
         let all = stems.as_slice();
+        assert_eq!(all.len(), 4 * (2 * STEMS + 1));
         assert_eq!(&all[16..20], &[0.0, 1.0, 1.0, 0.0]);
         assert_eq!(&all[20..24], &[0.0, 2.0, 2.0, 0.0]);
+        assert_eq!(&all[40..44], &[1.0; 4]);
         assert_eq!(stems.side(Channel::Melody, true), &[0.0, 2.0, 2.0, 0.0]);
-        assert!(stems.sides_mut(Channel::Drums, 3, 2).is_none());
+        assert_eq!(stems.duck(), &[1.0; 4]);
         stems.clear();
-        assert!(stems.as_slice().iter().all(|x| *x == 0.0));
+        assert!(stems.side(Channel::Melody, false).iter().all(|x| *x == 0.0));
+        assert_eq!(stems.duck(), &[1.0; 4]);
     }
 }

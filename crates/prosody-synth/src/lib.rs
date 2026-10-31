@@ -5,9 +5,11 @@
 //! into [`Stems`], one stereo stem per [`Channel`], looping it round as Strudel's pattern loops and
 //! handing over to an edited piece at a bar. Each note becomes a voice from a fixed pool: a
 //! sampler (a drum played through, or a soundfont zone pitched to the key and looped while held)
-//! or a band-limited oscillator, through a linear-attack, exponential-release envelope, an RBJ
-//! low-pass and its level. A voice that has to be cut off for want of room, and a note whose sound
-//! was never loaded, are counted ([`Losses`]): a fallback is visible (`CLAUDE.md` §6).
+//! or a band-limited oscillator, through a linear envelope, an RBJ low-pass, its colour (a formant
+//! vowel, a bit crusher, a waveshaper) and its level, into its channel's bus: a compressor, an echo
+//! and a feedback-delay-network reverb. The [`master`] mixes the stems for a file as the page's
+//! worklet does for the speakers. A voice that has to be cut off for want of room, and a note whose
+//! sound was never loaded, are counted ([`Losses`]): a fallback is visible (`CLAUDE.md` §6).
 //!
 //! # Purity
 //!
@@ -35,28 +37,39 @@
     )
 )]
 
+mod bus;
+mod delay;
+pub mod dynamics;
+mod effects;
 mod env;
 mod filter;
+mod formant;
 pub mod master;
 pub mod math;
 mod note;
 mod osc;
 mod render;
+mod reverb;
 mod sample;
 mod stems;
 mod units;
 mod voice;
 pub mod wav;
 
+pub use effects::{Compression, Crush, Echo, Effects, Room, Shape, Vowel};
 pub use env::Envelope;
-pub use filter::{BUTTERWORTH_Q, Biquad, Coefficients};
-pub use note::{Channel, DEFAULT_ATTACK, DEFAULT_RELEASE, Note, NoteSpec, Source};
+pub use filter::{BUTTERWORTH_Q, Biquad, Coefficients, LOW_PASS_Q};
+pub use note::{
+    Channel, DEFAULT_ATTACK, DEFAULT_DECAY, DEFAULT_RELEASE, DEFAULT_SUSTAIN, Note, NoteSpec,
+    Source,
+};
 pub use osc::{Oscillator, Wave};
 pub use render::{Losses, Piece, Placement, Renderer, Repeat};
+pub use reverb::WET as REVERB_WET;
 pub use sample::{Bank, Instrument, Loop, MAX_INSTRUMENTS, Sample, Zone};
 pub use stems::{STEMS, Stems};
 pub use units::{Gain, Hertz, Midi, SampleRate, Seconds};
-pub use voice::VOICES;
+pub use voice::{SOURCE_LEVEL, VOICES};
 
 /// Why something handed to the synth cannot be used. Each says what it was about: a note by its
 /// tag — its index in the Performance, and so its words (I4) — an instrument by its number.

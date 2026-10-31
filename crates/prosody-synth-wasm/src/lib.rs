@@ -22,17 +22,28 @@
 //! | 9 | attack | seconds, or NaN where the text sets none |
 //! | 10 | release | seconds, or NaN where the text sets none |
 //! | 11 | lpf | Hz |
+//! | 12 | crush | bits, or NaN for none |
+//! | 13 | vowel | 0 a, 1 e, 2 i, 3 o, 4 u, or NaN for none |
+//! | 14 | shape | 0..1, or NaN for none |
+//! | 15 | room | the reverb send; 0 for none |
+//! | 16 | roomsize | the reverb's RT60, seconds (read only with a send) |
+//! | 17 | delay | the echo send, or NaN for none |
+//! | 18 | delaytime | seconds |
+//! | 19 | delayfeedback | 0..1 |
+//! | 20 | compressor | threshold, dB, or NaN for none |
+//! | 21 | compressorRatio | `n` for `n`:1 |
 //!
 //! The page writes it (`web/src/player/notes.ts`), and a test on each side pins the layout.
 
 use prosody_synth::{
-    Bank, Channel, Gain, Hertz, Loop, Midi, Note, NoteSpec, Piece, Placement, Renderer, Repeat,
-    Sample, SampleRate, Seconds, Source, Stems, SynthError, Wave, Zone,
+    Bank, Channel, Compression, Crush, Echo, Effects, Gain, Hertz, Loop, Midi, Note, NoteSpec,
+    Piece, Placement, Renderer, Repeat, Room, Sample, SampleRate, Seconds, Shape, Source, Stems,
+    SynthError, Vowel, Wave, Zone,
 };
 use wasm_bindgen::prelude::wasm_bindgen;
 
 /// Numbers a note's record holds.
-pub const STRIDE: usize = 12;
+pub const STRIDE: usize = 22;
 
 /// The notes of a Performance from their records, in order.
 ///
@@ -60,8 +71,10 @@ fn decode_note(record: &[f64]) -> Result<Note, SynthError> {
         });
     };
     let malformed = |why| SynthError::Malformed { tag, why };
+    // The reading's stem (4) takes no Performance note: it comes with the reading, in step 4.
     let channel = whole(field(1))
         .and_then(|index| usize::try_from(index).ok())
+        .filter(|index| *index < 4)
         .and_then(Channel::from_index)
         .ok_or_else(|| malformed("its channel is not 0–3"))?;
     let id = whole(field(3))
@@ -105,6 +118,61 @@ fn decode_note(record: &[f64]) -> Result<Note, SynthError> {
         attack: optional(9, "its attack is not a time")?,
         release: optional(10, "its release is not a time")?,
         lpf: Hertz::new(field(11)).ok_or_else(|| malformed("its cutoff is not a frequency"))?,
+        effects: decode_effects(&field, &malformed)?,
+    })
+}
+
+/// A note's effects from fields 12–21 of its record.
+fn decode_effects(
+    field: &dyn Fn(usize) -> f64,
+    malformed: &dyn Fn(&'static str) -> SynthError,
+) -> Result<Effects, SynthError> {
+    // A field that is NaN is an effect the text does not set; any other value must be one the
+    // synth can mean.
+    let optional = |index: usize| Some(field(index)).filter(|value| !value.is_nan());
+    let crush = optional(12)
+        .map(|bits| Crush::new(bits).ok_or_else(|| malformed("its crush is not 1–16 bits")))
+        .transpose()?;
+    let vowel = optional(13)
+        .map(|index| {
+            whole(index)
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(Vowel::from_index)
+                .ok_or_else(|| malformed("its vowel is not 0–4"))
+        })
+        .transpose()?;
+    let shape = optional(14)
+        .map(|amount| Shape::new(amount).ok_or_else(|| malformed("its shape is not 0–0.99")))
+        .transpose()?;
+    let send = Gain::new(field(15)).ok_or_else(|| malformed("its room is not a level"))?;
+    let room = if send.get() > 0.0 {
+        let size =
+            Seconds::new(field(16)).ok_or_else(|| malformed("its roomsize is not a time"))?;
+        Some(Room::new(send, size).ok_or_else(|| malformed("its roomsize is not 0–10 s"))?)
+    } else {
+        None
+    };
+    let echo = optional(17)
+        .map(|level| {
+            let send = Gain::new(level).ok_or_else(|| malformed("its delay is not a level"))?;
+            let time =
+                Seconds::new(field(18)).ok_or_else(|| malformed("its delaytime is not a time"))?;
+            Echo::new(send, time, field(19)).ok_or_else(|| malformed("its delay is not an echo"))
+        })
+        .transpose()?;
+    let compression = optional(20)
+        .map(|threshold| {
+            Compression::new(threshold, field(21))
+                .ok_or_else(|| malformed("its compressor is not a compressor"))
+        })
+        .transpose()?;
+    Ok(Effects {
+        crush,
+        vowel,
+        shape,
+        room,
+        echo,
+        compression,
     })
 }
 
@@ -234,7 +302,8 @@ impl Player {
     }
 
     /// Renders the next block into `out`: [`prosody_synth::STEMS`] stereo stems, planar (each
-    /// stem's left, then its right), `block` frames each.
+    /// stem's left, then its right), `block` frames each, then the duck, `block` frames more
+    /// ([`Stems`]).
     pub fn render(&mut self, out: &mut [f32]) {
         self.renderer.render(&mut self.stems);
         for (to, from) in out.iter_mut().zip(self.stems.as_slice()) {
@@ -297,7 +366,7 @@ fn frames(count: u64) -> f64 {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
-    use super::{Player, STRIDE, decode_notes};
+    use super::{Player, STRIDE, Stems, decode_notes};
     use prosody_synth::{Channel, Source, Wave};
 
     /// A record as the page writes it (`web/test/player.test.ts` pins the same layout).
@@ -315,6 +384,16 @@ mod tests {
             f64::NAN,
             0.1,
             3_000.0,
+            f64::NAN,
+            f64::NAN,
+            f64::NAN,
+            0.0,
+            2.5,
+            f64::NAN,
+            0.0,
+            0.0,
+            f64::NAN,
+            1.0,
         ]
     }
 
@@ -332,6 +411,31 @@ mod tests {
         assert!(spec.attack.is_none());
         assert!((spec.release.unwrap().get() - 0.1).abs() < 1e-12);
         assert!((spec.lpf.get() - 3_000.0).abs() < 1e-9);
+        assert_eq!(spec.effects, prosody_synth::Effects::DRY);
+    }
+
+    #[test]
+    fn a_records_effects_are_read_field_by_field() {
+        let mut r = record(4.0, 2.0, 0.0, 60.0);
+        r[12..22].copy_from_slice(&[8.0, 3.0, 0.1, 0.35, 2.5, 0.2, 0.3, 0.35, -24.0, 7.0]);
+        let notes = decode_notes(&r).unwrap();
+        let effects = notes[0].spec().effects;
+        assert!((effects.crush.unwrap().bits() - 8.0).abs() < 1e-12);
+        assert_eq!(effects.vowel, Some(prosody_synth::Vowel::O));
+        assert!((effects.shape.unwrap().amount() - 0.1).abs() < 1e-12);
+        let room = effects.room.unwrap();
+        assert!(
+            (room.send().get() - 0.35).abs() < 1e-12 && (room.size().get() - 2.5).abs() < 1e-12
+        );
+        let echo = effects.echo.unwrap();
+        assert!((echo.send().get() - 0.2).abs() < 1e-12);
+        assert!((echo.time().get() - 0.3).abs() < 1e-12 && (echo.feedback() - 0.35).abs() < 1e-12);
+        let compression = effects.compression.unwrap();
+        assert!((compression.threshold() + 24.0).abs() < 1e-12);
+        assert!((compression.ratio() - 7.0).abs() < 1e-12);
+        // Out of range is refused by the note's tag, not dropped.
+        r[12] = 20.0;
+        assert!(decode_notes(&r).unwrap_err().to_string().contains("note 4"));
     }
 
     #[test]
@@ -352,7 +456,7 @@ mod tests {
         player
             .play(&record(0.0, 2.0, 0.0, 69.0), &[0.0], 2.0)
             .unwrap();
-        let mut out = vec![0.0_f32; 8 * 1_024];
+        let mut out = vec![0.0_f32; Stems::PER_FRAME * 1_024];
         let mut heard = Vec::new();
         for _ in 0..13 {
             player.render(&mut out);
@@ -370,7 +474,7 @@ mod tests {
         player
             .play(&record(0.0, 0.0, 4.0, f64::NAN), &[0.0], 2.0)
             .unwrap();
-        let mut out = vec![0.0_f32; 8 * 1_024];
+        let mut out = vec![0.0_f32; Stems::PER_FRAME * 1_024];
         for _ in 0..12 {
             player.render(&mut out);
         }

@@ -385,10 +385,12 @@ To hear a piece through Prosody's own synth instead (`docs/player.md`), render i
 cargo run -p prosody-cli -- render --out tyger.wav examples/blake-tyger.poem
 ```
 
-It plays the oscillators only for now: the drums (FLAC) and soundfonts (MP3) need sample decoders
-the CLI does not have yet, and it says how many notes it left out. A header of
-`synth = "subtractive"` puts the bass and melody on oscillators. On the page, the Mixer's
-**Player** switch plays the piece through the same synth.
+It plays the oscillators only for now, with every effect the pattern asks for (room, echo, crush,
+vowel, shape, compressor) and the page's master stage: the drums and the soundfonts are FLAC files
+beside the page (`web/public/drums`, `web/public/soundfonts`), which need a FLAC decoder the CLI
+does not have yet, and it says how many notes it left out. A header of `synth = "subtractive"`
+puts the bass and melody on oscillators. On the page, the Mixer's **Player** switch plays the piece
+through the same synth, every sound from beside the page.
 
 A note's arguments are `beats layer voice gain note detune sharpness family sustain noteGain`.
 `gain` is the drum's accent, always the syllable's own stress; `noteGain` is the pitched note's,

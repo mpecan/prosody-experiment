@@ -1,12 +1,20 @@
-//! Mixing the stems to stereo, through the master's ceiling: for a render to a file.
+//! The master stage: the stems mixed to stereo, for a render to a file.
 //!
-//! On the page the master stage runs in the audio worklet (`web/src/player/worklet.ts`), where mute
-//! and solo are stem gains (`docs/player.md` §4). A file needs the same last stage, so the CLI's
-//! render goes through this one. The soft clip is the page's own (`web/src/strudel/index.ts`
-//! `softClipCurve`, our code): transparent below [`CLIP_KNEE`], bending smoothly towards
-//! [`CLIP_CEILING`] above it, flat beyond [`CLIP_RANGE`]. The glue compressor before it arrives
-//! with step 3, with the rest of the master (`docs/player.md` §7).
+//! On the page the master runs in the audio worklet (`web/src/player/mixer.ts`), where mute and solo
+//! are stem gains (`docs/player.md` §4). A file needs the same last stage, so the CLI's render goes
+//! through this one. Both are the chain the page built for Strudel (`web/src/strudel/index.ts`, our
+//! own code), in its order:
+//!
+//! 1. each stem at its gain;
+//! 2. the music — every stem but the reading's — at the duck, the level the block's duck lane gives
+//!    each frame, so the reading is heard over it ([`crate::Stems`]);
+//! 3. the glue compressor ([`Setting::MASTER`]), on the music and the reading together;
+//! 4. the soft clip: transparent below [`CLIP_KNEE`], bending smoothly towards [`CLIP_CEILING`]
+//!    above it, flat beyond [`CLIP_RANGE`]. The page fed its curve through a gain of 1/4 because a
+//!    `WaveShaperNode`'s curve spans −1..1; here the curve is computed on the sample itself, so
+//!    that quarter and the curve's ×4 domain cancel and neither appears.
 
+use crate::dynamics::{Compressor, Setting};
 use crate::math;
 use crate::note::Channel;
 use crate::stems::{STEMS, Stems};
@@ -31,35 +39,58 @@ pub fn soft_clip(x: f64) -> f64 {
     if x < 0.0 { -shaped } else { shaped }
 }
 
-/// The stems summed, each at its gain, through the soft clip, appended to `out` interleaved
-/// left, right.
-pub fn mix(stems: &Stems, gains: [f64; STEMS], out: &mut Vec<f32>) {
-    for frame in 0..stems.frames() {
-        let mut left = 0.0;
-        let mut right = 0.0;
-        for (channel, gain) in Channel::ALL.iter().zip(gains) {
-            left += gain
-                * stems
-                    .side(*channel, false)
-                    .get(frame)
-                    .map_or(0.0, |x| f64::from(*x));
-            right += gain
-                * stems
-                    .side(*channel, true)
-                    .get(frame)
-                    .map_or(0.0, |x| f64::from(*x));
+/// The master: its glue compressor's state, kept from block to block.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Master {
+    glue: Compressor,
+}
+
+impl Master {
+    /// A master at `rate` frames a second.
+    #[must_use]
+    pub fn new(rate: f64) -> Self {
+        Self {
+            glue: Compressor::new(Setting::MASTER, rate),
         }
-        #[allow(clippy::cast_possible_truncation)] // within ±0.95 after the clip
-        {
-            out.push(soft_clip(left) as f32);
-            out.push(soft_clip(right) as f32);
+    }
+
+    /// The stems, each at its gain, the music ducked, through the glue and the soft clip,
+    /// appended to `out` interleaved left, right.
+    pub fn mix(&mut self, stems: &Stems, gains: [f64; STEMS], out: &mut Vec<f32>) {
+        let duck = stems.duck();
+        for frame in 0..stems.frames() {
+            let (mut music, mut speech) = ((0.0, 0.0), (0.0, 0.0));
+            for (channel, gain) in Channel::ALL.iter().zip(gains) {
+                let at = |right| {
+                    stems
+                        .side(*channel, right)
+                        .get(frame)
+                        .map_or(0.0, |x| f64::from(*x))
+                };
+                let sum = if *channel == Channel::Speech {
+                    &mut speech
+                } else {
+                    &mut music
+                };
+                sum.0 += gain * at(false);
+                sum.1 += gain * at(true);
+            }
+            let ducked = duck.get(frame).map_or(1.0, |d| f64::from(*d));
+            let left = ducked * music.0 + speech.0;
+            let right = ducked * music.1 + speech.1;
+            let glue = self.glue.gain(left.abs().max(right.abs()));
+            #[allow(clippy::cast_possible_truncation)] // within ±0.95 after the clip
+            {
+                out.push(soft_clip(glue * left) as f32);
+                out.push(soft_clip(glue * right) as f32);
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{CLIP_CEILING, CLIP_KNEE, mix, soft_clip};
+    use super::{CLIP_CEILING, CLIP_KNEE, Master, soft_clip};
     use crate::note::Channel;
     use crate::stems::Stems;
 
@@ -83,13 +114,30 @@ mod tests {
     }
 
     #[test]
-    fn stems_sum_at_their_gains() {
+    fn stems_sum_at_their_gains_through_the_glues_makeup() {
+        // Quiet stems, far below the glue's −6 dB threshold: only its makeup acts, 1.575 dB
+        // (×1.19881). Left: the drums' 0.05; right: half the bass's 0.1 — both 0.05 × 1.19881 =
+        // 0.059940.
         let mut stems = Stems::new(2);
-        stems.sides_mut(Channel::Drums, 0, 2).unwrap().0.fill(0.25);
-        stems.sides_mut(Channel::Bass, 0, 2).unwrap().1.fill(0.5);
+        stems.sides_mut(Channel::Drums).unwrap().0.fill(0.05);
+        stems.sides_mut(Channel::Bass).unwrap().1.fill(0.1);
         let mut out = Vec::new();
-        mix(&stems, [1.0, 0.5, 1.0, 1.0], &mut out);
-        // Left: the drums' 0.25; right: half the bass's 0.5.
-        assert_eq!(out, vec![0.25, 0.25, 0.25, 0.25]);
+        Master::new(48_000.0).mix(&stems, [1.0, 0.5, 1.0, 1.0, 1.0], &mut out);
+        for x in out {
+            assert!((x - 0.059_940).abs() < 1e-5, "{x}");
+        }
+    }
+
+    #[test]
+    fn the_duck_lowers_the_music_and_not_the_reading() {
+        // Duck at 0.6: the melody's 0.05 becomes 0.03, the reading's 0.05 stays; both then take the
+        // glue's makeup, ×1.19881: 0.035964 + 0.059940 = 0.095905.
+        let mut stems = Stems::new(1);
+        stems.sides_mut(Channel::Melody).unwrap().0.fill(0.05);
+        stems.sides_mut(Channel::Speech).unwrap().0.fill(0.05);
+        stems.duck_mut()[0] = 0.6;
+        let mut out = Vec::new();
+        Master::new(48_000.0).mix(&stems, [1.0; 5], &mut out);
+        assert!((out[0] - 0.095_905).abs() < 1e-5, "{}", out[0]);
     }
 }

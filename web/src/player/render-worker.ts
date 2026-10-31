@@ -12,8 +12,10 @@
 //   to the page:    { op: 'placement', outStart, pieceStart, serial }   where a piece plays from
 //                   { op: 'losses', stolen, missing }
 //                   { op: 'error', message }
-//   to the worklet: { flush, generation }, then { data, frame, frames, generation } blocks
+//   to the worklet: { flush, generation }, then { data, frame, frames, generation } blocks: five
+//                   stereo stems planar, then the duck (mixer.ts `PER_FRAME` numbers a frame)
 //   from it:        { played, generation }
+import { PER_FRAME } from './mixer';
 
 interface Player {
   add_drum(id: number, left: Float32Array, right: Float32Array, rate: number): void;
@@ -58,7 +60,7 @@ function pump(): void {
   if (!player || !worklet || !playing) return;
   while (player.frontier - played < lead) {
     const frame = player.frontier;
-    const data = new Float32Array(8 * block);
+    const data = new Float32Array(PER_FRAME * block);
     player.render(data);
     worklet.postMessage({ data, frame, frames: block, generation }, [data.buffer]);
   }
