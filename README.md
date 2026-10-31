@@ -61,13 +61,18 @@ Three ways. The first is the one to start with.
 ### Path A — the local web page (easiest)
 
 ```sh
+./scripts/build-synth.sh                            # the player's synth, into the page, once
 npm --prefix web ci && npm --prefix web run build   # the page, once (node from mise.toml)
 cargo run -p prosody-web
 # prosody: http://127.0.0.1:4747 — ^C to stop
 ```
 
 The page is its own program in `web/` — Preact and TypeScript, built by Vite into `web/dist`, which
-`prosody-web` serves beside the compiler's answers. Working on the page itself, run
+`prosody-web` serves beside the compiler's answers. Its player's synth is Rust built for the browser
+(`crates/prosody-synth-wasm`); `./scripts/build-synth.sh` writes it into `web/public` (it needs the
+`wasm32-unknown-unknown` target, which `rust-toolchain.toml` asks for, and installs the pinned
+`wasm-bindgen` once), and without it the page shows and compiles but says the player could not
+start. Working on the page itself, run
 `npm --prefix web run dev` with `prosody-web` still running: Vite serves the page with hot reload
 and sends every question to the server. `npm --prefix web run check` typechecks it, runs its tests
 (Vitest) and builds it.

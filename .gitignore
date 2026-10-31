@@ -6,3 +6,7 @@
 .DS_Store
 .idea/
 *.swp
+
+# The player's synth, built into the page by scripts/build-synth.sh, not written by hand.
+/web/public/synth.js
+/web/public/synth_bg.wasm

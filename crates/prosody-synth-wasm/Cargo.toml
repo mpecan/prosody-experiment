@@ -6,7 +6,7 @@ rust-version.workspace = true
 
 # The page's render worker (`docs/player.md` §5): `prosody-synth` built for the browser on its own,
 # so the worker loads a small module rather than the whole compiler. A cdylib for the browser
-# (`scripts/build-site.sh`), and an rlib so its tests run natively.
+# (`scripts/build-synth.sh`), and an rlib so its tests run natively.
 [lib]
 crate-type = ["cdylib", "rlib"]
 

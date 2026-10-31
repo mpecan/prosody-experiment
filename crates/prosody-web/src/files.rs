@@ -2,9 +2,11 @@
 //! "Engines": `recorded`).
 //!
 //! The page is a separate program, built by Vite into `web/dist`: its HTML, its scripts and styles,
-//! the player's render worker and worklet, and the speech worker. The server
-//! answers it from there, beside the compiler's answers, so served and static (`scripts/build-site.sh`
-//! copies the same files) are one page.
+//! the player's render worker and worklet, the speech worker, and what `web/public` puts beside them
+//! — the drums and soundfont zones (FLAC) and, once `scripts/build-synth.sh` has written it, the
+//! player's synth (`synth.js`, `synth_bg.wasm`). The server answers it from there, beside the
+//! compiler's answers, so served and static (`scripts/build-site.sh` copies the same files) are one
+//! page, and the served one plays (`docs/player.md` §5).
 //!
 //! `scripts/readings/` renders every line of every example poem with a set of voices into
 //! `examples/readings/` — a manifest and one small audio file per line and voice. The page asks
@@ -76,6 +78,11 @@ fn page_type(extension: &str) -> Option<&'static str> {
         "svg" => Some("image/svg+xml"),
         "png" => Some("image/png"),
         "woff2" => Some("font/woff2"),
+        "woff" => Some("font/woff"),
+        // The player's synth: `WebAssembly.instantiateStreaming` refuses any other type.
+        "wasm" => Some("application/wasm"),
+        // The drums and the soundfonts' zones, which the player decodes itself.
+        "flac" => Some("audio/flac"),
         _ => None,
     }
 }
@@ -186,5 +193,44 @@ mod tests {
         }
         // `/` is the page.
         assert_eq!(super::page(Path::new("/nowhere"), "/").status, 404);
+    }
+
+    #[test]
+    fn the_player_and_its_samples_are_served() {
+        let dir = Path::new("/p");
+        let kind = |wanted| file_of(dir, wanted, page_type).map(|(_, kind)| kind);
+        assert_eq!(kind("synth_bg.wasm"), Some("application/wasm"));
+        assert_eq!(kind("drums/tr808/bd/0.flac"), Some("audio/flac"));
+        assert_eq!(kind("soundfonts/zones/0a1b.flac"), Some("audio/flac"));
+    }
+
+    /// Every file the page ships beside itself (`web/public`, copied into `web/dist` by Vite) is one
+    /// the server answers: refused, a drum or a soundfont zone is silence on the served page alone.
+    /// Only the notes on where the samples came from are not the page's.
+    #[test]
+    fn every_file_beside_the_page_is_of_a_type_the_server_answers() {
+        fn files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    files(&path, out);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+        let public = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/public"));
+        let mut found = Vec::new();
+        files(public, &mut found);
+        assert!(found.len() > 300, "{} files in web/public", found.len());
+        let refused: Vec<_> = found
+            .iter()
+            .filter(|path| path.extension().and_then(|e| e.to_str()) != Some("md"))
+            .filter(|path| {
+                let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                page_type(extension).is_none()
+            })
+            .collect();
+        assert!(refused.is_empty(), "{refused:?}");
     }
 }

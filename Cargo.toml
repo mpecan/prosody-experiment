@@ -28,7 +28,7 @@ tree-sitter = "0.26"
 # script. The alternative is hand-written exports passing raw pointers, which needs `unsafe` in our
 # code and a calling convention kept in step by hand on both sides. Pinned exactly, because the
 # `wasm-bindgen` CLI that generates the JavaScript must be the same version
-# (`scripts/build-site.sh` installs that version).
+# (`scripts/wasm-bindgen.sh` installs that version).
 wasm-bindgen = "=0.2.129"
 tree-sitter-prosody = { path = "crates/tree-sitter-prosody" }
 prosody-core = { path = "crates/prosody-core" }
