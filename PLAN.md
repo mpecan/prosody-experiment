@@ -410,6 +410,32 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The player, step 1 — the Performance: every note resolved, and a parity test against Strudel
+
+The user accepted `docs/player.md` (our own player; Strudel stays the text) with its open questions
+answered as recommended, and asked for it built step by step. Step 1, no audio:
+
+- **One source of the numbers (`prosody_emit::perform`).** Every per-event value the Strudel text
+  prints — drum piece, gain, cutoff, attack, room, crush, vowel, nudge and velocity, shape, the bus
+  calls, melody and bass and chord tones, release, echo — is now a function there, and the emitter
+  prints what it returns. The grid walk is shared too: `strudel::lines` builds a lane's steps once,
+  the text writes them, the Performance times them. Every corpus snapshot is byte-identical.
+- **The `Perform` backend** (`Output = Performance`): notes with span, channel, lane, slot, grid
+  position, onset and length in seconds after swing and nudge, sound, pitch, level and every
+  parameter; bars; the trace's lights; and, through `Performance::read`, the reading's cues at both
+  paces. Values at the text's three decimals; times exact fractions until read.
+- **`POST /performance`** answers it as JSON, the same from the server and the WebAssembly build
+  (`scripts/check-wasm.mjs` compares it too).
+- **Properties** (`crates/prosody-emit/tests/perform.rs`): I1, I3 (no palette moves a note's word,
+  lane, bar or grid place), I4 (every note, light and cue on its words), and I2 scoped as the core's
+  bass property is (layer, rhyme words and refrains assumed unchanged).
+- **The parity test** (`web/test/parity.test.ts`) evaluates thirteen committed fixtures' patterns
+  with `@strudel/core` and compares every hap with the Performance, to 1e-6: they agree note for
+  note. **Measured, and a decision for the user:** Strudel's `swingBy` doubles some notes and drops
+  others that its documentation says it delays (`docs/player.md` §9). The Performance follows the
+  documentation, which keeps I3; the test names exactly the notes where Strudel departs. Making the
+  text swing as documented would change every swung piece's text, so it waits for the user.
+
 ### CI and build pipeline speedups
 
 The user asked to review CI performance and optimize build and tool installation times.

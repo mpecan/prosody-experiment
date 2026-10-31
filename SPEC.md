@@ -56,6 +56,13 @@ Voice IR  ←──────── per-unit seeded PRNG ── style resoluti
 Backend: Strudel/Tidal emit  |  OSC → SuperCollider  |  direct DSP
 ```
 
+**The direct-DSP backend's first half has landed (2026-10-31, `docs/player.md` step 1):** the
+`Performance` resolves every note of the piece — onset and length in seconds, sound, pitch, every
+parameter, and the token span it came from — from the same per-event functions the Strudel text
+prints (`prosody_emit::perform`), so the two backends cannot drift. It is realisation, where the
+style may be read (I3); no mapping changed. A parity test plays the Strudel text with Strudel itself
+and compares it note for note.
+
 ---
 
 ## 4. Mappings

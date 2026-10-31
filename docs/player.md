@@ -1,6 +1,7 @@
 # The player — design
 
-*Draft, 2026-10-31. Status: proposed, not started.*
+*Draft, 2026-10-31. Status: step 1 (the Performance) built; steps 2–5 not started. The open
+questions of §8 are decided (§8). What building step 1 changed in this design is in §9.*
 
 Prosody plays a poem today by writing Strudel text and handing it to Strudel's runtime
 (`@strudel/web`, its scheduler and the `superdough` synth). This document designs a player of
@@ -223,6 +224,14 @@ Each phase ends gated and auditionable (`SPEC.md` §7's rule).
 
 ## 8. Open questions
 
+*Decided by the user, 2026-10-31: the recommended answer to each of 1–3.* After step 4 Strudel's
+runtime leaves both the app and the web build (the page still shows and copies the text and links
+to strudel.cc; `@strudel/core` may stay a dev dependency for the parity test). "Matching" is
+identical notes by the parity test and a timbre close to Strudel's by measurement, not sample for
+sample; the reverb may differ. The 28 soundfonts are converted to our own FLAC zones and JSON at
+build time if the total stays under about 40 MB, and otherwise stay webaudiofont files, with the
+reason written down.
+
 1. **The website after phase 4.** Remove Strudel's runtime from the web build too (one sound
    everywhere, smaller page), or keep it as an option? Recommendation: remove it; keep "open in
    strudel.cc".
@@ -235,3 +244,52 @@ Each phase ends gated and auditionable (`SPEC.md` §7's rule).
    download; larger). Recommendation: convert, if the size stays reasonable.
 4. **`SPEC.md`.** No mapping changes; the Performance is realisation, where the style may be
    read (I3). The spec's §3 diagram already shows the backend. A short §-note when phase 1 lands.
+   *(Added with step 1.)*
+
+## 9. What building step 1 changed
+
+Step 1 is in `crates/prosody-emit/src/perform.rs` (the per-event values both backends call, and the
+backend), `crates/prosody-web` (`POST /performance`, JSON, the same in the WebAssembly build) and
+`web/test/parity.test.ts`. Every corpus snapshot of the Strudel text is byte-identical. Where it
+departs from §3 above, and why:
+
+- **Swing follows Strudel's documentation, not Strudel's output, and the parity test names the
+  difference.** Measured with `@strudel/core` 1.2.6 (its haps, not its source): `swingBy(x, n)`
+  decides what to delay by where the delayed copy lands as well as where the event began, so an
+  event in a slice's first half whose copy lands in the second half sounds twice, and an event in
+  the second half whose copy crosses into the next slice never sounds — `s("a b c d").swingBy(0.5, 1)`
+  plays a, b, b, c. Copying that would let a palette value add and remove notes (I3) and play notes
+  the score does not have (I4), so the Performance delays each event in a slice's second half by
+  `x` half-slices and plays it once. The parity test works out from the Performance exactly which
+  notes Strudel doubles and drops, and requires those and nothing else to differ; a fixture at
+  swing 0.9 exercises it against Strudel. At the palettes' swing (at most 0.33) under the steady
+  pulse this needs five syllables to a beat or a stacked line's fitting; under the elastic pulse a
+  cycle's slices need not fall on beats, so it can happen at any swing. **Decision for the user:**
+  the Strudel text keeps `swingBy` (its bytes may not change in step 1); a later step could write
+  swing so Strudel plays it as documented (for example per beat, with `late` on the second-half
+  steps only), which changes the text of every swung piece.
+- **A note carries more than §3 listed:** its `slot` and its `grid` position in cycles before swing
+  (structure, which no palette moves: what the I3 property compares, and what step 2's bar-by-bar
+  live edits need), and the `postgain` and compressor the text sets per layer. Parameters the text
+  leaves unset (the melody's attack, the drums' release) are `None`, not a default, so the player
+  decides those defaults in one place.
+- **Values are the text's, to its three decimals.** The Performance carries each value as the text
+  prints it (`quantised`), and its onsets as exact fractions of seconds (the printed `.cpm` in
+  thousandths, the printed nudge in milliseconds), converted to `f64` only when read. Unrounded
+  values would differ from what Strudel reads by up to half a thousandth and fail the 1e-6 parity.
+- **Cues are added by `Performance::read(&Reading)`**, not by the backend: a backend is given the
+  score and the style, and a reading needs the poem's lines and the chosen mappings. The route does
+  both. Marks are one per drum note, at its onset before the nudge, as the trace pattern lights them.
+- **The backend is `Perform`** (`Backend<Output = Performance>`); the note's `Lane` is the colour
+  enum the emitter already had (`pulse`, `ornament`, `bass`, `rhyme`, `chords`), now public.
+- **The parity test reads committed fixtures.** It needs Strudel (in Vitest) and the compiler (in
+  Rust), so `crates/prosody-web/tests/parity.rs` makes each piece's pattern and Performance through
+  the page's own requests and fails when a committed fixture under `web/test/parity/` is stale
+  (`PROSODY_BLESS=1` rewrites them). Thirteen fixtures, about 1.6 MB: every corpus poem under the
+  defaults, and settings that reach every parameter and placement. `@strudel/core`, `@strudel/mini`
+  and `@strudel/transpiler` 1.2.6 are now direct dev dependencies (they were already installed under
+  `@strudel/web`; nothing new is downloaded), and Vitest inlines them so `@kabelsalat/web` resolves
+  to its ES build. Strudel reports `.lpf` as `cutoff` in a hap's value.
+- **The text and the Performance share the walk, not only the numbers.** `strudel::lines` builds
+  each lane's steps once; the text writes them (`Line::write`) and the Performance times them
+  (`Line::timed`), so a note cannot fall anywhere its pattern step does not.
