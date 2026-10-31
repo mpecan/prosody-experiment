@@ -435,6 +435,14 @@ Chromium and its output recorded beside our synth's.
   glue and duck; the shipped soundfonts' integrity; an e2e that plays jazz through the Prosody
   player with every other host refused. The Pixel profile was not rerun (the device was not
   connected).
+- **Review remediation.** A channel's compressor no longer outlives the piece that asked for it (a
+  dry note or a stop removes it); bus changes land on the starting note's frame rather than the
+  block's, so a hand-over is the same bits at any block size; a tempo or compression edit lets the
+  old echo ring out and keeps the compressor's reduction; mono voices run the low-pass and vowel
+  once for both sides (the same bits). The fixes are pinned by tests that fail without them (a
+  fresh renderer against stop-then-play and against a swap, two block sizes, the old echo's
+  repeats, the compressor's kept reduction, the reverb's tail kept through a resize), the mono
+  path by the same sample given in stereo, and the echo's silence and clearing has its own test.
 
 ### The player, step 2 — first sound: our own synth, a render worker and a worklet
 

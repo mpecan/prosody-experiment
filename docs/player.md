@@ -446,6 +446,15 @@ departs from §3–§7 above, and why:
   notes overlapping, the loudest sets the reduction for all, and a note's first 25 ms are up to
   5 dB louder than Strudel's (table). Emulating a fresh Chrome compressor per note would cost a
   compressor a voice for a quirk of the browser.
+- **A bus belongs to the piece that sets it up** (review remediation). The compressor comes from
+  the style, so a note that asks for none takes it away, and a stop drops it with the tails: kept,
+  it went on compressing the next piece, and a piece's sound depended on what had played before it
+  (I1). A note that changes its bus changes it from its own frame: the renderer finishes the buses
+  up to each starting note, so a hand-over sounds the same at the page's block size and the CLI's.
+  A changed setting keeps what is sounding, as §5 asks of tails: the reverb resizes with its tail
+  in it, the compressor takes its new curve from the reduction it had reached, and an echo whose
+  time (any tempo change) or feedback changes lets the old line ring out its repeats beside the new
+  one instead of cutting them. Old voices still sounding send into the new line.
 - **Five stems and the duck.** The fifth stem is the reading's, silent until step 4; a block now ends
   with a duck lane (the music's level under the reading, frame by frame, 1 throughout until step 4),
   written by the renderer because the reading's timeline will be the renderer's. The master — in the
