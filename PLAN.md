@@ -435,6 +435,13 @@ answered as recommended, and asked for it built step by step. Step 1, no audio:
   others that its documentation says it delays (`docs/player.md` §9). The Performance follows the
   documentation, which keeps I3; the test names exactly the notes where Strudel departs. Making the
   text swing as documented would change every swung piece's text, so it waits for the user.
+- **Review remediation.** The cue clock, the marks and each note's bar are now pinned by hand-worked
+  tests (a later slot at 100 cpm; marks against the trace; every note's grid inside its bar's
+  cycles and its onset before the next bar but for swing and nudge). Cycles and exact seconds are
+  separate types, as is a compressor's threshold. The Performance carries the reading's unread
+  lines and their reasons (`unread`, `natural_unread`, in `/performance` too). Three more parity
+  fixtures reach chords at a density level, erosion, and the gradual handover without an outro;
+  all sixteen agree with Strudel.
 
 ### CI and build pipeline speedups
 

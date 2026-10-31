@@ -277,16 +277,28 @@ departs from §3 above, and why:
   prints it (`quantised`), and its onsets as exact fractions of seconds (the printed `.cpm` in
   thousandths, the printed nudge in milliseconds), converted to `f64` only when read. Unrounded
   values would differ from what Strudel reads by up to half a thousandth and fail the 1e-6 parity.
+- **Cycles and seconds are two types.** A note's `grid` is `Cycles` (structure) and its exact onset
+  `ExactSeconds`; only the piece's clock turns one into the other, so a place in the pattern cannot
+  be read as a time (`CLAUDE.md` §5). Each bar carries both its `cycle` and its `at`, so a bar's
+  notes can be checked to fall inside it on either clock. A compressor's threshold is `Decibels`.
 - **Cues are added by `Performance::read(&Reading)`**, not by the backend: a backend is given the
   score and the style, and a reading needs the poem's lines and the chosen mappings. The route does
-  both. Marks are one per drum note, at its onset before the nudge, as the trace pattern lights them.
+  both. A line the reading speaks at neither pace has no cue; it is in the Performance's `unread`
+  or `natural_unread` with the reading's reason, as `/reading` lists it, so when the player reads
+  from the Performance (§5, step 4) the page can still say what it loses (`CLAUDE.md` §6). Marks
+  are one per drum note, at its onset before the nudge, as the trace pattern lights them.
 - **The backend is `Perform`** (`Backend<Output = Performance>`); the note's `Lane` is the colour
   enum the emitter already had (`pulse`, `ornament`, `bass`, `rhyme`, `chords`), now public.
 - **The parity test reads committed fixtures.** It needs Strudel (in Vitest) and the compiler (in
   Rust), so `crates/prosody-web/tests/parity.rs` makes each piece's pattern and Performance through
   the page's own requests and fails when a committed fixture under `web/test/parity/` is stale
-  (`PROSODY_BLESS=1` rewrites them). Thirteen fixtures, about 1.6 MB: every corpus poem under the
-  defaults, and settings that reach every parameter and placement. `@strudel/core`, `@strudel/mini`
+  (`PROSODY_BLESS=1` rewrites them). Sixteen fixtures, about 2.4 MB: every corpus poem under the
+  defaults, and settings chosen to reach the parameters and placements the defaults do not — among
+  them chords at a density level below one, and a long stanza (a poem of the test's own, since no
+  corpus stanza is longer than four lines) eroding under an arrival and handed over gradually with
+  no outro. Not every combination is compared with Strudel; the rest is covered only by the Rust
+  properties, and a test checks that each case still reaches what it was added for.
+  `@strudel/core`, `@strudel/mini`
   and `@strudel/transpiler` 1.2.6 are now direct dev dependencies (they were already installed under
   `@strudel/web`; nothing new is downloaded), and Vitest inlines them so `@kabelsalat/web` resolves
   to its ES build. Strudel reports `.lpf` as `cutoff` in a hap's value.
