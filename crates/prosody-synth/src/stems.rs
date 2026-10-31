@@ -10,9 +10,8 @@ pub const STEMS: usize = Channel::ALL.len();
 /// [`Channel::index`] order; then the duck, `frames` more — the music's level under the reading at
 /// each frame, 1 for none. The page's worklet reads this layout from the transferred buffer.
 ///
-/// The duck is written by the renderer because the reading's timeline will be the renderer's
-/// (`docs/player.md` §5, "The reading"): until the reading comes to the player in step 4, it is 1
-/// throughout.
+/// The duck is written by the renderer because the reading's timeline is the renderer's
+/// (`docs/player.md` §5, "The reading"): it comes from the same placements as the speech stem.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stems {
     frames: usize,
@@ -69,7 +68,7 @@ impl Stems {
         self.data.get(start..start + self.frames).unwrap_or(&[])
     }
 
-    /// The duck, to write: what the reading will set from step 4 (`docs/player.md` §7).
+    /// The duck, to write: what the reading's placements set.
     pub fn duck_mut(&mut self) -> &mut [f32] {
         let start = 2 * STEMS * self.frames;
         let end = start + self.frames;

@@ -12,7 +12,8 @@
 
 use prosody_synth::{
     Bank, Channel, Compression, Crush, Echo, Effects, Gain, Hertz, Midi, Note, NoteSpec, Piece,
-    Renderer, Repeat, STEMS, Sample, SampleRate, Seconds, Shape, Source, Stems, VOICES, Vowel,
+    Renderer, Repeat, STEMS, Sample, SampleRate, Seconds, Shape, Source, Stems, Utterance, VOICES,
+    Vowel,
 };
 
 const RATE: u32 = 8_000;
@@ -411,4 +412,89 @@ fn a_mono_sample_sounds_as_the_same_sample_in_stereo() {
         bits(&mono[drums..=drums]),
         bits(&mono[drums + 1..=drums + 1])
     );
+}
+
+#[test]
+fn a_line_of_the_reading_sounds_on_its_own_stem_over_the_music_and_ducks_it() {
+    // A drum hit every 0.1 s (frames 0, 800, …) and a line of 50 frames placed at frame 250, its
+    // speech from 260 (a 10-frame margin). The drums keep their frames; the line is on the speech
+    // stem only, from 250 to 300; the duck starts falling at 260, not before.
+    let mut renderer = Renderer::new(rate(), burst_bank(10));
+    let hits = (0..4)
+        .map(|n| hit(n, 0.1 * f64::from(n), Channel::Drums))
+        .collect();
+    renderer.play(piece(hits, &[0.0], 0.4, Repeat::Once));
+    renderer
+        .add_line(
+            3,
+            Sample::new(vec![0.5; 50], None, f64::from(RATE)).unwrap(),
+        )
+        .unwrap();
+    renderer.set_duck(Gain::new(0.6).unwrap());
+    let spoken = renderer
+        .speak(Utterance {
+            line: 3,
+            start: 250,
+            speech: 260,
+            hold: 0,
+        })
+        .unwrap();
+    assert_eq!((spoken.start, spoken.end), (250, 300));
+    assert_eq!(renderer.speaking(), vec![3]);
+    let mut stems = Stems::new(400);
+    renderer.render(&mut stems);
+    assert_eq!(onsets(stems.side(Channel::Drums, false)), vec![0]);
+    let speech = stems.side(Channel::Speech, false);
+    assert_eq!(onsets(speech), vec![250]);
+    assert!(speech[250..300].iter().all(|x| (*x - 0.5).abs() < 1e-6));
+    assert!(speech[300..].iter().all(|x| *x == 0.0));
+    assert!(
+        stems.side(Channel::Speech, true)[250..300]
+            .iter()
+            .all(|x| (*x - 0.5).abs() < 1e-6)
+    );
+    let duck = stems.duck();
+    assert!(duck[..260].iter().all(|x| (*x - 1.0).abs() < 1e-9));
+    assert!(duck[260] < 1.0);
+    // The music's stems are the bits they are without the reading: the duck is the master's to
+    // apply, not the stems'.
+    let mut alone = Renderer::new(rate(), burst_bank(10));
+    let hits = (0..4)
+        .map(|n| hit(n, 0.1 * f64::from(n), Channel::Drums))
+        .collect();
+    alone.play(piece(hits, &[0.0], 0.4, Repeat::Once));
+    let mut without = Stems::new(400);
+    alone.render(&mut without);
+    assert_eq!(
+        stems.side(Channel::Drums, false),
+        without.side(Channel::Drums, false)
+    );
+}
+
+#[test]
+fn a_stop_lets_the_reading_go_with_the_music() {
+    let mut renderer = Renderer::new(rate(), Bank::new());
+    renderer
+        .add_line(
+            0,
+            Sample::new(vec![0.5; 1_000], None, f64::from(RATE)).unwrap(),
+        )
+        .unwrap();
+    renderer.set_duck(Gain::new(0.6).unwrap());
+    renderer
+        .speak(Utterance {
+            line: 0,
+            start: 0,
+            speech: 0,
+            hold: 0,
+        })
+        .unwrap();
+    let mut stems = Stems::new(100);
+    renderer.render(&mut stems);
+    assert!(stems.side(Channel::Speech, false).iter().all(|x| *x > 0.4));
+    renderer.stop();
+    renderer.render(&mut stems);
+    assert!(stems.side(Channel::Speech, false).iter().all(|x| *x == 0.0));
+    assert!(stems.duck().iter().all(|x| (*x - 1.0).abs() < 1e-9));
+    assert!(renderer.speaking().is_empty());
 }

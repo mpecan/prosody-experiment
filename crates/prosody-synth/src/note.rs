@@ -41,9 +41,9 @@ pub enum Channel {
     Melody,
     /// The chord lane.
     Chords,
-    /// The reading. No note of a Performance plays on it yet: the reading comes to the player in
-    /// step 4 (`docs/player.md` §7), and its stem is silent until then. The master treats it apart
-    /// from the music: the duck lowers the music under it, never it (`crate::master`).
+    /// The reading. No note of a Performance plays on it: its lines are placed by the renderer
+    /// (`Renderer::speak`). The master treats it apart from the music: the duck lowers the music
+    /// under it, never it (`crate::master`).
     Speech,
 }
 

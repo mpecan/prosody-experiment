@@ -7,7 +7,9 @@
 //! sampler (a drum played through, or a soundfont zone pitched to the key and looped while held)
 //! or a band-limited oscillator, through a linear envelope, an RBJ low-pass, its colour (a formant
 //! vowel, a bit crusher, a waveshaper) and its level, into its channel's bus: a compressor, an echo
-//! and a feedback-delay-network reverb. The [`master`] mixes the stems for a file as the page's
+//! and a feedback-delay-network reverb. The reading's lines are placed on the speech stem at the
+//! frames the page's render worker chooses, and the duck the music takes under them is written
+//! from the same placements. The [`master`] mixes the stems for a file as the page's
 //! worklet does for the speakers. A voice that has to be cut off for want of room, and a note whose
 //! sound was never loaded, are counted ([`Losses`]): a fallback is visible (`CLAUDE.md` §6).
 //!
@@ -51,6 +53,7 @@ mod osc;
 mod render;
 mod reverb;
 mod sample;
+mod speech;
 mod stems;
 mod units;
 mod voice;
@@ -67,6 +70,9 @@ pub use osc::{Oscillator, Wave};
 pub use render::{Losses, Piece, Placement, Renderer, Repeat};
 pub use reverb::WET as REVERB_WET;
 pub use sample::{Bank, Instrument, Loop, MAX_INSTRUMENTS, Sample, Zone};
+pub use speech::{
+    CUT_FADE, DUCK_FALL, DUCK_RELEASE_DELAY, DUCK_RISE, MAX_LINES, MAX_PLACED, Spoken, Utterance,
+};
 pub use stems::{STEMS, Stems};
 pub use units::{Gain, Hertz, Midi, SampleRate, Seconds};
 pub use voice::{SOURCE_LEVEL, VOICES};
@@ -92,6 +98,12 @@ pub enum SynthError {
     /// An instrument number past the bank's end.
     #[error("instrument {0} is past the bank's {max}", max = MAX_INSTRUMENTS)]
     Instrument(u32),
+    /// A line of the reading placed, or loaded, under a number it does not have.
+    #[error("line {0} of the reading is not loaded, or is past the {max} a reading holds", max = speech::MAX_LINES)]
+    Line(u32),
+    /// A line of the reading that cannot be placed.
+    #[error("a line of the reading cannot be placed: {0}")]
+    Speech(&'static str),
     /// A pitched sound with no pitch.
     #[error("note {tag} asks for a pitched sound and has no pitch")]
     Unpitched {

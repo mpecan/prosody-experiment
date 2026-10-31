@@ -5,11 +5,13 @@
 //! piece loops round and where an edit takes over are decided without a float (`CLAUDE.md` §4).
 //! A note's time in seconds becomes a frame once, when the piece is made.
 
+use crate::SynthError;
 use crate::bus::Bus;
 use crate::note::{Channel, Note};
-use crate::sample::Bank;
+use crate::sample::{Bank, Sample};
+use crate::speech::{Speech, Spoken, Utterance};
 use crate::stems::{STEMS, Stems};
-use crate::units::{SampleRate, Seconds};
+use crate::units::{Gain, SampleRate, Seconds};
 use crate::voice::{Pool, Unplayable, Voice};
 
 /// Whether a piece loops round at its end, as Strudel's pattern does, or plays once (the CLI's
@@ -180,6 +182,8 @@ pub struct Renderer {
     /// Reused each block, so rendering does not allocate once it has warmed up.
     starts: Vec<Start>,
     losses: Losses,
+    /// The reading's lines and the duck (`docs/player.md` §5, "The reading").
+    speech: Speech,
 }
 
 impl Renderer {
@@ -198,6 +202,7 @@ impl Renderer {
             next: None,
             starts: Vec::with_capacity(256),
             losses: Losses::default(),
+            speech: Speech::new(rate),
         }
     }
 
@@ -295,7 +300,8 @@ impl Renderer {
         }
     }
 
-    /// Stops: every voice silenced, nothing playing. The clock keeps counting.
+    /// Stops: every voice silenced, every line of the reading let go, nothing playing. The clock
+    /// keeps counting.
     pub fn stop(&mut self) {
         self.now = None;
         self.next = None;
@@ -303,6 +309,52 @@ impl Renderer {
         for bus in &mut self.buses {
             bus.clear();
         }
+        self.speech.clear();
+    }
+
+    /// Loads a recorded line of the reading as line `id`, in place of whatever had that number.
+    /// Mono: a voice reads in the middle.
+    ///
+    /// # Errors
+    ///
+    /// [`SynthError::Line`] for a number past [`crate::MAX_LINES`].
+    pub fn add_line(&mut self, id: u32, sample: Sample) -> Result<(), SynthError> {
+        self.speech.add_line(id, sample)
+    }
+
+    /// Lets line `id` go. Where it is already placed, it still plays.
+    pub fn drop_line(&mut self, id: u32) {
+        self.speech.drop_line(id);
+    }
+
+    /// Places a line of the reading on the speech stem, and says where it sounds. A line placed to
+    /// start before the frontier is heard from the frontier on, from as far into it as it has got.
+    ///
+    /// # Errors
+    ///
+    /// [`SynthError::Line`] for a line not loaded; [`SynthError::Speech`] for more than
+    /// [`crate::MAX_PLACED`] lines placed and not finished, or speech that begins before its
+    /// recording.
+    pub fn speak(&mut self, utterance: Utterance) -> Result<Spoken, SynthError> {
+        self.speech.speak(utterance)
+    }
+
+    /// Cuts the reading off at output frame `at`: a line sounding there fades out over
+    /// [`crate::CUT_FADE`] frames, one placed to start at or after it is let go, and the music
+    /// rises back from there.
+    pub fn cut_speech(&mut self, at: u64) {
+        self.speech.cut(at);
+    }
+
+    /// The music's level under a line of the reading, from the frontier on: 1 for no duck.
+    pub fn set_duck(&mut self, level: Gain) {
+        self.speech.set_level(level);
+    }
+
+    /// The lines of the reading placed and not yet finished, by number.
+    #[must_use]
+    pub fn speaking(&self) -> Vec<u32> {
+        self.speech.speaking().collect()
     }
 
     /// Renders the next `stems.frames()` frames into `stems`, replacing what it held.
@@ -334,6 +386,7 @@ impl Renderer {
             self.begin(*start);
         }
         self.render_stretch(stems, from, cursor, to);
+        self.speech.render(from, stems);
         self.starts = starts;
         if takeover.is_some_and(|at| at <= to) {
             self.now = self.next.take();

@@ -34,11 +34,18 @@
 //! | 21 | compressorRatio | `n` for `n`:1 |
 //!
 //! The page writes it (`web/src/player/notes.ts`), and a test on each side pins the layout.
+//!
+//! # The reading
+//!
+//! The worker also places the reading's lines (`docs/player.md` §5, "The reading"): each recorded
+//! line is loaded once ([`Player::add_line`]) and placed at an output frame ([`Player::speak`]),
+//! which gives back where it ends, so the worker can time the next line from it. The synth writes
+//! the duck from the same placements.
 
 use prosody_synth::{
     Bank, Channel, Compression, Crush, Echo, Effects, Gain, Hertz, Loop, Midi, Note, NoteSpec,
     Piece, Placement, Renderer, Repeat, Room, Sample, SampleRate, Seconds, Shape, Source, Stems,
-    SynthError, Vowel, Wave, Zone,
+    SynthError, Utterance, Vowel, Wave, Zone,
 };
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -184,6 +191,13 @@ fn whole(value: f64) -> Option<i64> {
     whole
 }
 
+/// A count of frames from JavaScript: whole and not negative.
+fn frame(value: f64, what: &str) -> Result<u64, String> {
+    whole(value)
+        .and_then(|frame| u64::try_from(frame).ok())
+        .ok_or_else(|| format!("{what} is not a frame"))
+}
+
 /// A piece from a Performance's records, its bars' starts and its length, all in seconds.
 fn piece(records: &[f64], bars: &[f64], seconds: f64, rate: SampleRate) -> Result<Piece, String> {
     let notes = decode_notes(records).map_err(|error| error.to_string())?;
@@ -296,9 +310,68 @@ impl Player {
         Ok(())
     }
 
-    /// Stops: every voice silenced.
+    /// Stops: every voice silenced, every line of the reading let go.
     pub fn stop(&mut self) {
         self.renderer.stop();
+    }
+
+    /// Loads a recorded line of the reading as line `id`: its mono PCM and the rate it is at.
+    ///
+    /// # Errors
+    ///
+    /// A recording the synth cannot play, or a number past the most it holds.
+    pub fn add_line(&mut self, id: u32, pcm: Vec<f32>, rate: f64) -> Result<(), String> {
+        let sample = Sample::new(pcm, None, rate).map_err(|error| error.to_string())?;
+        self.renderer
+            .add_line(id, sample)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Lets line `id` go; where it is already placed, it still plays.
+    pub fn drop_line(&mut self, id: u32) {
+        self.renderer.drop_line(id);
+    }
+
+    /// Places line `id` on the speech stem, its recording from output frame `start`, its speech
+    /// from `speech`, the music kept down `hold` frames after it; and gives the frame after its
+    /// last, which the reading's chaining times the next line from.
+    ///
+    /// # Errors
+    ///
+    /// A line not loaded, a frame that is not one, or more lines placed than the synth holds.
+    pub fn speak(&mut self, id: u32, start: f64, speech: f64, hold: f64) -> Result<f64, String> {
+        let spoken = self
+            .renderer
+            .speak(Utterance {
+                line: id,
+                start: frame(start, "the line's start")?,
+                speech: frame(speech, "the line's speech")?,
+                hold: frame(hold, "the line's hold")?,
+            })
+            .map_err(|error| error.to_string())?;
+        Ok(frames(spoken.end))
+    }
+
+    /// Cuts the reading off at output frame `at`: a line sounding there fades out, one placed to
+    /// start at or after it is let go.
+    ///
+    /// # Errors
+    ///
+    /// A frame that is not one.
+    pub fn cut_speech(&mut self, at: f64) -> Result<(), String> {
+        self.renderer.cut_speech(frame(at, "the cut")?);
+        Ok(())
+    }
+
+    /// The music's level under a line of the reading: 1 for no duck.
+    ///
+    /// # Errors
+    ///
+    /// A level that is not one.
+    pub fn set_duck(&mut self, level: f64) -> Result<(), String> {
+        let level = Gain::new(level).ok_or("the duck's level is not a level")?;
+        self.renderer.set_duck(level);
+        Ok(())
     }
 
     /// Renders the next block into `out`: [`prosody_synth::STEMS`] stereo stems, planar (each
@@ -466,6 +539,32 @@ mod tests {
         assert_eq!(heard.iter().position(|h| *h), Some(11));
         assert!((player.frontier() - 13.0 * 1_024.0).abs() < 0.5);
         assert!(player.missing() < 0.5);
+    }
+
+    #[test]
+    fn a_line_of_the_reading_is_placed_on_the_speech_stem_and_ducks_the_music() {
+        let mut player = Player::new(48_000, 1_024).unwrap();
+        player.play(&[], &[0.0], 2.0).unwrap();
+        // 480 frames at 24 kHz: 960 at 48 kHz, from frame 100, its speech from 120.
+        player.add_line(2, vec![0.25; 480], 24_000.0).unwrap();
+        player.set_duck(0.6).unwrap();
+        let end = player.speak(2, 100.0, 120.0, 0.0).unwrap();
+        assert!((end - 1_060.0).abs() < 0.5);
+        let mut out = vec![0.0_f32; Stems::PER_FRAME * 1_024];
+        player.render(&mut out);
+        // The speech stem is stem 4: its left side from 8 × 1 024, its right from 9 × 1 024; the
+        // duck from 10 × 1 024.
+        let left = &out[8 * 1_024..9 * 1_024];
+        let right = &out[9 * 1_024..10 * 1_024];
+        let duck = &out[10 * 1_024..11 * 1_024];
+        assert!(left[..100].iter().all(|x| *x == 0.0));
+        assert!((left[500] - 0.25).abs() < 1e-6 && (right[500] - 0.25).abs() < 1e-6);
+        assert!(duck[..120].iter().all(|x| (*x - 1.0).abs() < 1e-9) && duck[500] < 1.0);
+        // Not a frame, not loaded, not a level: refused, not guessed.
+        assert!(player.speak(2, 1.5, 2.0, 0.0).is_err());
+        assert!(player.speak(9, 0.0, 0.0, 0.0).is_err());
+        assert!(player.set_duck(-1.0).is_err());
+        assert!(player.cut_speech(f64::NAN).is_err());
     }
 
     #[test]
