@@ -103,6 +103,27 @@ impl Formants {
         }
         out
     }
+
+    /// One frame through the left side's bands alone: [`Self::process`]'s left output, the same
+    /// bits, for a voice whose sides are the same.
+    pub(crate) fn process_mono(&mut self, x: f64) -> f64 {
+        let mut out = 0.0;
+        for ((c, level), left) in self
+            .coefficients
+            .iter()
+            .zip(self.levels)
+            .zip(&mut self.left)
+        {
+            out += level * left.process(c, x);
+        }
+        out
+    }
+
+    /// The right side's bands given the left's state: where they would be had they been run on
+    /// the same frames.
+    pub(crate) fn level_right(&mut self) {
+        self.right = self.left;
+    }
 }
 
 #[cfg(test)]

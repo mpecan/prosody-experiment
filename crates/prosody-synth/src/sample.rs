@@ -51,6 +51,12 @@ impl Sample {
         self.left.len()
     }
 
+    /// Whether it has a right channel of its own; a mono sample plays its one in both.
+    #[must_use]
+    pub(crate) const fn is_stereo(&self) -> bool {
+        self.right.is_some()
+    }
+
     /// The rate it was decoded at.
     #[must_use]
     pub const fn rate(&self) -> f64 {

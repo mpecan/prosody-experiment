@@ -49,23 +49,43 @@ impl Colour {
 
     /// One frame through the colour, both sides.
     fn process(&mut self, x: f64, y: f64) -> (f64, f64) {
-        let (mut x, mut y) = match &mut self.formants {
+        let (x, y) = match &mut self.formants {
             Some(formants) => formants.process(x, y),
             None => (x, y),
         };
+        (self.crush_and_shape(x), self.crush_and_shape(y))
+    }
+
+    /// One frame through the colour when both sides are the same: [`Self::process`]'s left side,
+    /// the same bits, at half the work. Only the left side's state moves.
+    fn process_mono(&mut self, x: f64) -> f64 {
+        let x = match &mut self.formants {
+            Some(formants) => formants.process_mono(x),
+            None => x,
+        };
+        self.crush_and_shape(x)
+    }
+
+    /// One side's frame, after the vowel, through the crush and the shape (neither has state).
+    fn crush_and_shape(&self, mut x: f64) -> f64 {
         if let Some(step) = self.step {
             // Rounded to the nearest step, zero among them: Strudel's levels were symmetric about 0.
             x = (x / step).round() * step;
-            y = (y / step).round() * step;
         }
         if let Some(k) = self.drive {
             // Bram de Jong's waveshaper (musicdsp.org, "Waveshaper", 2002), unscaled: Strudel's
             // `.shape`, measured at five drives and levels, matched it to 0.01 dB in its fundamental
             // and its third harmonic (`docs/player.md` §11).
             x = (1.0 + k) * x / (1.0 + k * x.abs());
-            y = (1.0 + k) * y / (1.0 + k * y.abs());
         }
-        (x, y)
+        x
+    }
+
+    /// The right side's state made the left's, after frames run through [`Self::process_mono`].
+    fn level_right(&mut self) {
+        if let Some(formants) = &mut self.formants {
+            formants.level_right();
+        }
     }
 }
 
@@ -272,6 +292,10 @@ impl Voice {
             },
             Generator::Oscillator(_) => None,
         };
+        // An oscillator or a mono sample gives both sides the same frame, so the two sides of the
+        // low-pass and the vowel would compute the same bits from the same state: run them once,
+        // the heaviest part of a voice, and bring the right side's state level at the block's end.
+        let mono = sample.is_none_or(|sample| !sample.is_stereo());
         let Slice {
             pre: [pre_l, pre_r],
             post: [post_l, post_r],
@@ -325,9 +349,15 @@ impl Voice {
                 (Generator::Sampler { .. }, None) => return false,
             };
             let [filter_left, filter_right] = &mut self.filters;
-            let x = filter_left.process(&self.coefficients, x * level);
-            let y = filter_right.process(&self.coefficients, y * level);
-            let (x, y) = self.colour.process(x, y);
+            let (x, y) = if mono {
+                let x = filter_left.process(&self.coefficients, x * level);
+                let x = self.colour.process_mono(x);
+                (x, x)
+            } else {
+                let x = filter_left.process(&self.coefficients, x * level);
+                let y = filter_right.process(&self.coefficients, y * level);
+                self.colour.process(x, y)
+            };
             let (heard_x, heard_y) = (x * self.postgain, y * self.postgain);
             add(pre_l, n, x);
             add(pre_r, n, y);
@@ -341,6 +371,12 @@ impl Voice {
                 add(echo_l, n, heard_x * self.echo);
                 add(echo_r, n, heard_y * self.echo);
             }
+        }
+        if mono {
+            // So the right side is where running it would have left it, should the instrument be
+            // replaced by a stereo one before the next block.
+            self.filters[1] = self.filters[0];
+            self.colour.level_right();
         }
         !self.envelope.done()
     }

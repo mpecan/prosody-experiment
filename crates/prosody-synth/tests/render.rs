@@ -11,8 +11,8 @@
 )]
 
 use prosody_synth::{
-    Bank, Channel, Compression, Echo, Effects, Gain, Hertz, Midi, Note, NoteSpec, Piece, Renderer,
-    Repeat, STEMS, Sample, SampleRate, Seconds, Source, Stems, VOICES,
+    Bank, Channel, Compression, Crush, Echo, Effects, Gain, Hertz, Midi, Note, NoteSpec, Piece,
+    Renderer, Repeat, STEMS, Sample, SampleRate, Seconds, Shape, Source, Stems, VOICES, Vowel,
 };
 
 const RATE: u32 = 8_000;
@@ -369,4 +369,46 @@ fn an_edit_that_changes_a_bus_sounds_the_same_whatever_the_block_size() {
     let drums = &a[2 * Channel::Drums.index()];
     assert!((drums[4_450] - drums[4_449]).abs() > 0.1);
     assert_eq!(bits(&a), bits(&b));
+}
+
+#[test]
+fn a_mono_sample_sounds_as_the_same_sample_in_stereo() {
+    // A mono sample runs the low-pass and the vowel once for both sides; the same frames given as
+    // a stereo sample run them on each. Through a low-pass, a vowel, a crush and a shape, the two
+    // must give the same bits, on both sides.
+    let wave: Vec<f32> = (0..2_000)
+        .map(|n| ((n * 37 % 101) as f32 / 50.0 - 1.0) * 0.8)
+        .collect();
+    let render = |stereo: bool| {
+        let mut bank = Bank::new();
+        let right = stereo.then(|| wave.clone());
+        bank.set_drum(
+            0,
+            Sample::new(wave.clone(), right, f64::from(RATE)).unwrap(),
+        )
+        .unwrap();
+        let effects = Effects {
+            vowel: Some(Vowel::A),
+            crush: Crush::new(6.0),
+            shape: Shape::new(0.4),
+            ..Effects::DRY
+        };
+        let note = Note::new(NoteSpec {
+            lpf: Hertz::new(1_500.0).unwrap(),
+            effects,
+            ..*hit(0, 0.0, Channel::Drums).spec()
+        })
+        .unwrap();
+        let mut renderer = Renderer::new(rate(), bank);
+        renderer.play(piece(vec![note], &[0.0], 1.0, Repeat::Once));
+        run_blocks(&mut renderer, 100, 3_000)
+    };
+    let (mono, stereo) = (render(false), render(true));
+    let drums = 2 * Channel::Drums.index();
+    assert!(mono[drums].iter().any(|x| x.abs() > 0.01));
+    assert_eq!(bits(&mono), bits(&stereo));
+    assert_eq!(
+        bits(&mono[drums..=drums]),
+        bits(&mono[drums + 1..=drums + 1])
+    );
 }
