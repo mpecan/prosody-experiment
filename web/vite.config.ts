@@ -11,7 +11,7 @@ import { defineConfig, type Plugin } from 'vite';
 import preact from '@preact/preset-vite';
 
 const compiler = 'http://127.0.0.1:4747';
-const asked = ['/site.json', '/presets.json', '/pattern', '/explain', '/score', '/reading', '/trace', '/readings'];
+const asked = ['/site.json', '/presets.json', '/pattern', '/explain', '/score', '/reading', '/trace', '/performance', '/readings'];
 
 // Strudel, served from beside the page rather than a CDN, so the phone app plays with no network
 // and the page plays the exact versions package-lock.json pins. The files are copied as published:
@@ -59,5 +59,9 @@ export default defineConfig({
     environment: 'happy-dom',
     include: ['test/**/*.test.{ts,tsx}'],
     setupFiles: ['test/setup.ts'],
+    // The parity test (test/parity.test.ts) evaluates patterns with @strudel/core. Left to Node,
+    // its import of @kabelsalat/web resolves to that package's `main`, a browser bundle with no
+    // named exports, and fails; through Vite it resolves to `module`, the ES build.
+    server: { deps: { inline: [/@strudel\//, /@kabelsalat\//] } },
   },
 });
