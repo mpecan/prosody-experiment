@@ -35,7 +35,8 @@
       "icons/icon.ico"
     ],
     "android": {
-      "debugApplicationIdSuffix": ".debug"
+      "debugApplicationIdSuffix": ".debug",
+      "minSdkVersion": 26
     }
   }
 }

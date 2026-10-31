@@ -77,3 +77,12 @@ opt-level = 2
 
 [profile.dev.package.prosody-lts]
 opt-level = 2
+
+# The native player renders in these on a thread of the app, a debug build's included
+# (`docs/player.md` §13): at opt-level 0 its render thread took 36% of a core on an Android
+# emulator, and a page busy resuming starved it past its lead.
+[profile.dev.package.prosody-synth]
+opt-level = 2
+
+[profile.dev.package.prosody-player]
+opt-level = 2

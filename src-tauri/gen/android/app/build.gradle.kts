@@ -19,7 +19,8 @@ android {
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "rocks.prosody"
-        minSdk = 24
+        // 26 (Android 8.0): AAudio, which the native player plays through (docs/player.md §13).
+        minSdk = 26
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")

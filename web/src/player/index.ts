@@ -8,6 +8,9 @@
 //     ▲                                                                          │
 //     └──────────────────────────── frames played ◄──────────────────────────────┘
 //
+// In the app the render worker and the worklet are the app's native player instead (native.ts,
+// `docs/player.md` §13), driven by the same messages, so playback goes on with the screen off.
+//
 // The drums, the bass, the melody and the chords, with everything the text asks of them — gain,
 // envelope, low-pass, vowel, crush, shape, each channel's compressor, echo and reverb — and the
 // reading, its rendered lines placed on the fifth stem by the worker with the duck (speech.ts, and
@@ -28,6 +31,7 @@ import {
 } from '../watch';
 import { indexed, marksAt, notesBetween, pieceTime, settle, type Indexed, type Placement } from './clock';
 import { barStarts, cueRecords, records, sampledOf, STEM_CHANNELS } from './notes';
+import { inApp, startNative } from './native';
 import { decodeDrum, decodeFont, zoneName } from './samples';
 import { dropped, handing, speechAt, speechStats, startSpeech, stopSpeech, told, wanted } from './speech';
 
@@ -36,18 +40,35 @@ const BLOCK = 2048;
 /** How far ahead of the playhead the worker keeps rendered (`docs/player.md` §5). */
 const LEAD_SECONDS = 0.5;
 
-/** The engine, once started: the audio context, the worklet's node, the worker. */
-interface Engine {
-  context: AudioContext;
-  node: AudioWorkletNode;
-  worker: Worker;
+/** Where the player runs, once started: the render worker and the worklet in a browser, the native
+ * player in the app. */
+export interface Engine {
+  /** The output's rate, frames a second. */
+  rate: number;
+  /** A message for what renders: the render worker, or the native player (render-worker.ts lists
+   * them). */
+  post(message: Record<string, unknown>, transfer?: Transferable[]): void;
+  /** A message for what mixes: the worklet, or the native output — the stems' gains, the browser
+   * voice's duck. */
+  mix(message: { gains?: number[]; duck?: number }): void;
+  /** Now, in seconds, on the clock the mixer's reports are stamped with. */
+  now(): number;
+  /** Seconds between a frame leaving the mixer and the speaker. */
+  latency(): number;
+  /** Lets the output run (a browser holds audio until a click). */
+  resume(): Promise<void>;
 }
 let engine: Promise<Engine> | null = null;
 /** The engine once it has started, for the drawing, which runs every frame. */
 let ready: Engine | null = null;
 
-/** What the worklet last said: how far it had played, by the audio clock's `time`. */
-let report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation: 0, peak: 0, speechPeak: 0 };
+/** What the worklet (or the native player) last said: how far it had played, by the engine's clock's
+ * `time`. */
+/** `glitches` is the app's output's own (an xrun below the mix); a worklet has none to tell. */
+let report: {
+  played: number; underruns: number; queued: number; started: boolean; time: number; generation: number; peak: number;
+  speechPeak: number; glitches?: number;
+} = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation: 0, peak: 0, speechPeak: 0 };
 /** The loudest the output, and the reading's stem, have been since last asked (the end-to-end test
  * asks). */
 let loudest = 0;
@@ -87,49 +108,67 @@ let frame = 0;
 
 function startEngine(): Promise<Engine> {
   engine ??= (async () => {
-    const context = new AudioContext();
-    await context.audioWorklet.addModule(workletUrl);
-    const node = new AudioWorkletNode(context, 'prosody-player', { numberOfInputs: 0, outputChannelCount: [2] });
-    node.connect(context.destination);
-    node.port.onmessage = ({ data }: MessageEvent) => {
-      if (data.generation !== generation) return;
-      const ranDry = data.underruns !== report.underruns;
-      report = data;
-      loudest = Math.max(loudest, data.peak as number);
-      loudestSpeech = Math.max(loudestSpeech, (data.speechPeak as number) ?? 0);
-      if (ranDry) tell();
-    };
-    const worker = new Worker(new URL('./render-worker.ts', import.meta.url), { type: 'module' });
-    const channel = new MessageChannel();
-    node.port.postMessage({ worker: channel.port1 }, [channel.port1]);
-    await new Promise<void>((resolve, reject) => {
-      worker.onmessage = ({ data }: MessageEvent) => {
-        if (data.op === 'ready') resolve();
-        else if (data.op === 'error') reject(new Error(data.message));
-      };
-      worker.postMessage({
-        op: 'init',
-        bindings: new URL('./synth.js', document.baseURI).href,
-        rate: context.sampleRate,
-        block: BLOCK,
-        lead: Math.round(context.sampleRate * LEAD_SECONDS),
-        port: channel.port2,
-      }, [channel.port2]);
-    });
-    worker.onmessage = ({ data }: MessageEvent) => heard(data);
-    ready = { context, node, worker };
+    const started = inApp()
+      ? await startNative(BLOCK, LEAD_SECONDS, { report: reported, heard })
+      : await startWeb();
+    ready = started;
     startSpeech({
-      post: (message, transfer = []) => worker.postMessage(message, transfer),
-      worklet: (message) => node.port.postMessage(message),
+      post: (message, transfer = []) => started.post(message, transfer),
+      worklet: (message) => started.mix(message),
       gains: sendGains,
-      playhead: () => playhead(context),
-      rate: () => context.sampleRate,
+      playhead,
+      rate: () => started.rate,
       generation: () => generation,
     });
-    return ready;
+    return started;
   })();
   engine.catch(() => { engine = null; });
   return engine;
+}
+
+/** The browser's engine: a render worker and an AudioWorklet in an AudioContext. */
+async function startWeb(): Promise<Engine> {
+  const context = new AudioContext();
+  await context.audioWorklet.addModule(workletUrl);
+  const node = new AudioWorkletNode(context, 'prosody-player', { numberOfInputs: 0, outputChannelCount: [2] });
+  node.connect(context.destination);
+  node.port.onmessage = ({ data }: MessageEvent) => reported(data);
+  const worker = new Worker(new URL('./render-worker.ts', import.meta.url), { type: 'module' });
+  const channel = new MessageChannel();
+  node.port.postMessage({ worker: channel.port1 }, [channel.port1]);
+  await new Promise<void>((resolve, reject) => {
+    worker.onmessage = ({ data }: MessageEvent) => {
+      if (data.op === 'ready') resolve();
+      else if (data.op === 'error') reject(new Error(data.message));
+    };
+    worker.postMessage({
+      op: 'init',
+      bindings: new URL('./synth.js', document.baseURI).href,
+      rate: context.sampleRate,
+      block: BLOCK,
+      lead: Math.round(context.sampleRate * LEAD_SECONDS),
+      port: channel.port2,
+    }, [channel.port2]);
+  });
+  worker.onmessage = ({ data }: MessageEvent) => heard(data);
+  return {
+    rate: context.sampleRate,
+    post: (message, transfer = []) => worker.postMessage(message, transfer),
+    mix: (message) => node.port.postMessage(message),
+    now: () => context.currentTime,
+    latency: () => context.outputLatency || context.baseLatency || 0,
+    resume: () => context.resume(),
+  };
+}
+
+/** What the mixer says of how far it has played. */
+function reported(data: typeof report): void {
+  if (data.generation !== generation) return;
+  const ranDry = data.underruns !== report.underruns || data.glitches !== report.glitches;
+  report = data;
+  loudest = Math.max(loudest, data.peak);
+  loudestSpeech = Math.max(loudestSpeech, data.speechPeak ?? 0);
+  if (ranDry) tell();
 }
 
 /** What the worker says. */
@@ -156,6 +195,11 @@ function heard(data: Record<string, unknown>): void {
     tell();
   } else if (data.op === 'error') {
     status('the Prosody player failed: ' + String(data.message), true);
+  } else if (data.op === 'media') {
+    // A button of the app's notification, its lock screen or a headset: the native player has
+    // already stopped the music for a pause (the page may have been asleep); the page follows.
+    if (data.action === 'stop' && playing.value) stop();
+    else if (data.action === 'play' && !playing.value) void play();
   }
 }
 /** The status line: what plays, and anything lost (`CLAUDE.md` §6: a fallback is visible). */
@@ -163,14 +207,15 @@ function tell(): void {
   if (!playing.value) return;
   const lost = [
     report.underruns ? `ran dry ${report.underruns} time(s), silence instead of music` : '',
+    report.glitches ? `the phone's audio output glitched ${report.glitches} time(s)` : '',
     losses.stolen ? `${losses.stolen} note(s) cut short for want of voices` : '',
     losses.missing ? `${losses.missing} note(s) unheard, their sound not loaded` : '',
   ].filter(Boolean);
   status(said + (lost.length ? ' · Prosody player ' + lost.join(', ') : ''), lost.length > 0);
 }
 
-/** Loads every sampled sound `performance` needs that the worker does not have. */
-async function loadSounds(worker: Worker, performance: Performance): Promise<string[]> {
+/** Loads every sampled sound `performance` needs that the player does not have. */
+async function loadSounds(running: Engine, performance: Performance): Promise<string[]> {
   const failed: string[] = [];
   await Promise.all([...sampledOf(performance)].map(async ([key, { sound, keys }]) => {
     const have = loadedKeys.get(key);
@@ -184,11 +229,11 @@ async function loadSounds(worker: Worker, performance: Performance): Promise<str
     try {
       if (sound.kind === 'drum') {
         const drum = await decodeDrum(sound.bank, sound.piece);
-        worker.postMessage({ op: 'drum', id, ...drum }, [drum.left.buffer, drum.right.buffer]);
+        running.post({ op: 'drum', id, ...drum }, [drum.left.buffer, drum.right.buffer]);
       } else {
         const zones = loadedZones.get(key) ?? new Set<string>();
         for (const zone of await decodeFont(sound.file, wanted, zones)) {
-          worker.postMessage({ op: 'zone', id, ...zone }, [zone.left.buffer, zone.right.buffer]);
+          running.post({ op: 'zone', id, ...zone }, [zone.left.buffer, zone.right.buffer]);
           zones.add(zoneName(zone));
         }
         loadedZones.set(key, zones);
@@ -225,7 +270,7 @@ export async function play(): Promise<void> {
       openLoader({ title: 'Getting the player ready', text: 'The synth and the samples this piece uses. Then it plays.' });
     }
     running = await startEngine();
-    await running.context.resume();
+    await running.resume();
   } catch (error) {
     if (!overtaken()) status('could not start the Prosody player: ' + (error as Error).message, true);
     closeLoader();
@@ -240,7 +285,7 @@ export async function play(): Promise<void> {
     performance = (await answer.json()) as Performance;
     if (overtaken() || text !== poem.value || side !== hearing.value) return;   // a newer one plays itself
     status('loading the sounds this piece uses…' + (playing.value ? ' · playing' : ''));
-    failed = await loadSounds(running.worker, performance);
+    failed = await loadSounds(running, performance);
   } catch (error) {
     if (!overtaken()) status('the Prosody player could not play this: ' + (error as Error).message, true);
     return;
@@ -266,13 +311,14 @@ export async function play(): Promise<void> {
   if (fromTheTop) {
     report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation, peak: 0, speechPeak: 0 };
     losses = { stolen: 0, missing: 0 };
-    running.worker.postMessage({ op: 'play', generation, ...message, ...reads }, [message.notes.buffer, message.bars.buffer, reads.cues.buffer]);
+    // The title is for the app's notification; the render worker has no use for it.
+    running.post({ op: 'play', generation, ...message, ...reads, title: titleOf(text) }, [message.notes.buffer, message.bars.buffer, reads.cues.buffer]);
     // Nothing else is heard now, so the roll takes this piece's bars at once. After a live edit it
     // keeps the old piece's until the new one takes over (draw).
     watch.heardBars = heard.bars;
     fitRoll();
   } else {
-    running.worker.postMessage({ op: 'swap', ...message, ...reads }, [message.notes.buffer, message.bars.buffer, reads.cues.buffer]);
+    running.post({ op: 'swap', ...message, ...reads }, [message.notes.buffer, message.bars.buffer, reads.cues.buffer]);
   }
   piece.fromTheTop = false;
   sendGains();
@@ -292,7 +338,8 @@ export function stop(): void {
   // Any play() still loading gives up.
   attempt += 1;
   generation += 1;
-  void engine?.then(({ worker }) => worker.postMessage({ op: 'stop', generation }));
+  const stopping = generation;
+  void engine?.then((running) => running.post({ op: 'stop', generation: stopping }));
   cancelAnimationFrame(frame);
   frame = 0;
   placements = [];
@@ -311,7 +358,7 @@ export function stop(): void {
 /** Mute and solo, as stem gains in the worklet: heard within about 5 ms (mixer.ts `GLIDE`). The
  * reading's stem is at the reading's level (0–2, its fader in the Mixer), or nothing while muted. */
 export function sendGains(): void {
-  ready?.node.port.postMessage({
+  ready?.mix({
     gains: STEM_CHANNELS.map((channel) => (channel === 'voice' ? voiceLevel() : audible(channel as Channel) ? 1 : 0)),
   });
 }
@@ -325,15 +372,20 @@ export function showBeat(): void {
   beat.value = playing.value && steady && trace && trace.cpm > 0 ? 60 / trace.cpm : null;
 }
 
-/** The render frame at the speaker now, or null before anything has played: the worklet's count
- * moved on by the audio clock since it said it, never further than it had queued, less the output's
- * latency (`docs/player.md` §5). */
-function playhead(context: AudioContext): number | null {
-  if (!report.started) return null;
-  const rate = context.sampleRate;
-  const since = Math.max(0, context.currentTime - report.time) * rate;
-  const latency = (context.outputLatency || context.baseLatency || 0) * rate;
-  return report.played + Math.min(since, report.queued) - latency;
+/** The render frame at the speaker now, or null before anything has played: the mixer's count moved
+ * on by its clock since it said it, never further than it had queued, less the output's latency
+ * (`docs/player.md` §5). */
+function playhead(): number | null {
+  if (!ready || !report.started) return null;
+  const rate = ready.rate;
+  const since = Math.max(0, ready.now() - report.time) * rate;
+  return report.played + Math.min(since, report.queued) - ready.latency() * rate;
+}
+
+/** What the app's notification calls the piece: the poem's first line after its header. */
+export function titleOf(text: string): string {
+  const body = text.startsWith('+++') ? text.slice(text.indexOf('+++', 3) + 3) : text;
+  return body.split('\n').map((line) => line.trim()).find((line) => line && !line.startsWith('#')) ?? 'Prosody';
 }
 
 /** Each frame: the playhead's piece and time, then the roll and meters, then the lit poem. */
@@ -343,10 +395,10 @@ let marksCache: { performance: Performance | null; version: number; marks: Map<n
 function draw(): void {
   frame = requestAnimationFrame(draw);
   if (!ready) return;
-  const at = playhead(ready.context);
+  const at = playhead();
   if (at === null) return;
   placements = settle(placements, at);
-  const now = pieceTime(at, placements, ready.context.sampleRate);
+  const now = pieceTime(at, placements, ready.rate);
   if (!now) return;
   const { heard } = now.placement;
   // The roll's bars switch with the piece heard: at a live edit's hand-over, not when it was sent.
@@ -392,7 +444,7 @@ function lit(heard: Heard, time: number): { mark: Mark; elements: HTMLElement[] 
 // For the end-to-end test (web/e2e): how the player is doing, read from outside.
 (globalThis as Record<string, unknown>).prosodyPlayer = {
   stats: () => {
-    const at = ready ? playhead(ready.context) : null;
+    const at = playhead();
     const peak = loudest;
     const speechPeak = loudestSpeech;
     loudest = 0;
@@ -404,7 +456,7 @@ function lit(heard: Heard, time: number): { mark: Mark; elements: HTMLElement[] 
       underruns: report.underruns,
       started: report.started,
       queued: report.queued,
-      playhead: at === null || !ready ? null : at / ready.context.sampleRate,
+      playhead: at === null || !ready ? null : at / ready.rate,
       stolen: losses.stolen,
       missing: losses.missing,
       /** Pieces handed to the worker, from the top or as a live edit's hand-over. */

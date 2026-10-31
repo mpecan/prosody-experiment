@@ -262,6 +262,21 @@ impl Engine {
         }
     }
 
+    /// Frames it keeps rendered ahead of the output.
+    #[must_use]
+    pub const fn lead(&self) -> u64 {
+        self.lead
+    }
+
+    /// Keeps at least `frames` ahead from now on; a smaller number changes nothing. The app's output
+    /// asks for buffers of its own size, which a phone may enlarge — to more than the lead — when
+    /// its screen turns off (`docs/player.md` §13); a lead shorter than a buffer runs dry inside it.
+    pub const fn widen(&mut self, frames: u64) {
+        if frames > self.lead {
+            self.lead = frames;
+        }
+    }
+
     /// Whether a block is due: playing, and less than the lead ahead of the output.
     #[must_use]
     pub const fn due(&self) -> bool {

@@ -297,3 +297,24 @@ fn a_line_let_go_gives_its_number_to_the_next() {
     assert_eq!(engine.free_lines, Vec::<u32>::new());
     assert_eq!(engine.next_line, 1);
 }
+
+#[test]
+fn a_wider_lead_renders_further_ahead_and_a_narrower_one_changes_nothing() {
+    let mut engine = engine();
+    engine.play(
+        1,
+        handed(1, &[], Vec::new(), Cast::new()),
+        Pace::Natural,
+        unity(),
+    );
+    engine.widen(10_000);
+    assert_eq!(engine.lead(), 24_000);
+    // Widened to 48 000 frames: 47 blocks of 1 024 (48 128) before it is full.
+    engine.widen(48_000);
+    let mut blocks = 0;
+    while engine.due() {
+        engine.render();
+        blocks += 1;
+    }
+    assert_eq!(blocks, 47);
+}
