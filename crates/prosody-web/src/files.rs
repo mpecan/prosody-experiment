@@ -83,6 +83,9 @@ fn page_type(extension: &str) -> Option<&'static str> {
         "wasm" => Some("application/wasm"),
         // The drums and the soundfonts' zones, which the player decodes itself.
         "flac" => Some("audio/flac"),
+        // The soundfonts' licences, which the page's credits link to: an MIT notice travels with
+        // what it covers.
+        "txt" => Some("text/plain; charset=utf-8"),
         _ => None,
     }
 }
@@ -202,6 +205,10 @@ mod tests {
         assert_eq!(kind("synth_bg.wasm"), Some("application/wasm"));
         assert_eq!(kind("drums/tr808/bd/0.flac"), Some("audio/flac"));
         assert_eq!(kind("soundfonts/zones/0a1b.flac"), Some("audio/flac"));
+        assert_eq!(
+            kind("soundfonts/LICENSES/FluidR3_GM.txt"),
+            Some("text/plain; charset=utf-8")
+        );
     }
 
     /// Every file the page ships beside itself (`web/public`, copied into `web/dist` by Vite) is one

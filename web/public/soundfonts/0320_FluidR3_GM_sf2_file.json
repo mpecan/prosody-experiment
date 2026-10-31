@@ -2,6 +2,7 @@
  "name": "gm_acoustic_bass",
  "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0320_FluidR3_GM_sf2_file.js",
  "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
  "zones": [
   {
    "position": 0,

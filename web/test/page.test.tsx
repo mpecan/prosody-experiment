@@ -71,6 +71,12 @@ describe('a first visit', () => {
     expect(within(welcome).getByText('github.com/mpecan/prosody-experiment').getAttribute('href'))
       .toBe('https://github.com/mpecan/prosody-experiment');
     expect(within(welcome).getByText('me@prosody.rocks').getAttribute('href')).toBe('mailto:me@prosody.rocks');
+    // The credits link each soundfont licence that ships beside the page (public.test.ts checks
+    // the files are there).
+    const credits = [...document.querySelectorAll('#credits a')].map((a) => a.getAttribute('href'));
+    expect(credits).toEqual([
+      'soundfonts/LICENSES/FluidR3_GM.txt', 'soundfonts/LICENSES/GeneralUser_GS.txt', 'soundfonts/LICENSES/webaudiofontdata.txt',
+    ]);
     fireEvent.click(within(welcome).getByText('Start listening'));
     await waitFor(() => expect(welcome.open).toBe(false));
     expect(localStorage.getItem('prosody.welcomed')).toBe('1');

@@ -37,6 +37,17 @@ const LICENCES = {
   FluidR3_GM: 'FluidR3 GM by Frank Wen, MIT licence',
   GeneralUserGS: 'GeneralUser GS by S. Christian Collins, free for any use (its licence permits use and redistribution, commercial included)',
 };
+/** Each licence's full text, with its copyright line, kept beside the zones in `LICENSES/` (an MIT
+ * notice must travel with what it covers; a one-line attribution is not the notice). Written by
+ * hand, not by this script: it checks they are there. */
+const LICENCE_FILES = {
+  FluidR3_GM: 'LICENSES/FluidR3_GM.txt',
+  GeneralUserGS: 'LICENSES/GeneralUser_GS.txt',
+};
+const SOURCE_LICENCE = 'LICENSES/webaudiofontdata.txt';
+for (const file of [...Object.values(LICENCE_FILES), SOURCE_LICENCE]) {
+  if (!fs.existsSync(path.join(out, file))) throw new Error(`${file} is missing from ${path.relative(root, out)}`);
+}
 
 /** Every zone of a webaudiofont file that has a sample, in its order (as samples.ts `parseZones`). */
 function parseZones(text) {
@@ -109,7 +120,10 @@ for (const { name, file } of variants) {
   });
   const bank = Object.keys(LICENCES).find((key) => file.includes(key));
   if (!bank) throw new Error(`no licence known for ${file}`);
-  const manifest = { name, source: `https://github.com/${REPO}/blob/${COMMIT}/sound/${file}.js`, licence: LICENCES[bank], zones: described };
+  const manifest = {
+    name, source: `https://github.com/${REPO}/blob/${COMMIT}/sound/${file}.js`, licence: LICENCES[bank],
+    licenceFile: LICENCE_FILES[bank], zones: described,
+  };
   fs.writeFileSync(path.join(out, `${file}.json`), `${JSON.stringify(manifest, null, 1)}\n`);
   sources.push({ name, file, url: manifest.source, bank, zones: described.length });
 }
@@ -122,10 +136,10 @@ const lines = [
   'from the webaudiofont file\'s MP3 (lossless from there on). A recording two soundfonts share is',
   'stored once, named by the hash of its MP3.',
   '',
-  `The webaudiofont files come from [${REPO}](https://github.com/${REPO}) (MIT) at commit \`${COMMIT}\`.`,
-  'The recordings keep their banks\' licences:',
+  `The webaudiofont files come from [${REPO}](https://github.com/${REPO}) (MIT, [its licence](${SOURCE_LICENCE})) at commit \`${COMMIT}\`.`,
+  'The recordings keep their banks\' licences, whose full texts and copyright lines are in `LICENSES/`:',
   '',
-  ...Object.values(LICENCES).map((licence) => `- ${licence}.`),
+  ...Object.entries(LICENCES).map(([bank, licence]) => `- ${licence}: [${LICENCE_FILES[bank]}](${LICENCE_FILES[bank]}).`),
   '',
   '| Instrument | File | Zones | Bank |',
   '|---|---|---|---|',

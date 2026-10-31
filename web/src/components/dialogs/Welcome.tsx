@@ -28,6 +28,13 @@ export function Welcome() {
         <p class="small">How it works, and the source: <a href="https://github.com/mpecan/prosody-experiment"
           rel="noopener" target="_blank">github.com/mpecan/prosody-experiment</a>. Questions, poems,
           ideas: <a href="mailto:me@prosody.rocks">me@prosody.rocks</a>.</p>
+        {/* The soundfonts' recordings ship with the page, and their notices with them. */}
+        <p class="small" id="credits">The instruments are recordings from FluidR3 GM, © Frank Wen
+          (<a href="soundfonts/LICENSES/FluidR3_GM.txt" target="_blank">MIT licence</a>), and GeneralUser
+          GS by S. Christian Collins (<a href="soundfonts/LICENSES/GeneralUser_GS.txt" target="_blank">its
+          licence</a>), by way of the webaudiofont files, © Srgy Surkv
+          (<a href="soundfonts/LICENSES/webaudiofontdata.txt" target="_blank">MIT licence</a>). The drums
+          are in the public domain.</p>
       </div>
     </Dialog>
   );

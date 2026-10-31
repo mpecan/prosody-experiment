@@ -54,6 +54,12 @@ describe('the soundfonts', () => {
     for (const file of manifests) {
       const manifest = JSON.parse(read(`public/soundfonts/${file}`));
       expect(manifest.licence, file).toMatch(/FluidR3 GM|GeneralUser GS/);
+      // The licence's full text travels with the recordings, not a one-line attribution: FluidR3's
+      // MIT notice with its copyright line, GeneralUser GS's own terms.
+      const licence = read(`public/soundfonts/${manifest.licenceFile}`);
+      expect(licence, file).toMatch(manifest.licence.startsWith('FluidR3')
+        ? /Copyright \(c\) 2000-2002, 2008 Frank Wen[\s\S]*Permission is hereby granted/
+        : /License of the complete work/);
       expect(manifest.zones.length, file).toBeGreaterThan(0);
       manifest.zones.forEach((zone: { position: number; low: number; high: number; rate: number; file: string;
         loopStart: number | null; loopEnd: number | null }, index: number) => {
@@ -67,5 +73,9 @@ describe('the soundfonts', () => {
     }
     // No recording is shipped that no soundfont plays.
     expect([...recordings].filter((name) => !used.has(name))).toEqual([]);
+  });
+
+  it('ships the webaudiofont files\' licence, with its copyright line, beside them', () => {
+    expect(read('public/soundfonts/LICENSES/webaudiofontdata.txt')).toMatch(/Copyright \(c\) 2017 Srgy Surkv[\s\S]*Permission is hereby granted/);
   });
 });

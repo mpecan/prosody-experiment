@@ -6,11 +6,11 @@ recording's frames, its rate — and names the zone's recording in `zones/`, a 1
 from the webaudiofont file's MP3 (lossless from there on). A recording two soundfonts share is
 stored once, named by the hash of its MP3.
 
-The webaudiofont files come from [felixroos/webaudiofontdata](https://github.com/felixroos/webaudiofontdata) (MIT) at commit `23ca907d4370a04fd89ca483a92915e4d6159ab9`.
-The recordings keep their banks' licences:
+The webaudiofont files come from [felixroos/webaudiofontdata](https://github.com/felixroos/webaudiofontdata) (MIT, [its licence](LICENSES/webaudiofontdata.txt)) at commit `23ca907d4370a04fd89ca483a92915e4d6159ab9`.
+The recordings keep their banks' licences, whose full texts and copyright lines are in `LICENSES/`:
 
-- FluidR3 GM by Frank Wen, MIT licence.
-- GeneralUser GS by S. Christian Collins, free for any use (its licence permits use and redistribution, commercial included).
+- FluidR3 GM by Frank Wen, MIT licence: [LICENSES/FluidR3_GM.txt](LICENSES/FluidR3_GM.txt).
+- GeneralUser GS by S. Christian Collins, free for any use (its licence permits use and redistribution, commercial included): [LICENSES/GeneralUser_GS.txt](LICENSES/GeneralUser_GS.txt).
 
 | Instrument | File | Zones | Bank |
 |---|---|---|---|

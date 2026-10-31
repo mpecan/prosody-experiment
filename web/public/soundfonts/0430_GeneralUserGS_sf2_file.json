@@ -2,6 +2,7 @@
  "name": "gm_contrabass",
  "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0430_GeneralUserGS_sf2_file.js",
  "licence": "GeneralUser GS by S. Christian Collins, free for any use (its licence permits use and redistribution, commercial included)",
+ "licenceFile": "LICENSES/GeneralUser_GS.txt",
  "zones": [
   {
    "position": 0,
