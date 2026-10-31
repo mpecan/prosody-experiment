@@ -174,8 +174,10 @@ impl Player {
             .map_err(|error| error.to_string())
     }
 
-    /// Adds a zone to soundfont instrument `id`: its sample's channels and rate, the pitch it
-    /// sounds at its own rate, its keys, and its loop in the sample's frames (NaN for none).
+    /// Adds zone `position` of its file (its index among the file's zones, which decides between
+    /// zones that could both play a key: `Instrument::zone`) to soundfont instrument `id`: its
+    /// sample's channels and rate, the pitch it sounds at its own rate, its keys, and its loop in
+    /// the sample's frames (NaN for none).
     ///
     /// # Errors
     ///
@@ -184,6 +186,7 @@ impl Player {
     pub fn add_zone(
         &mut self,
         id: u32,
+        position: u32,
         left: Vec<f32>,
         right: Vec<f32>,
         rate: f64,
@@ -199,7 +202,7 @@ impl Player {
         let zone = Zone::new(sample, root, low, high, looped).map_err(|error| error.to_string())?;
         self.renderer
             .bank_mut()
-            .add_zone(id, zone)
+            .add_zone(id, position, zone)
             .map_err(|error| error.to_string())
     }
 

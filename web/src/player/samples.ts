@@ -34,6 +34,9 @@ export interface RawZone {
 
 /** A soundfont zone, decoded, with its loop in the decoded sample's frames. */
 export interface Zone extends Decoded {
+  /** Its index among its file's zones (as `parseZones` reads them): the synth chooses between zones
+   * that could both play a key by it, so the choice does not depend on which was loaded first. */
+  position: number;
   low: number;
   high: number;
   root: number;
@@ -120,12 +123,14 @@ export const zoneName = (zone: { low: number; high: number }) => `${zone.low}-${
 export async function decodeFont(context: BaseAudioContext, file: string, keys: Iterable<number>, have: ReadonlySet<string>): Promise<Zone[]> {
   const response = await fetch(`${SOUNDFONT_BASE}${file}.js`);
   if (!response.ok) throw new Error(`${response.status} for the soundfont ${file}`);
-  const wanted = zonesFor(parseZones(await response.text()), keys).filter((zone) => !have.has(zoneName(zone)));
+  const all = parseZones(await response.text());
+  const wanted = zonesFor(all, keys).filter((zone) => !have.has(zoneName(zone)));
   return Promise.all(wanted.map(async (zone) => {
     const decoded = channelsOf(await context.decodeAudioData(bytesOf(zone.file)));
     const scale = zone.sampleRate > 0 ? decoded.rate / zone.sampleRate : 1;
     return {
       ...decoded,
+      position: all.indexOf(zone),
       low: zone.low,
       high: zone.high,
       root: zone.root,

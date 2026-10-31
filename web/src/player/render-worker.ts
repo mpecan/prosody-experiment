@@ -5,7 +5,7 @@
 //
 //   from the page:  { op: 'init', bindings, rate, block, lead, port }   → { op: 'ready' } or { op: 'error' }
 //                   { op: 'drum', id, left, right, rate }
-//                   { op: 'zone', id, left, right, rate, root, low, high, loopStart, loopEnd }
+//                   { op: 'zone', id, position, left, right, rate, root, low, high, loopStart, loopEnd }
 //                   { op: 'play', notes, bars, seconds, generation }    from the top
 //                   { op: 'swap', notes, bars, seconds }                at the next bar
 //                   { op: 'stop', generation }
@@ -17,8 +17,8 @@
 
 interface Player {
   add_drum(id: number, left: Float32Array, right: Float32Array, rate: number): void;
-  add_zone(id: number, left: Float32Array, right: Float32Array, rate: number, root: number, low: number, high: number,
-    loopStart: number, loopEnd: number): void;
+  add_zone(id: number, position: number, left: Float32Array, right: Float32Array, rate: number, root: number, low: number,
+    high: number, loopStart: number, loopEnd: number): void;
   play(notes: Float64Array, bars: Float64Array, seconds: number): void;
   swap(notes: Float64Array, bars: Float64Array, seconds: number): void;
   stop(): void;
@@ -103,8 +103,8 @@ async function handle(data: Record<string, unknown>): Promise<void> {
       player?.add_drum(data.id as number, data.left as Float32Array, data.right as Float32Array, data.rate as number);
       return;
     case 'zone':
-      player?.add_zone(data.id as number, data.left as Float32Array, data.right as Float32Array, data.rate as number,
-        data.root as number, data.low as number, data.high as number, data.loopStart as number, data.loopEnd as number);
+      player?.add_zone(data.id as number, data.position as number, data.left as Float32Array, data.right as Float32Array,
+        data.rate as number, data.root as number, data.low as number, data.high as number, data.loopStart as number, data.loopEnd as number);
       return;
     case 'play':
       if (!player) return;

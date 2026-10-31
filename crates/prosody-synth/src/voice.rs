@@ -26,6 +26,9 @@ enum Generator {
         /// How far a frame moves through the sample: pitch ratio × the sample's rate ÷ the output's.
         step: f64,
         looped: Option<Loop>,
+        /// Whether it has gone round its loop yet: from then on, what comes before the loop's
+        /// start is its end, for the interpolation (`Sample::at_looped`).
+        wrapped: bool,
     },
 }
 
@@ -87,6 +90,7 @@ impl Voice {
                         at: 0.0,
                         step: sample.rate() / hz,
                         looped: None,
+                        wrapped: false,
                     },
                     None,
                 ),
@@ -107,6 +111,7 @@ impl Voice {
                         at: 0.0,
                         step: ratio * zone.sample().rate() / hz,
                         looped: zone.looped(),
+                        wrapped: false,
                     },
                     held,
                 )
@@ -151,6 +156,7 @@ impl Voice {
                     at,
                     step,
                     looped: None,
+                    ..
                 },
             ) => {
                 let frames = match bank.get(instrument) {
@@ -177,7 +183,7 @@ impl Voice {
             } => match (bank.get(instrument), zone) {
                 (Some(Instrument::Drum(sample)), None) => Some(sample),
                 (Some(Instrument::Font(zones)), Some(index)) => {
-                    zones.get(index).map(crate::sample::Zone::sample)
+                    zones.get(index).map(|(_, zone)| zone.sample())
                 }
                 // Its instrument was replaced while it sounded: it stops rather than plays another.
                 _ => return false,
@@ -204,20 +210,26 @@ impl Voice {
                 }
                 (
                     Generator::Sampler {
-                        at, step, looped, ..
+                        at,
+                        step,
+                        looped,
+                        wrapped,
+                        ..
                     },
                     Some(sample),
                 ) => {
                     #[allow(clippy::cast_precision_loss)] // a sample's length, far below 2^52
                     let end = sample.frames() as f64;
-                    if looped.is_none() && *at >= end {
-                        return false;
-                    }
-                    let value = sample.at(*at);
+                    let value = match looped {
+                        Some(span) => sample.at_looped(*at, *span, *wrapped),
+                        None if *at >= end => return false,
+                        None => sample.at(*at),
+                    };
                     *at += *step;
                     if let Some(span) = looped {
                         while *at >= span.end() {
-                            *at -= span.end() - span.start();
+                            *at -= span.length();
+                            *wrapped = true;
                         }
                     }
                     value
@@ -350,7 +362,7 @@ mod tests {
         let ramp: Vec<f32> = (0..2_000).map(|n| n as f32 / 2_000.0).collect();
         let mut bank = Bank::new();
         let sample = Sample::new(ramp, None, 48_000.0).unwrap();
-        bank.add_zone(0, Zone::new(sample, 60.0, 0, 127, None).unwrap())
+        bank.add_zone(0, 0, Zone::new(sample, 60.0, 0, 127, None).unwrap())
             .unwrap();
         let mut voice =
             Voice::new(&note(Source::Font(0), Some(72.0), 1.0), &bank, rate(), 0).unwrap();
@@ -393,13 +405,32 @@ mod tests {
         let mut bank = Bank::new();
         let sample = Sample::new(vec![0.5; 100], None, 48_000.0).unwrap();
         let looped = Loop::new(50.0, 100.0, 100);
-        bank.add_zone(0, Zone::new(sample, 60.0, 0, 127, looped).unwrap())
+        bank.add_zone(0, 0, Zone::new(sample, 60.0, 0, 127, looped).unwrap())
             .unwrap();
         let mut voice =
             Voice::new(&note(Source::Font(0), Some(60.0), 1.0), &bank, rate(), 0).unwrap();
         let (out, alive) = run(&mut voice, &bank, 1_000);
         assert!(alive);
         assert!(out[999].abs() > 0.2);
+    }
+
+    #[test]
+    fn a_looped_zone_played_off_its_root_does_not_dip_at_the_wrap() {
+        // A constant 0.5 sample looping 50..100, played a fifth up (2^(7/12) = 1.498 frames a
+        // frame), so the read position lands between frames all around the loop's end. The note
+        // has gain 0.5 and the filter is open, so once the filter has settled every frame is
+        // 0.25. Read past the loop's end from the buffer, each pass dipped towards half that.
+        let mut bank = Bank::new();
+        let sample = Sample::new(vec![0.5; 100], None, 48_000.0).unwrap();
+        let looped = Loop::new(50.0, 100.0, 100);
+        bank.add_zone(0, 0, Zone::new(sample, 60.0, 0, 127, looped).unwrap())
+            .unwrap();
+        let mut voice =
+            Voice::new(&note(Source::Font(0), Some(67.0), 1.0), &bank, rate(), 0).unwrap();
+        let (out, _) = run(&mut voice, &bank, 2_000);
+        for (n, x) in out.iter().enumerate().skip(200) {
+            assert!((x - 0.25).abs() < 1e-3, "frame {n}: {x}");
+        }
     }
 
     #[test]

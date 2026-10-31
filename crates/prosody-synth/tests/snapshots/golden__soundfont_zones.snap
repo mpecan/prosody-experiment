@@ -3,4 +3,4 @@ source: crates/prosody-synth/tests/golden.rs
 expression: "describe(\"soundfont_zones\", bank, notes, 2.6)"
 ---
 soundfont_zones: 149504 frames, peak 0.6006, rms 0.2264, stolen 0, missing 0
-blake3 13afcbc044f9489b4c92de0a76651e3a9f939ef4283c1e882b40974d244a3a8d
+blake3 b29a8fe301e0baeee8b74f6a61f88726d0ea44edab5f8c91218ea145349ea952

@@ -206,11 +206,13 @@ fn soundfont_zones() {
     let high = Sample::new(tone(9_600, 48_000.0 / 440.0), None, 48_000.0).unwrap();
     bank.add_zone(
         0,
+        0,
         Zone::new(low, 57.0, 0, 62, Loop::new(7_200.0, 9_600.0, 9_600)).unwrap(),
     )
     .unwrap();
     bank.add_zone(
         0,
+        1,
         Zone::new(high, 69.0, 63, 127, Loop::new(7_200.0, 9_600.0, 9_600)).unwrap(),
     )
     .unwrap();

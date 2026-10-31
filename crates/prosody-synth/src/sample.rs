@@ -61,27 +61,74 @@ impl Sample {
     /// interpolation; silence beyond either end.
     #[must_use]
     pub fn at(&self, at: f64) -> (f64, f64) {
-        let left = interpolate(&self.left, at);
+        self.read(at, None)
+    }
+
+    /// The sample at fractional frame `at` of a note looping `looped`, `wrapped` once it has gone
+    /// round the loop at least once. The four frames the interpolation reads are taken from the
+    /// sound as it plays rather than from the buffer: past the loop's end comes its start again,
+    /// and once it has wrapped, before its start comes its end. Read from the buffer instead, the
+    /// frames past the end are silence (or whatever follows the loop) and a looped note dips or
+    /// overshoots once each time round.
+    #[must_use]
+    pub fn at_looped(&self, at: f64, looped: Loop, wrapped: bool) -> (f64, f64) {
+        self.read(at, Some((looped, wrapped)))
+    }
+
+    fn read(&self, at: f64, looped: Option<(Loop, bool)>) -> (f64, f64) {
+        let left = interpolate(&self.left, at, looped);
         let right = self
             .right
             .as_deref()
-            .map_or(left, |right| interpolate(right, at));
+            .map_or(left, |right| interpolate(right, at, looped));
         (left, right)
     }
 }
 
-/// `channel` at fractional frame `at`, from the frames either side of it.
-fn interpolate(channel: &[f32], at: f64) -> f64 {
+/// Frame `index` of `channel`, or silence outside it.
+fn frame_of(channel: &[f32], index: i64) -> f64 {
+    usize::try_from(index)
+        .ok()
+        .and_then(|i| channel.get(i))
+        .map_or(0.0, |x| f64::from(*x))
+}
+
+/// `channel` at a fractional position, between its two nearest frames. A loop moved to the
+/// decoded rate (`samples.ts` scales it) can have fractional ends, so the frame a loop maps a
+/// neighbour to may fall between two; for whole-frame loop points it is exactly a frame.
+fn linear(channel: &[f32], position: f64) -> f64 {
+    let whole = position.floor();
+    let t = position - whole;
+    #[allow(clippy::cast_possible_truncation)]
+    // a frame number of a sample far shorter than 2^63 frames
+    let index = whole as i64;
+    let here = frame_of(channel, index);
+    here + t * (frame_of(channel, index + 1) - here)
+}
+
+/// `channel` at fractional frame `at`, from the frames either side of it, as the note plays them:
+/// with `looped`, a neighbour past the loop's end is the frame as far past its start, and once the
+/// note has wrapped, one before its start is as far before its end.
+fn interpolate(channel: &[f32], at: f64, looped: Option<(Loop, bool)>) -> f64 {
     let whole = at.floor();
     let t = at - whole;
     #[allow(clippy::cast_possible_truncation)]
     // a frame number of a sample far shorter than 2^63 frames; a negative one reads as silence
     let index = whole as i64;
     let frame = |offset: i64| -> f64 {
-        usize::try_from(index + offset)
-            .ok()
-            .and_then(|i| channel.get(i))
-            .map_or(0.0, |x| f64::from(*x))
+        let i = index + offset;
+        let Some((span, wrapped)) = looped else {
+            return frame_of(channel, i);
+        };
+        #[allow(clippy::cast_precision_loss)] // a frame number, far below 2^52
+        let position = i as f64;
+        if position >= span.end() {
+            linear(channel, position - span.length())
+        } else if wrapped && position < span.start() {
+            linear(channel, position + span.length())
+        } else {
+            frame_of(channel, i)
+        }
     };
     let (ym1, y0, y1, y2) = (frame(-1), frame(0), frame(1), frame(2));
     let c1 = 0.5 * (y1 - ym1);
@@ -124,6 +171,12 @@ impl Loop {
     #[must_use]
     pub const fn end(self) -> f64 {
         self.end
+    }
+
+    /// How long it is, in the sample's frames.
+    #[must_use]
+    pub fn length(self) -> f64 {
+        self.end - self.start
     }
 }
 
@@ -189,13 +242,21 @@ impl Zone {
 pub enum Instrument {
     /// A drum: one sample, played once at its own pitch.
     Drum(Sample),
-    /// A soundfont instrument: zones over the keys.
-    Font(Vec<Zone>),
+    /// A soundfont instrument: zones over the keys, each with its position among its file's
+    /// zones, in the order they were loaded.
+    Font(Vec<(u32, Zone)>),
 }
 
 impl Instrument {
-    /// The zone that plays `pitch` (rounded to a key): the first whose range holds it, or else the
-    /// nearest by key, so a note outside every range still sounds, from the closest recording.
+    /// The zone that plays `pitch` (rounded to a key), and its index here: of the zones whose range
+    /// holds it, the first in its file; or else the nearest by key, ties to the first in the file,
+    /// so a note outside every range still sounds, from the closest recording.
+    ///
+    /// The choice goes by the file's order, not the order zones were loaded in. The page loads a
+    /// font's zones as pieces need them, so which arrived first depends on what played before;
+    /// choosing by load order would make the same poem sound a different recording depending on
+    /// its edit history (`SPEC.md` §6, I1). By file order the choice among the zones loaded is the
+    /// choice among all of them, as long as that one is loaded (`samples.ts` `zonesFor` loads it).
     #[must_use]
     pub fn zone(&self, pitch: f64) -> Option<(usize, &Zone)> {
         let Self::Font(zones) = self else {
@@ -204,20 +265,26 @@ impl Instrument {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         // clamped to 0..=127 first
         let key = pitch.round().clamp(0.0, 127.0) as u8;
-        zones
+        let holding = zones
             .iter()
             .enumerate()
-            .find(|(_, zone)| (zone.low..=zone.high).contains(&key))
+            .filter(|(_, (_, zone))| (zone.low..=zone.high).contains(&key))
+            .min_by_key(|(_, (position, _))| *position);
+        holding
             .or_else(|| {
-                zones.iter().enumerate().min_by_key(|(index, zone)| {
-                    let distance = if key < zone.low {
-                        zone.low - key
-                    } else {
-                        key.saturating_sub(zone.high)
-                    };
-                    (distance, *index)
-                })
+                zones
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, (position, zone))| {
+                        let distance = if key < zone.low {
+                            zone.low - key
+                        } else {
+                            key.saturating_sub(zone.high)
+                        };
+                        (distance, *position)
+                    })
             })
+            .map(|(index, (_, zone))| (index, zone))
     }
 }
 
@@ -246,16 +313,23 @@ impl Bank {
         Ok(())
     }
 
-    /// Adds a zone to soundfont instrument `id`, making it a soundfont if it was not one.
+    /// Adds zone `position` of its file to soundfont instrument `id`, making it a soundfont if it
+    /// was not one, or replaces the zone it already has at that position. A zone already loaded
+    /// keeps its index, so a voice playing it is not moved onto another.
     ///
     /// # Errors
     ///
     /// [`SynthError::Instrument`] for a number past [`MAX_INSTRUMENTS`].
-    pub fn add_zone(&mut self, id: u32, zone: Zone) -> Result<(), SynthError> {
+    pub fn add_zone(&mut self, id: u32, position: u32, zone: Zone) -> Result<(), SynthError> {
         let slot = self.slot(id)?;
         match slot {
-            Some(Instrument::Font(zones)) => zones.push(zone),
-            _ => *slot = Some(Instrument::Font(vec![zone])),
+            Some(Instrument::Font(zones)) => {
+                match zones.iter_mut().find(|(at, _)| *at == position) {
+                    Some(existing) => existing.1 = zone,
+                    None => zones.push((position, zone)),
+                }
+            }
+            _ => *slot = Some(Instrument::Font(vec![(position, zone)])),
         }
         Ok(())
     }
@@ -326,7 +400,11 @@ mod tests {
     #[test]
     fn the_zone_for_a_key_is_the_one_whose_range_holds_it_else_the_nearest() {
         let zone = |low, high| Zone::new(ramp(4), f64::from(low), low, high, None).unwrap();
-        let font = Instrument::Font(vec![zone(30, 40), zone(41, 60), zone(70, 80)]);
+        let font = Instrument::Font(vec![
+            (0, zone(30, 40)),
+            (1, zone(41, 60)),
+            (2, zone(70, 80)),
+        ]);
         assert_eq!(font.zone(35.0).map(|(i, _)| i), Some(0));
         assert_eq!(font.zone(40.6).map(|(i, _)| i), Some(1)); // rounds to key 41
         assert_eq!(font.zone(64.0).map(|(i, _)| i), Some(1)); // 4 above 60, 6 below 70
@@ -336,17 +414,97 @@ mod tests {
     }
 
     #[test]
+    fn the_zone_chosen_does_not_depend_on_the_order_zones_were_loaded_in() {
+        // A file's zones: 0 is keys 40..=50, 1 is 56..=70, 2 is 45..=60 (overlapping both). Key 48
+        // lies in 0 and 2, so 0, first in the file; key 53 in 2 only; key 75 is nearest 1 (5 above
+        // 70). With only 0 and 1 loaded, key 53 is 3 from each, so 0, first in the file.
+        let zone = |low: u8, high: u8| Zone::new(ramp(4), f64::from(low), low, high, None).unwrap();
+        let file = [(0, zone(40, 50)), (1, zone(56, 70)), (2, zone(45, 60))];
+        let chosen = |order: &[usize], key: f64| {
+            let mut bank = Bank::new();
+            for &i in order {
+                let (position, zone) = file[i].clone();
+                bank.add_zone(0, position, zone).unwrap();
+            }
+            let Some(Instrument::Font(zones)) = bank.get(0) else {
+                unreachable!("a font was loaded")
+            };
+            let (index, _) = bank.get(0).unwrap().zone(key).unwrap();
+            zones[index].0
+        };
+        for order in [[0, 1, 2], [2, 1, 0], [1, 2, 0], [2, 0, 1]] {
+            assert_eq!(chosen(&order, 48.0), 0, "{order:?}");
+            assert_eq!(chosen(&order, 53.0), 2, "{order:?}");
+            assert_eq!(chosen(&order, 75.0), 1, "{order:?}");
+        }
+        // The gap case the page reaches by loading zones as pieces need them: [1] then [0] (an edit
+        // added key 53) chooses as a fresh load of [0, 1] does.
+        assert_eq!(chosen(&[1, 0], 53.0), 0);
+        assert_eq!(chosen(&[0, 1], 53.0), 0);
+    }
+
+    #[test]
+    fn a_loop_is_read_as_it_plays_not_as_the_buffer_lies() {
+        // A constant 0.5 for 100 frames, looping 50..100. Played at a fractional position near the
+        // loop's end, the frames after it are the loop's start (0.5), not silence. At 99.5 read
+        // from the buffer, the four frames are 0.5, 0.5, 0, 0 (frames 100 and 101 lie past it):
+        // c1 = -0.25, c2 = -0.75, c3 = 0.5, so ((0.5/2 - 0.75)/2 - 0.25)/2 + 0.5 = 0.25, a dip of
+        // half the level. Read as the note plays it, all four are 0.5, every coefficient but y0 is
+        // zero, and it is 0.5 exactly.
+        let constant = Sample::new(vec![0.5; 100], None, 48_000.0).unwrap();
+        let looped = Loop::new(50.0, 100.0, 100).unwrap();
+        assert!((constant.at(99.5).0 - 0.25).abs() < 1e-12);
+        for at in [98.5, 99.25, 99.5, 99.9] {
+            assert!(
+                (constant.at_looped(at, looped, false).0 - 0.5).abs() < 1e-12,
+                "{at}"
+            );
+        }
+
+        // One period of a sine over the loop 50..100, and silence before it. Once wrapped, the
+        // frame before the loop's start is its end (the sine's last frame), not the silence: at
+        // 50.5 the value is the sine's, sin(2 pi 0.5/50), to Catmull-Rom's accuracy at 50 frames a
+        // period (its error is far below 10^-3 there).
+        let period = 50.0;
+        let wave: Vec<f32> = (0..100)
+            .map(|n| {
+                if n < 50 {
+                    0.0
+                } else {
+                    (std::f64::consts::TAU * f64::from(n - 50) / period).sin() as f32
+                }
+            })
+            .collect();
+        let sine = Sample::new(wave, None, 48_000.0).unwrap();
+        let expected = |phase: f64| (std::f64::consts::TAU * phase / period).sin();
+        assert!((sine.at_looped(50.5, looped, true).0 - expected(0.5)).abs() < 1e-3);
+        // Before it has wrapped, the frames before the start are what played: the silence.
+        assert!((sine.at_looped(50.5, looped, false).0 - expected(0.5)).abs() > 1e-3);
+        // Near the end, the start follows.
+        assert!((sine.at_looped(99.5, looped, true).0 - expected(49.5)).abs() < 1e-3);
+        assert!((sine.at(99.5).0 - expected(49.5)).abs() > 1e-3);
+    }
+
+    #[test]
     fn a_bank_numbers_its_sounds() {
         let mut bank = Bank::new();
         bank.set_drum(3, ramp(4)).unwrap();
         assert!(matches!(bank.get(3), Some(Instrument::Drum(_))));
         assert!(bank.get(0).is_none());
         assert!(bank.get(99).is_none());
-        bank.add_zone(5, Zone::new(ramp(4), 60.0, 0, 127, None).unwrap())
+        bank.add_zone(5, 0, Zone::new(ramp(4), 60.0, 0, 127, None).unwrap())
             .unwrap();
-        bank.add_zone(5, Zone::new(ramp(4), 72.0, 0, 127, None).unwrap())
+        bank.add_zone(5, 1, Zone::new(ramp(4), 72.0, 0, 127, None).unwrap())
             .unwrap();
         assert!(matches!(bank.get(5), Some(Instrument::Font(zones)) if zones.len() == 2));
+        // The same position again replaces it, where it was.
+        bank.add_zone(5, 0, Zone::new(ramp(4), 48.0, 0, 127, None).unwrap())
+            .unwrap();
+        assert!(matches!(
+            bank.get(5),
+            Some(Instrument::Font(zones))
+                if zones.len() == 2 && zones[0].0 == 0 && (zones[0].1.root() - 48.0).abs() < 1e-12
+        ));
         assert!(bank.set_drum(super::MAX_INSTRUMENTS, ramp(4)).is_err());
         assert!(Zone::new(ramp(4), 60.0, 70, 60, None).is_err());
     }

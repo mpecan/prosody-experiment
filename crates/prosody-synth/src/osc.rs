@@ -20,7 +20,10 @@ pub enum Wave {
     Sawtooth,
     /// A square, high for the first half of each period.
     Square,
-    /// A triangle, from −1 at the start of a period to 1 halfway.
+    /// A triangle, rising through 0 at the start of a period to 1 a quarter in, then down to −1
+    /// three quarters in: in phase with the sine, as Web Audio's triangle (a sine series) is.
+    /// Started at a corner instead, every note would begin with a step of nearly its full level
+    /// within the 1 ms default attack — a thump.
     Triangle,
 }
 
@@ -87,10 +90,12 @@ impl Oscillator {
                 naive + blep(t, dt) - blep((t + 0.5).fract(), dt)
             }
             Wave::Triangle => {
-                // The slope is +4 a period from −1 to 1, then −4: it changes by 8 a period, 8·dt a
-                // sample, up at phase 0 and down at phase ½.
-                let naive = 1.0 - 4.0 * (t - 0.5).abs();
-                naive + 8.0 * dt * (blamp(t, dt) - blamp((t + 0.5).fract(), dt))
+                // Read a quarter period on, the triangle that rises from −1 at its start: its slope
+                // is +4 a period from −1 to 1, then −4, changing by 8 a period, 8·dt a sample, up at
+                // its phase 0 (ours ¾) and down at its ½ (ours ¼).
+                let u = (t + 0.25).fract();
+                let naive = 1.0 - 4.0 * (u - 0.5).abs();
+                naive + 8.0 * dt * (blamp(u, dt) - blamp((u + 0.5).fract(), dt))
             }
         };
         self.phase += dt;
@@ -140,19 +145,29 @@ mod tests {
 
     #[test]
     fn the_waves_have_their_shapes() {
-        // 100 samples a period: the sine peaks a quarter in; the triangle starts at −1 and peaks
-        // halfway; the square is high for the first half and low for the second; the saw climbs.
+        // 100 samples a period: the sine peaks a quarter in; the triangle starts at 0 rising, peaks
+        // a quarter in and bottoms out three quarters in; the square is high for the first half
+        // and low for the second; the saw climbs.
         let sine = render(Wave::Sine, 441.0, 100);
         assert!(sine[0].abs() < 1e-12);
         assert!((sine[25] - 1.0).abs() < 1e-12);
         assert!((sine[75] + 1.0).abs() < 1e-12);
         let triangle = render(Wave::Triangle, 441.0, 100);
-        assert!((triangle[25] - 0.0).abs() < 1e-9);
-        // The corner itself is rounded by 8·dt/3 ≈ 0.027 (the ramp residual at its centre is ⅓).
+        // It starts at 0: no step under a 1 ms attack. Away from the corners it is a straight line
+        // of slope 4 a period: 0.04 a sample, so 0.4 ten samples in.
+        assert!(triangle[0].abs() < 1e-9, "{}", triangle[0]);
+        assert!((triangle[10] - 0.4).abs() < 1e-9, "{}", triangle[10]);
+        assert!(triangle[50].abs() < 1e-9, "{}", triangle[50]);
+        // Each corner itself is rounded by 8·dt/3 ≈ 0.027 (the ramp residual at its centre is ⅓).
         assert!(
-            (triangle[50] - (1.0 - 0.08 / 3.0)).abs() < 1e-9,
+            (triangle[25] - (1.0 - 0.08 / 3.0)).abs() < 1e-9,
             "{}",
-            triangle[50]
+            triangle[25]
+        );
+        assert!(
+            (triangle[75] + (1.0 - 0.08 / 3.0)).abs() < 1e-9,
+            "{}",
+            triangle[75]
         );
         let square = render(Wave::Square, 441.0, 100);
         assert!((square[25] - 1.0).abs() < 1e-12);
