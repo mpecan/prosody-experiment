@@ -444,6 +444,20 @@ Step 4 of `docs/player.md`; what reality changed in the design is in its §12.
   no Strudel file. On the emulator, attached over CDP, The Tyger played 18 s with zero underruns,
   nothing missing, and all eight lines placed on their cues. The Pixel (58131FDCQ009PT) was not
   connected, so the profile of §6 was not rerun.
+- **Review remediation.** The served page plays again: `scripts/build-synth.sh` writes the synth
+  into `web/public`, so `npm run build` (served by `prosody-web`) and `npm run dev` carry it, and
+  the server answers `.wasm` and `.flac` (the bindings' installer is shared, `scripts/wasm-bindgen.sh`).
+  Play loads a saved live engine. The natural pace places a line only when the block it begins in is
+  next, so a long stanza cannot overflow the synth's 64 placements, and a refused line is not told
+  as spoken. A cut releases the duck from the cut, and a line cut in its quiet lead ducks nothing. A
+  hand-over cuts a still-sounding line of the browser's voice at the playhead, and the duck switch
+  reaches that voice at once. `Renderer::speaking`, unused and unsound, is gone. Pinned by tests that
+  fail without the fixes: the duck after a cut with a hold and in a lead (Rust); a 100-line stanza
+  placed a line at a time, a refused line, `failed()`, the re-ask on a recast, a wrap at the seam
+  while the voice reads, a saved engine loading on Play, the browser's voice cut at a hand-over and
+  following the duck switch (Vitest); every file in `web/public` of a type the server answers (Rust);
+  and e2e for the fitted pace, a preset restarting the reading at line 1 (B's defaults read nothing),
+  and a live edit while reading with no underruns.
 
 ### The player, step 3 — everything the text asks for, matched to Strudel by measurement
 

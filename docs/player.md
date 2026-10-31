@@ -383,9 +383,12 @@ above, and why:
   changes nothing restyles nothing (the measured cost on the Pixel was style recalculation).
 - **The reading is not played by the Prosody player yet** (step 4); the status line says so while
   it plays.
-- **The player needs the static build.** Its synth (`synth.js`, `synth_bg.wasm`) is written beside
-  the page by `scripts/build-site.sh`; the page served by `prosody-web` or `npm run dev` has none,
-  and the player says it could not start.
+- **The player needs its synth beside the page.** Its synth (`synth.js`, `synth_bg.wasm`) is
+  generated, not written: `scripts/build-synth.sh` puts it in `web/public` (ignored by git), so the
+  page Vite builds into `web/dist` — which `prosody-web` serves, and `build-site.sh` copies — and the
+  page `npm run dev` serves both carry it; without it the player says it could not start. *(Step 4's
+  review: until then only the static build had it, and once the Prosody player was the only one the
+  served page could not play at all; `prosody-web` now also serves `.wasm` and `.flac`.)*
 - **The e2e** blocks the page's thread for 500 ms while the Prosody player plays and requires zero
   underruns, a playhead 0.75 s further on after 0.9 s, and output that is not silence (the worklet
   reports its peak). It passes in headless Chromium; the Pixel profile (§6, "Device") is still to
@@ -487,7 +490,8 @@ Where it departs from §5 and §7 above, and why:
   the music falls towards the duck's level (0.6, the page's `DUCK`) from where a line's speech begins
   with a 0.08 s time constant, and rises back with 0.15 s from 0.05 s after the line ends and its hold
   (the pause before the stanza's next line) — the page's own Strudel-era automation, as a one-pole
-  approach frame by frame, so a stanza ducks the music once. A placement holds its recording, so a
+  approach frame by frame, so a stanza ducks the music once. A line cut off releases the duck from
+  the cut, its hold not kept. A placement holds its recording, so a
   line the worker lets go while it is placed still plays. Hand-worked tests pin each part, and a
   render with no reading is the same bits as before (the golden hashes did not move).
 - **The reading's timing is the page's chaining, in the worker, on output frames.** `reader.ts`
@@ -535,6 +539,17 @@ Where it departs from §5 and §7 above, and why:
   place, every soundfont the compiler can name must be beside the page as our zones.
 - **The Pattern view still shows the reading's cue pattern** under the music's, as text: nothing
   evaluates it, but it says in Strudel's terms when each line is read.
+- **Review remediation.** A line is placed when the block its recording begins in is about to be
+  rendered, not as soon as the chain knows when it falls: the natural pace placed a stanza's held
+  lines all at once, so a stanza of more than `MAX_PLACED` (64) lines overflowed the synth, and a
+  line the synth refuses is no longer told to the page as spoken. A cut releases the duck from the
+  cut (after the 0.05 s delay), not after the line's hold, and a line cut before its speech begins
+  ducks nothing. A hand-over cuts a line of the browser's voice that is still sounding when the
+  playhead reaches the cut, and the Mixer's duck switch reaches that voice's duck at once, as the
+  bullet above says. Play loads the reader's saved live engine (Kokoro, Piper, Kitten), as the
+  Strudel page did; without it the browser's voice read until a setting changed. `Renderer::speaking`
+  went: nothing but tests read it, and its claim to attribute the speech stem did not hold once line
+  numbers were reused — the worker attributes each placed line by its `spoken` report.
 - **The device profile (§6, "Device") is still to rerun:** the Pixel was not connected when this
   step was built. The rebuilt Android app was checked on an emulator instead: 18 s of The Tyger with
   zero underruns and every line on its cue (`PLAN.md`'s step 4 entry).
