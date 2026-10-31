@@ -34,6 +34,7 @@
 )]
 
 pub mod osc;
+pub mod perform;
 pub mod reading;
 pub mod strudel;
 pub mod style;
@@ -42,6 +43,7 @@ pub mod trace;
 use prosody_core::voice::Score;
 
 pub use osc::Osc;
+pub use perform::{Perform, PerformError, Performance};
 pub use reading::{Cue, Natural, Onset, Pace, Pause, Reading, ReadingError, Spoken, Unread, Word};
 pub use strudel::{Strudel, StrudelError, melody_over_harmony, melody_voicing};
 pub use style::{
@@ -51,8 +53,9 @@ pub use trace::{Mark, Trace};
 
 /// A target that can play a poem.
 ///
-/// Two implementations, and the second is why [`Backend::Output`] is associated rather than fixed
-/// to `String`: [`Strudel`] emits pattern text and [`Osc`] emits a schedule of timed messages. A
+/// Three implementations, and the second is why [`Backend::Output`] is associated rather than fixed
+/// to `String`: [`Strudel`] emits pattern text, [`Osc`] emits a schedule of timed messages, and
+/// [`Perform`] resolves every note for a player of our own (`docs/player.md`). A
 /// trait that promised text would have had to be replaced rather than implemented, and the two
 /// backends differ in what they can express — the OSC one honours `SPEC.md` §4.3's anchors, which
 /// mini-notation structurally cannot.
