@@ -410,6 +410,32 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The player, step 3 — everything the text asks for, matched to Strudel by measurement
+
+Step 3 of `docs/player.md`; what reality changed in the design, and every measurement, is in its
+§11. Strudel's source was not read: single notes were played through its public API in headless
+Chromium and its output recorded beside our synth's.
+
+- **`prosody-synth`**: per note, a formant vowel (five parallel band-passes fitted to Strudel's
+  response), a bit crusher, Bram de Jong's waveshaper, then postgain; per channel, a bus with a
+  feed-forward compressor (Giannoulis et al., Web Audio's makeup), a feedback echo and an 8-line
+  feedback delay network (RT60 = `roomsize`); five stereo stems and a duck lane; the master's glue
+  compressor and soft clip for a file. Measured and matched: 0.3 output level for oscillators and
+  soundfonts, Strudel's default envelope (50 ms decay to 0.6 when nothing is set), linear release,
+  the Gibbs-normalised saw and square, the low-pass at Web Audio's Q. Its own `log2`, so a render
+  is still the same bits everywhere.
+- **Soundfonts as our own FLAC zones** (`scripts/render-soundfonts.mjs`, decision 3): 31.1 MB for
+  28 instruments, licences and sources in `web/public/soundfonts/SOURCES.md`, decoded at their own
+  rate on the page. A key plays the zone holding the key below it, as Strudel was measured to.
+- **The page**: notes carry every effect (22 numbers a note); the worklet mixes five stems, ducks
+  the music, glues and clips as the page's Strudel master did; mute and solo stay instant.
+- **Tests**: hand-worked units for every stage (formant levels, the compressor's curve, makeup,
+  attack and release, the echo's repeats, the reverb's decay and decorrelation, the crusher's
+  steps, the shaper, the decay to sustain, the duck); a golden `effects` scene; the page's records,
+  glue and duck; the shipped soundfonts' integrity; an e2e that plays jazz through the Prosody
+  player with every other host refused. The Pixel profile was not rerun (the device was not
+  connected).
+
 ### The player, step 2 — first sound: our own synth, a render worker and a worklet
 
 Step 2 of `docs/player.md`, behind a Strudel/Prosody **Player** switch in the Mixer (Strudel stays

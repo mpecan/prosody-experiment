@@ -1,8 +1,9 @@
 # The player — design
 
-*Draft, 2026-10-31. Status: steps 1 (the Performance) and 2 (first sound) built; steps 3–5 not
-started. The open questions of §8 are decided (§8). What building step 1 changed in this design is
-in §9, and step 2 in §10.*
+*Draft, 2026-10-31. Status: steps 1 (the Performance), 2 (first sound) and 3 (everything the text
+asks for) built; steps 4–5 not started. The open questions of §8 are decided (§8). What building
+step 1 changed in this design is in §9, step 2 in §10, and step 3 in §11, with the measurements
+against Strudel.*
 
 Prosody plays a poem today by writing Strudel text and handing it to Strudel's runtime
 (`@strudel/web`, its scheduler and the `superdough` synth). This document designs a player of
@@ -390,3 +391,74 @@ above, and why:
   reports its peak). It passes in headless Chromium; the Pixel profile (§6, "Device") is still to
   rerun.
 
+
+## 11. What building step 3 changed
+
+Step 3 is in `crates/prosody-synth` (`effects`, `formant`, `dynamics`, `delay`, `reverb`, `bus`, the
+voice's colour, the linear envelope, the master), `crates/prosody-synth-wasm` (a note's record is
+now 22 numbers), `web/src/player` (five stems and the master in the worklet, soundfonts from beside
+the page) and `scripts/render-soundfonts.mjs` with its output in `web/public/soundfonts`. Where it
+departs from §3–§7 above, and why:
+
+- **Matched by measurement, never by source.** Every number below came from playing single notes
+  through Strudel's public API (`superdough`) in headless Chromium, recording what came out of its
+  output gain before any page master, and playing the same note through our synth in the same page;
+  Chrome's own `DynamicsCompressorNode` was measured offline the same way. The harness lives
+  outside the repository (it drives a built site); the numbers are recorded here so a later change
+  can be checked against them. Strudel's source was not read.
+
+  | What | Strudel | Ours | How it was matched |
+  |---|---|---|---|
+  | level, gain 1 sine / soundfont / drum | 0.300 / 0.282 (zone peak 0.933) / file's own (0.891) | the same, to 0.001 | `SOURCE_LEVEL` 0.3 for oscillators and soundfonts, 1 for drums; gain, velocity and postgain linear |
+  | envelope, nothing set (oscillator) | full at once, a straight line to 0.6 over 50 ms, 10 ms straight release | identical at 1, 25, 100 ms and the end | `DEFAULT_DECAY`, `DEFAULT_SUSTAIN`; with attack or release set it holds at 1 (measured too) |
+  | attack 0.05 / release 0.6 | straight lines | identical per period (0.0104, 0.1602, 0.300; ends at 599.9 ms) | release is linear, not the exponential §4 proposed |
+  | sawtooth, square fundamental | 0.848 of the sine's | 0.848 (harmonics 1–20 within 0.06 dB) | `Wave::level`: the Gibbs overshoot normalised away, as Web Audio's oscillator does |
+  | low-pass | +2.0 dB at 0.77·fc, +1 dB at fc, −12 dB/octave | within 0.06 dB to the 20th harmonic at 400, 1000, 3000 Hz | Q 1.122 (Web Audio's 1 dB default), not Butterworth |
+  | crush 4 / 8 bits on 0.144 | 3 / 37 levels, top 0.125 / 0.1406 | the same | step 2^(1 − bits), rounded, on the note at its level; postgain after (0.0625) |
+  | shape 0.1–0.5, five cases | — | fundamental and 3rd harmonic within 0.01 dB | `(1 + k)x/(1 + k|x|)`, `k = 2s/(1 − s)` (musicdsp.org), after the envelope, before postgain |
+  | vowel a e i o u, rms on a 110 Hz saw | 0.0461 0.0688 0.0108 0.0333 0.0121 | 0.0453 0.0683 0.0118 0.0324 0.0134 (−0.2…+0.9 dB) | five parallel band-passes, started from the Csound tenor table and fitted to Strudel's response on noise and on the saw (1.2–1.6 dB rms) |
+  | room size 1 / 2.5 / 5: RT60 | 1.05 / 2.59 / 5.00 s | 0.99 / 2.57 / 5.08 s | `roomsize` is the RT60; an 8-line FDN |
+  | room: tail start re dry burst | −14.5 / −16.3 / −16.9 dB; half send −6 dB | −14.6 / −16.5 / −16.7 dB; half −6 dB | `WET` 0.079 |
+  | room: 50–100 ms after the burst | −18.9 / −25.0 / −16.2 dB | −15.1 / −14.6 / −14.4 dB | **differs**: Strudel's tail builds up over ~100 ms, the FDN's is dense from ~30 ms (decision 2: the reverb may differ) |
+  | delay 0.5, 0.25 s, feedback 0.35 | echoes 0.150, 0.0525, 0.0184, both sides | the same to 4 places | a feedback line returning only its repeats |
+  | compressor −24 dB 7:1 / −8 dB 3:1, steady | 0.3779 / 0.2104 | 0.3731 / 0.2086 (−0.11 / −0.07 dB) | Chrome's node with a 10 dB knee, 3 ms attack, 20 ms release reproduced Strudel's to 0.0001; ours fitted to Chrome over 24 attack/release pairs (0.17 dB rms) |
+  | compressor below threshold (makeup) | 0.1160 | 0.1109 (−0.39 dB) | Web Audio's makeup from a quadratic knee; Chrome's knee bends 0.4 dB further |
+  | compressor, first 9 ms of a note | 0.31 (rises over ~25 ms) | 0.54 | **differs**: Strudel makes a fresh compressor per note, whose makeup comes in over its first 25 ms; ours is the channel's, already settled |
+  | soundfonts: piano C4, bass C2, e-piano E4 and C4 with attack, warm pad C3 | — | residual −41, −61, −46, −48, −37 dB; band powers within 0.2 dB below 3.2 kHz | the same recordings (our FLAC zones), the same zone, the same envelope |
+
+- **Soundfonts are our own FLAC zones** (decision 3). The 28 licensed webaudiofont files became
+  282 distinct recordings (35 shared between instruments, stored once by content hash) and 28 JSON
+  files: 31.1 MB, under the 40 MB the user set, against 8.4 MB of MP3 inside the original files.
+  `web/public/soundfonts/SOURCES.md` records the commit they came from and the banks' licences, as
+  the drums' does. The page decodes each FLAC — and each drum — at its own rate in an
+  `OfflineAudioContext` of that rate, so no browser resamples it and every browser hands the synth
+  the same samples; the synth resamples to the output itself. The Strudel player still fetches the
+  webaudiofont files until step 4 removes it.
+- **A soundfont key plays the zone holding the key below it**, as Strudel does (measured: at the
+  lowest key of every zone's range Strudel sounds the zone beneath, to −46 dB residual, at four
+  boundaries in three instruments; elsewhere the zone holding the key). The SoundFont 2 range is
+  inclusive; following it would give one key in five or six a different recording, pitched the
+  other way. Which recording sounds is timbre, not structure, so the player matches the text
+  (`Instrument::zone`, `samples.ts` `zonesFor`).
+- **The compressor is the channel's**, as §4 designed, but driven by the voices before their
+  `postgain` and applied after it and to their sends — where Strudel's per-note compressor sits
+  (its compressed output halves with postgain ½). With notes apart the two agree (table); with
+  notes overlapping, the loudest sets the reduction for all, and a note's first 25 ms are up to
+  5 dB louder than Strudel's (table). Emulating a fresh Chrome compressor per note would cost a
+  compressor a voice for a quirk of the browser.
+- **Five stems and the duck.** The fifth stem is the reading's, silent until step 4; a block now ends
+  with a duck lane (the music's level under the reading, frame by frame, 1 throughout until step 4),
+  written by the renderer because the reading's timeline will be the renderer's. The master — in the
+  worklet for the speakers, `prosody_synth::master` for a file — is the page's Strudel chain in its
+  order: stem gains, the duck on the music only, the glue compressor (the page's settings, our
+  compressor), the soft clip. The page's ¼ gain existed only because a `WaveShaperNode`'s curve spans
+  ±1 while ours covered ±4; on the sample itself the two cancel. Mute and solo stay the 5 ms glide of
+  step 2; the reading's stem answers to the Mixer's voice channel.
+- **Swing and nudge** needed nothing new: the Performance's onsets already carry both (§9), and the
+  measured envelopes start on the frame Strudel's do.
+- **Golden audio** gained an `effects` scene (every vowel, two crushes, a shaped and compressed
+  bass, a melody into room and echo); the earlier scenes' hashes moved with the measured levels, the
+  linear release, the Q and the master's glue, and the corpus renders grew by the 2 s reverb tail.
+- **Not done in this step.** The CLI still renders oscillators only: decoding FLAC in Rust needs a
+  decoder crate to argue for (`CLAUDE.md` §10), now that every sample is FLAC. The device profile
+  (§6, "Device") was not rerun: the Pixel was not connected when this step was built.
