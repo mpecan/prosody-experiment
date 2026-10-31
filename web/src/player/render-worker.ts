@@ -221,7 +221,8 @@ async function handle(data: Record<string, unknown>): Promise<void> {
       player?.stop();
       reader?.stop();
       restart(data.generation as number);
-      wantNow();
+      // The recorded lines are kept: a Play straight after is most likely the same piece, and the
+      // next piece handed over lets go of any it does not cast.
       return;
     case 'cast': {
       if (!reader) return;
