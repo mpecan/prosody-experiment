@@ -436,7 +436,9 @@ departs from §3–§7 above, and why:
   282 distinct recordings (35 shared between instruments, stored once by content hash) and 28 JSON
   files: 31.1 MB, under the 40 MB the user set, against 8.4 MB of MP3 inside the original files.
   `web/public/soundfonts/SOURCES.md` records the commit they came from and the banks' licences, as
-  the drums' does. The page decodes each FLAC — and each drum — at its own rate in an
+  the drums' does; the licences' full texts, with their copyright lines, ship beside the zones in
+  `LICENSES/` (FluidR3 GM's MIT notice, GeneralUser GS's terms, webaudiofontdata's MIT notice), and
+  the page's about dialog links them (final review: a one-line attribution is not an MIT notice). The page decodes each FLAC — and each drum — at its own rate in an
   `OfflineAudioContext` of that rate, so no browser resamples it and every browser hands the synth
   the same samples; the synth resamples to the output itself. The Strudel player still fetches the
   webaudiofont files until step 4 removes it.
@@ -449,8 +451,10 @@ departs from §3–§7 above, and why:
 - **The compressor is the channel's**, as §4 designed, but driven by the voices before their
   `postgain` and applied after it and to their sends — where Strudel's per-note compressor sits
   (its compressed output halves with postgain ½). With notes apart the two agree (table); with
-  notes overlapping, the loudest sets the reduction for all, and a note's first 25 ms are up to
-  5 dB louder than Strudel's (table). Emulating a fresh Chrome compressor per note would cost a
+  notes overlapping, the loudest sets the reduction for all — the detector hears the loudest voice
+  frame by frame, not the voices' sum (final review: on the sum, a chord of tones each below the
+  threshold was compressed, as Strudel never compresses it; every corpus render moved, pentameter's
+  by a difference of −51 dB rms, 0.12 dB louder) — and a note's first 25 ms are up to 5 dB louder than Strudel's (table). Emulating a fresh Chrome compressor per note would cost a
   compressor a voice for a quirk of the browser.
 - **A bus belongs to the piece that sets it up** (review remediation). The compressor comes from
   the style, so a note that asks for none takes it away, and a stop drops it with the tails: kept,
@@ -669,3 +673,26 @@ departs from §5 and §7 above, and why:
   idle pause, the narrowing lead and the service's fixes after review are tested on the host (a
   pretend output for the render thread's rounds) and compiled for Android, not yet run on a device:
   a route change on the emulator and on the Pixel is the check still owed.
+- **Final review remediation** (both players, each pinned by a test that failed without it):
+  - *What was lost is said per start of play.* The worklet's and the native mixer's underruns start
+    again at a flush, the app's output glitches at a new start of play (an output reopened mid-play
+    keeps its count), and the renderer's losses at a stop. Before, a new Play reported the last one's
+    underruns and glitches in red as its own, and its first `losses` event carried the old total.
+  - *A flush fades from where the music was.* Its 5 ms tail now carries the browser voice's duck as
+    the mix does; without it, Stop during such a line stepped the music up to 4.4 dB before fading.
+  - *Every valid style plays.* `Echo::MAX_TIME` is 45 s, the dotted-eighth echo at tempo 1, not 4 s:
+    a style with a tempo under 11.25 made a piece the synth refused outright. The line is allocated at
+    the time asked for, so only such a style pays for it (17 MB at 45 s).
+  - *`prosody render` keeps the echo's tail*: the longest echo's repeats down to 2^−16 of the first
+    (eleven at the text's feedback 0.35), beside the reverb's; the corpus renders that echo grew by
+    about 2 s.
+  - *A room made smaller while it rings rings on*: its tail counts from the resize, and the lines are
+    cleared at the first silent frame past the tail, not only on the frame it is reached — a shrunk
+    room was cut to silence mid-ring and its old contents came back on the next send.
+  - *A mark that runs over the loop's end stays lit* once the piece comes round (a swung last step),
+    as the roll's notes already did.
+  - *The browser player rests while stopped.* A second after Stop the AudioContext is suspended
+    (Play resumes it, and a Play within that second calls the rest off), and the render worker's 20 ms
+    timer runs only while something plays — before, both ran for as long as the tab was open, where
+    the app's native player parks.
+  - CI's `app` job installs ALSA's headers (`libasound2-dev`): cpal's Linux backend links it.

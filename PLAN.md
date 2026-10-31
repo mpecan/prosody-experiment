@@ -461,6 +461,15 @@ Step 5 of `docs/player.md` for Android (iOS later); what reality changed in the 
   `keep` and `reopened` (Rust); the idle poll and the hiding told (Vitest). The Kotlin compiles
   (`compileUniversalDebugKotlin`) and the app passes clippy for `aarch64-linux-android`; none of it
   has been run on a device yet.
+- **Final review remediation** (`docs/player.md` §13 lists each): underruns, glitches and losses
+  counted per start of play, not blamed on the next Play; a flush's fade under the browser voice's
+  duck; echoes up to 45 s, so a style under tempo 11.25 plays; `prosody render` keeps the echo's
+  repeats; the channel compressor hears the loudest voice, not the sum (every corpus render's hash
+  moved: pentameter differs by −51 dB rms, 0.12 dB louder; the echoing ones are also about 2 s
+  longer); a shrunk room rings on; a mark over the loop's end stays lit; the browser player suspends
+  its AudioContext a second after Stop and its worker's timer stops; the soundfonts' licence texts in
+  `web/public/soundfonts/LICENSES/`, linked from the about dialog and served (`.txt`) by
+  `prosody-web`; CI's `app` job installs `libasound2-dev` for cpal. All gates green, e2e included.
 
 ### The player, step 4 — the reading through the player, and Strudel's runtime gone
 
