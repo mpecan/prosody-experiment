@@ -6,8 +6,10 @@ import type { ComponentChildren } from 'preact';
 import { toggleMute, toggleSolo, turnControl } from '../../actions';
 import { audible } from '../../mix';
 import { setLevel } from '../../reading';
-import { controls, duck, muted, readingSettings, soloed, type Channel } from '../../store';
+import { choosePlayer } from '../../transport';
+import { controls, duck, muted, player, readingSettings, soloed, type Channel, type PlayerName } from '../../store';
 import { Fader, Knob, Switch } from '../desk/parts';
+import { Segmented } from '../desk/Segmented';
 
 const value = (id: string) => controls.value[id] ?? '';
 const turn = (id: string) => (next: string) => turnControl(id, next);
@@ -62,6 +64,11 @@ export function MixerFolder() {
           <Fader id="readingLevel" channel="voice" label="Voice level" engraved="Voice" value={level} min={0} max={2} step={0.05} colour="var(--ornament)"
             shown={Number(level).toFixed(2)} title="The voice's level into the master, against the music" onInput={(next) => setLevel(Number(next))} />
         </Strip>
+      </div>
+      <div class="module player" title="Which player makes the sound: Strudel playing the pattern text, or Prosody's own player playing every note the compiler resolved (docs/player.md). The pattern shown, and pasted into strudel.cc, is the same either way.">
+        <Segmented label="Player" id="player" value={player.value} marked="strudel" colour="var(--accent)"
+          options={[{ value: 'strudel', label: 'Strudel' }, { value: 'prosody', label: 'Prosody' }]}
+          onChange={(next) => choosePlayer(next as PlayerName)} />
       </div>
       <div class="module duck">
         <Switch id="duck" checked={duck.value} onChange={(on) => { duck.value = on; }}>Duck the band while a stanza is read</Switch>

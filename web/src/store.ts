@@ -23,6 +23,10 @@ export const suggested = signal<Record<string, { from: string; to: string; style
 /** Which setting is playing and shown. */
 export const hearing = signal<Side>('A');
 export const playing = signal(false);
+/** Which player makes the sound (`docs/player.md` §6, "Listening"): Strudel's runtime playing the
+ * text, or Prosody's own player playing the Performance. Strudel until the two are close enough. */
+export type PlayerName = 'strudel' | 'prosody';
+export const player = signal<PlayerName>('strudel');
 
 // The status bar: what the music is doing, and after it what the reading is doing.
 export const statusText = signal('ready');

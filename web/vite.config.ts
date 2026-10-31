@@ -50,6 +50,10 @@ export default defineConfig({
   server: {
     proxy: Object.fromEntries(asked.map((path) => [path, compiler])),
   },
+  // The Prosody player's render worker and worklet (src/player) are built as modules of their own:
+  // the worker imports the synth's bindings from beside the page at run time, and an AudioWorklet
+  // loads a module.
+  worker: { format: 'es' },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

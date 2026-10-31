@@ -1,0 +1,78 @@
+// A Performance as the render worker's synth reads it: the sampled sounds it needs, numbered, and
+// every note as a flat record of numbers (crates/prosody-synth-wasm/src/lib.rs lays the record out;
+// a test on each side pins it). The synth decides nothing here — this only moves numbers.
+import type { Performance, PerformedNote, PerformedSound } from '../answers';
+
+/** Numbers a note's record holds. */
+export const STRIDE = 12;
+/** The stems, in the synth's order: a channel's index is its stem. */
+export const CHANNELS = ['drums', 'bass', 'melody', 'chords'] as const;
+/** The oscillator waves, in the synth's order. */
+export const WAVES = ['sine', 'sawtooth', 'square', 'triangle'] as const;
+
+/** A sampled sound: a drum of a kit, or a soundfont file. */
+export type Sampled = { kind: 'drum'; bank: string; piece: string } | { kind: 'font'; file: string };
+
+/** The name a sampled sound is known by, or null for an oscillator, which needs nothing loaded. */
+export function sampledKey(sound: PerformedSound): string | null {
+  if (sound.kind === 'drum') return `drum:${sound.bank}/${sound.piece}`;
+  if (sound.kind === 'font') return `font:${sound.file}`;
+  return null;
+}
+
+/** Every sampled sound a Performance uses, by key, with the keys its soundfont notes play (rounded),
+ * so only the zones those keys need are decoded. In order of first use. */
+export function sampledOf(performance: Performance): Map<string, { sound: Sampled; keys: Set<number> }> {
+  const sounds = new Map<string, { sound: Sampled; keys: Set<number> }>();
+  for (const note of performance.notes) {
+    const key = sampledKey(note.sound);
+    if (key === null) continue;
+    let entry = sounds.get(key);
+    if (!entry) {
+      const sound: Sampled = note.sound.kind === 'drum'
+        ? { kind: 'drum', bank: note.sound.bank, piece: note.sound.piece }
+        : { kind: 'font', file: (note.sound as { file: string }).file };
+      entry = { sound, keys: new Set() };
+      sounds.set(key, entry);
+    }
+    if (note.pitch !== null) entry.keys.add(Math.max(0, Math.min(127, Math.round(note.pitch))));
+  }
+  return sounds;
+}
+
+/** A note's record: see crates/prosody-synth-wasm/src/lib.rs. `ids` numbers the sampled sounds;
+ * a note whose sound has no number is written with an id past every loaded one, so the synth counts
+ * it as missing rather than playing something else. */
+function record(note: PerformedNote, tag: number, ids: Map<string, number>, out: Float64Array, at: number): void {
+  const key = sampledKey(note.sound);
+  const kind = note.sound.kind === 'drum' ? 0 : note.sound.kind === 'font' ? 1 : 2;
+  const id = key === null
+    ? Math.max(0, WAVES.indexOf((note.sound as { wave: string }).wave as typeof WAVES[number]))
+    : ids.get(key) ?? 4095;
+  out.set([
+    tag,
+    Math.max(0, CHANNELS.indexOf(note.channel)),
+    kind,
+    id,
+    note.onset,
+    note.length,
+    note.pitch ?? NaN,
+    note.gain,
+    note.postgain,
+    note.attack ?? NaN,
+    note.release ?? NaN,
+    note.lpf,
+  ], at);
+}
+
+/** Every note of `performance` as records, in its order; a note's tag is its index. */
+export function records(performance: Performance, ids: Map<string, number>): Float64Array {
+  const out = new Float64Array(performance.notes.length * STRIDE);
+  performance.notes.forEach((note, index) => record(note, index, ids, out, index * STRIDE));
+  return out;
+}
+
+/** Where the bars start, in seconds, for the synth's bar-by-bar hand-over. */
+export function barStarts(performance: Performance): Float64Array {
+  return Float64Array.from(performance.bars.map((bar) => bar.at));
+}

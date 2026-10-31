@@ -4,7 +4,7 @@ import type { Reading, Trace } from './answers';
 import { ask } from './compiler';
 import { CONTROLS } from './controls';
 import { prerender, showVoices } from './reading';
-import { play } from './strudel';
+import { play } from './transport';
 import {
   controls, explainView, hearing, patternView, playing, poem, profile, readingSettings, scores,
   settings, status, type Score, type Side,

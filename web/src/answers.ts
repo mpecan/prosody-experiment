@@ -84,3 +84,56 @@ export interface Trace {
   cpm: number;
   marks: Mark[];
 }
+
+/** What makes a performed note's sound (`prosody_emit::perform::Sound`). */
+export type PerformedSound =
+  | { kind: 'drum'; bank: string; piece: string }
+  | { kind: 'font'; name: string; variant: number; file: string }
+  | { kind: 'wave'; wave: string };
+
+/** The stems mute and solo act on. */
+export type PerformedChannel = 'drums' | 'bass' | 'melody' | 'chords';
+
+/** One note of the Performance, resolved: when, what, how loud, from which words. */
+export interface PerformedNote {
+  from: number;
+  to: number;
+  channel: PerformedChannel;
+  /** The roll's lane: a layer's name (`site.layers`). */
+  lane: string;
+  slot: number;
+  onset: number;
+  length: number;
+  sound: PerformedSound;
+  pitch: number | null;
+  /** `gain` × `velocity`. */
+  gain: number;
+  attack: number | null;
+  release: number | null;
+  lpf: number;
+  postgain: number;
+}
+
+/** A syllable lighting up while it sounds. */
+export interface PerformedMark {
+  from: number;
+  to: number;
+  lane: string;
+  slot: number;
+  onset: number;
+  length: number;
+  fresh: boolean;
+  melody: boolean;
+  bass: boolean;
+}
+
+/** Every note of the piece, resolved (`docs/player.md` §3; `performance_json` in
+ * crates/prosody-web/src/lib.rs). Times are seconds; the piece loops round at `seconds`. Fields the
+ * player does not read yet (room, delay, crush, the reading's cues) are left out of the type. */
+export interface Performance {
+  seconds: number;
+  cpm: number;
+  bars: { slot: number; at: number }[];
+  notes: PerformedNote[];
+  marks: PerformedMark[];
+}

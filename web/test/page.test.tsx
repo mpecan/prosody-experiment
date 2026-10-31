@@ -8,8 +8,9 @@ import { startControls } from '../src/controls';
 import { compile } from '../src/piece';
 import { engines, startReading } from '../src/reading';
 import { loadSettings } from '../src/settings';
-import { folder, hearing, language, muted, poem, preset, rollShown, settings, shareLink, sharedOpened, sheetOpen, soloed, suggested } from '../src/store';
+import { folder, hearing, language, muted, player, poem, preset, rollShown, settings, shareLink, sharedOpened, sheetOpen, soloed, suggested } from '../src/store';
 import { decode } from '../src/share';
+import { choosePlayer, restorePlayer } from '../src/transport';
 import { useFixture } from './site.fixture';
 
 // What the compiler answers, for any poem: a pattern of two bars, a reading of one line, a trace
@@ -214,6 +215,22 @@ describe('the mixer', () => {
     fireEvent.input(voice, { target: { value: '1.5' } });
     await waitFor(() => expect(document.getElementById('readingLevelOut')!.textContent).toBe('1.50'));
     expect(JSON.parse(localStorage.getItem('prosody.reading')!).level).toBe(1.5);
+  });
+
+  it('plays through Strudel unless the Prosody player is chosen, and remembers the choice', async () => {
+    restorePlayer();
+    start();
+    fireEvent.click(screen.getByRole('tab', { name: 'Mixer' }));
+    const group = screen.getByRole('group', { name: 'Player' });
+    const strudel = within(group).getByRole('button', { name: 'Strudel' });
+    expect(strudel.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(group).getByRole('button', { name: 'Prosody' }));
+    await waitFor(() => expect(player.value).toBe('prosody'));
+    expect(localStorage.getItem('prosody.player')).toBe('prosody');
+    player.value = 'strudel';
+    restorePlayer();
+    expect(player.value).toBe('prosody');
+    choosePlayer('strudel');
   });
 });
 

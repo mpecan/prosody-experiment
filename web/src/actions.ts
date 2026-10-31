@@ -8,6 +8,7 @@ import { applyVoiceLevel, readIn } from './reading';
 import { current, linkTo, settingsOf, type Shared } from './share';
 import { fitRoll, buildLit, watch } from './watch';
 import { load, save } from './storage';
+import { mixChanged } from './transport';
 import {
   folder, hearing, muted, noticeShown, poem, preset, rollBars, rollShown, settings, shareLink, sharedOpened, sheetOpen, soloed,
   theme, welcomeOpen,
@@ -90,11 +91,13 @@ export function foldSheet(): void {
 export function toggleMute(channel: Channel): void {
   muted.value = { ...muted.value, [channel]: !muted.value[channel] };
   applyVoiceLevel();
+  mixChanged();
 }
 /** Solos or unsolos a channel: with any soloed, only the soloed are heard. */
 export function toggleSolo(channel: Channel): void {
   soloed.value = { ...soloed.value, [channel]: !soloed.value[channel] };
   applyVoiceLevel();
+  mixChanged();
 }
 
 // ---- Sharing ----

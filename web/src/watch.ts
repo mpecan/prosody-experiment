@@ -49,16 +49,18 @@ export const watch = {
   canvas: null as HTMLCanvasElement | null,
 };
 
-/** The poem as compiled, one element per piece of it a mark can light. */
-let lit: { trace: Trace | null; marks: HTMLSpanElement[][]; pieces: Piece[] } = { trace: null, marks: [], pieces: [] };
+/** The poem as compiled, one element per piece of it a mark can light: `all` every piece of the
+ * verse, `pieces` those the reading may light (only while its positions are the text box's). */
+let lit: { trace: Trace | null; marks: HTMLSpanElement[][]; pieces: Piece[]; all: Piece[]; text: string } = {
+  trace: null, marks: [], pieces: [], all: [], text: '',
+};
 
 export async function startDrawing(): Promise<void> {
   try {
     const { Drawer } = await (import(/* @vite-ignore */ DRAW) as
       Promise<{ Drawer: new (fn: (haps: Hap[], time: number) => void, span: [number, number]) => Drawer }>);
     watch.drawer = new Drawer((haps, time) => {
-      paintRoll(haps, time);
-      showActivity(haps, time);
+      drawFrame(haps, time);
       lightUp(time);
     }, rollWindow());
   } catch (error) {
@@ -97,7 +99,7 @@ function barLength(): number {
 
 // The roll shows about a whole number of bars — the setting, at the mean bar length — half behind
 // the playhead and half ahead.
-function rollWindow(): [number, number] {
+export function rollWindow(): [number, number] {
   const half = (Number(rollBars.value) || 4) * barLength() / 2;
   return [-half, half];
 }
@@ -128,6 +130,14 @@ export function barLines(times: number[], from: number, to: number): number[] {
     }
   }
   return lines;
+}
+
+/** One frame of the picture: the roll and the meters, from the notes near `time` on the clock that
+ * keeps rising. Strudel's drawer calls it with its haps; the Prosody player with the Performance's
+ * notes, shaped as haps (player/index.ts). */
+export function drawFrame(haps: Hap[], time: number): void {
+  paintRoll(haps, time);
+  showActivity(haps, time);
 }
 
 function paintRoll(haps: Hap[], time: number): void {
@@ -225,9 +235,12 @@ export function buildLit(): void {
   // the two the same height, so their scrolling stays in step.
   fragment.append(' ');
   box.replaceChildren(fragment);
+  built += 1;
   box.scrollTop = watch.poemBox?.scrollTop ?? 0;
   lit = {
     trace,
+    all: pieces,
+    text,
     pieces: piece.readings.poem === text ? pieces : [],
     marks: trace ? trace.marks.map((mark) =>
       pieces.filter((p) => p.start >= mark.start && p.start < mark.end).map((p) => p.element)) : [],
@@ -295,6 +308,31 @@ export function followWords(shown: Speaking, now: () => number): void {
 // ---- Lighting the verse ----
 
 let shining = new Map<HTMLElement, Mark>();   // element → the mark lighting it
+let built = 0;   // how many times the verse has been cut: elements of an older cut are gone
+
+/** Which cut of the verse is showing, so a cache of its elements knows when it is stale. */
+export const litVersion = (): number => built;
+
+/** The elements of the verse a run of the text box covers — while the verse shows `text`, which is
+ * what the run's positions are positions in; none otherwise. */
+export function elementsBetween(from: number, to: number, text: string): HTMLElement[] {
+  if (lit.text !== text) return [];
+  return lit.all.filter((p) => p.start < to && p.end > from).map((p) => p.element);
+}
+
+/** Lights the marks given, each over its elements: Strudel's trace or the Prosody player's
+ * Performance. A fresh mark wins over a looping one where they overlap. */
+export function lightMarks(marks: Iterable<{ mark: Mark; elements: HTMLElement[] }>): void {
+  const next = new Map<HTMLElement, Mark>();
+  for (const { mark, elements } of marks) {
+    for (const element of elements) {
+      const held = next.get(element);
+      if (!held || (mark.fresh && !held.fresh)) next.set(element, mark);
+    }
+  }
+  shine(next);
+}
+
 export function lightUp(time: number | null): void {
   const next = new Map<HTMLElement, Mark>();
   if (time !== null && watch.tracePattern && lit.trace) {
@@ -311,6 +349,10 @@ export function lightUp(time: number | null): void {
       }
     }
   }
+  shine(next);
+}
+
+function shine(next: Map<HTMLElement, Mark>): void {
   let follow: HTMLElement | null = null;
   for (const [element] of shining) if (!next.has(element)) element.classList.remove('on', 'echo');
   for (const [element, mark] of next) {

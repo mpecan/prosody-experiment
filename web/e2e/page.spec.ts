@@ -192,3 +192,39 @@ test('every soundfont plays the licensed variant the compiler names, in the Stru
     expect(listed(name)[Number(index)], sound).toBe(file);
   }
 });
+
+test('the Prosody player keeps playing while the page is blocked for half a second', async ({ page }) => {
+  // The failure measured on the Pixel (docs/player.md §1): a page busy for a moment made Strudel's
+  // scheduler skip notes. Here the page's thread does nothing at all for 500 ms while the piece
+  // plays; the render worker and the worklet are not on it, so the music must not notice.
+  await open(page);
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Mixer' }).click();
+  await page.locator('#player button[data-value="prosody"]').click();
+  await expect(page.locator('#player button[data-value="prosody"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect(page.locator('#status')).toContainText('Prosody player');
+  type Stats = { underruns: number; playhead: number | null; missing: number; peak: number };
+  const stats = () => page.evaluate(() => (globalThis as unknown as { prosodyPlayer: { stats(): Stats } }).prosodyPlayer.stats());
+  await expect.poll(async () => (await stats()).playhead ?? -1, { timeout: 20_000 }).toBeGreaterThan(0.5);
+  // It is making a sound.
+  await expect.poll(async () => (await stats()).peak, { timeout: 5_000 }).toBeGreaterThan(0.01);
+  // The poem lights from the Performance at the playhead.
+  await expect(page.locator('#lit span.on').first()).toBeAttached({ timeout: 10_000 });
+  const before = await stats();
+  await page.evaluate(() => {
+    const end = performance.now() + 500;
+    while (performance.now() < end) { /* the page's thread, blocked */ }
+  });
+  await page.waitForTimeout(400);
+  const after = await stats();
+  expect(after.underruns).toBe(0);
+  // Half a second blocked and 0.4 s waited: the playhead has moved on by about 0.9 s.
+  expect(after.playhead! - before.playhead!).toBeGreaterThan(0.75);
+  expect(after.missing).toBe(0);
+  await expect(page.locator('#status')).not.toContainText('ran dry');
+  await page.click('#stop');
+  await expect(page.locator('#status')).toContainText('stopped');
+  await expect(page.locator('#lit span.on')).toHaveCount(0);
+});
