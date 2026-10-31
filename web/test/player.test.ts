@@ -4,8 +4,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Performance, PerformedNote } from '../src/answers';
-import { indexed, marksAt, notesBetween, pieceTime, within } from '../src/player/clock';
-import { softClip, StemQueue } from '../src/player/mixer';
+import { indexed, marksAt, notesBetween, pieceTime, settle, within } from '../src/player/clock';
+import { FADE, GLIDE, softClip, StemQueue } from '../src/player/mixer';
 import { barStarts, records, sampledOf, STRIDE } from '../src/player/notes';
 import { parseZones, zonesFor } from '../src/player/samples';
 
@@ -83,6 +83,28 @@ describe('the clock', () => {
     expect(within(4.5, 2)).toBe(0.5);
   });
 
+  it('keeps the placement playing and those still to come, and lets the rest go', () => {
+    const a = performance([]), b = performance([]), c = performance([]), d = performance([]);
+    // A from the top; edits B and C both placed at the bar at 96 000 (C, sent later, is the one
+    // heard from there); D at the bar after, 192 000.
+    const placements = [
+      { outStart: 0, pieceStart: 0, performance: a },
+      { outStart: 96_000, pieceStart: 0, performance: b },
+      { outStart: 96_000, pieceStart: 0, performance: c },
+      { outStart: 192_000, pieceStart: 0, performance: d },
+    ];
+    // Before anything plays, and while A plays, all are kept.
+    expect(settle(placements, -10)).toEqual(placements);
+    expect(settle(placements, 50_000)).toEqual(placements);
+    // From 96 000, C plays: A is done with, and B never will be heard.
+    const later = settle(placements, 100_000);
+    expect(later.map((p) => p.performance)).toEqual([c, d]);
+    expect(pieceTime(100_000, later, 48_000)?.placement.performance).toBe(c);
+    // From 192 000 only D is left; and settling again changes nothing.
+    expect(settle(later, 200_000).map((p) => p.performance)).toEqual([d]);
+    expect(settle(settle(later, 200_000), 200_000).map((p) => p.performance)).toEqual([d]);
+  });
+
   it('lights the marks sounding at a time, any time round', () => {
     const piece = indexed(performance([]));
     // At 0.45 s the first mark (0–0.5) and the second (0.4–0.6) are lit; at 3.6 s, which is 1.6 s
@@ -121,10 +143,49 @@ describe('the worklet mixer', () => {
     expect([...left]).toEqual([0.25, 0.25]);
     expect([...right]).toEqual([0.5, 0.5]);
     expect(queue.played).toBe(1002);
-    // Muted: the drums' stem at a gain of 0 is silent at once.
-    queue.mix(left, right, [0, 1, 1, 1]);
-    expect([...left, ...right]).toEqual([0, 0, 0, 0]);
     expect(queue.underruns).toBe(0);
+  });
+
+  it('glides a stem to a new gain rather than stepping, and starts at the gains asked for', () => {
+    const queue = new StemQueue();
+    // A stem muted before play is silent from its first frame: nothing sounded to glide from.
+    queue.push(block(0, 1000, 0, 0.5, 0.5));
+    const two = new Float32Array(2), other = new Float32Array(2);
+    queue.mix(two, other, [0, 1, 1, 1]);
+    expect([...two]).toEqual([0, 0]);
+    // Unmuted, it rises by 1/GLIDE a frame: 0.5 × 1/256, then × 2/256.
+    queue.mix(two, other, [1, 1, 1, 1]);
+    expect(two[0]).toBeCloseTo(0.5 / GLIDE, 9);
+    expect(two[1]).toBeCloseTo(0.5 * 2 / GLIDE, 9);
+    // After GLIDE frames it is all the way up, and stays there.
+    const long = new Float32Array(GLIDE), side = new Float32Array(GLIDE);
+    queue.mix(long, side, [1, 1, 1, 1]);
+    expect(long[GLIDE - 3]).toBeCloseTo(0.5, 9);
+    expect(long[GLIDE - 1]).toBeCloseTo(0.5, 9);
+    // Muted again: down by 1/GLIDE a frame, no step to 0.
+    queue.mix(two, other, [0, 1, 1, 1]);
+    expect(two[0]).toBeCloseTo(0.5 * (GLIDE - 1) / GLIDE, 9);
+    expect(two[1]).toBeCloseTo(0.5 * (GLIDE - 2) / GLIDE, 9);
+  });
+
+  it('fades what was queued out over FADE frames when it is flushed', () => {
+    const queue = new StemQueue();
+    queue.push(block(0, 1000, 1, 0.4, 0.2));
+    const two = new Float32Array(2), other = new Float32Array(2);
+    queue.mix(two, other, [1, 1, 1, 1]);
+    queue.flush();
+    // The next FADE frames of the dropped music, falling linearly: frame k at (FADE − k)/FADE.
+    const out = new Float32Array(FADE + 4), outRight = new Float32Array(FADE + 4);
+    queue.mix(out, outRight, [1, 1, 1, 1]);
+    expect(out[0]).toBeCloseTo(0.4, 6);
+    expect(outRight[0]).toBeCloseTo(0.2, 6);
+    expect(out[FADE / 2]).toBeCloseTo(0.4 * 0.5, 6);
+    expect(out[FADE - 1]).toBeCloseTo(0.4 / FADE, 6);
+    expect([...out.slice(FADE)]).toEqual([0, 0, 0, 0]);
+    // Silence after a flush is no shortfall, and the count is not moved by the tail.
+    expect(queue.underruns).toBe(0);
+    queue.push(block(5000, 4, 0, 0.1, 0.1));
+    expect(queue.played).toBe(5000);
   });
 
   it('carries across blocks and counts a quantum it could not fill', () => {

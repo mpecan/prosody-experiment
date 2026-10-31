@@ -116,7 +116,10 @@ async function handle(data: Record<string, unknown>): Promise<void> {
       pump();
       return;
     case 'swap':
-      if (!player) return;
+      // A hand-over with nothing playing is stale: a play() sent it after a Stop it had not
+      // noticed. The synth would take it as a start of play, but nothing here would pump it, and
+      // the page would wait on silence; a start of play comes as 'play'.
+      if (!player || !playing) return;
       player.swap(data.notes as Float64Array, data.bars as Float64Array, data.seconds as number);
       placed(data.serial as number);
       return;

@@ -344,8 +344,20 @@ above, and why:
   and decodes only the zones the piece's keys need. The zones' loop points were set on the original
   recordings, and an MP3 encoder pads its output by a few frames, so a loop may be a few frames off;
   the synth checks only that a loop lies inside its sample.
+- **A zone is chosen by its place in the file, not by when it was loaded.** The page loads a
+  font's zones as pieces need them, so the order they reach the synth depends on what played
+  before. Where two zones could play a key (overlapping ranges, or a key equally far from two), the
+  first *loaded* would make the same poem sound a different recording after a different edit
+  history (I1). The page sends each zone's index in its file, and the synth takes the first in the
+  file, which is the zone `zonesFor` loaded for that key.
+- **A looped note is interpolated as it plays.** The cubic reads two frames either side of the
+  read position; near a loop's end those come from the loop's start, and once the note has gone
+  round, those before the start come from its end. Read from the buffer instead, every pass of a
+  note off its root key dipped or overshot at the seam.
 - **Stems and instant mute/solo arrived now, not in step 3.** The worklet mixes the four stems
-  anyway, so mute and solo are a stem gain from the first sound. The master stage here is the soft
+  anyway, so mute and solo are a stem gain from the first sound. "Instant" is a 5 ms glide
+  (256 frames): a gain switched between two samples is a step in a sounding wave, a click, where
+  Strudel's mute, applied as each event is scheduled, has none. The master stage here is the soft
   clip alone, the page's own curve (also in `prosody_synth::master` for a file); the glue
   compressor and the reading's duck come with step 3 and step 4. The chords play too: they are the
   same sampler.
@@ -356,8 +368,12 @@ above, and why:
   renderer takes over at the first bar boundary *at or after* its frontier (a boundary exactly at
   the frontier has not been rendered yet), from the same bar of the new piece, counted round a piece
   with fewer bars; notes already sounding ring on. A preset or an A/B switch starts from the top as
-  Strudel's `hush` does: the voices stop and the worklet's queue is dropped, so the new piece is
-  heard within a block rather than after the half-second lead. Each start of play is a generation;
+  Strudel's `hush` does: the voices stop and the worklet's queue is dropped — faded out over its
+  next 5 ms, not cut mid-wave — so the new piece is heard within a block rather than after the
+  half-second lead. A Play still loading when Stop is pressed, or the player is switched, gives up
+  rather than start sound after the Stop; the worker ignores a hand-over with nothing playing.
+  During a hand-over the roll's bars and the lit words stay the old piece's (each piece keeps the
+  text and bars it was compiled with) until the new one takes over at its bar. Each start of play is a generation;
   the worker sends its flush down the same channel as its blocks, so nothing rendered before a stop
   can arrive after it.
 - **The page's clock** is the worklet's count of frames played, moved on by the audio clock since

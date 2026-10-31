@@ -14,7 +14,12 @@ const prosodyPlayer = () => (prosody ??= import('./player'));
 
 /** Plays the piece of the side heard, or carries on with its newest version. */
 export async function play(): Promise<void> {
-  if (player.value === 'prosody') return (await prosodyPlayer()).play();
+  if (player.value === 'prosody') {
+    const prosodyModule = await prosodyPlayer();
+    // Switched away while the player's code loaded: the Stop button now stops Strudel.
+    if (player.value !== 'prosody') return;
+    return prosodyModule.play();
+  }
   return strudel.play();
 }
 
@@ -24,7 +29,7 @@ export function stop(): void {
   else strudel.stop();
 }
 
-/** After mute or solo: the Prosody player hears it as a stem gain, at once (Strudel reads the
+/** After mute or solo: the Prosody player hears it as a stem gain, within a few ms (Strudel reads the
  * switches as it schedules each event: mix.ts). */
 export function mixChanged(): void {
   if (prosody) void prosody.then((p) => p.sendGains());
@@ -36,6 +41,9 @@ export function choosePlayer(next: PlayerName): void {
   if (next === player.value) return;
   const wasPlaying = playing.value;
   if (wasPlaying) stop();
+  // Nothing plays yet, but the Prosody player may be loading a piece to play: it gives up, or it
+  // would start once the other player is chosen, where this Stop button no longer reaches it.
+  else if (player.value === 'prosody' && prosody) void prosody.then((p) => p.cancel());
   player.value = next;
   save('prosody.player', next);
   if (wasPlaying) void play();

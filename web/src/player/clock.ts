@@ -16,11 +16,23 @@ export interface Placement {
  * from the piece's first time round — it keeps rising as the piece loops, as Strudel's cycles do —
  * or null before anything plays. Placements are kept in the order they were made; a later one takes
  * over from its own `outStart`. */
-export function pieceTime(frame: number, placements: Placement[], rate: number): { placement: Placement; time: number } | null {
-  let found: Placement | null = null;
+export function pieceTime<P extends Placement>(frame: number, placements: P[], rate: number): { placement: P; time: number } | null {
+  let found: P | null = null;
   for (const placement of placements) if (placement.outStart <= frame) found = placement;
   if (!found) return null;
   return { placement: found, time: (found.pieceStart + frame - found.outStart) / rate };
+}
+
+/** The placements still worth keeping once output frame `frame` plays: the one playing it and any
+ * that take over later. Every live edit adds a placement, and each holds its Performance; without
+ * this they would pile up until the next restart from the top, and `pieceTime` would scan them all
+ * every frame. An edit superseded before it took over (two edits placed at the same bar) goes too
+ * once that bar plays, since the later one at the same `outStart` is the one heard. Nothing is
+ * dropped before anything plays. */
+export function settle<P extends Placement>(placements: P[], frame: number): P[] {
+  let current = -1;
+  placements.forEach((placement, index) => { if (placement.outStart <= frame) current = index; });
+  return current > 0 ? placements.slice(current) : placements;
 }
 
 /** A time folded into one time round the piece. */

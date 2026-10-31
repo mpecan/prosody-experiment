@@ -23,7 +23,7 @@ import type { Hap } from '../strudel/globals';
 import {
   clearRoll, drawFrame, elementsBetween, fitRoll, lightMarks, litVersion, resetMeters, rollWindow, watch,
 } from '../watch';
-import { indexed, marksAt, notesBetween, pieceTime, type Indexed, type Placement } from './clock';
+import { indexed, marksAt, notesBetween, pieceTime, settle, type Indexed, type Placement } from './clock';
 import { barStarts, CHANNELS, records, sampledOf } from './notes';
 import { decodeDrum, decodeFont, zoneName } from './samples';
 
@@ -48,12 +48,24 @@ let report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, gene
 let loudest = 0;
 /** What the worker last said it lost. */
 let losses = { stolen: 0, missing: 0 };
+/** A piece as the page draws it: its Performance indexed, and the text and bar times it was compiled
+ * with. Each piece keeps its own, so during a live edit's hand-over the old piece's marks are still
+ * found in the old text and the roll shows its bars, until the new one takes over at its bar. */
+interface Heard {
+  piece: Indexed;
+  text: string;
+  bars: number[];
+}
 /** Where each piece plays from, on the worklet's count; the latest that has begun is heard. */
-let placements: Placement[] = [];
+let placements: (Placement & { heard: Heard })[] = [];
 /** Pieces handed to the worker, by serial, until it says where they play from. */
-const handed = new Map<number, { piece: Indexed; fromTheTop: boolean }>();
+const handed = new Map<number, { heard: Heard; fromTheTop: boolean }>();
 let serial = 0;
 let generation = 0;
+/** Counts calls to play(), and Stop and a switch of player: a play() still loading when this has
+ * moved on was overtaken — by Stop, a switch, or a newer play() — and gives up rather than start
+ * sound nobody asked for, or sound the Stop button no longer reaches. */
+let attempt = 0;
 /** The sampled sounds, by key, as the instrument numbers the worker knows them by: given once, in
  * the order first asked for. A sound that failed to load keeps its number, and the synth counts its
  * notes as missing. */
@@ -64,8 +76,6 @@ const loaded = new Set<string>();
  * new keys loads only the zones it does not have. */
 const loadedKeys = new Map<string, Set<number>>();
 const loadedZones = new Map<string, Set<string>>();
-/** The text the Performance playing was compiled from: its marks' positions are positions in it. */
-let heardText = '';
 let said = '';
 let frame = 0;
 
@@ -113,13 +123,13 @@ function heard(data: Record<string, unknown>): void {
     const sent = handed.get(data.serial as number);
     handed.delete(data.serial as number);
     if (!sent) return;
-    const placement = { outStart: data.outStart as number, pieceStart: data.pieceStart as number, performance: sent.piece.performance };
-    pieces.set(sent.piece.performance, sent.piece);
+    const placement = {
+      outStart: data.outStart as number,
+      pieceStart: data.pieceStart as number,
+      performance: sent.heard.piece.performance,
+      heard: sent.heard,
+    };
     placements = sent.fromTheTop ? [placement] : [...placements, placement];
-    // Only the pieces still placed are kept.
-    for (const performance of pieces.keys()) {
-      if (!placements.some((p) => p.performance === performance)) pieces.delete(performance);
-    }
   } else if (data.op === 'losses') {
     losses = { stolen: data.stolen as number, missing: data.missing as number };
     tell();
@@ -127,8 +137,6 @@ function heard(data: Record<string, unknown>): void {
     status('the Prosody player failed: ' + String(data.message), true);
   }
 }
-const pieces = new Map<Performance, Indexed>();
-
 /** The status line: what plays, and anything lost (`CLAUDE.md` §6: a fallback is visible). */
 function tell(): void {
   if (!playing.value) return;
@@ -177,6 +185,9 @@ async function loadSounds(context: AudioContext, worker: Worker, performance: Pe
  * switch, otherwise handing over to the new version at the next bar (`docs/player.md` §5). */
 export async function play(): Promise<void> {
   if (!piece.latest) return;
+  const mine = ++attempt;
+  // Overtaken by Stop, a switch of player, or a newer play(): checked after every wait.
+  const overtaken = () => mine !== attempt;
   const text = poem.value;
   const side = hearing.value;
   const fromTheTop = !playing.value || piece.fromTheTop;
@@ -189,46 +200,49 @@ export async function play(): Promise<void> {
     running = await startEngine();
     await running.context.resume();
   } catch (error) {
-    status('could not start the Prosody player: ' + (error as Error).message, true);
+    if (!overtaken()) status('could not start the Prosody player: ' + (error as Error).message, true);
     closeLoader();
     return;
   }
   let performance: Performance;
   let failed: string[];
   try {
+    if (overtaken()) return;
     const answer = await ask('/performance', query(side), text);
     if (!answer.ok) throw new Error('the Performance could not be made: ' + (await answer.text()));
     performance = (await answer.json()) as Performance;
-    if (text !== poem.value || side !== hearing.value) return;   // a newer one plays itself
+    if (overtaken() || text !== poem.value || side !== hearing.value) return;   // a newer one plays itself
     status('loading the sounds this piece uses…' + (playing.value ? ' · playing' : ''));
     failed = await loadSounds(running.context, running.worker, performance);
   } catch (error) {
-    status('the Prosody player could not play this: ' + (error as Error).message, true);
+    if (!overtaken()) status('the Prosody player could not play this: ' + (error as Error).message, true);
     return;
   } finally {
     closeLoader();
   }
-  if (text !== poem.value || side !== hearing.value) return;
+  if (overtaken() || text !== poem.value || side !== hearing.value) return;
   const message = {
     notes: records(performance, ids),
     bars: barStarts(performance),
     seconds: performance.seconds,
     serial: ++serial,
   };
-  handed.set(message.serial, { piece: indexed(performance), fromTheTop });
+  const heard: Heard = { piece: indexed(performance), text, bars: [...performance.bars.map((bar) => bar.at), performance.seconds] };
+  handed.set(message.serial, { heard, fromTheTop });
   if (fromTheTop) {
     generation += 1;
     report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation, peak: 0 };
     losses = { stolen: 0, missing: 0 };
     running.worker.postMessage({ op: 'play', generation, ...message }, [message.notes.buffer, message.bars.buffer]);
+    // Nothing else is heard now, so the roll takes this piece's bars at once. After a live edit it
+    // keeps the old piece's until the new one takes over (draw).
+    watch.heardBars = heard.bars;
+    fitRoll();
   } else {
     running.worker.postMessage({ op: 'swap', ...message }, [message.notes.buffer, message.bars.buffer]);
   }
   piece.fromTheTop = false;
-  heardText = text;
-  watch.heardBars = [...performance.bars.map((bar) => bar.at), performance.seconds];
   sendGains();
-  fitRoll();
   playing.value = true;
   showBeat();
   said = side + ' · ' + summaryOf(piece.latest) + ' · playing (Prosody player; the reading is not played by it yet)'
@@ -237,7 +251,15 @@ export async function play(): Promise<void> {
   if (!frame) frame = requestAnimationFrame(draw);
 }
 
+/** Gives up any play() still loading, without touching what plays: for a switch of player while
+ * nothing plays (transport.ts), which would otherwise leave a Prosody load to start sound once the
+ * other player is chosen — sound that player's Stop button would not reach. */
+export function cancel(): void {
+  attempt += 1;
+}
+
 export function stop(): void {
+  cancel();
   generation += 1;
   void engine?.then(({ worker }) => worker.postMessage({ op: 'stop', generation }));
   cancelAnimationFrame(frame);
@@ -253,7 +275,7 @@ export function stop(): void {
   status('stopped');
 }
 
-/** Mute and solo, as stem gains in the worklet: heard at once. */
+/** Mute and solo, as stem gains in the worklet: heard within about 5 ms (mixer.ts `GLIDE`). */
 export function sendGains(): void {
   ready?.node.port.postMessage({ gains: CHANNELS.map((channel) => (audible(channel as Channel) ? 1 : 0)) });
 }
@@ -277,14 +299,20 @@ function draw(): void {
   frame = requestAnimationFrame(draw);
   if (!ready) return;
   const at = playhead(ready.context);
-  const now = at === null ? null : pieceTime(at, placements, ready.context.sampleRate);
+  if (at === null) return;
+  placements = settle(placements, at);
+  const now = pieceTime(at, placements, ready.context.sampleRate);
   if (!now) return;
-  const playingPiece = pieces.get(now.placement.performance);
-  if (!playingPiece) return;
+  const { heard } = now.placement;
+  // The roll's bars switch with the piece heard: at a live edit's hand-over, not when it was sent.
+  if (watch.heardBars !== heard.bars) {
+    watch.heardBars = heard.bars;
+    fitRoll();
+  }
   const [from, to] = rollWindow();
-  const haps = notesBetween(playingPiece, now.time + from, now.time + to).map(({ note, begin, end }) => hapOf(note, begin, end));
+  const haps = notesBetween(heard.piece, now.time + from, now.time + to).map(({ note, begin, end }) => hapOf(note, begin, end));
   drawFrame(haps, now.time);
-  lightMarks(lit(playingPiece, now.time));
+  lightMarks(lit(heard, now.time));
 }
 
 /** The colour each lane is drawn in. */
@@ -300,18 +328,18 @@ function hapOf(note: Indexed['notes'][number], begin: number, end: number): Hap 
 }
 
 /** The marks lit at `time`, each over its words in the verse — only while the verse shows the text
- * the Performance was compiled from. */
-function lit(playingPiece: Indexed, time: number): { mark: Mark; elements: HTMLElement[] }[] {
-  if (heardText !== poem.value) return [];
-  if (marksCache.performance !== playingPiece.performance || marksCache.version !== litVersion()) {
-    marksCache = { performance: playingPiece.performance, version: litVersion(), marks: new Map() };
+ * the piece heard was compiled from, whose positions its marks' are. */
+function lit(heard: Heard, time: number): { mark: Mark; elements: HTMLElement[] }[] {
+  if (heard.text !== poem.value) return [];
+  if (marksCache.performance !== heard.piece.performance || marksCache.version !== litVersion()) {
+    marksCache = { performance: heard.piece.performance, version: litVersion(), marks: new Map() };
   }
-  return marksAt(playingPiece, time).map(({ mark, index }) => {
+  return marksAt(heard.piece, time).map(({ mark, index }) => {
     let entry = marksCache.marks.get(index);
     if (!entry) {
       entry = {
         mark: { start: mark.from, end: mark.to, colour: colourOf(mark.lane), fresh: mark.fresh, melody: mark.melody, bass: mark.bass },
-        elements: elementsBetween(mark.from, mark.to, heardText),
+        elements: elementsBetween(mark.from, mark.to, heard.text),
       };
       marksCache.marks.set(index, entry);
     }
