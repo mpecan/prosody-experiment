@@ -50,18 +50,24 @@ class PlaybackService : Service() {
      * not start a service, and by then the app may be. */
     private var running: PlaybackService? = null
 
+    /** The latest state asked for, stops included: what a service still starting shows when it
+     * comes up. A Play and then a Stop can both be asked for before Android has created the service
+     * (it does so on this thread, after whatever is already queued on it), and the service must
+     * then come up stopped — not playing from the Play's intent, holding a wake lock and the audio
+     * focus with nothing to release them. */
+    @Volatile
+    private var wanted = Pair(false, "Prosody")
+
     /** The music started or stopped. Called on the main thread. */
     fun update(context: Context, playing: Boolean, title: String) {
+      wanted = Pair(playing, title)
       val service = running
       if (service != null) {
         service.show(playing, title)
       } else if (playing) {
         // Started for the foreground; it must call startForeground within seconds, and does, in
-        // onStartCommand.
-        val intent = Intent(context, PlaybackService::class.java)
-          .setAction(UPDATE)
-          .putExtra("playing", true)
-          .putExtra("title", title)
+        // onStartCommand, whatever has been asked for by then.
+        val intent = Intent(context, PlaybackService::class.java).setAction(UPDATE)
         context.startForegroundService(intent)
       }
     }
@@ -73,6 +79,8 @@ class PlaybackService : Service() {
   private var focus: AudioFocusRequest? = null
   private var noisy: BroadcastReceiver? = null
   private var title = "Prosody"
+  /** Whether it has shown the music playing since it was created. */
+  private var shown = false
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -94,7 +102,20 @@ class PlaybackService : Service() {
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     when (intent?.action) {
-      UPDATE -> show(intent.getBooleanExtra("playing", false), intent.getStringExtra("title") ?: title)
+      UPDATE -> {
+        val (playing, title) = wanted
+        if (playing) {
+          show(true, title)
+        } else if (shown) {
+          show(false, title)
+        } else {
+          // Stopped before it ever showed anything: started for the foreground, it must still
+          // enter it once, and then it leaves, taking its notification with it.
+          foreground(notification(false))
+          stopForeground(STOP_FOREGROUND_REMOVE)
+          stopSelf(startId)
+        }
+      }
       PLAY -> listener?.invoke("play")
       PAUSE -> listener?.invoke("pause")
     }
@@ -125,17 +146,23 @@ class PlaybackService : Service() {
     session.isActive = true
     val notification = notification(playing)
     if (playing) {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-      } else {
-        startForeground(NOTIFICATION, notification)
-      }
+      shown = true
+      foreground(notification)
       hold()
     } else {
       // Out of the foreground, the notification left behind with Play on it.
       stopForeground(STOP_FOREGROUND_DETACH)
       getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification)
       release()
+    }
+  }
+
+  /** Into the foreground, as a media player, showing `notification`. */
+  private fun foreground(notification: Notification) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      startForeground(NOTIFICATION, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+    } else {
+      startForeground(NOTIFICATION, notification)
     }
   }
 
@@ -195,8 +222,14 @@ class PlaybackService : Service() {
           }
         }
         .build()
-      audio.requestAudioFocus(request)
-      focus = request
+      // Refused (a phone call is on): it does not play over it. The stop comes back here as a
+      // Stopped update, which releases the rest. Delayed focus is never offered
+      // (setAcceptsDelayedFocusGain is left off), so the answer is granted or failed.
+      if (audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+        focus = request
+      } else {
+        listener?.invoke("pause")
+      }
     }
     if (noisy == null) {
       val receiver = object : BroadcastReceiver() {
