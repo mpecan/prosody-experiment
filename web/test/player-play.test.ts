@@ -34,6 +34,8 @@ class FakeWorker {
     if (message.op === 'init') queueMicrotask(() => this.onmessage?.({ data: { op: 'ready' } }));
   }
 }
+/** The page's AudioContext: made once, with the player, for the whole file. */
+let context: FakeContext | null = null;
 class FakeContext {
   sampleRate = 48_000;
   currentTime = 0;
@@ -41,7 +43,17 @@ class FakeContext {
   baseLatency = 0;
   destination = {};
   audioWorklet = { addModule: async () => {} };
-  async resume(): Promise<void> {}
+  /** Calls to suspend and resume, in order. */
+  calls: string[] = [];
+  constructor() {
+    context = this;
+  }
+  async resume(): Promise<void> {
+    this.calls.push('resume');
+  }
+  async suspend(): Promise<void> {
+    this.calls.push('suspend');
+  }
 }
 class FakeNode {
   port = { postMessage: () => {}, onmessage: null };
@@ -135,6 +147,41 @@ describe('the Prosody player', () => {
     await playingNow;
     expect(starts()).toEqual(['play']);
     expect(playing.value).toBe(true);
+  });
+
+  it('lets the audio rest a second after Stop, and not under a Play that comes sooner', async () => {
+    // Left running, the AudioContext calls the worklet on silence for as long as the tab is open.
+    const prosody = await import('../src/player');
+    const first = prosody.play();
+    await heldAtThePerformance();
+    answer!();
+    await first;
+    const audio = context!;
+    audio.calls.length = 0;
+    let again: Promise<void> = Promise.resolve();
+    vi.useFakeTimers();
+    try {
+      prosody.stop();
+      vi.advanceTimersByTime(prosody.REST_AFTER - 1);
+      expect(audio.calls).toEqual([]);
+      vi.advanceTimersByTime(1);
+      expect(audio.calls).toEqual(['suspend']);
+      // Stop, then Play within the second: the rest is called off, so Play's output is not
+      // suspended under it once it starts.
+      audio.calls.length = 0;
+      prosody.stop();
+      vi.advanceTimersByTime(prosody.REST_AFTER / 2);
+      answer = null;
+      again = prosody.play();
+      vi.advanceTimersByTime(prosody.REST_AFTER);
+      expect(audio.calls).not.toContain('suspend');
+    } finally {
+      vi.useRealTimers();
+    }
+    await heldAtThePerformance();
+    answer!();
+    await again;
+    expect(audio.calls).toEqual(['resume']);
   });
 
   it('gives up when Stop comes while the Performance is on its way', async () => {

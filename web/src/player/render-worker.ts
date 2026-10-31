@@ -68,6 +68,19 @@ const scope = self as unknown as {
 let player: Player | null = null;
 let worklet: MessagePort | null = null;
 let block = 2048;
+/** The lead's own clock (`pump` every 20 ms), running only while something plays: once a Stop's
+ * flush has gone there is nothing to render, and a timer left running woke the worker 50 times a
+ * second for as long as the tab was open (the app's native player parks likewise, docs/player.md
+ * §13). */
+let ticking: ReturnType<typeof setInterval> | undefined;
+
+function tick(on: boolean): void {
+  if (on && ticking === undefined) ticking = setInterval(pump, 20);
+  else if (!on && ticking !== undefined) {
+    clearInterval(ticking);
+    ticking = undefined;
+  }
+}
 
 function say(message: unknown): void {
   scope.postMessage(message);
@@ -112,8 +125,6 @@ async function handle(data: Record<string, unknown>): Promise<void> {
         player?.played(message.generation as number, message.played as number);
         pump();
       };
-      // Messages can be late, a worklet's included; the lead is kept full on a clock of its own too.
-      setInterval(pump, 20);
       say({ op: 'ready' });
       return;
     }
@@ -130,6 +141,9 @@ async function handle(data: Record<string, unknown>): Promise<void> {
       player.play(data.generation as number, data.serial as number, data.notes as Float64Array, data.bars as Float64Array,
         data.seconds as number, data.cues as Float64Array, data.pace as string, data.duck as number);
       pump();
+      // Messages can be late, a worklet's included; while it plays the lead is kept full on a
+      // clock of its own too.
+      tick(true);
       return;
     }
     case 'swap':
@@ -142,7 +156,9 @@ async function handle(data: Record<string, unknown>): Promise<void> {
     case 'stop':
       if (!player) return;
       player.stop(data.generation as number);
+      // The flush goes to the worklet now; after it, nothing is due until the next Play.
       pump();
+      tick(false);
       return;
     case 'cast':
       if (!player) return;

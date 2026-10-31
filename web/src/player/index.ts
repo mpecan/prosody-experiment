@@ -57,7 +57,14 @@ export interface Engine {
   latency(): number;
   /** Lets the output run (a browser holds audio until a click). */
   resume(): Promise<void>;
+  /** Lets the output rest while nothing plays. */
+  rest(): Promise<void>;
 }
+/** How long after a Stop the output rests (`Engine.rest`): long past the flush's 5 ms fade, and long
+ * enough that Stop then Play does not cycle the output (the app's native player waits as long,
+ * docs/player.md §13). */
+export const REST_AFTER = 1000;
+let resting: ReturnType<typeof setTimeout> | undefined;
 let engine: Promise<Engine> | null = null;
 /** The engine once it has started, for the drawing, which runs every frame. */
 let ready: Engine | null = null;
@@ -158,6 +165,9 @@ async function startWeb(): Promise<Engine> {
     now: () => context.currentTime,
     latency: () => context.outputLatency || context.baseLatency || 0,
     resume: () => context.resume(),
+    // A running AudioContext keeps the audio thread calling the worklet on silence, and the output
+    // device open, for as long as the tab is; suspended, it costs nothing until Play resumes it.
+    rest: () => context.suspend(),
   };
 }
 
@@ -257,6 +267,9 @@ export async function play(): Promise<void> {
   // the browser's voice stands in, and says so.
   ensureEngine();
   prerender();
+  // A Stop's rest still to come would suspend the output under this Play.
+  clearTimeout(resting);
+  resting = undefined;
   const mine = ++attempt;
   // Overtaken by Stop or a newer play(): checked after every wait.
   const overtaken = () => mine !== attempt;
@@ -340,6 +353,11 @@ export function stop(): void {
   generation += 1;
   const stopping = generation;
   void engine?.then((running) => running.post({ op: 'stop', generation: stopping }));
+  clearTimeout(resting);
+  resting = setTimeout(() => {
+    resting = undefined;
+    if (!playing.value) void ready?.rest().catch(() => {});
+  }, REST_AFTER);
   cancelAnimationFrame(frame);
   frame = 0;
   placements = [];

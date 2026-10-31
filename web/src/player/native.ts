@@ -137,5 +137,8 @@ export async function startNative(block: number, lead: number, ears: Ears): Prom
     now: () => performance.now() / 1000,
     latency: () => latency,
     resume: async () => {},
+    // The native player pauses its own output and parks its render thread once nothing plays
+    // (docs/player.md §13); there is nothing for the page to rest.
+    rest: async () => {},
   };
 }
