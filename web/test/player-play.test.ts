@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { piece } from '../src/piece';
-import { playing, poem } from '../src/store';
+import { engines } from '../src/reading';
+import { playing, poem, readingSettings } from '../src/store';
 
 /** The one line the Performance's reading cues: line 0, where the piece begins, at the natural pace. */
 const CUE = { line: 0, stanza: 0, from: 0, to: 28, pace: 1, pause: 1.5, fitted: null, natural: { onset: 'arrives', slot: 0, at: 0 } };
@@ -63,6 +64,8 @@ beforeEach(() => {
   piece.fromTheTop = false;
   poem.value = 'Tyger Tyger, burning bright,';
   playing.value = false;
+  // The browser's voice loads nothing: Play fetches no engine unless a test asks for one.
+  readingSettings.value = { engine: 'browser', pace: 'natural', level: 1, voices: {} };
   toWorker.length = 0;
   answer = null;
 });
@@ -94,6 +97,21 @@ describe('the Prosody player', () => {
     expect(play.pace).toBe('natural');
     expect(play.duck).toBe(0.6);
     piece.readings = { A: null, B: null, poem: '' };
+  });
+
+  it('starts loading a saved live engine on Play, so it reads once it is ready', async () => {
+    // A returning reader whose engine is Kokoro: nothing loads it at start-up (its model is hundreds
+    // of MB), so Play must, or the browser's voice reads every line until a setting changes.
+    readingSettings.value = { engine: 'kokoro', pace: 'natural', level: 1, voices: {} };
+    engines.kokoro.state = 'idle';
+    const load = vi.spyOn(engines.kokoro, 'load').mockImplementation(() => new Promise<void>(() => {}));
+    const prosody = await import('../src/player');
+    const playingNow = prosody.play();
+    expect(load).toHaveBeenCalledTimes(1);
+    await heldAtThePerformance();
+    answer!();
+    await playingNow;
+    load.mockRestore();
   });
 
   it('hands over no cues for a reading compiled from another text', async () => {

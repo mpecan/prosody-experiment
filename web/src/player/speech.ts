@@ -8,8 +8,8 @@
 // that voice cannot be placed in a stream.
 import type { Reading, SpokenLine } from '../answers';
 import {
-  castOf, hostReading, noteLoss, noteReading, readAloud, readingIsAt, renderedFor, renderUrgently, speakerOf, speech,
-  type Rendered,
+  castOf, hostReading, hushBrowserVoice, noteLoss, noteReading, readAloud, readingIsAt, renderedFor, renderUrgently, speakerOf,
+  speech, type Rendered,
 } from '../reading';
 import { ENGINE_INFO } from '../reading/engines';
 import { duck, readingNote, readingSettings, type Pace } from '../store';
@@ -46,6 +46,14 @@ let showing: { entry: Shown; speaking: Speaking } | null = null;
 /** A line of the browser's voice the worker says is due, to speak when the playhead reaches it. */
 interface Due { line: SpokenLine & { stanzaLast?: boolean }; rate: number; at: number; chain: number; generation: number }
 let due: Due[] = [];
+/** Where the worker cut the reading off (a hand-over, a fitted cue), in render frames: a line of the
+ * browser's voice begun before one is cut off when the playhead gets there, as a placed line is. */
+let cuts: number[] = [];
+/** The render frame the browser's voice began its latest line at, while it may still be speaking. */
+let browserFrom: number | null = null;
+/** Whether the browser's voice has the worklet keep the music down: what the Mixer's duck switch
+ * changes at once. */
+let browserDucked = false;
 /** The render keys the worker has asked for and not been sent. */
 let wants = new Set<string>();
 /** The render keys sent to the worker and not since let go by it: sent with a piece, before the
@@ -55,6 +63,11 @@ const sent = new Set<string>();
  * end-to-end test's proof the reading played, and played on the music's clock. */
 let placedCount = 0;
 let onTimeCount = 0;
+/** Starts of play from the top, the first line placed since the last, and the pace of the latest:
+ * how the end-to-end test tells a restart from a hand-over, and which pace was read. */
+let startsCount = 0;
+let firstLine: number | null = null;
+let lastPace: Pace | null = null;
 
 /** The line of `reading` the worker names, at `pace`, with what its cue says. */
 function lineOf(reading: Reading | null | undefined, pace: Pace, line: number): (SpokenLine & { rate?: number; slot?: number }) | undefined {
@@ -79,7 +92,10 @@ export function startSpeech(player: Link): void {
     },
     rendered: (key, buffer) => send(key, buffer),
     failed: (key) => link?.post({ op: 'failed', key }),
-    duck: (down) => link?.worklet({ duck: down && duck.value ? DUCK : 1 }),
+    duck: (down) => {
+      browserDucked = down;
+      link?.worklet({ duck: down && duck.value ? DUCK : 1 });
+    },
     level: () => link?.gains(),
   });
 }
@@ -91,6 +107,8 @@ export function handing(serial: number, reading: Reading | null, fromTheTop: boo
     forgetPlaced();
     placedCount = 0;
     onTimeCount = 0;
+    startsCount += 1;
+    firstLine = null;
   }
   readings.set(serial, reading);
   // Only the pieces the worker may still be playing are kept: the one it plays and one to come.
@@ -119,13 +137,17 @@ export function stopSpeech(): void {
 function forgetPlaced(): void {
   shown = [];
   due = [];
+  cuts = [];
+  browserFrom = null;
   if (showing && speaking === showing.speaking) setSpeaking(null);
   showing = null;
 }
 
-/** The duck switched on the Mixer: from what the worker renders next, and for the browser's voice. */
+/** The duck switched on the Mixer: from what the worker renders next, and at once for a line of the
+ * browser's voice that has the music down (`docs/player.md` §12). */
 export function duckChanged(): void {
   link?.post({ op: 'duck', level: duck.value ? DUCK : 1 });
+  if (browserDucked) link?.worklet({ duck: duck.value ? DUCK : 1 });
 }
 
 /** The worker let these recorded lines go: sent again when wanted. */
@@ -167,6 +189,8 @@ export function told(generation: number, message: Told): void {
       if (!line) return;
       placedCount += 1;
       if (message.late < 0.001) onTimeCount += 1;
+      firstLine ??= line.line;
+      lastPace = message.pace;
       shown.push({ line, start: message.start, end: message.end });
       const who = speakerOf(line.text);
       console.log(`[reading] ${message.pace}: line ${line.line + 1} placed at ${(message.start / rate).toFixed(3)} s`
@@ -199,6 +223,7 @@ export function told(generation: number, message: Told): void {
     case 'cut':
       shown = shown.filter((entry) => entry.start < message.at).map((entry) => ({ ...entry, end: Math.min(entry.end, message.at) }));
       due = due.filter((entry) => entry.at < message.at);
+      cuts.push(message.at);
       return;
     case 'wait': {
       const reading = readings.get(message.serial);
@@ -241,10 +266,21 @@ export function speechAt(at: number): void {
     }
   }
   const ready = due.filter((d) => d.at <= at);
+  // A cut reached: a line of the browser's voice begun before it stops there. A line due now cuts
+  // it anyway (readAloud), keeping the duck down between the two.
+  const reached = cuts.filter((cut) => cut <= at);
+  if (reached.length) {
+    cuts = cuts.filter((cut) => cut > at);
+    if (!ready.length && browserFrom !== null && browserFrom < Math.max(...reached)) {
+      browserFrom = null;
+      hushBrowserVoice();
+    }
+  }
   if (!ready.length) return;
   due = due.filter((d) => d.at > at);
   for (const line of ready) {
     console.log(`[reading] line ${line.line.line + 1} with the browser voice at ${(at / rate).toFixed(3)} s (due ${(line.at / rate).toFixed(3)} s): ${line.line.text}`);
+    browserFrom = at;
     readAloud(line.line, line.rate, line.chain ? () => {
       if (!link || line.generation !== link.generation()) return;
       link.post({ op: 'said', chain: line.chain, end: Math.round(link.playhead() ?? at) });
@@ -253,4 +289,4 @@ export function speechAt(at: number): void {
 }
 
 /** How the reading has gone, for the end-to-end test. */
-export const speechStats = () => ({ spoken: placedCount, onTime: onTimeCount });
+export const speechStats = () => ({ spoken: placedCount, onTime: onTimeCount, starts: startsCount, first: firstLine, pace: lastPace });

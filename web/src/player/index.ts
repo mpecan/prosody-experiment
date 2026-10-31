@@ -20,7 +20,7 @@ import { site } from '../data';
 import { closeLoader, openLoader } from '../loader';
 import { audible } from '../mix';
 import { piece, query, summaryOf } from '../piece';
-import { quietReading, voiceLevel } from '../reading';
+import { ensureEngine, prerender, quietReading, voiceLevel } from '../reading';
 import type { RollNote } from '../roll';
 import { beat, hearing, playing, poem, readingSettings, settings, status, type Channel } from '../store';
 import {
@@ -206,6 +206,12 @@ async function loadSounds(worker: Worker, performance: Performance): Promise<str
  * switch, otherwise handing over to the new version at the next bar (`docs/player.md` §5). */
 export async function play(): Promise<void> {
   if (!piece.latest) return;
+  // The reading's engine starts loading with the music, and its lines rendering: a reader whose
+  // saved engine is a live one has it load on Play, not only when a setting changes (reading/index.ts
+  // `startReading` loads only the recorded readings' small manifest by itself). Until it is ready
+  // the browser's voice stands in, and says so.
+  ensureEngine();
+  prerender();
   const mine = ++attempt;
   // Overtaken by Stop or a newer play(): checked after every wait.
   const overtaken = () => mine !== attempt;
@@ -401,6 +407,8 @@ function lit(heard: Heard, time: number): { mark: Mark; elements: HTMLElement[] 
       playhead: at === null || !ready ? null : at / ready.context.sampleRate,
       stolen: losses.stolen,
       missing: losses.missing,
+      /** Pieces handed to the worker, from the top or as a live edit's hand-over. */
+      handed: serial,
     };
   },
 };

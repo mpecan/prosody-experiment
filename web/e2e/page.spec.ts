@@ -11,6 +11,7 @@ async function open(page: Page) {
 /** How the Prosody player is doing (src/player/index.ts `prosodyPlayer.stats`). */
 type Stats = {
   underruns: number; playhead: number | null; missing: number; peak: number; speechPeak: number; spoken: number; onTime: number;
+  starts: number; first: number | null; pace: 'fitted' | 'natural' | null; handed: number;
 };
 const stats = (page: Page) => page.evaluate(() => (globalThis as unknown as { prosodyPlayer: { stats(): Stats } }).prosodyPlayer.stats());
 
@@ -281,5 +282,71 @@ test('a muted voice is silent on the reading stem, and comes back when unmuted',
   // The stanza is still being read: unmuted, it is heard again, within the 5 ms glide.
   await page.getByRole('button', { name: 'Mute voice' }).click();
   await expect.poll(async () => (await stats(page)).speechPeak, { timeout: 10_000 }).toBeGreaterThan(0.001);
+  await page.click('#stop');
+});
+
+/** The page with the recorded readings' voices listed, ready to read from them. */
+async function readyToRead(page: Page) {
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Reading' }).click();
+  await expect(page.locator('#voice option:checked')).toContainText('lines recorded', { timeout: 15_000 });
+}
+
+test('reads at the fitted pace through the player: each recorded line placed on its bar', async ({ page }) => {
+  // The pace saved from an earlier visit: a line a bar, each cut off at the next (SPEC.md §4.7).
+  await page.addInitScript(() => localStorage.setItem('prosody.reading',
+    JSON.stringify({ engine: 'recorded', pace: 'fitted', level: 1, voices: {} })));
+  await open(page);
+  await readyToRead(page);
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  const read = await stats(page);
+  expect(read.pace).toBe('fitted');
+  expect(read.onTime).toBeGreaterThan(0);
+  await expect.poll(async () => (await stats(page)).speechPeak, { timeout: 10_000 }).toBeGreaterThan(0.001);
+  await expect(page.locator('#status')).not.toContainText('browser voice');
+  await page.click('#stop');
+});
+
+test('a preset chosen while reading starts the piece, and the reading, from the top', async ({ page }) => {
+  // (B's defaults switch the reading off, so the restart is a preset's: also from the top.)
+  await open(page);
+  await readyToRead(page);
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  // Into the stanza: line 2 has been placed, so a reading that went on would not begin at line 1.
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 30_000 }).toBeGreaterThan(1);
+  const before = await stats(page);
+  await page.selectOption('#preset', 'blake-tyger');
+  await expect.poll(async () => {
+    const now = await stats(page);
+    return now.starts > before.starts && now.spoken > 0;
+  }, { timeout: 30_000 }).toBe(true);
+  const after = await stats(page);
+  expect(after.first).toBe(0);
+  expect(after.underruns).toBe(0);
+  await page.click('#stop');
+});
+
+test('a live edit while reading hands over: the reading goes on and the music never runs dry', async ({ page }) => {
+  await open(page);
+  await readyToRead(page);
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  const before = await stats(page);
+  // The poem's last line changed: the lines read before it are the same, and still recorded.
+  const poem = page.locator('#poem');
+  const lines = (await poem.inputValue()).trimEnd().split('\n');
+  lines[lines.length - 1] = lines[lines.length - 1]!.replace(/[?!.,;:]*$/, ', still?');
+  await poem.fill(lines.join('\n') + '\n');
+  // The new version is handed to the worker as it plays — not started again from the top.
+  await expect.poll(async () => (await stats(page)).handed, { timeout: 20_000 }).toBeGreaterThan(before.handed);
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 30_000 }).toBeGreaterThan(before.spoken + 1);
+  const after = await stats(page);
+  expect(after.starts).toBe(before.starts);
+  expect(after.underruns).toBe(0);
+  await expect(page.locator('#status')).not.toContainText('ran dry');
   await page.click('#stop');
 });

@@ -556,12 +556,21 @@ export function readAloud(line: SpokenLine & { stanzaLast?: boolean }, rate: num
 /** Everything the page itself is reading is let go: the browser's voice, its timers, its duck, the
  * line shown. What the player has placed is the player's to let go (`ReadingHost.recast`). */
 export function quietReading(): void {
+  hushBrowserVoice();
+  readingAt = null;
+  setSpeaking(null);
+}
+
+/** The browser's voice cut off: its line, its timers and its duck let go, and its line no longer
+ * shown. Where the reading is, and what the player has placed, are left alone — at a live edit's
+ * hand-over the reading goes on in the new version (SPEC.md §4.7: a line being spoken from the
+ * previous version is cut off where the new one takes over). */
+export function hushBrowserVoice(): void {
   for (const timer of readingTimers) clearTimeout(timer);
   readingTimers.clear();
   if ('speechSynthesis' in window) speechSynthesis.cancel();
-  readingAt = null;
   host?.duck(false);
-  setSpeaking(null);
+  if (speaking?.utterance) setSpeaking(null);
 }
 
 // The music's bars, in seconds from the piece's start, and its length last: for fitting a line to
