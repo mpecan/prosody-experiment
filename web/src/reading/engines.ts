@@ -314,8 +314,8 @@ export const engines: Record<EngineName, Engine> & { recorded: RecordedEngine } 
   recorded,
 };
 
-// What decodes a recording: a context of the page's own, so a line can be fetched ahead before
-// Strudel has made the audio context it plays in (which resamples a 48 kHz buffer as it plays it).
+// What decodes a recording: a context of the page's own, so a line can be fetched ahead before the
+// player has made its audio context. The player resamples a line to the output's rate itself.
 let decoding: OfflineAudioContext | null = null;
 function decoder(): OfflineAudioContext {
   decoding ??= new OfflineAudioContext(1, 1, 48000);

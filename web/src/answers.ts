@@ -140,13 +140,40 @@ export interface PerformedMark {
   bass: boolean;
 }
 
+/** A line of the reading on the piece's clock (`prosody_emit::perform::Cue`): where it is read at
+ * each pace, `null` where that pace does not read it. */
+export interface PerformedCue {
+  line: number;
+  stanza: number;
+  from: number;
+  to: number;
+  /** The speed the natural pace asks a voice for, and the pause after the line there, in seconds. */
+  pace: number;
+  pause: number;
+  /** The bar it is read in at the fitted pace, when that bar begins, and the rate it is fitted at. */
+  fitted: { slot: number; at: number; rate: number } | null;
+  /** What it waits for at the natural pace, and the bar it may begin in (`null` for a line that only
+   * follows the one before). */
+  natural: { onset: 'arrives' | 'breath' | 'follows' | string; slot: number | null; at: number | null } | null;
+}
+
+/** A line a pace leaves unread, and why. */
+export interface PerformedUnread {
+  line: number;
+  from: number;
+  to: number;
+  why: string;
+}
+
 /** Every note of the piece, resolved (`docs/player.md` §3; `performance_json` in
- * crates/prosody-web/src/lib.rs). Times are seconds; the piece loops round at `seconds`. Fields the
- * player does not read yet (the reading's cues) are left out of the type. */
+ * crates/prosody-web/src/lib.rs). Times are seconds; the piece loops round at `seconds`. */
 export interface Performance {
   seconds: number;
   cpm: number;
   bars: { slot: number; at: number }[];
   notes: PerformedNote[];
   marks: PerformedMark[];
+  cues: PerformedCue[];
+  unread: PerformedUnread[];
+  natural_unread: PerformedUnread[];
 }

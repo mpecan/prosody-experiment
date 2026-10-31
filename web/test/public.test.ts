@@ -9,35 +9,21 @@ const read = (file: string) => readFileSync(join(web, file), 'utf8');
 describe('the page\'s HTML', () => {
   const html = read('index.html');
 
-  it('answers Strudel\'s own imports from the Strudel already on the page, by relative paths', () => {
-    // Relative, so the static page works from a subdirectory of a host as well as from `/`.
-    expect(html).toContain('"@strudel/core": "./strudel-globals.mjs"');
-    expect(html).toContain('"@strudel/webaudio": "./strudel-globals.mjs"');
+  it('loads nothing from another host, and no Strudel', () => {
     // From beside the page, not a CDN: the phone app plays with no network.
-    expect(html).toContain('<script vite-ignore src="./vendor/strudel-web.js"></script>');
     expect(html).not.toMatch(/<script[^>]* src="https?:/);
     expect(html).not.toMatch(/<link[^>]* href="https?:/);
+    // The Prosody player makes the sound (docs/player.md): Strudel's runtime, its import map and
+    // its globals are gone, and the page's own code never imports a Strudel package.
+    expect(html).not.toMatch(/strudel|importmap/i);
+    expect(existsSync(join(web, 'public/strudel-globals.mjs'))).toBe(false);
   });
-});
 
-describe('the Strudel shim', () => {
-  // The names a vendored module imports from the packages the import map sends to the shim.
-  const importedFromShim = (file: string) =>
-    [...read(file).matchAll(/import\s*\{([^}]*)\}\s*from\s*["'](@strudel\/core|@strudel\/webaudio|sfumato)["']/g)]
-      .flatMap((match) => match[1].split(','))
-      .map((name) => name.trim().split(/\s+as\s+/)[0])
-      .filter(Boolean);
-
-  it('exports every name the soundfonts and the roll import from Strudel', () => {
-    // A name missing here leaves every soundfont unregistered and the melody silent.
-    const shim = read('public/strudel-globals.mjs');
-    const names = [
-      ...importedFromShim('node_modules/@strudel/soundfonts/dist/index.mjs'),
-      ...importedFromShim('node_modules/@strudel/draw/draw.mjs'),
-    ];
-    expect(names).toContain('registerSound');
-    expect(names).toContain('TimeSpan');
-    for (const name of names) expect(shim, name).toMatch(new RegExp(`\\b${name}\\b`));
+  it('builds code that imports no Strudel package', () => {
+    const sources = (dir: string): string[] => readdirSync(join(web, dir), { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? sources(join(dir, entry.name)) : /\.tsx?$/.test(entry.name) ? [join(dir, entry.name)] : []);
+    const importing = sources('src').filter((file) => /from\s+['"]@strudel\//.test(read(file)) || /import\(['"]@strudel\//.test(read(file)));
+    expect(importing).toEqual([]);
   });
 });
 

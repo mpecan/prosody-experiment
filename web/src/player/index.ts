@@ -1,15 +1,17 @@
 // The Prosody player on the page (`docs/player.md` §5): the piece's Performance rendered by our own
 // synth in a worker, mixed by an AudioWorklet, and everything the page draws — the lit poem, the
-// roll, the meters — read from the Performance at the worklet's playhead.
+// roll, the meters, the line being read — read from the Performance at the worklet's playhead. It is
+// the page's only player: Strudel's runtime is not loaded (the pattern is still shown, copied and
+// linked to strudel.cc as text).
 //
 //   page ──Performance, samples──► render worker ──blocks (MessageChannel)──► worklet ──► output
 //     ▲                                                                          │
 //     └──────────────────────────── frames played ◄──────────────────────────────┘
 //
-// Steps 2 and 3 of the design: the drums, the bass, the melody and the chords, with everything the
-// text asks of them — gain, envelope, low-pass, vowel, crush, shape, each channel's compressor, echo
-// and reverb — mixed as five stems through the page's master. The reading comes in step 4; until
-// then its stem is silent and the status line says the reading is not played here.
+// The drums, the bass, the melody and the chords, with everything the text asks of them — gain,
+// envelope, low-pass, vowel, crush, shape, each channel's compressor, echo and reverb — and the
+// reading, its rendered lines placed on the fifth stem by the worker with the duck (speech.ts,
+// reader.ts), mixed through the page's master.
 import workletUrl from './worklet?worker&url';
 
 import type { Mark, Performance } from '../answers';
@@ -18,15 +20,16 @@ import { site } from '../data';
 import { closeLoader, openLoader } from '../loader';
 import { audible } from '../mix';
 import { piece, query, summaryOf } from '../piece';
-import { showBeat } from '../strudel';
-import { hearing, playing, poem, status, type Channel } from '../store';
-import type { Hap } from '../strudel/globals';
+import { quietReading, voiceLevel } from '../reading';
+import type { RollNote } from '../roll';
+import { beat, hearing, playing, poem, readingSettings, settings, status, type Channel } from '../store';
 import {
   clearRoll, drawFrame, elementsBetween, fitRoll, lightMarks, litVersion, resetMeters, rollWindow, watch,
 } from '../watch';
 import { indexed, marksAt, notesBetween, pieceTime, settle, type Indexed, type Placement } from './clock';
 import { barStarts, records, sampledOf, STEM_CHANNELS } from './notes';
 import { decodeDrum, decodeFont, zoneName } from './samples';
+import { dropped, handing, speechAt, speechStats, startSpeech, stopSpeech, told, wanted } from './speech';
 
 /** Frames the worker renders at a time. */
 const BLOCK = 2048;
@@ -44,9 +47,11 @@ let engine: Promise<Engine> | null = null;
 let ready: Engine | null = null;
 
 /** What the worklet last said: how far it had played, by the audio clock's `time`. */
-let report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation: 0, peak: 0 };
-/** The loudest the output has been since it was last asked (the end-to-end test asks). */
+let report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation: 0, peak: 0, speechPeak: 0 };
+/** The loudest the output, and the reading's stem, have been since last asked (the end-to-end test
+ * asks). */
 let loudest = 0;
+let loudestSpeech = 0;
 /** What the worker last said it lost. */
 let losses = { stolen: 0, missing: 0 };
 /** A piece as the page draws it: its Performance indexed, and the text and bar times it was compiled
@@ -63,9 +68,9 @@ let placements: (Placement & { heard: Heard })[] = [];
 const handed = new Map<number, { heard: Heard; fromTheTop: boolean }>();
 let serial = 0;
 let generation = 0;
-/** Counts calls to play(), and Stop and a switch of player: a play() still loading when this has
- * moved on was overtaken — by Stop, a switch, or a newer play() — and gives up rather than start
- * sound nobody asked for, or sound the Stop button no longer reaches. */
+/** Counts calls to play(), and Stop: a play() still loading when this has moved on was overtaken —
+ * by Stop or a newer play() — and gives up rather than start sound nobody asked for, or sound the
+ * Stop button no longer reaches. */
 let attempt = 0;
 /** The sampled sounds, by key, as the instrument numbers the worker knows them by: given once, in
  * the order first asked for. A sound that failed to load keeps its number, and the synth counts its
@@ -91,6 +96,7 @@ function startEngine(): Promise<Engine> {
       const ranDry = data.underruns !== report.underruns;
       report = data;
       loudest = Math.max(loudest, data.peak as number);
+      loudestSpeech = Math.max(loudestSpeech, (data.speechPeak as number) ?? 0);
       if (ranDry) tell();
     };
     const worker = new Worker(new URL('./render-worker.ts', import.meta.url), { type: 'module' });
@@ -112,6 +118,14 @@ function startEngine(): Promise<Engine> {
     });
     worker.onmessage = ({ data }: MessageEvent) => heard(data);
     ready = { context, node, worker };
+    startSpeech({
+      post: (message, transfer = []) => worker.postMessage(message, transfer),
+      worklet: (message) => node.port.postMessage(message),
+      gains: sendGains,
+      playhead: () => playhead(context),
+      rate: () => context.sampleRate,
+      generation: () => generation,
+    });
     return ready;
   })();
   engine.catch(() => { engine = null; });
@@ -131,6 +145,12 @@ function heard(data: Record<string, unknown>): void {
       heard: sent.heard,
     };
     placements = sent.fromTheTop ? [placement] : [...placements, placement];
+  } else if (data.op === 'reading') {
+    told(data.generation as number, data.told as Parameters<typeof told>[1]);
+  } else if (data.op === 'want') {
+    wanted(data.keys as string[]);
+  } else if (data.op === 'dropped') {
+    dropped(data.keys as string[]);
   } else if (data.op === 'losses') {
     losses = { stolen: data.stolen as number, missing: data.missing as number };
     tell();
@@ -187,7 +207,7 @@ async function loadSounds(worker: Worker, performance: Performance): Promise<str
 export async function play(): Promise<void> {
   if (!piece.latest) return;
   const mine = ++attempt;
-  // Overtaken by Stop, a switch of player, or a newer play(): checked after every wait.
+  // Overtaken by Stop or a newer play(): checked after every wait.
   const overtaken = () => mine !== attempt;
   const text = poem.value;
   const side = hearing.value;
@@ -230,43 +250,49 @@ export async function play(): Promise<void> {
   };
   const heard: Heard = { piece: indexed(performance), text, bars: [...performance.bars.map((bar) => bar.at), performance.seconds] };
   handed.set(message.serial, { heard, fromTheTop });
+  // The reading compiled with this Performance: from the same text, so its lines are the cues'.
+  const reading = piece.readings.poem === text ? piece.readings[side] : null;
   if (fromTheTop) {
     generation += 1;
-    report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation, peak: 0 };
+    quietReading();
+  }
+  const reads = { cues: reading ? performance.cues : [], ...handing(message.serial, reading, fromTheTop) };
+  if (fromTheTop) {
+    report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation, peak: 0, speechPeak: 0 };
     losses = { stolen: 0, missing: 0 };
-    running.worker.postMessage({ op: 'play', generation, ...message }, [message.notes.buffer, message.bars.buffer]);
+    running.worker.postMessage({ op: 'play', generation, ...message, ...reads }, [message.notes.buffer, message.bars.buffer]);
     // Nothing else is heard now, so the roll takes this piece's bars at once. After a live edit it
     // keeps the old piece's until the new one takes over (draw).
     watch.heardBars = heard.bars;
     fitRoll();
   } else {
-    running.worker.postMessage({ op: 'swap', ...message }, [message.notes.buffer, message.bars.buffer]);
+    running.worker.postMessage({ op: 'swap', ...message, ...reads }, [message.notes.buffer, message.bars.buffer]);
   }
   piece.fromTheTop = false;
   sendGains();
   playing.value = true;
   showBeat();
-  said = side + ' · ' + summaryOf(piece.latest) + ' · playing (Prosody player; the reading is not played by it yet)'
+  // A line the reading leaves out is said, not left for the listener to miss (SPEC.md §4.7).
+  const missing = readingSettings.value.pace === 'fitted' ? reading?.unread : reading?.natural_unread;
+  const lost = missing?.length ? ' · not read: ' + missing.map((line) => 'line ' + (line.line + 1) + ', ' + line.why).join('; ') : '';
+  if (lost) console.log('[reading]' + lost);
+  said = side + ' · ' + summaryOf(piece.latest) + ' · playing' + lost
     + (failed.length ? ' · not loaded: ' + failed.join(', ') : '');
   tell();
   if (!frame) frame = requestAnimationFrame(draw);
 }
 
-/** Gives up any play() still loading, without touching what plays: for a switch of player while
- * nothing plays (transport.ts), which would otherwise leave a Prosody load to start sound once the
- * other player is chosen — sound that player's Stop button would not reach. */
-export function cancel(): void {
-  attempt += 1;
-}
-
 export function stop(): void {
-  cancel();
+  // Any play() still loading gives up.
+  attempt += 1;
   generation += 1;
   void engine?.then(({ worker }) => worker.postMessage({ op: 'stop', generation }));
   cancelAnimationFrame(frame);
   frame = 0;
   placements = [];
   handed.clear();
+  quietReading();
+  stopSpeech();
   watch.heardBars = null;
   lightMarks([]);
   clearRoll();
@@ -276,9 +302,21 @@ export function stop(): void {
   status('stopped');
 }
 
-/** Mute and solo, as stem gains in the worklet: heard within about 5 ms (mixer.ts `GLIDE`). */
+/** Mute and solo, as stem gains in the worklet: heard within about 5 ms (mixer.ts `GLIDE`). The
+ * reading's stem is at the reading's level (0–2, its fader in the Mixer), or nothing while muted. */
 export function sendGains(): void {
-  ready?.node.port.postMessage({ gains: STEM_CHANNELS.map((channel) => (audible(channel as Channel) ? 1 : 0)) });
+  ready?.node.port.postMessage({
+    gains: STEM_CHANNELS.map((channel) => (channel === 'voice' ? voiceLevel() : audible(channel as Channel) ? 1 : 0)),
+  });
+}
+
+// ---- The beat on the Play button ----
+// Under the steady pulse a cycle is a beat, so the trace's cycles a minute are the tempo; under the
+// elastic one there is no single beat to show, and the button stays still.
+export function showBeat(): void {
+  const trace = piece.traces[hearing.value];
+  const steady = (settings.value[hearing.value]?.pulse ?? 'steady') !== 'elastic';
+  beat.value = playing.value && steady && trace && trace.cpm > 0 ? 60 / trace.cpm : null;
 }
 
 /** The render frame at the speaker now, or null before anything has played: the worklet's count
@@ -311,21 +349,18 @@ function draw(): void {
     fitRoll();
   }
   const [from, to] = rollWindow();
-  const haps = notesBetween(heard.piece, now.time + from, now.time + to).map(({ note, begin, end }) => hapOf(note, begin, end));
-  drawFrame(haps, now.time);
+  const notes = notesBetween(heard.piece, now.time + from, now.time + to).map(({ note, begin, end }) => rollNoteOf(note, begin, end));
+  drawFrame(notes, now.time);
   lightMarks(lit(heard, now.time));
+  speechAt(at);
 }
 
 /** The colour each lane is drawn in. */
 const colourOf = (lane: string) => site.layers.find((layer) => layer.name === lane)?.colour ?? '#888';
 
-/** A note as the roll and the meters read a Strudel event. */
-function hapOf(note: Indexed['notes'][number], begin: number, end: number): Hap {
-  return {
-    whole: { begin, end },
-    value: { color: colourOf(note.lane), note: note.pitch ?? undefined, muted: !audible(note.channel) },
-    hasOnset: () => true,
-  };
+/** A note as the roll and the meters draw it. */
+function rollNoteOf(note: Indexed['notes'][number], begin: number, end: number): RollNote {
+  return { begin, end, colour: colourOf(note.lane), note: note.pitch ?? undefined, muted: !audible(note.channel) };
 }
 
 /** The marks lit at `time`, each over its words in the verse — only while the verse shows the text
@@ -353,9 +388,13 @@ function lit(heard: Heard, time: number): { mark: Mark; elements: HTMLElement[] 
   stats: () => {
     const at = ready ? playhead(ready.context) : null;
     const peak = loudest;
+    const speechPeak = loudestSpeech;
     loudest = 0;
+    loudestSpeech = 0;
     return {
       peak,
+      speechPeak,
+      ...speechStats(),
       underruns: report.underruns,
       started: report.started,
       queued: report.queued,

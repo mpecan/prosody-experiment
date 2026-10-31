@@ -19,11 +19,10 @@ export const piece = {
   patterns: { A: '', B: '' } as Record<Side, string>,
   /** The pattern of the side heard: what Play plays. */
   latest: '',
-  // Set when the next play() must restart Strudel's clock at cycle 0 rather than hand the running
-  // scheduler a new pattern: after a preset or an A/B switch. Strudel keeps its cycle count across
-  // `setPattern`, so without the restart the new piece (at its own `.cpm`) starts partway through
-  // and its reading begins at whatever line that bar first hosts. A live edit keeps the clock
-  // running instead — the writer is listening in place — and the reading carries on from there.
+  // Set when the next play() must start the piece from its top rather than hand the playing one
+  // over to it at the next bar: after a preset or an A/B switch, so the new piece starts at bar 1 and
+  // its reading at its first line. A live edit hands over instead — the writer is listening in place
+  // — and the reading carries on from there (docs/player.md §5, "Live edits").
   fromTheTop: false,
 };
 

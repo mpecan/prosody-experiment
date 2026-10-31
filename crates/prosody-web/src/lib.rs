@@ -1461,9 +1461,11 @@ mod tests {
 
     #[test]
     fn no_poem_text_reaches_the_code_the_page_runs() {
-        // A shared link hands a stranger's poem to the page, which evaluates what it compiles to —
-        // the pattern, the reading's two cue patterns and the trace — as JavaScript. So no text of
-        // the poem may reach that code except inside a `//` comment it cannot leave: no line of the
+        // A shared link hands a stranger's poem to the page, which shows what it compiles to — the
+        // pattern, the reading's two cue patterns and the trace — as code someone may paste into
+        // strudel.cc, which runs it as JavaScript (the page itself evaluated it too, before its own
+        // player replaced Strudel's: docs/player.md §12). So no text of the poem may reach that
+        // code except inside a `//` comment it cannot leave: no line of the
         // code outside a comment carries the poem's words, and no line terminator JavaScript knows
         // (U+2028, U+2029, a carriage return) appears at all, since one inside a comment would end
         // it. Every word below carries the marker `qzx`.

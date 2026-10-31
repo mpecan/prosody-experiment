@@ -1,9 +1,7 @@
 // Watch: the roll, the mixer's meters and the lit poem.
 //
-// Strudel's own drawing (`@strudel/draw`, the version matching the page's Strudel) is loaded only
-// once Strudel has started: its imports of `@strudel/core` are answered from the playing Strudel
-// by the import map, like the soundfonts'. Its `Drawer` calls back every animation frame with the
-// notes near the playhead and the scheduler's time; the same time draws the lane roll (roll.ts),
+// The Prosody player calls back every animation frame with the Performance's notes near its
+// playhead and the playhead's time (player/index.ts); the same time draws the lane roll (roll.ts),
 // moves the mixer's meters and lights the poem, so none of them can disagree about what is
 // sounding.
 //
@@ -13,19 +11,8 @@ import type { Mark, Trace } from './answers';
 import { piece } from './piece';
 import { site } from './data';
 import { audible, CHANNEL_OF_LAYER, layerOf } from './mix';
-import { laneRects, paintLanes } from './roll';
+import { laneRects, paintLanes, type RollNote } from './roll';
 import { hearing, poem, rollBars, rollShown, type Channel } from './store';
-import type { Hap, Pattern, Scheduler } from './strudel/globals';
-
-// Served from beside the page (vite.config.ts `vendored`), not a CDN.
-const DRAW = new URL('./vendor/strudel-draw.mjs', document.baseURI).href;
-
-interface Drawer {
-  start(scheduler: Scheduler): void;
-  stop(): void;
-  invalidate(scheduler: Scheduler): void;
-  setDrawTime(span: [number, number]): void;
-}
 
 /** Lit pieces of the verse: a run of its text, and the element showing it. */
 interface Piece {
@@ -35,10 +22,6 @@ interface Piece {
 }
 
 export const watch = {
-  drawer: null as Drawer | null,
-  drawing: false,
-  /** The trace of the pattern playing, evaluated: queried for which syllable sounds. */
-  tracePattern: null as Pattern | null,
   // Where the bars of the pattern now playing fall, in seconds (barsOf): taken from that pattern's
   // own trace when it starts, so the roll keeps the clock of what is sounding while the text box
   // runs ahead of it.
@@ -51,29 +34,13 @@ export const watch = {
 
 /** The poem as compiled, one element per piece of it a mark can light: `all` every piece of the
  * verse, `pieces` those the reading may light (only while its positions are the text box's). */
-let lit: { trace: Trace | null; marks: HTMLSpanElement[][]; pieces: Piece[]; all: Piece[]; text: string } = {
-  trace: null, marks: [], pieces: [], all: [], text: '',
-};
+let lit: { pieces: Piece[]; all: Piece[]; text: string } = { pieces: [], all: [], text: '' };
 
-export async function startDrawing(): Promise<void> {
-  try {
-    const { Drawer } = await (import(/* @vite-ignore */ DRAW) as
-      Promise<{ Drawer: new (fn: (haps: Hap[], time: number) => void, span: [number, number]) => Drawer }>);
-    watch.drawer = new Drawer((haps, time) => {
-      drawFrame(haps, time);
-      lightUp(time);
-    }, rollWindow());
-  } catch (error) {
-    // The music does not depend on the picture of it.
-    console.warn('[watch] Strudel\'s drawing could not be loaded:', error);
-  }
-}
-
-// Where the bars of a trace (prosody_emit::trace) fall on the scheduler's clock, in seconds: each
-// bar's start, and last the piece's length, where it loops round. The trace is built by the music's
-// own walk: under the steady pulse a bar lasts its beats, so bars of three and four beats are not
-// evenly spaced; under the elastic pulse every bar is one cycle. A cycle lasts `60 / cpm` on a
-// scheduler at one cycle a second. Null without a trace that says so.
+// Where the bars of a trace (prosody_emit::trace) fall on the piece's clock, in seconds: each bar's
+// start, and last the piece's length, where it loops round. The trace is built by the music's own
+// walk: under the steady pulse a bar lasts its beats, so bars of three and four beats are not evenly
+// spaced; under the elastic pulse every bar is one cycle. A cycle lasts `60 / cpm`. Null without a
+// trace that says so.
 export function barsOf(trace: Trace | null): number[] | null {
   if (!trace || !Array.isArray(trace.bars) || trace.bars.length < 2 || !(trace.cpm > 0)) return null;
   const cycle = 60 / trace.cpm;
@@ -104,8 +71,10 @@ export function rollWindow(): [number, number] {
   return [-half, half];
 }
 
+/** After the bars or the roll's width change: the window is read each frame (`rollWindow`), so
+ * there is nothing to hold; the roll is cleared until the next frame paints it. */
 export function fitRoll(): void {
-  watch.drawer?.setDrawTime(rollWindow());
+  clearRoll();
 }
 
 function rollContext(): CanvasRenderingContext2D | null {
@@ -133,14 +102,13 @@ export function barLines(times: number[], from: number, to: number): number[] {
 }
 
 /** One frame of the picture: the roll and the meters, from the notes near `time` on the clock that
- * keeps rising. Strudel's drawer calls it with its haps; the Prosody player with the Performance's
- * notes, shaped as haps (player/index.ts). */
-export function drawFrame(haps: Hap[], time: number): void {
-  paintRoll(haps, time);
-  showActivity(haps, time);
+ * keeps rising (player/index.ts). */
+export function drawFrame(notes: RollNote[], time: number): void {
+  paintRoll(notes, time);
+  showActivity(notes, time);
 }
 
-function paintRoll(haps: Hap[], time: number): void {
+function paintRoll(notes: RollNote[], time: number): void {
   if (!rollShown.value) return;
   const ctx = rollContext();
   if (!ctx) return;
@@ -150,7 +118,7 @@ function paintRoll(haps: Hap[], time: number): void {
   const frame = { width: ctx.canvas.width, height: ctx.canvas.height, gutter: Math.round(72 * scale) };
   const across = (frame.width - frame.gutter) / (span[1] - span[0]);
   const bars = barLines(barTimes(), time + span[0], time + span[1]).map((at) => frame.gutter + at * across);
-  paintLanes(ctx, laneRects(haps, site.layers, time, span, frame), site.layers, bars, frame, scale);
+  paintLanes(ctx, laneRects(notes, site.layers, time, span, frame), site.layers, bars, frame, scale);
 }
 
 // ---- The meters ----
@@ -160,14 +128,14 @@ function paintRoll(haps: Hap[], time: number): void {
 // channels; the voice's meter follows the line being read (`setSpeaking`).
 const activity: Partial<Record<Channel, number>> = {};
 let lastFrame = 0;
-function showActivity(haps: Hap[], time: number): void {
+function showActivity(notes: RollNote[], time: number): void {
   const now = performance.now();
   const fall = Math.exp(-(now - (lastFrame || now)) / 180);
   lastFrame = now;
   const sounding = new Set<Channel>();
-  for (const hap of haps) {
-    if (!hap.whole || time < hap.whole.begin.valueOf() || time >= hap.whole.end.valueOf()) continue;
-    const layer = layerOf(hap.value?.color);
+  for (const note of notes) {
+    if (time < note.begin || time >= note.end) continue;
+    const layer = layerOf(note.colour);
     const channel = layer ? CHANNEL_OF_LAYER[layer] : undefined;
     if (channel && audible(channel)) sounding.add(channel);
   }
@@ -216,7 +184,7 @@ export function buildLit(): void {
   if (!box) return;
   const text = poem.value;
   const trace = piece.traces.poem === text ? piece.traces[hearing.value] : null;
-  lightUp(null);
+  lightMarks([]);
   // The reading's lines too, so a line being read is a run of whole pieces, and its words, so the
   // word being said is a run of whole pieces too.
   const reading = piece.readings.poem === text ? piece.readings[hearing.value] : null;
@@ -237,14 +205,7 @@ export function buildLit(): void {
   box.replaceChildren(fragment);
   built += 1;
   box.scrollTop = watch.poemBox?.scrollTop ?? 0;
-  lit = {
-    trace,
-    all: pieces,
-    text,
-    pieces: piece.readings.poem === text ? pieces : [],
-    marks: trace ? trace.marks.map((mark) =>
-      pieces.filter((p) => p.start >= mark.start && p.start < mark.end).map((p) => p.element)) : [],
-  };
+  lit = { all: pieces, text, pieces: piece.readings.poem === text ? pieces : [] };
   showReading();
 }
 
@@ -320,33 +281,14 @@ export function elementsBetween(from: number, to: number, text: string): HTMLEle
   return lit.all.filter((p) => p.start < to && p.end > from).map((p) => p.element);
 }
 
-/** Lights the marks given, each over its elements: Strudel's trace or the Prosody player's
- * Performance. A fresh mark wins over a looping one where they overlap. */
+/** Lights the marks given, each over its elements: the Performance's marks at the playhead. A fresh
+ * mark wins over a looping one where they overlap. */
 export function lightMarks(marks: Iterable<{ mark: Mark; elements: HTMLElement[] }>): void {
   const next = new Map<HTMLElement, Mark>();
   for (const { mark, elements } of marks) {
     for (const element of elements) {
       const held = next.get(element);
       if (!held || (mark.fresh && !held.fresh)) next.set(element, mark);
-    }
-  }
-  shine(next);
-}
-
-export function lightUp(time: number | null): void {
-  const next = new Map<HTMLElement, Mark>();
-  if (time !== null && watch.tracePattern && lit.trace) {
-    for (const hap of watch.tracePattern.queryArc(time, time + 1e-4)) {
-      if (!hap.whole) continue;
-      const [begin, end] = [hap.whole.begin.valueOf(), hap.whole.end.valueOf()];
-      if (time < begin || time >= end) continue;
-      const id = Number(hap.value?.n);
-      const mark = lit.trace.marks[id];
-      if (!mark) continue;
-      for (const element of lit.marks[id] || []) {
-        const held = next.get(element);
-        if (!held || (mark.fresh && !held.fresh)) next.set(element, mark);
-      }
     }
   }
   shine(next);

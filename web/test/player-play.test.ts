@@ -1,11 +1,14 @@
 // The Prosody player's Play and Stop on the page (src/player/index.ts), with the audio stubbed: a
-// play() still loading when Stop is pressed, or the player switched, must give up — not start sound
-// after the Stop, nor sound the Stop button can no longer reach. The compiler is held at the
-// Performance request so each test can act while play() waits on it.
+// play() still loading when Stop is pressed must give up — not start sound after the Stop — and a
+// piece is handed to the worker with its reading. The compiler is held at the Performance request so
+// each test can act while play() waits on it.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { piece } from '../src/piece';
-import { player, playing, poem } from '../src/store';
+import { playing, poem } from '../src/store';
+
+/** The one line the Performance's reading cues: line 0, where the piece begins, at the natural pace. */
+const CUE = { line: 0, stanza: 0, from: 0, to: 28, pace: 1, pause: 1.5, fitted: null, natural: { onset: 'arrives', slot: 0, at: 0 } };
 
 /** The Performance request, held until the test lets it answer. */
 let answer: (() => void) | null = null;
@@ -14,7 +17,9 @@ vi.mock('../src/compiler', () => ({
   ask: vi.fn(async (path: string) => {
     asked(path);
     await new Promise<void>((resolve) => { answer = resolve; });
-    return new Response(JSON.stringify({ seconds: 2, cpm: 30, bars: [{ slot: 0, at: 0 }], notes: [], marks: [] }));
+    return new Response(JSON.stringify({
+      seconds: 2, cpm: 30, bars: [{ slot: 0, at: 0 }], notes: [], marks: [], cues: [CUE], unread: [], natural_unread: [],
+    }));
   }),
 }));
 vi.mock('../src/player/worklet?worker&url', () => ({ default: 'worklet.js' }));
@@ -69,6 +74,38 @@ afterEach(async () => {
 });
 
 describe('the Prosody player', () => {
+  it('hands the worker the reading with the piece: its cues, who reads each line, the pace and the duck', async () => {
+    const text = poem.value;
+    const line = { line: 0, stanza: 0, start: 0, end: 28, from: 0, to: 28, syllables: 7, pace: 1, pause: 1.5, ends: 'stanza', words: [], text };
+    piece.readings = {
+      A: { pattern: '', natural: '', bars: [0, 1], cpm: 30, fill: 0.9, cues: [], lines: [{ ...line, onset: 'arrives', slot: 0 }], unread: [], natural_unread: [] },
+      B: null,
+      poem: text,
+    };
+    const prosody = await import('../src/player');
+    const playingNow = prosody.play();
+    await heldAtThePerformance();
+    answer!();
+    await playingNow;
+    const play = toWorker.find((m) => m.op === 'play')!;
+    expect(play.cues).toEqual([CUE]);
+    // No engine has loaded, so the browser's voice reads it (null): the worker tells the page when.
+    expect(play.cast).toEqual([[0, null]]);
+    expect(play.pace).toBe('natural');
+    expect(play.duck).toBe(0.6);
+    piece.readings = { A: null, B: null, poem: '' };
+  });
+
+  it('hands over no cues for a reading compiled from another text', async () => {
+    piece.readings = { A: null, B: null, poem: 'something else' };
+    const prosody = await import('../src/player');
+    const playingNow = prosody.play();
+    await heldAtThePerformance();
+    answer!();
+    await playingNow;
+    expect(toWorker.find((m) => m.op === 'play')!.cues).toEqual([]);
+  });
+
   it('plays once the Performance arrives, from the top', async () => {
     // The control: without a Stop, the same steps do start sound, so the tests below can fail.
     const prosody = await import('../src/player');
@@ -111,21 +148,5 @@ describe('the Prosody player', () => {
     await edit;
     expect(starts()).toEqual([]);
     expect(playing.value).toBe(false);
-  });
-
-  it('gives up when the player is switched to Strudel during its first load', async () => {
-    const transport = await import('../src/transport');
-    player.value = 'prosody';
-    const playingNow = transport.play();
-    await heldAtThePerformance();
-    transport.choosePlayer('strudel');
-    // The switch reaches the player through its module's promise: let it.
-    await Promise.resolve();
-    await Promise.resolve();
-    answer!();
-    await playingNow;
-    expect(starts()).toEqual([]);
-    expect(playing.value).toBe(false);
-    expect(player.value).toBe('strudel');
   });
 });

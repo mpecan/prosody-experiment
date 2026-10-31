@@ -1,4 +1,5 @@
-// The static page, end to end: the real compiler answering in the browser.
+// The static page, end to end: the real compiler answering in the browser, the Prosody player
+// making the sound.
 import { expect, test, type Page } from '@playwright/test';
 
 /** The page, the welcome already seen. */
@@ -6,6 +7,12 @@ async function open(page: Page) {
   await page.addInitScript(() => localStorage.setItem('prosody.welcomed', '1'));
   await page.goto('/');
 }
+
+/** How the Prosody player is doing (src/player/index.ts `prosodyPlayer.stats`). */
+type Stats = {
+  underruns: number; playhead: number | null; missing: number; peak: number; speechPeak: number; spoken: number; onTime: number;
+};
+const stats = (page: Page) => page.evaluate(() => (globalThis as unknown as { prosodyPlayer: { stats(): Stats } }).prosodyPlayer.stats());
 
 test('compiles the opening poem in the browser, under A and then B', async ({ page }) => {
   await open(page);
@@ -43,7 +50,6 @@ test('plays, lighting the poem as it goes, and stops', async ({ page }) => {
   await open(page);
   await expect(page.locator('#status')).toContainText('24 bars');
   await page.click('#play');
-  // The soundfonts come from their CDN on the first Play; everything else is beside the page.
   await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
   await expect(page.locator('#lit span.on').first()).toBeAttached({ timeout: 15_000 });
   await page.click('#stop');
@@ -132,62 +138,43 @@ test('shares a poem as a link that opens to the same piece, for someone else', a
   await expect(other.locator('.mapping[data-name="bass"] [aria-label="bass, setting A"] button[aria-pressed="true"]')).toHaveText('feet');
 });
 
-test('plays from beside the page: only the soundfonts come from anywhere else', async ({ page, baseURL }) => {
-  // The drums were strudel.cc's drum machines on its CDN, with no licence to ship or cache. Every
-  // other host is refused here, so a sound that still came from one would fail to load.
-  const elsewhere = new Set<string>();
-  await page.route('**/*', (route) => {
-    const url = new URL(route.request().url());
-    if (url.origin === new URL(baseURL!).origin) return route.continue();
-    elsewhere.add(url.host);
-    // The instruments' soundfonts, until the app downloads them for offline use.
-    return url.host === 'felixroos.github.io' ? route.continue() : route.abort();
-  });
-  await open(page);
-  // Jazz, on the Virtuosity kit's ride.
-  await page.getByRole('tab', { name: 'Sound' }).click();
-  await page.locator('#styles [data-style="jazz"]').click();
-  await expect(page.locator('#status')).toContainText('24 bars');
-  const drums: string[] = [];
-  page.on('requestfinished', (request) => { if (request.url().includes('/drums/')) drums.push(new URL(request.url()).pathname); });
-  await page.click('#play');
-  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
-  // Jazz's ride, from its kit beside the page (the other side, still on the default palette, may
-  // load uzu's kick).
-  await expect.poll(() => drums, { timeout: 15_000 }).toContain('/drums/virtuosity/rd.flac');
-  expect([...elsewhere]).toEqual(['felixroos.github.io']);
-  await page.click('#stop');
-});
-
-test('the Prosody player plays everything from beside the page, the soundfonts too', async ({ page, baseURL }) => {
-  // Its soundfonts are our own FLAC zones (scripts/render-soundfonts.mjs), not the webaudiofont
-  // files Strudel fetches: every other host is refused, and nothing may be missing.
+test('plays and reads from beside the page, with every other host refused', async ({ page, baseURL }) => {
+  // The phone app plays offline: the player, its synth, the drums, the soundfonts (our own FLAC
+  // zones, scripts/render-soundfonts.mjs) and the recorded readings are all beside the page, and
+  // Strudel's runtime is not loaded at all. Every other host is refused here, so anything that still
+  // came from one would fail — and nothing may be missing.
   const elsewhere = new Set<string>();
   const fonts: string[] = [];
+  const drums: string[] = [];
+  const asked: string[] = [];
   await page.route('**/*', (route) => {
     const url = new URL(route.request().url());
     if (url.origin === new URL(baseURL!).origin) {
+      asked.push(url.pathname);
       if (url.pathname.includes('/soundfonts/')) fonts.push(url.pathname);
+      if (url.pathname.includes('/drums/')) drums.push(url.pathname);
       return route.continue();
     }
     elsewhere.add(url.host);
     return route.abort();
   });
   await open(page);
-  // Jazz: soundfont bass and electric piano, compressed, with room and echo.
+  // Jazz: soundfont bass and electric piano, compressed, with room and echo, on the Virtuosity kit's
+  // ride.
   await page.getByRole('tab', { name: 'Sound' }).click();
   await page.locator('#styles [data-style="jazz"]').click();
   await expect(page.locator('#status')).toContainText('24 bars');
-  await page.getByRole('tab', { name: 'Mixer' }).click();
-  await page.locator('#player button[data-value="prosody"]').click();
   await page.click('#play');
   await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
-  type Stats = { underruns: number; playhead: number | null; missing: number; peak: number };
-  const stats = () => page.evaluate(() => (globalThis as unknown as { prosodyPlayer: { stats(): Stats } }).prosodyPlayer.stats());
-  await expect.poll(async () => (await stats()).peak, { timeout: 20_000 }).toBeGreaterThan(0.01);
-  expect((await stats()).missing).toBe(0);
+  await expect.poll(async () => (await stats(page)).peak, { timeout: 20_000 }).toBeGreaterThan(0.01);
+  // The first line is read from its recording, on the player's reading stem.
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  expect((await stats(page)).missing).toBe(0);
+  expect(drums).toContain('/drums/virtuosity/rd.flac');
   expect(fonts.some((path) => path.endsWith('0320_FluidR3_GM_sf2_file.json'))).toBe(true);
   expect(fonts.some((path) => path.endsWith('.flac'))).toBe(true);
+  expect(asked.some((path) => path.startsWith('/readings/') && path.endsWith('.mp3'))).toBe(true);
+  expect(asked.filter((path) => /strudel|vendor/.test(path) && !path.endsWith('strudel.json'))).toEqual([]);
   expect([...elsewhere]).toEqual([]);
   await page.click('#stop');
 });
@@ -208,21 +195,18 @@ test('every drum a pattern can ask for is beside the page, in a form the browser
   expect(decoded.filter((result) => result !== 'ok')).toEqual([]);
 });
 
-test('every soundfont plays the licensed variant the compiler names, in the Strudel the page ships', async ({ request }) => {
-  // The compiler asks for `gm_cello:1`; Strudel turns the index into a file from its own `gm` table.
-  // An upgrade that reordered that table would quietly play another bank, one with no licence.
+test('every soundfont the compiler can name is beside the page, as our own zones', async ({ request }) => {
+  // The page plays a soundfont from the file the compiler names for it (site.json), converted to
+  // FLAC zones beside the page. A name with no file there would leave its notes unheard.
   const site = (await (await request.get('/site.json')).json()) as { soundfonts: Record<string, string> };
-  const module = await (await request.get('/vendor/strudel-soundfonts.mjs')).text();
-  const listed = (name: string) => {
-    const block = module.match(new RegExp(`\\n  ${name}: \\[([\\s\\S]*?)\\n  \\]`));
-    // Only the entries Strudel counts: a commented-out file is not in its list.
-    return block ? [...block[1].replace(/\/\/.*$/gm, '').matchAll(/"([^"]*)"/g)].map((m) => m[1]) : [];
-  };
   const sounds = Object.entries(site.soundfonts);
   expect(sounds.length).toBeGreaterThan(20);
   for (const [sound, file] of sounds) {
-    const [name, index] = sound.split(':');
-    expect(listed(name)[Number(index)], sound).toBe(file);
+    const manifest = await request.get(`/soundfonts/${file}.json`);
+    expect(manifest.ok(), sound).toBe(true);
+    const zones = ((await manifest.json()) as { zones: { file: string }[] }).zones;
+    expect(zones.length, sound).toBeGreaterThan(0);
+    expect((await request.head(`/soundfonts/${zones[0]!.file}`)).ok(), sound).toBe(true);
   }
 });
 
@@ -232,26 +216,20 @@ test('the Prosody player keeps playing while the page is blocked for half a seco
   // plays; the render worker and the worklet are not on it, so the music must not notice.
   await open(page);
   await expect(page.locator('#status')).toContainText('24 bars');
-  await page.getByRole('tab', { name: 'Mixer' }).click();
-  await page.locator('#player button[data-value="prosody"]').click();
-  await expect(page.locator('#player button[data-value="prosody"]')).toHaveAttribute('aria-pressed', 'true');
   await page.click('#play');
   await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
-  await expect(page.locator('#status')).toContainText('Prosody player');
-  type Stats = { underruns: number; playhead: number | null; missing: number; peak: number };
-  const stats = () => page.evaluate(() => (globalThis as unknown as { prosodyPlayer: { stats(): Stats } }).prosodyPlayer.stats());
-  await expect.poll(async () => (await stats()).playhead ?? -1, { timeout: 20_000 }).toBeGreaterThan(0.5);
+  await expect.poll(async () => (await stats(page)).playhead ?? -1, { timeout: 20_000 }).toBeGreaterThan(0.5);
   // It is making a sound.
-  await expect.poll(async () => (await stats()).peak, { timeout: 5_000 }).toBeGreaterThan(0.01);
+  await expect.poll(async () => (await stats(page)).peak, { timeout: 5_000 }).toBeGreaterThan(0.01);
   // The poem lights from the Performance at the playhead.
   await expect(page.locator('#lit span.on').first()).toBeAttached({ timeout: 10_000 });
-  const before = await stats();
+  const before = await stats(page);
   await page.evaluate(() => {
     const end = performance.now() + 500;
     while (performance.now() < end) { /* the page's thread, blocked */ }
   });
   await page.waitForTimeout(400);
-  const after = await stats();
+  const after = await stats(page);
   expect(after.underruns).toBe(0);
   // Half a second blocked and 0.4 s waited: the playhead has moved on by about 0.9 s.
   expect(after.playhead! - before.playhead!).toBeGreaterThan(0.75);
@@ -260,4 +238,48 @@ test('the Prosody player keeps playing while the page is blocked for half a seco
   await page.click('#stop');
   await expect(page.locator('#status')).toContainText('stopped');
   await expect(page.locator('#lit span.on')).toHaveCount(0);
+});
+
+test('reads the poem through the player: each recorded line on the reading stem, lit while it is heard', async ({ page }) => {
+  // The recorded readings are the default engine; The Tyger is read from its recordings, the first
+  // line where the music begins (SPEC.md §4.7). The render worker places the line on the reading's
+  // stem at its frame (docs/player.md §5), so it is heard, and the page lights it at the playhead.
+  await open(page);
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Reading' }).click();
+  await expect(page.locator('#voice option:checked')).toContainText('lines recorded', { timeout: 15_000 });
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  await expect.poll(async () => (await stats(page)).speechPeak, { timeout: 10_000 }).toBeGreaterThan(0.001);
+  // Placed exactly on its cue, by the frame: the recording was in the worker before its bar.
+  expect((await stats(page)).onTime).toBeGreaterThan(0);
+  await expect(page.locator('#lit span.reading').first()).toBeAttached({ timeout: 10_000 });
+  // Nothing says the reading is not played, and nothing went missing.
+  await expect(page.locator('#status')).not.toContainText('not played');
+  await expect(page.locator('#status')).not.toContainText('browser voice');
+  await page.click('#stop');
+  await expect(page.locator('#lit span.reading')).toHaveCount(0);
+});
+
+test('a muted voice is silent on the reading stem, and comes back when unmuted', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Mixer' }).click();
+  await page.getByRole('button', { name: 'Mute voice' }).click();
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  // Placed, but at a gain of nothing: the reading's stem stays silent while the music sounds.
+  await page.waitForTimeout(1_500);
+  await stats(page);
+  await page.waitForTimeout(1_000);
+  const muted = await stats(page);
+  expect(muted.peak).toBeGreaterThan(0.01);
+  expect(muted.speechPeak).toBe(0);
+  // The stanza is still being read: unmuted, it is heard again, within the 5 ms glide.
+  await page.getByRole('button', { name: 'Mute voice' }).click();
+  await expect.poll(async () => (await stats(page)).speechPeak, { timeout: 10_000 }).toBeGreaterThan(0.001);
+  await page.click('#stop');
 });

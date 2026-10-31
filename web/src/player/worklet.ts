@@ -22,6 +22,8 @@ const TELL_PAGE = Math.round(sampleRate * 0.05);
 class PlayerProcessor extends AudioWorkletProcessor {
   private queue = new StemQueue(sampleRate);
   private gains = [1, 1, 1, 1, 1];
+  /** The music's level the page asks for while the browser's own voice reads a line. */
+  private duck = 1;
   private worker: MessagePort | null = null;
   /** Which start of play the blocks wanted belong to: blocks still in flight from before a stop or
    * a restart are dropped, not heard. */
@@ -49,13 +51,14 @@ class PlayerProcessor extends AudioWorkletProcessor {
         };
       }
       if (data.gains) this.gains = data.gains as number[];
+      if (typeof data.duck === 'number') this.duck = data.duck;
     };
   }
 
   process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const [left, right] = outputs[0] ?? [];
     if (!left) return true;
-    this.queue.mix(left, right ?? new Float32Array(left.length), this.gains);
+    this.queue.mix(left, right ?? new Float32Array(left.length), this.gains, this.duck);
     for (let i = 0; i < left.length; i++) this.peak = Math.max(this.peak, Math.abs(left[i]!), Math.abs(right?.[i] ?? 0));
     this.sinceWorker += left.length;
     this.sincePage += left.length;
@@ -78,9 +81,11 @@ class PlayerProcessor extends AudioWorkletProcessor {
       started: this.queue.started,
       generation: this.generation,
       peak: this.peak,
+      speechPeak: this.queue.speechPeak,
       time: currentTime,
     });
     this.peak = 0;
+    this.queue.speechPeak = 0;
   }
 }
 

@@ -2,8 +2,8 @@
 //
 // The page makes one worker per engine — `new Worker('./speech-worker.mjs?engine=kokoro',
 // { type: 'module' })` — and asks it, one message at a time, to load and to render a line. Why a
-// worker: a neural voice computes for a second or more per line, and the page's own thread is the
-// one Strudel's scheduler ticks on, so rendering there would skip music. Why one each: Kokoro
+// worker: a neural voice computes for a second or more per line, and the page's own thread draws
+// the lit poem and the roll as the music plays, so rendering there would freeze it. Why one each: Kokoro
 // brings its own ONNX runtime inside Transformers.js and Piper uses onnxruntime-web directly, and
 // two runtimes in one global scope would fight over it.
 //

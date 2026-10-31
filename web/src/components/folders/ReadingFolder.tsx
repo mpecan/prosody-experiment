@@ -43,8 +43,10 @@ export function ReadingFolder() {
           At the <em>natural</em> pace a line follows the one before after a pause from how it
           ends — a quarter of a second after a line that runs on, more after a comma, more after a
           full stop, a second and a half at a stanza's end; <em>fitted</em> fits each line to its bar.
-          Strudel's clock places every line; a neural voice is rendered ahead and started exactly on
-          it, the browser's voice as near as its speech allows. Kokoro and Kitten speak English;
+          The player places every line on the music's clock: a recorded or neural voice is rendered
+          ahead and starts exactly on its beat, ducking the band as it goes; the browser's own voice
+          cannot be placed, so it starts when the playhead reaches its line and is not in step with
+          the music. Kokoro and Kitten speak English;
           Piper speaks many languages, Slovenian among them. Kitten needs WebGPU.
         </p>
       </More>

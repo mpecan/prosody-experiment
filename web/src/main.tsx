@@ -10,7 +10,6 @@ import { compile } from './piece';
 import { startReading } from './reading';
 import { loadSettings } from './settings';
 import { loadSite } from './site';
-import { restorePlayer } from './transport';
 import { decode } from './share';
 import { poem, settings, status } from './store';
 // The two typefaces, built into the page rather than fetched from Google, so the phone app needs no
@@ -36,7 +35,6 @@ async function start(): Promise<void> {
   settings.value = loadSettings();
   poem.value = site.seed;
   restorePage();
-  restorePlayer();
   startReading();
   // A shared link opens its creation in place of the opening poem and the settings this browser
   // saved — without saving over them: they are this visitor's, and come back on a plain visit.

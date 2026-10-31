@@ -3,7 +3,7 @@
 // only what a reader sees.
 
 const NAMES: Record<string, string> = {
-  // Strudel's own synths.
+  // The synth models a header can name (in the Strudel text, Strudel's own synths).
   karplus: 'Plucked string', fm: 'FM synth', subtractive: 'Subtractive synth', physical: 'Physical model',
   sine: 'Sine wave', sawtooth: 'Sawtooth wave', square: 'Square wave', triangle: 'Triangle wave',
   // General MIDI soundfonts.

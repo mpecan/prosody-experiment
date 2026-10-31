@@ -26,6 +26,7 @@ function performance(notes: PerformedNote[], seconds = 2): Performance {
       { from: 4, to: 7, lane: 'pulse', slot: 0, onset: 0.4, length: 0.2, fresh: true, melody: true, bass: false },
       { from: 8, to: 9, lane: 'pulse', slot: 1, onset: 1.5, length: 0.25, fresh: false, melody: false, bass: false },
     ],
+    cues: [], unread: [], natural_unread: [],
   };
 }
 
@@ -248,6 +249,21 @@ describe('the worklet mixer', () => {
     const left = new Float32Array(1), right = new Float32Array(1);
     queue.mix(left, right, ALL);
     expect(left[0]).toBeCloseTo(0.095905, 5);
+  });
+
+  it('ducks the music, not the reading, under the browser\'s voice, falling as the renderer\'s duck falls', () => {
+    // The page asks for 0.6 while the browser's own voice reads. At 48 kHz the fall's time constant
+    // (0.08 s) is 3 840 frames: one constant in, the music has gone 1 − 1/e of the way, to
+    // 0.6 + 0.4/e = 0.747152 of itself. The reading's stem is untouched, and is what the peak sees.
+    const queue = new StemQueue(48_000);
+    const b = block(0, 4_000, 0, 0.1, 0.1);
+    b.data.fill(0.02, 4 * 2 * 4_000, 4 * 2 * 4_000 + 4_000);
+    queue.push(b);
+    const left = new Float32Array(4_000), right = new Float32Array(4_000);
+    queue.mix(left, right, ALL, 0.6);
+    expect(left[3_839]).toBeCloseTo((0.1 * (0.6 + 0.4 / Math.E) + 0.02) * MAKEUP, 5);
+    expect(right[0]).toBeLessThan(0.12 * MAKEUP);
+    expect(queue.speechPeak).toBeCloseTo(0.02, 6);
   });
 
   it('glues as prosody_synth::dynamics does', () => {

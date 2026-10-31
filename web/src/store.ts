@@ -1,5 +1,5 @@
 // What the page shows, as signals: the components render from these, and the engine modules (the
-// compiler's answers, Strudel, the reading) write them. State the screen never shows lives in those
+// compiler's answers, the player, the reading) write them. State the screen never shows lives in those
 // modules as plain variables, as it did when the page was one script.
 import { computed, signal } from '@preact/signals';
 
@@ -23,10 +23,6 @@ export const suggested = signal<Record<string, { from: string; to: string; style
 /** Which setting is playing and shown. */
 export const hearing = signal<Side>('A');
 export const playing = signal(false);
-/** Which player makes the sound (`docs/player.md` §6, "Listening"): Strudel's runtime playing the
- * text, or Prosody's own player playing the Performance. Strudel until the two are close enough. */
-export type PlayerName = 'strudel' | 'prosody';
-export const player = signal<PlayerName>('strudel');
 
 // The status bar: what the music is doing, and after it what the reading is doing.
 export const statusText = signal('ready');

@@ -20,20 +20,6 @@
 <meta property="og:image:alt" content="prosody: a poem lit syllable by syllable over lanes of music">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:,">
-<!--
-  `@strudel/soundfonts` imports `@strudel/core` and `@strudel/webaudio` by name. Answering those
-  from a CDN would give it a second Strudel that the playing one never hears, so the import map
-  sends both to the Strudel `@strudel/web` already put on the page (see public/strudel-globals.mjs).
--->
-<script type="importmap">
-{ "imports": {
-  "@strudel/core": "./strudel-globals.mjs",
-  "@strudel/webaudio": "./strudel-globals.mjs",
-  "sfumato": "./strudel-globals.mjs"
-} }
-</script>
-<!-- Strudel puts its functions on the global scope, where the compiled pattern finds them. -->
-<script vite-ignore src="./vendor/strudel-web.js"></script>
 </head>
 <body>
 <div id="app"></div>

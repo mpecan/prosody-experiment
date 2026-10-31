@@ -3,8 +3,8 @@
 // the master stage, and count the times the queue ran dry. Kept apart from the worklet itself so it
 // can be tested without an audio thread; `worklet.ts` is the thin shell that runs it.
 //
-// The master is the chain the page built for Strudel (strudel/index.ts `limitTheMaster`), in its
-// order, and the same as `prosody_synth::master` does for a file: the stems at their gains; the music
+// The master is the chain the page built for Strudel before the player replaced it, in its order, and
+// the same as `prosody_synth::master` does for a file: the stems at their gains; the music
 // (every stem but the reading's) at the duck the block carries; the glue compressor on the music and
 // the reading together; the soft clip. The page fed its WaveShaper a quarter of the signal because a
 // curve spans −1…1 and its curve covered ±4; computed on the sample itself here, that quarter and the
@@ -23,12 +23,15 @@ export const PER_FRAME = 2 * STEMS + 1;
  * solo. (Strudel's mute applies as each event is scheduled, so it has no step to hide; ours applies
  * mid-note, and the glide is what keeps that quiet.) */
 export const GLIDE = 256;
+/** How fast the music falls under a line the browser's voice reads, and rises after it: the time
+ * constants the renderer's duck has (prosody_synth `DUCK_FALL`, `DUCK_RISE`), in seconds. */
+export const DUCK_FALL = 0.08, DUCK_RISE = 0.15;
 /** Frames the music still queued fades out over when it is dropped, at a stop or a restart from the
  * top: about 5 ms, for the same reason. */
 export const FADE = 256;
 
-// The master's ceiling, as the page's Strudel master has it (strudel/index.ts `softClipCurve`) and
-// as `prosody_synth::master` does for a file: transparent below the knee, bending smoothly towards
+// The master's ceiling, as the page's Strudel master had it (a WaveShaper's curve) and as
+// `prosody_synth::master` does for a file: transparent below the knee, bending smoothly towards
 // the ceiling above it, flat beyond the range.
 const CLIP_KNEE = 0.6, CLIP_CEILING = 0.95, CLIP_RANGE = 4;
 export function softClip(x: number): number {
@@ -107,10 +110,21 @@ export class StemQueue {
   private tailFrames = 0;
   private tailAt = 0;
   private glue: Glue;
+  /** The duck the page asks for while the browser's own voice reads (it cannot be placed in the
+   * stream, so its duck cannot be in the block's lane), and its poles: towards a lower level at
+   * DUCK_FALL, back up at DUCK_RISE — the renderer's (prosody_synth `speech`). */
+  private outer = 1;
+  private readonly fall: number;
+  private readonly rise: number;
+  /** The loudest the reading's stem has been, at its gain, since it was last asked: proof that a
+   * line was heard, for the page. */
+  speechPeak = 0;
 
   /** A queue playing at `rate` frames a second (the glue's time constants are in seconds). */
   constructor(rate = 48_000) {
     this.glue = new Glue(rate);
+    this.fall = Math.exp(-1 / (DUCK_FALL * rate));
+    this.rise = Math.exp(-1 / (DUCK_RISE * rate));
   }
 
   /** A block, in the order rendered. The first after a flush says where the count starts. */
@@ -174,13 +188,15 @@ export class StemQueue {
   }
 
   /** Fills `left` and `right` with the next frames: each stem at its gain (gliding to the `gains`
-   * asked for, a 1/`GLIDE` step a frame), the music at the block's duck, plus any tail fading from a
-   * flush, through the glue and the soft clip. Frames the queue cannot fill are silence, and a
-   * quantum short of music counts one underrun. */
-  mix(left: Float32Array, right: Float32Array, gains: readonly number[]): void {
+   * asked for, a 1/`GLIDE` step a frame), the music at the block's duck and at `duck` (the browser
+   * voice's, approached as the renderer approaches its own), plus any tail fading from a flush,
+   * through the glue and the soft clip. Frames the queue cannot fill are silence, and a quantum short
+   * of music counts one underrun. */
+  mix(left: Float32Array, right: Float32Array, gains: readonly number[], duck = 1): void {
     let short = false;
     for (let i = 0; i < left.length; i++) {
       let l = 0, r = 0;
+      this.outer = duck + (this.outer - duck) * (duck < this.outer ? this.fall : this.rise);
       const block = this.blocks[0];
       if (block) {
         let sl = 0, sr = 0;
@@ -196,9 +212,10 @@ export class StemQueue {
             r += gain * block.data[base + block.frames]!;
           }
         }
-        const duck = block.data[2 * STEMS * block.frames + this.offset] ?? 1;
-        l = l * duck + sl;
-        r = r * duck + sr;
+        const lane = (block.data[2 * STEMS * block.frames + this.offset] ?? 1) * this.outer;
+        l = l * lane + sl;
+        r = r * lane + sr;
+        this.speechPeak = Math.max(this.speechPeak, Math.abs(sl), Math.abs(sr));
         this.fresh = false;
         this.offset += 1;
         this.played += 1;

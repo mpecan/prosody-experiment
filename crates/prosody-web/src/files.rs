@@ -2,7 +2,7 @@
 //! "Engines": `recorded`).
 //!
 //! The page is a separate program, built by Vite into `web/dist`: its HTML, its scripts and styles,
-//! the speech worker and the module its import map points Strudel's own imports at. The server
+//! the player's render worker and worklet, and the speech worker. The server
 //! answers it from there, beside the compiler's answers, so served and static (`scripts/build-site.sh`
 //! copies the same files) are one page.
 //!
@@ -157,12 +157,12 @@ mod tests {
             file_of("index.html"),
             Some((dir.join("index.html"), "text/html; charset=utf-8"))
         );
-        // A module worker and an import map's target must be JavaScript, or the browser refuses
-        // them.
+        // A module worker must be JavaScript, or the browser refuses it.
         for module in [
             "assets/index-3f2a.js",
+            "assets/render-worker-9c1d.js",
             "speech-worker.mjs",
-            "strudel-globals.mjs",
+            "synth.js",
         ] {
             assert_eq!(
                 file_of(module).map(|(_, kind)| kind),

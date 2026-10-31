@@ -1,7 +1,8 @@
-// The reading's clock: bars on the audio clock, and how a line too long for its bar is refitted.
+// The reading's clock: bars on the output's clock, and how a line too long for its bar is refitted.
 import { describe, expect, it } from 'vitest';
 
-import { barAt, barSeconds, barTime, fromWhere, refitSpeed, renderKey } from '../src/reading';
+import { barAt, barTime } from '../src/player/reader';
+import { barSeconds, fromWhere, refitSpeed, renderKey } from '../src/reading';
 import { barsOf } from '../src/watch';
 
 describe('the music\'s bars', () => {
@@ -12,7 +13,7 @@ describe('the music\'s bars', () => {
     expect(seconds).toEqual([0, 2, 4, 8]);
   });
 
-  it('repeat round the loop on the audio clock', () => {
+  it('repeat round the loop on the output\'s clock', () => {
     const chain = { seconds, origin: 10 };
     expect(barTime(chain, 0)).toBe(10);
     expect(barTime(chain, 2)).toBe(14);
