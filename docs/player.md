@@ -1,9 +1,10 @@
 # The player — design
 
 *Draft, 2026-10-31. Status: steps 1 (the Performance), 2 (first sound), 3 (everything the text
-asks for) and 4 (the reading, and the Prosody player the only one) built; step 5 not started. The
-open questions of §8 are decided (§8). What building step 1 changed in this design is in §9, step 2
-in §10, step 3 in §11, with the measurements against Strudel, and step 4 in §12.*
+asks for), 4 (the reading, and the Prosody player the only one) and 5 for Android (the native
+player, with the screen off and lock-screen controls; iOS later) built. The open questions of §8
+are decided (§8). What building step 1 changed in this design is in §9, step 2 in §10, step 3 in
+§11, with the measurements against Strudel, step 4 in §12 and step 5 in §13.*
 
 Prosody plays a poem today by writing Strudel text and handing it to Strudel's runtime
 (`@strudel/web`, its scheduler and the `superdough` synth). This document designs a player of
@@ -195,7 +196,9 @@ stream; it stays timed off the playhead, as unsynchronised as it is today, and s
 **In the app.** The page and the player are the same as on the web; the worklet is inside the
 WebView. Later (phase 5), the same crate can run natively in the Tauri shell — `oboe`/AAudio on
 Android, Core Audio on iOS — which is also how playback survives the screen turning off and gets
-lock-screen controls. The crate boundary is drawn so that move needs no change to it.
+lock-screen controls. The crate boundary is drawn so that move needs no change to it. *(Step 5
+built it for Android, through `cpal` rather than `oboe`, with the render worker's logic moved into a
+crate both run: §13.)*
 
 ## 6. Tests
 
@@ -553,3 +556,81 @@ Where it departs from §5 and §7 above, and why:
 - **The device profile (§6, "Device") is still to rerun:** the Pixel was not connected when this
   step was built. The rebuilt Android app was checked on an emulator instead: 18 s of The Tyger with
   zero underruns and every line on its cue (`PLAN.md`'s step 4 entry).
+
+## 13. What building step 5 changed
+
+Step 5, for Android (iOS later), is `crates/prosody-player` (the engine), `src-tauri/src/player`
+and `src-tauri/src/media.rs` (the native player and its bridge), `PlaybackService.kt` and
+`MediaPlugin.kt` in the Android project, and `web/src/player/native.ts` (the page's side). Where it
+departs from §5 and §7 above, and why:
+
+- **The render worker's logic moved into a crate both players run.** The native player needs
+  everything the render worker did — render ahead, place the reading's lines as their cues come
+  round, ask the page for the recordings it lacks, say where each piece plays from — and two copies
+  of the reading's chaining (TypeScript in the browser, Rust in the app) would drift, which §3's
+  "one source of the numbers" forbids for the notes. So `reader.ts` and the worker's bookkeeping
+  became `prosody-player` (`Engine`, `reader`), pure like the synth, and `prosody-synth-wasm` now
+  wraps it: the worker only moves the page's messages in and blocks and events out. The page's
+  messages are unchanged, except that a piece's cues now travel as records (seven numbers a cue,
+  `records.rs`) as its notes already did. The reader's decisions are the same; its times are whole
+  output frames rather than seconds compared with a tolerance (`CLAUDE.md` §4), and its tests moved
+  with it, the same cases and numbers. The browser's synth grew from 105 kB to 257 kB of
+  WebAssembly (the reader, the events' JSON, the strings of a cast). The worklet's mix is also in the
+  crate (`Mixer`), for the app's output; the worklet keeps its TypeScript, since a worklet cannot
+  wait for a module to load, and the two are pinned by the same hand-worked numbers.
+- **The page drives the native player with the worker's messages, over `invoke`, and polls.** In
+  the app (`__TAURI_INTERNALS__` present) the page opens the native player instead of the worker and
+  the worklet (`player_open`), posts the same messages (`player_post`), sends the worklet's mute,
+  solo and duck (`player_mix`), and asks for the output's report and the engine's events every 40 ms
+  (`player_poll`). Polled, not pushed: a paused WebView would pile up a call for every report while
+  the screen is off; the app keeps what happened (up to 4 096 events, and says how many it let go).
+  A buffer cannot cross Android's WebView bridge — Tauri sends every call there as JSON, since that
+  WebView cannot read a request body — so samples, records and recorded lines go as base64 of their
+  little-endian bytes. The page still decodes the samples (the same FLAC, at its own rate, §11), so
+  the app's synth gets the same numbers as the browser's.
+- **The output is `cpal`, not `oboe`.** AAudio called directly (or an `AudioTrack` through JNI) is
+  foreign functions and raw sample pointers, which this workspace's `unsafe_code = "forbid"` rules
+  out; `oboe` is the same plus a C++ build. `cpal` (Apache-2.0) wraps AAudio — and Core Audio, for
+  iOS later — in a safe callback over `&mut [f32]`, and runs on the desktop where the app is
+  developed. It brings `jni` 0.22 and `ndk-context` beside the `ndk` the WebView already pulled in,
+  and needs **API 26** (AAudio): the app's minimum SDK rose from 24 to 26 (Android 8.0).
+- **Two threads, as in the browser.** A render thread does the worker's job: a round every 5 ms
+  (sooner when a message arrives), rendering 2 048-frame blocks while it is less than its lead ahead
+  of the output, sending them down a bounded channel. The audio callback does the worklet's: takes
+  what has arrived, reads the stems' gains from atomics, mixes, writes its report to atomics. It
+  takes no lock and frees nothing (finished blocks go back to be rendered into), and what the channel
+  has no room for waits in the render thread's outbox, in order. **The lead is at least twice the
+  output's largest buffer** (`Engine::widen`), since a phone's buffer can grow, and a lead shorter
+  than a buffer runs dry inside it. An output xrun (cpal's `Xrun`) is counted and said with the
+  losses ("the phone's audio output glitched"), not reported as a failure.
+- **The screen off is a foreground service.** Android freezes or kills an app with nothing in the
+  foreground; one that plays music says so with a service of type `mediaPlayback` and its media
+  notification (`PlaybackService`, platform `MediaSession` and `Notification.MediaStyle`, so no new
+  Android library). It holds a partial wake lock while playing, for the render thread, which must run
+  between the output's own wake-ups; takes the audio focus (and stops when another player takes it);
+  stops when headphones are pulled out; and stops when the app is swiped away. None of it asks the
+  user anything: a media session's notification needs no `POST_NOTIFICATIONS`. **Prosody has no
+  pause**, so the notification and lock screen show Stop while playing and Play after: Stop (or a
+  headset's pause) stops the music in the app at once — the page may be asleep — and the page follows
+  when it wakes; Play asks the page to play, since only the page can make the piece, so with the page
+  asleep it waits for it.
+- **Debug builds optimise the synth.** Measured on the emulator, a debug app's render thread took
+  36% of a core at opt-level 0, and the system's work as the screen went off or came back on starved
+  it past its half-second lead (the queue ran dry, 3 to 47 buffers at a time); at opt-level 2 it
+  takes about 10%, and in six screen-offs over three minutes the queue did not run dry once.
+  `prosody-synth` and `prosody-player` build at opt-level 2 in the dev profile, as `prosody-lts`
+  already did.
+- **What the browser's voice and the engines need, the page still does.** A line the browser's own
+  voice reads is spoken by the page when its playhead reaches it, so with the screen off it is not
+  heard, and at the natural pace the chain waits for it (the page says so when it wakes). A neural
+  engine renders lines in the page: the lines rendered before the screen went off are in the app and
+  go on being read each time round; a line not yet rendered waits.
+- **Verified on the emulator, not on the Pixel**, which was not connected (`PLAN.md`'s step 5 entry
+  has the runs). With the screen off the app's process kept its AAudio stream started, its wake lock
+  held and its media session `PLAYING`; the page, woken, found every line of the reading on its cue
+  and the queue never dry, and the playhead within half a second of the wall clock over a minute off
+  — except in one run of 3 min 15 s, six screen-offs, where the emulator's output reported two xruns
+  and the playhead was 3.5 s behind: the output itself stalling, below the queue; a headset pause dispatched with the screen off stopped
+  the music and the session, and the page showed it stopped when woken. Not done: the output stream
+  stays open, playing silence, while nothing plays (it is closed only when the page reopens the player
+  or the app ends); pausing it when idle would save battery and is left for a measured reason.

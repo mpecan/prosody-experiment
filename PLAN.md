@@ -410,6 +410,41 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The player, step 5 — the native player on Android, with the screen off
+
+Step 5 of `docs/player.md` for Android (iOS later); what reality changed in the design is in its §13.
+
+- **`prosody-player`**, a new pure crate: the render worker's logic (rendering ahead, the reading's
+  timing, the recordings asked for and let go, the events) as `Engine` and `reader`, which the
+  browser's worker (through `prosody-synth-wasm`) and the app both run; the worklet's mix as `Mixer`
+  for the app. `reader.ts` is gone; its tests are Rust now, the same cases and numbers, on whole
+  frames. Cues travel as records, like notes.
+- **The native player** (`src-tauri/src/player`): `player_open`, `player_post` (the worker's
+  messages, buffers as base64), `player_mix`, `player_poll` (report and events, asked for rather than
+  pushed); a render thread and a lock-free audio callback through `cpal` (new: Apache-2.0, a safe
+  wrapper of AAudio and, later, Core Audio, where calling them by hand needs `unsafe`). The lead is at
+  least twice the output's largest buffer; output xruns are counted and said. The page uses it when it
+  is inside the app (`web/src/player/native.ts`), the worklet otherwise.
+- **Android**: a `mediaPlayback` foreground service with a `MediaSession` notification
+  (`PlaybackService.kt`), a wake lock and the audio focus while playing; its buttons reach the native
+  player through an app plugin (`MediaPlugin.kt`, `src-tauri/src/media.rs`). Stop works with the page
+  asleep; Play goes through the page. Minimum SDK 24 → 26 (AAudio).
+- **Tests**: the reader, engine, mixer and records (Rust, hand-worked); the bridge's base64 against
+  RFC 4648's vectors, the messages it reads and refuses, the render thread keeping its lead and the
+  callback playing it, the outbox keeping order, a mute through the atomics, the lead widening, a
+  pause button; on the page, the base64 the Rust side reads back, the calls in order, the poll handed
+  on, and the page playing through the native player and stopping on its pause button.
+- **Device.** The Pixel (58131FDCQ009PT) was not connected; the debug app was checked on the arm64
+  emulator. Before `prosody-synth`/`prosody-player` were optimised in the dev profile, the render
+  thread took 36% of a core and the queue ran dry 3–47 buffers at a time around the screen turning
+  off or on; after, about 10%, and over 3 min 15 s with six 20 s screen-offs (and a separate 60 s one)
+  no underrun, every line of the reading on its cue (35 of 35), the stream `started`, the wake lock
+  held and the session `PLAYING` throughout; the emulator's output reported two xruns in the long run
+  and the playhead ended 3.5 s behind the wall clock there (within 0.5 s in the 60 s run). A headset
+  pause dispatched with the screen off (`cmd media_session dispatch pause`) stopped the music and the
+  session; `input keyevent` media keys are not routed with the emulator's screen off. Left: the output
+  stream stays open, playing silence, while stopped.
+
 ### The player, step 4 — the reading through the player, and Strudel's runtime gone
 
 Step 4 of `docs/player.md`; what reality changed in the design is in its §12.
