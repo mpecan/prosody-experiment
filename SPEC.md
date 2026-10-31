@@ -226,8 +226,8 @@ strikes a drum piece; its first variant is what preceded it):
       beats.
 
 Every sample (`bd`, `sd`, `hh`, `ht`, `mt`, `lt`, plus `rd`/`oh`/`cr` for the ride kit) is present
-across all 6 allowed Strudel drum banks (`tr909`, `tr808`, `tr707`, `linn`, `casio`, `r8`) and
-both kits (12 configurations, checked by `every_kit_asks_every_bank_for_a_sample_the_bank_has`). No
+across all 5 allowed drum banks (`uzu`, `fm_drums`, `modular`, `big_rusty`, `virtuosity`) and
+both kits (10 configurations, checked by `every_kit_asks_every_bank_for_a_sample_the_bank_has`). No
 event is added, removed or re-timed; every parameter after `s("…")` on the drum lane and every other
 lane in the pattern is byte-identical between `flat` and `articulated`. Locality holds (I2): a
 syllable's drum piece depends only on its own layer, beat index, stress and foot mates within the
@@ -862,7 +862,17 @@ Three more keys, every one palette:
 - **`ride_fallback = "open_hat" | "crash"`** (default `open_hat`) — what keeps time under
   `kit = "ride"` on a bank with no ride sample (TR-808, TR-707). The stand-in strikes exactly where
   the ride would; the `plays:` line of the pattern's header names it ("crash in place of the ride,
-  which RolandTR808 does not have"). A bank with a ride ignores it.
+  which RolandTR808 does not have"). A bank with a ride ignores it. *Since 2026-10-31 every bank
+  has a ride (see below), so nothing stands in; the key is still read.*
+
+*Changed 2026-10-31 (the drums).* The six drum machines (`tr909`, `tr808`, `tr707`, `linn`, `casio`,
+`r8`) were strudel.cc's sample map, whose recordings carry no licence: the app could neither ship
+them nor cache them for offline use. Five kits in the public domain replace them, chosen by ear
+and rendered into `web/public/drums/` (one file a drum, with its sources): `uzu`, `fm_drums`,
+`modular`, `big_rusty` and `virtuosity`. A header naming a retired machine plays the kit nearest its
+character (`style::RETIRED_BANKS`), so an old poem or link still compiles; the genres moved the
+same way (jazz and bossa to `virtuosity`, techno to `uzu`, lo-fi to `modular`, ambient, chamber and
+hymn to `big_rusty`). Which kit plays is palette; no event moved.
 - **`density_level`** (`0..=1`, default `0`, today's fixed levels) — levels that follow density.
   Every gain in a bar is multiplied by *n*^−`density_level`, where *n* is the number of lines
   sounding in that bar (every placement of the arrangement that plays at least one event): at

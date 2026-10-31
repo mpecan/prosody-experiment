@@ -292,8 +292,11 @@ export async function linkTo(shared: Shared): Promise<string> {
  * each starts — anything unknown falling back. */
 export function settingsOf(shared: Shared): { sound: Palette; sides: Record<Side, Setting> } {
   const start = startingSettings(site.mappings);
+  const sound = { ...(site.palettes.default ?? {}), ...shared.sound };
+  // A link from before the drum machines were retired shows the kit it will be heard on.
+  if (sound.bank && site.retiredBanks[sound.bank]) sound.bank = site.retiredBanks[sound.bank];
   return {
-    sound: { ...(site.palettes.default ?? {}), ...shared.sound },
+    sound,
     sides: {
       A: restore(site.mappings, start.A, { ...start.A, ...shared.A }, false),
       B: restore(site.mappings, start.B, { ...start.B, ...shared.B }, false),

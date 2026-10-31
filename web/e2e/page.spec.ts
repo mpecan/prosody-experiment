@@ -43,7 +43,7 @@ test('plays, lighting the poem as it goes, and stops', async ({ page }) => {
   await open(page);
   await expect(page.locator('#status')).toContainText('24 bars');
   await page.click('#play');
-  // Strudel, the drum machines and the soundfonts come from their CDNs on the first Play.
+  // The soundfonts come from their CDN on the first Play; everything else is beside the page.
   await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
   await expect(page.locator('#lit span.on').first()).toBeAttached({ timeout: 15_000 });
   await page.click('#stop');
@@ -130,6 +130,49 @@ test('shares a poem as a link that opens to the same piece, for someone else', a
   // And its A carries what techno suggested for it.
   await other.getByRole('tab', { name: 'Mappings' }).click();
   await expect(other.locator('.mapping[data-name="bass"] [aria-label="bass, setting A"] button[aria-pressed="true"]')).toHaveText('feet');
+});
+
+test('plays from beside the page: only the soundfonts come from anywhere else', async ({ page, baseURL }) => {
+  // The drums were strudel.cc's drum machines on its CDN, with no licence to ship or cache. Every
+  // other host is refused here, so a sound that still came from one would fail to load.
+  const elsewhere = new Set<string>();
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin === new URL(baseURL!).origin) return route.continue();
+    elsewhere.add(url.host);
+    // The instruments' soundfonts, until the app downloads them for offline use.
+    return url.host === 'felixroos.github.io' ? route.continue() : route.abort();
+  });
+  await open(page);
+  // Jazz, on the Virtuosity kit's ride.
+  await page.getByRole('tab', { name: 'Sound' }).click();
+  await page.locator('#styles [data-style="jazz"]').click();
+  await expect(page.locator('#status')).toContainText('24 bars');
+  const drums: string[] = [];
+  page.on('requestfinished', (request) => { if (request.url().includes('/drums/')) drums.push(new URL(request.url()).pathname); });
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  // Jazz's ride, from its kit beside the page (the other side, still on the default palette, may
+  // load uzu's kick).
+  await expect.poll(() => drums, { timeout: 15_000 }).toContain('/drums/virtuosity/rd.flac');
+  expect([...elsewhere]).toEqual(['felixroos.github.io']);
+  await page.click('#stop');
+});
+
+test('every drum a pattern can ask for is beside the page, in a form the browser can play', async ({ page }) => {
+  await open(page);
+  const decoded = await page.evaluate(async () => {
+    const site = await (await fetch('/site.json')).json() as { banks: string[]; drumSamples: string[] };
+    const context = new OfflineAudioContext(2, 44_100, 44_100);
+    return Promise.all(site.banks.flatMap((bank) => site.drumSamples.map(async (drum) => {
+      const response = await fetch(`/drums/${bank}/${drum}.flac`);
+      if (!response.ok) return `${bank}/${drum}: ${response.status}`;
+      const audio = await context.decodeAudioData(await response.arrayBuffer());
+      return audio.duration > 0.02 ? 'ok' : `${bank}/${drum}: ${audio.duration}s`;
+    })));
+  });
+  expect(decoded.length).toBe(45);
+  expect(decoded.filter((result) => result !== 'ok')).toEqual([]);
 });
 
 test('every soundfont plays the licensed variant the compiler names, in the Strudel the page ships', async ({ request }) => {

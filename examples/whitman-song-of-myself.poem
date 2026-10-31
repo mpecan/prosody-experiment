@@ -3,7 +3,7 @@
 scale       = "dorian"
 root        = "A"
 tempo_range = [88, 96]
-bank        = "linn"
+bank        = "big_rusty"
 synth       = "subtractive"
 +++
 I celebrate myself, and sing myself,

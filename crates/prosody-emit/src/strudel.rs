@@ -88,7 +88,7 @@ use prosody_core::voice::{Anchor, Event, Score, Subdivision, Voice};
 use prosody_core::{BassNote, Chord, Chromatic, Drum, Harmony, Silence, VoiceId};
 use rand_core::Rng as _;
 
-use crate::style::{Kit, Named, RideFallback, Style, Voicing};
+use crate::style::{BANKS, Kit, Named, RideFallback, Style, Voicing};
 use crate::{Backend, fmt_param};
 
 /// Renders a score as Strudel pattern text.
@@ -421,20 +421,13 @@ impl Colour {
 
 /// The Strudel sample bank a palette name plays from.
 ///
-/// The poem's vocabulary is not Strudel's: `SPEC.md` §5's example says `tr909`, and Strudel's
-/// bank is `RolandTR909`. Translating here is what `sample_for`'s doc means by "which sounds those
-/// are is palette" — the backend owns the palette-to-sound step, and passing the poem's word
-/// through unchanged asked for a sample that does not exist and played silence.
+/// The page registers every kit under its own name ([`DRUM_SAMPLES`]), so the poem's word is
+/// Strudel's: `.bank("uzu")` with `s("bd")` plays `uzu_bd`. It stays a step of its own because the
+/// backend owns the palette-to-sound translation — what `sample_for`'s doc means by "which sounds
+/// those are is palette" — and the drum machines this replaced did need one (`tr909` was
+/// `RolandTR909`; passing the poem's word through unchanged played silence).
 const fn strudel_bank(bank: Named) -> &'static str {
-    match bank.get().as_bytes() {
-        b"tr808" => "RolandTR808",
-        b"tr707" => "RolandTR707",
-        b"linn" => "AkaiLinn",
-        b"casio" => "CasioRZ1",
-        b"r8" => "RolandR8",
-        // `tr909` and anything a later `BANKS` adds before this match does.
-        _ => "RolandTR909",
-    }
+    bank.get()
 }
 
 /// Which pitched role a layer plays.
@@ -1178,12 +1171,12 @@ fn rhythm_layer(
 /// keeping time and snare comping round it. Either way the foundation is the time and the flourish
 /// the ornament.
 ///
-/// Not every bank has a ride: the TR-808 and TR-707 in the sample map have none. Asking for one
-/// there makes Strudel log "sound not found" on every hit and the whole pulse layer go silent, so a
-/// palette choice would in effect remove events — which is not palette's to do (I3) and leaves
-/// sound nobody can trace (I4). Such a bank plays the palette's [`RideFallback`] instead — its
-/// open hat by default, the drum machine's usual stand-in for a ride, or its crash — and the
-/// pattern's header says so ([`ride_stand_in`]).
+/// A bank without a ride would be a problem: asking for one makes Strudel log "sound not found" on
+/// every hit and the whole pulse layer go silent, so a palette choice would in effect remove events
+/// — which is not palette's to do (I3) and leaves sound nobody can trace (I4). Such a bank plays
+/// the palette's [`RideFallback`] instead — its open hat by default, or its crash — and the
+/// pattern's header says so ([`ride_stand_in`]). Every bank in [`DRUM_SAMPLES`] has a ride, so
+/// today that never happens; the drum machines that had none (the TR-808 and TR-707) are retired.
 #[cfg(test)]
 fn sample_for(style: &Style, layer: Layer) -> &'static str {
     sample_for_drum(style, Drum::flat_for(layer))
@@ -1212,7 +1205,7 @@ fn sample_for_drum(style: &Style, drum: Drum) -> &'static str {
 const RIDE: &str = "rd";
 
 /// What a bank without a ride plays in its place — the palette's [`RideFallback`]: the open hat or
-/// the crash, which every bank in [`BANK_SAMPLES`] has.
+/// the crash, both in [`DRUM_SAMPLES`].
 const fn stand_in(fallback: RideFallback) -> &'static str {
     match fallback {
         RideFallback::OpenHat => "oh",
@@ -1227,54 +1220,14 @@ fn ride_stand_in(style: &Style) -> Option<&'static str> {
     (style.kit() == Kit::Ride && !bank_has(bank, RIDE)).then_some(bank)
 }
 
-/// The samples each bank has in the sample map the page loads (`tidal-drum-machines.json` on
-/// `strudel.b-cdn.net`, checked 2026-10-22). Only what a kit can ask for has to be right here; the
-/// rest is listed so the table reads as the map does.
-const BANK_SAMPLES: &[(&str, &[&str])] = &[
-    (
-        "RolandTR909",
-        &[
-            "bd", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rd", "rim", "sd",
-        ],
-    ),
-    (
-        "RolandTR808",
-        &[
-            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "perc", "rim", "sd", "sh",
-        ],
-    ),
-    (
-        "RolandTR707",
-        &[
-            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rim", "sd", "tb",
-        ],
-    ),
-    (
-        "AkaiLinn",
-        &[
-            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "rd", "sd", "sh", "tb",
-        ],
-    ),
-    (
-        "CasioRZ1",
-        &[
-            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "rd", "rim", "sd",
-        ],
-    ),
-    (
-        "RolandR8",
-        &[
-            "bd", "cb", "cp", "cr", "hh", "ht", "lt", "mt", "oh", "perc", "rd", "rim", "sd", "sh",
-            "tb",
-        ],
-    ),
-];
+/// The drums every bank in [`BANKS`] has: one file each, `drums/<bank>/<drum>.flac` beside the
+/// page, which the page registers as Strudel's `<bank>_<drum>`. Exactly what a kit can ask for
+/// (`sample_for_drum`), and its ride stand-ins.
+pub const DRUM_SAMPLES: &[&str] = &["bd", "sd", "hh", "oh", "rd", "cr", "lt", "mt", "ht"];
 
 /// Whether a Strudel bank has a sample of that name.
 fn bank_has(bank: &str, sample: &str) -> bool {
-    BANK_SAMPLES
-        .iter()
-        .any(|(name, samples)| *name == bank && samples.contains(&sample))
+    BANKS.contains(&bank) && DRUM_SAMPLES.contains(&sample)
 }
 
 /// One of the lines a layer sounds at the same time, as one pattern of its own.
@@ -2081,7 +2034,7 @@ mod tests {
 
     use prosody_core::role::Layer;
 
-    use super::{BANK_SAMPLES, Strudel, StrudelError, bank_has, sample_for, strudel_bank};
+    use super::{Strudel, StrudelError, bank_has, sample_for, strudel_bank};
     use crate::Backend as _;
     use crate::fmt_param;
     use crate::style::{BANKS, KITS, RIDE_FALLBACKS, Style};
@@ -2328,14 +2281,12 @@ mod tests {
         // Each of these is a separate mapping from the style, and each was untested until a
         // mutation run showed the bank and synth could be hardcoded without any test noticing.
         let style = Style::parse(
-            "+++\nbank = \"casio\"\nsynth = \"subtractive\"\nroot = \"D\"\nscale = \"lydian\"\n+++",
+            "+++\nbank = \"modular\"\nsynth = \"subtractive\"\nroot = \"D\"\nscale = \"lydian\"\n+++",
         )
         .unwrap();
         let text = render("te bAn\nte bAn\n", &style);
-        // The palette's name, translated to the identifier Strudel actually knows. Passing the
-        // poem's word through unchanged asked for a sample that does not exist, so §5's own
-        // example header played silence.
-        assert!(text.contains(".bank(\"CasioRZ1\")"), "{text}");
+        // The palette's name, as the page registers the kit's samples.
+        assert!(text.contains(".bank(\"modular\")"), "{text}");
         assert!(text.contains(".sound(\"sawtooth\")"), "{text}");
         // D lydian, the melody's octave (MIDI 60): 60 + 2 + 0 = 62.
         assert_eq!(first_note(&text), "62");
@@ -2824,8 +2775,8 @@ mod tests {
                 .unwrap();
                 let strudel = strudel_bank(style.bank());
                 assert!(
-                    BANK_SAMPLES.iter().any(|(name, _)| *name == strudel),
-                    "{bank} → {strudel} is not in the sample table"
+                    BANKS.contains(&strudel),
+                    "{bank} → {strudel} is not a kit the page registers"
                 );
                 for layer in [Layer::Foundation, Layer::Flourish] {
                     let sample = sample_for(&style, layer);
@@ -2854,84 +2805,32 @@ mod tests {
     }
 
     #[test]
-    fn a_bank_without_a_ride_keeps_time_on_its_open_hat_and_says_so() {
-        // tidal-drum-machines.json has no RolandTR808_rd and no RolandTR707_rd; both have `oh`.
+    fn every_bank_keeps_time_on_its_own_ride_whatever_the_fallback() {
+        // Every kit was chosen with a ride of its own (2026-10-31), so the ride kit plays `rd` on
+        // each and the header claims no stand-in, whichever stand-in the palette names. The
+        // retired TR-808 and TR-707 had none; an old header naming one plays the kit that
+        // replaced it, ride and all.
         let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
-        for (bank, strudel) in [("tr808", "RolandTR808"), ("tr707", "RolandTR707")] {
-            let header = format!("+++\npreset = \"jazz\"\nbank = \"{bank}\"\n+++");
+        let banks = BANKS.iter().chain(&["tr808", "tr707"]);
+        for (bank, fallback) in banks.flat_map(|b| RIDE_FALLBACKS.iter().map(move |f| (b, f))) {
+            let header = format!(
+                "+++\npreset = \"jazz\"\nbank = \"{bank}\"\nride_fallback = \"{fallback}\"\n+++"
+            );
             let text = render(source, &Style::parse(&header).unwrap());
             let drums: Vec<String> = text
                 .lines()
                 .filter(|l| l.starts_with("  s("))
                 .map(|l| argument(l, "s"))
                 .collect();
-            assert!(drums.iter().any(|d| d.contains("oh")), "{text}");
-            assert!(drums.iter().any(|d| d.contains("sd")), "{text}");
-            assert!(!drums.iter().any(|d| d.contains("rd")), "{text}");
+            assert!(drums.iter().any(|d| d.contains("rd")), "{bank}: {text}");
+            assert!(drums.iter().any(|d| d.contains("sd")), "{bank}: {text}");
             assert!(
-                text.contains(&format!(
-                    "open hat in place of the ride, which {strudel} does not have,"
-                )),
-                "the stand-in is visible: {text}"
+                !drums.iter().any(|d| d.contains("oh") || d.contains("cr")),
+                "{bank} ({fallback}): {text}"
             );
+            assert!(text.contains("(ride on the foundation"), "{bank}: {text}");
+            assert!(!text.contains("in place of the ride"), "{bank}: {text}");
         }
-        // A bank that has a ride plays it, and the header claims no stand-in.
-        let text = render(
-            source,
-            &Style::parse("+++\npreset = \"jazz\"\nbank = \"linn\"\n+++").unwrap(),
-        );
-        assert!(text.contains("(ride on the foundation"), "{text}");
-        assert!(!text.contains("in place of the ride"), "{text}");
-    }
-
-    #[test]
-    fn a_bank_without_a_ride_can_keep_time_on_its_crash_instead() {
-        // tidal-drum-machines.json has RolandTR808_cr and RolandTR707_cr.
-        let source = "bA\nbA bA bA bA bA bA\n\ntA nA\nrA sA\n";
-        let crash = "+++\npreset = \"jazz\"\nbank = \"tr808\"\nride_fallback = \"crash\"\n+++";
-        let text = render(source, &Style::parse(crash).unwrap());
-        let drums: Vec<String> = text
-            .lines()
-            .filter(|l| l.starts_with("  s("))
-            .map(|l| argument(l, "s"))
-            .collect();
-        assert!(drums.iter().any(|d| d.contains("cr")), "{text}");
-        assert!(drums.iter().any(|d| d.contains("sd")), "{text}");
-        assert!(
-            !drums.iter().any(|d| d.contains("oh") || d.contains("rd")),
-            "{text}"
-        );
-        assert!(
-            text.contains("(crash in place of the ride, which RolandTR808 does not have, on"),
-            "the stand-in is named on the plays line: {text}"
-        );
-        assert!(text.contains("//   ride_fallback = crash\n"), "{text}");
-        // The same piece but for that one sample name: the stand-in strikes where the hat did.
-        let hat = render(
-            source,
-            &Style::parse("+++\npreset = \"jazz\"\nbank = \"tr808\"\n+++").unwrap(),
-        );
-        let music = |t: &str| -> Vec<String> {
-            t.lines()
-                .filter(|l| !l.starts_with("//"))
-                .map(|l| {
-                    l.replace("\"cr", "\"oh")
-                        .replace(" cr", " oh")
-                        .replace("[cr", "[oh")
-                })
-                .collect()
-        };
-        assert_eq!(music(&text), music(&hat));
-        // A bank that has a ride plays it whatever the fallback, and the header names no stand-in.
-        let linn = render(
-            source,
-            &Style::parse(
-                "+++\npreset = \"jazz\"\nbank = \"linn\"\nride_fallback = \"crash\"\n+++",
-            )
-            .unwrap(),
-        );
-        assert!(linn.contains("(ride on the foundation"), "{linn}");
-        assert!(!linn.contains("in place of the ride"), "{linn}");
     }
 
     #[test]
@@ -3092,7 +2991,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            drums.iter().all(|l| l.contains(".bank(\"RolandR8\")")),
+            drums.iter().all(|l| l.contains(".bank(\"virtuosity\")")),
             "{text}"
         );
         // Same layers, same steps: only the sound's name moved.

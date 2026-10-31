@@ -38,7 +38,13 @@ AR_wasm32_unknown_unknown="$llvm_ar" \
 npm --prefix web ci --no-audit --no-fund --loglevel=error
 npm --prefix web run --silent build >/dev/null
 mkdir -p "$dir"
-rm -rf "$dir/assets" # hashed names: an older build's files must not linger beside the new ones
+# Each of the page's files and folders replaces its older copy rather than merging into it: hashed
+# names and removed files must not linger beside the new ones. The app ships this directory
+# (src-tauri), so a lingering file is shipped too — an older build's drums/ held drum machines
+# with no licence.
+for entry in web/dist/*; do
+  rm -rf "${dir:?}/${entry#web/dist/}"
+done
 cp -R web/dist/. "$dir/"
 cargo run --quiet --release --locked -p prosody-web -- --site "$dir"
 

@@ -7,7 +7,7 @@
 scale       = "harmonic_minor"
 root        = "E"
 tempo_range = [104, 112]
-bank        = "tr707"
+bank        = "fm_drums"
 +++
 Spet trte so rodile,
 prijat'lji, vince nam sladko,

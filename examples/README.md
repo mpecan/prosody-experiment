@@ -77,9 +77,9 @@ method the emitter calls (`gain`, `lpf`, `attack`, `room`, `crush`, `vowel`, `ba
 `cpm`, `swingBy`, `stack`) exists on Strudel's `Pattern`. Querying Dickinson cycle by cycle gives
 eight events in the first cycle and six in the second — which is the syllable count of "Because I
 could not stop for Death" and "He kindly stopped for me". Successive cycles differ, so the poem's
-lines really do play in order, and repeated queries give identical results. All five bank names
-(`tr909`, `tr808`, `tr707`, `linn`, `casio`) resolve to real entries in Strudel's default
-drum-machine sample set.
+lines really do play in order, and repeated queries give identical results. The drum banks were
+then Strudel's default drum machines; they are now five kits the page ships itself
+(`web/public/drums/`), and a header naming an old machine plays the kit that replaced it.
 
 **OSC: yes, once you run the receiver.** The messages were decoded with `python-osc` — a
 third-party implementation, not the one that wrote them — and all of them parse. `examples/`

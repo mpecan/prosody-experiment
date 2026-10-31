@@ -36,7 +36,7 @@ You get something like:
 ```js
 // compiled from a poem by prosody
 // 36 bars from 12 lines, 12 voices, 255 events
-//   bank = tr909
+//   bank = uzu
 //   root = c
 //   scale = minor
 stack(
@@ -131,12 +131,12 @@ which is invariant I3 in front of you.
 
 The **Style** cards at the top of the Sound folder pick a named palette for the instruments and
 the mix: **default** (electric piano over acoustic bass, a modest room, a little echo on the
-melody, light compression, a small human stray), **warm** (vibraphone over fretless bass, a long
+melody, light compression, a small human stray), **warm** (vibraphone over upright bass, a long
 room, more echo, a lower high cut, a touch of drive, more stray) and **raw** (the palette as it
 was before any of this: triangle oscillators, dry, on the grid) leave scale, root, tempo and bank
-alone. The genres set a scale, a swing and a drum machine as well: **jazz** (Rhodes playing each
+alone. The genres set a scale, a swing and a drum kit as well: **jazz** (Rhodes playing each
 rhyme word as the seventh chord on its degree, an upright bass, the ride keeping time and the
-snare comping on the sampled acoustic R-8 kit, triplet swing, dorian, a warm room), **lo-fi**,
+snare comping on the acoustic Virtuosity kit, triplet swing, dorian, a warm room), **lo-fi**,
 **techno**, **ambient**, **bossa**, **chamber** and **hymn**. A genre also suggests what the poem
 might *do* — jazz a walking bass and cadences, techno the bass on every foot — and picking it on
 the page sets those mappings on side A, marked in the Mappings folder with a button to put A back;
@@ -145,9 +145,9 @@ is custom. **Kit**
 picks kick-and-hat or ride-and-snare for the two drum layers, and **Voicing** plays each rhyme word
 as one note or as a seventh chord built in the current scale; neither moves an event. With a side's
 harmony mapping on, that side's rhyme words play as single notes over the chord lane whatever the
-voicing, and the voicing shapes only the chords. **Ride
-stand-in** picks what keeps time under the ride kit on a bank without one (open hat or crash), and
-**Bass octave** and **Melody octave** move each role's register by whole octaves. **Levels follow
+voicing, and the voicing shapes only the chords. **Drums** picks one of five kits, all of them
+in the public domain and served with the page (`web/public/drums/SOURCES.md` says where each
+sound came from): **uzu**, **FM drums**, **Modular**, **Big Rusty** and **Virtuosity**. **Bass octave** and **Melody octave** move each role's register by whole octaves. **Levels follow
 density** (in the mix) turns down the bars where several lines sound at once — a stanza looping
 under the next, a held line, a call — so dense poems stop leaning on the page's soft clipper;
 warm and jazz set it to 0.5. The mix controls: reverb, room size, echo on the melody, high cut, drive, compression,
@@ -340,11 +340,14 @@ rather than keeping it under the new pace. Adding a voice is a line in `scripts/
    cargo run -p prosody-cli -- examples/blake-tyger.poem | xclip -sel clip   # Linux
    ```
 2. Open **<https://strudel.cc>**.
-3. Select everything in the editor and paste over it.
+3. Select everything in the editor and paste over it, then add this line above it — strudel.cc
+   has the same GM soundfonts as this page, but not its drum kits:
+   ```js
+   samples('https://prosody.rocks/drums/strudel.json')
+   ```
 4. Press **Ctrl+Enter** (or the ▶ button). The first run downloads the drum samples, so give it a
    second.
-   strudel.cc registers the same drum machines and GM soundfonts this page loads, so the
-   instruments sound the same. One difference: strudel.cc honours `.nudge` only for samples, so
+   The instruments then sound as they do on the page. One difference: strudel.cc honours `.nudge` only for samples, so
    there the humanise stray moves the drums and not the bass or melody (their softening still
    applies); the local page applies it to every sound.
 
@@ -643,7 +646,7 @@ scale       = "phrygian_dominant"
 root        = "D"
 tempo_range = [124, 132]
 swing       = 0.08
-bank        = "tr909"
+bank        = "uzu"
 synth       = "karplus"
 +++
 Tyger Tyger, burning bright,
@@ -657,7 +660,11 @@ and 132, and the poem says where in that window, from how densely its syllables 
 
 Scales: `major`, `minor`, `harmonic_minor`, `dorian`, `phrygian`, `phrygian_dominant`, `lydian`,
 `mixolydian`, `locrian`, `pentatonic_minor`, `whole_tone`, `chromatic`.
-Banks: `tr909`, `tr808`, `tr707`, `linn`, `casio`, `r8` (Roland R-8, sampled acoustic drums).
+Banks: `uzu` (Switch Angel's electronic kit), `fm_drums` (drums made by FM synthesis), `modular`
+(a modular synthesiser's hits), `big_rusty` and `virtuosity` (sampled acoustic kits). The drum
+machines the page once loaded from strudel.cc carry no licence and are retired; a header naming
+one plays the kit nearest it — `tr909` is `uzu`, `tr808` is `modular`, `tr707` and `casio` are
+`fm_drums`, `linn` is `big_rusty`, `r8` is `virtuosity`.
 Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`, `triangle`.
 `synth` sets both pitched instruments; in Strudel the four model names play the recorded
 instrument nearest the model (Karplus–Strong: acoustic bass and nylon guitar; FM: DX-style synth
@@ -667,12 +674,12 @@ The rest of the header, every key optional:
 
 | key | what | range | default |
 |---|---|---|---|
-| `preset` | a named palette to start from — `default`, `warm`, `raw`, `jazz` (which also sets `scale = "dorian"`, `swing = 0.33`, `bank = "r8"`); applied before every other key | | `default` |
-| `kit` | which drum each layer plays: `machine` (kick on the foundation, hat on the flourish) or `ride` (ride and snare; on `tr808` and `tr707`, which have no ride, the open hat keeps time instead and the pattern's header says so) | | `machine` |
-| `ride_fallback` | what keeps time under `kit = "ride"` on a bank with no ride (`tr808`, `tr707`): `open_hat` or `crash`; named on the pattern header's `plays:` line | | `open_hat` |
+| `preset` | a named palette to start from — `default`, `warm`, `raw`, `jazz` (which also sets `scale = "dorian"`, `swing = 0.33`, `bank = "virtuosity"`); applied before every other key | | `default` |
+| `kit` | which drum each layer plays: `machine` (kick on the foundation, hat on the flourish) or `ride` (ride and snare) | | `machine` |
+| `ride_fallback` | what keeps time under `kit = "ride"` on a bank with no ride: `open_hat` or `crash`, named on the pattern header's `plays:` line. Every bank has a ride, so it changes nothing today; an older header that sets it still compiles | | `open_hat` |
 | `voicing` | each rhyme word as one `note`, or as the `seventh` chord on its degree in the scale (the level is shared between the tones; in a scale without seven notes it stacks every other degree all the same — fourths in `pentatonic_minor`). With the harmony mapping on, rhyme words are single notes over the chords whatever this says, and it shapes only the chord lane | | `note` |
 | `chord_sound` | the chord lane's instrument (heard only with the harmony mapping on): any name `bass` and `melody` take | | `gm_pad_warm` (`warm`, `jazz`: `gm_epiano1`; `raw`: `triangle`) |
-| `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_fretless_bass`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
+| `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
 | `reverb` | reverb send (the drums take half, plus §4.4's rise with distinctiveness; the bass three tenths) | 0–1 | 0.25 |
 | `room_size` | reverb length, seconds | 0.1–10 | 2.0 |
 | `delay` | echo on the melody, a dotted eighth behind | 0–1 | 0.15 |

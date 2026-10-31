@@ -42,7 +42,8 @@ interface Sound {
 
 interface Strudel {
   initStrudel(options: { prebake: () => Promise<unknown> }): Promise<Repl>;
-  samples(map: string, base: string, options: Record<string, unknown>): Promise<unknown>;
+  /** A sample map: the URL of one, or the map itself (name → files, each relative to `base`). */
+  samples(map: string | Record<string, string[]>, base: string, options: Record<string, unknown>): Promise<unknown>;
   setStringParser(parser: (text: string) => Pattern): void;
   mini(text: string): Pattern;
   soundMap: { get(): Record<string, Sound> };

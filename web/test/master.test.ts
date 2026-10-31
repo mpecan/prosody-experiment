@@ -1,7 +1,7 @@
 // The master stage's ceiling, and the sounds loaded before a pattern plays.
 import { describe, expect, it } from 'vitest';
 
-import { CLIP_CEILING, CLIP_KNEE, CLIP_RANGE, softClipCurve, soundsOf } from '../src/strudel';
+import { CLIP_CEILING, CLIP_KNEE, CLIP_RANGE, drumMap, softClipCurve, soundsOf } from '../src/strudel';
 
 describe('the soft clipper', () => {
   const points = 4097;
@@ -35,15 +35,24 @@ describe('the sounds a pattern asks for', () => {
     const code = [
       'stack(',
       '  note("<36 38@2 ~ [36,43]>").sound("gm_acoustic_bass"),',
-      '  s("bd ~ hh@3 bd").bank("tr909"),',
+      '  s("bd ~ hh@3 bd").bank("uzu"),',
       ')',
     ].join('\n');
     expect(soundsOf(code)).toEqual([
       { s: 'gm_acoustic_bass', note: 36 },
       { s: 'gm_acoustic_bass', note: 38 },
       { s: 'gm_acoustic_bass', note: 43 },
-      { s: 'bd', bank: 'tr909' },
-      { s: 'hh', bank: 'tr909' },
+      { s: 'bd', bank: 'uzu' },
+      { s: 'hh', bank: 'uzu' },
     ]);
+  });
+});
+
+describe('the drums', () => {
+  it('are one file per drum of each kit, beside the page, under the names a pattern asks for', () => {
+    // `.bank("uzu")` with `s("bd")` asks Strudel for `uzu_bd`.
+    expect(drumMap(['uzu', 'modular'], ['bd', 'rd'])).toEqual({
+      uzu_bd: ['uzu/bd.flac'], uzu_rd: ['uzu/rd.flac'], modular_bd: ['modular/bd.flac'], modular_rd: ['modular/rd.flac'],
+    });
   });
 });

@@ -1,5 +1,5 @@
 // What the controls' values are called on the page. The values themselves — `gm_acoustic_bass`,
-// `tr909`, `phrygian_dominant` — are the style header's, and are what the page sends; these are
+// `uzu`, `phrygian_dominant` — are the style header's, and are what the page sends; these are
 // only what a reader sees.
 
 const NAMES: Record<string, string> = {
@@ -18,9 +18,8 @@ const NAMES: Record<string, string> = {
   gm_choir_aahs: 'Choir', gm_pad_halo: 'Halo pad',
   // Palettes whose names are not words.
   lofi: 'lo-fi',
-  // Drum machines.
-  tr909: 'Roland TR-909', tr808: 'Roland TR-808', tr707: 'Roland TR-707', linn: 'LinnDrum', casio: 'Casio',
-  r8: 'Roland R-8',
+  // Drum kits.
+  uzu: 'uzu', fm_drums: 'FM drums', modular: 'Modular', big_rusty: 'Big Rusty', virtuosity: 'Virtuosity',
   // Kits, ride stand-ins and voicings.
   machine: 'Kick and hat', ride: 'Ride and snare', open_hat: 'Open hat', crash: 'Crash',
   note: 'One note', seventh: 'Seventh chord',

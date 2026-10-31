@@ -123,10 +123,8 @@ export function SoundFolder() {
         </div>
       </div>
       <div class="module voices" aria-label="Instruments">
-        <ControlPatch id="bank" label="Drum machine" colour="var(--pulse)" />
+        <ControlPatch id="bank" label="Drums" colour="var(--pulse)" />
         <ControlSwitch id="kit" label="Kit" colour="var(--pulse)" title="Which drum carries each layer: kick and hat, or ride and snare" />
-        <ControlSwitch id="ride_fallback" label="Ride stand-in" colour="var(--pulse)"
-          title="What keeps time under the ride kit on a bank with no ride (tr808, tr707): its open hat or its crash" />
         <ControlPatch id="bass" label="Bass" colour="var(--bass)" />
         <ControlPatch id="melody" label="Melody" colour="var(--rhyme)" />
         <ControlPatch id="chord_sound" label="Chords" colour="var(--chords)"

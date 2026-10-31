@@ -25,9 +25,10 @@ use prosody_core::lower::{self, Analyses};
 use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
+use prosody_emit::strudel::DRUM_SAMPLES;
 use prosody_emit::style::{
-    BANKS, KITS, PRESETS as PALETTES, RIDE_FALLBACKS, SOUNDFONT_VARIANTS, SOUNDFONTS, SYNTHS,
-    VOICINGS, preset_keys,
+    BANKS, KITS, PRESETS as PALETTES, RETIRED_BANKS, RIDE_FALLBACKS, SOUNDFONT_VARIANTS,
+    SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
 };
 use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading, trace};
 use prosody_lexicon::EnglishLexicon;
@@ -162,6 +163,8 @@ fn site_json(transport: Transport) -> Result<String> {
         ("scaleSteps", scale_steps()),
         ("soundfonts", soundfont_files()),
         ("banks", list(BANKS)),
+        ("retiredBanks", retired_banks()),
+        ("drumSamples", list(DRUM_SAMPLES)),
         ("instruments", list(&instruments)),
         ("kits", list(KITS)),
         ("voicings", list(VOICINGS)),
@@ -336,6 +339,43 @@ fn soundfont_files() -> String {
                 json_string(variant.file)
             )
         })
+        .collect();
+    format!("{{{}}}", entries.join(","))
+}
+
+/// Where the drums are served from, for a pattern played somewhere other than the page.
+const DRUMS_URL: &str = "https://prosody.rocks/drums/";
+
+/// The drums as a Strudel sample map, `drums/strudel.json`: what a pattern pasted into strudel.cc
+/// loads with `samples('https://prosody.rocks/drums/strudel.json')`, since strudel.cc has none of
+/// these kits. The page itself registers the same names from `site.json` and its own files.
+#[must_use]
+pub fn drum_map() -> String {
+    let entries: Vec<String> = BANKS
+        .iter()
+        .flat_map(|bank| {
+            DRUM_SAMPLES.iter().map(move |drum| {
+                format!(
+                    "{}:[{}]",
+                    json_string(&format!("{bank}_{drum}")),
+                    json_string(&format!("{bank}/{drum}.flac"))
+                )
+            })
+        })
+        .collect();
+    format!(
+        "{{\"_base\":{},{}}}",
+        json_string(DRUMS_URL),
+        entries.join(",")
+    )
+}
+
+/// Each retired bank and the kit a header naming it now plays, so the page can show a shared link's
+/// old bank as the kit it will hear.
+fn retired_banks() -> String {
+    let entries: Vec<String> = RETIRED_BANKS
+        .iter()
+        .map(|(retired, now)| format!("{}:{}", json_string(retired), json_string(now)))
         .collect();
     format!("{{{}}}", entries.join(","))
 }
@@ -1016,6 +1056,38 @@ mod tests {
     use prosody_core::mapping::Variant;
 
     use super::{Mapping, Mappings, Output, Profile, SEED, body_of, json_string, site_json};
+
+    #[test]
+    fn the_drums_are_a_sample_map_strudel_cc_can_load() {
+        // Strudel joins `_base` and each file by plain concatenation, and `.bank("uzu")` with
+        // `s("bd")` asks for `uzu_bd`.
+        let map = super::drum_map();
+        assert!(
+            map.starts_with(
+                "{\"_base\":\"https://prosody.rocks/drums/\",\"uzu_bd\":[\"uzu/bd.flac\"],"
+            ),
+            "{map}"
+        );
+        assert!(
+            map.contains("\"virtuosity_rd\":[\"virtuosity/rd.flac\"]"),
+            "{map}"
+        );
+        // Five kits of nine drums.
+        assert_eq!(map.matches(".flac").count(), 45, "{map}");
+    }
+
+    #[test]
+    fn the_site_data_names_the_drums_and_the_retired_banks() {
+        let data = site_json(super::Transport::Wasm).unwrap();
+        assert!(
+            data.contains(
+                "\"drumSamples\":[\"bd\",\"sd\",\"hh\",\"oh\",\"rd\",\"cr\",\"lt\",\"mt\",\"ht\"]"
+            ),
+            "{data}"
+        );
+        assert!(data.contains("\"tr909\":\"uzu\""), "retired banks");
+        assert!(data.contains("\"r8\":\"virtuosity\""), "retired banks");
+    }
 
     #[test]
     fn the_site_data_lists_every_palette_value_the_style_accepts() {
@@ -1928,7 +2000,7 @@ mod tests {
         for field in [
             "\"scale\":\"phrygian_dominant\"",
             "\"root\":\"D\"",
-            "\"bank\":\"tr909\"",
+            "\"bank\":\"uzu\"",
             "\"bass\":\"karplus\"",
             "\"melody\":\"karplus\"",
             "\"low\":\"124\"",
@@ -2018,7 +2090,7 @@ mod tests {
         let response = super::compile(&request(&query, SEED), &Output::Pattern);
         assert_eq!(response.status, 200, "{}", response.body);
         let body = &response.body;
-        assert!(body.contains(".bank(\"RolandR8\")"), "{body}");
+        assert!(body.contains(".bank(\"virtuosity\")"), "{body}");
         // A drum lane of ride strokes. Not "the first bar is a ride bar": 24 bars are more than
         // a level holds, so the first element may be a group of bars (`strudel::nested`).
         assert!(
@@ -2065,7 +2137,9 @@ mod tests {
     }
 
     #[test]
-    fn the_register_the_ride_stand_in_and_density_reach_the_pattern() {
+    fn the_register_the_ride_fallback_and_density_reach_the_pattern() {
+        // A link shared before the drum machines were retired: the TR-808, which had no ride, and
+        // the crash standing in for it. It compiles, as the modular kit, which has a ride.
         let query = [
             ("bass_octave", "1"),
             ("melody_octave", "5"),
@@ -2082,11 +2156,13 @@ mod tests {
             "//   melody_octave = 5\n",
             "//   ride_fallback = crash\n",
             "//   density_level = 0.50\n",
-            "crash in place of the ride, which RolandTR808 does not have,",
+            "//   bank = modular\n",
+            "(ride on the foundation",
             "//   density: every gain in a bar divided by n^0.500",
         ] {
             assert!(body.contains(line), "{line} missing: {body}");
         }
+        assert!(!body.contains("in place of the ride"), "{body}");
         // An octave outside its role's range is refused at the boundary, naming the key.
         let response = super::compile(&request(&[("bass_octave", "4")], SEED), &Output::Pattern);
         assert_eq!(response.status, 400);

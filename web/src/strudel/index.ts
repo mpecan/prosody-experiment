@@ -6,12 +6,19 @@ import { cuesOf, ensureEngine, prerender, quietReading, speech, voiceLevel } fro
 import { beat, hearing, playing, readingNote, readingSettings, settings, status } from '../store';
 import { barsOf, clearRoll, fitRoll, lightUp, resetMeters, startDrawing, watch } from '../watch';
 import { played } from '../mix';
+import { site } from '../data';
 import { audioContext, evaluate, strudel, type Pattern, type Repl } from './globals';
 
-// Where the sounds come from. The drum machines are the same sample map strudel.cc loads; without
-// it every `.bank(...)` asks for a sample nobody registered and the drums are silent.
-const SAMPLES = 'https://strudel.b-cdn.net';
+// Where the sounds come from: all of them beside the page, so a piece plays with no network once the
+// page is here. The drums are five kits rendered by `scripts/render-drums.mjs`; without them every
+// `.bank(...)` asks for a sample nobody registered and the drums are silent.
+const DRUMS = new URL('./drums/', document.baseURI).href;
 const SOUNDFONTS = new URL('./vendor/strudel-soundfonts.mjs', document.baseURI).href;
+
+/** Every kit's drums as a Strudel sample map: `.bank("uzu")` with `s("bd")` plays `uzu_bd`. */
+export function drumMap(banks: string[], drums: string[]): Record<string, string[]> {
+  return Object.fromEntries(banks.flatMap((bank) => drums.map((drum) => [`${bank}_${drum}`, [`${bank}/${drum}.flac`]])));
+}
 
 let strudelReady = false;
 /** The running Strudel, once started. */
@@ -20,10 +27,7 @@ export let repl: Repl | null = null;
 async function startStrudel(): Promise<void> {
   const started = await strudel.initStrudel({
     prebake: () => Promise.all([
-      strudel.samples(`${SAMPLES}/tidal-drum-machines.json`, `${SAMPLES}/tidal-drum-machines/machines/`, {
-        prebake: true,
-        tag: 'drum-machines',
-      }),
+      strudel.samples(drumMap(site.banks, site.drumSamples), DRUMS, { prebake: true, tag: 'drums' }),
       // Imported only now: the import map answers its Strudel imports from the globals that
       // `initStrudel` has just created.
       (import(/* @vite-ignore */ SOUNDFONTS) as Promise<{ registerSoundfonts: () => unknown }>)
