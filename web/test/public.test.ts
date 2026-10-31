@@ -1,5 +1,5 @@
 // The files the page loads beside itself, as they are shipped.
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -52,5 +52,34 @@ describe('the speech worker', () => {
       'kitten-tts-webgpu@0.1.1/',
       'piper-voices/resolve/5041a7a49ae5b3a0f30e6837769eb03fdbb231bd',
     ]) expect(worker, pinned).toContain(pinned);
+  });
+});
+
+describe('the soundfonts', () => {
+  // scripts/render-soundfonts.mjs writes them; the Prosody player reads them (src/player/samples.ts).
+  const dir = join(web, 'public/soundfonts');
+  const manifests = readdirSync(dir).filter((file) => file.endsWith('.json'));
+
+  it('has one for every soundfont the compiler plays, each zone\'s recording beside it', () => {
+    // style::SOUNDFONT_VARIANTS has 28; site.json names each by its file (a test there pins that).
+    expect(manifests.length).toBe(28);
+    const recordings = new Set(readdirSync(join(dir, 'zones')));
+    const used = new Set<string>();
+    for (const file of manifests) {
+      const manifest = JSON.parse(read(`public/soundfonts/${file}`));
+      expect(manifest.licence, file).toMatch(/FluidR3 GM|GeneralUser GS/);
+      expect(manifest.zones.length, file).toBeGreaterThan(0);
+      manifest.zones.forEach((zone: { position: number; low: number; high: number; rate: number; file: string;
+        loopStart: number | null; loopEnd: number | null }, index: number) => {
+        expect(zone.position, file).toBe(index);
+        expect(zone.low <= zone.high && zone.high <= 127, file).toBe(true);
+        expect(zone.rate, file).toBeGreaterThanOrEqual(8_000);
+        expect(zone.loopStart === null || (zone.loopEnd !== null && zone.loopEnd > zone.loopStart), file).toBe(true);
+        expect(existsSync(join(dir, zone.file)), zone.file).toBe(true);
+        used.add(zone.file.replace(/^zones\//, ''));
+      });
+    }
+    // No recording is shipped that no soundfont plays.
+    expect([...recordings].filter((name) => !used.has(name))).toEqual([]);
   });
 });

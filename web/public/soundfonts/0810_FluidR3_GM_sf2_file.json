@@ -1,0 +1,57 @@
+{
+ "name": "gm_lead_2_sawtooth",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0810_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 56,
+   "root": 45,
+   "loopStart": 201,
+   "loopEnd": 602,
+   "rate": 44100,
+   "file": "zones/02accfbbdebdeb7e.flac"
+  },
+  {
+   "position": 1,
+   "low": 57,
+   "high": 68,
+   "root": 57,
+   "loopStart": 101,
+   "loopEnd": 301,
+   "rate": 44100,
+   "file": "zones/b0619df09c94b79e.flac"
+  },
+  {
+   "position": 2,
+   "low": 69,
+   "high": 80,
+   "root": 69,
+   "loopStart": 51,
+   "loopEnd": 151,
+   "rate": 44100,
+   "file": "zones/a37ef45759f3d190.flac"
+  },
+  {
+   "position": 3,
+   "low": 81,
+   "high": 92,
+   "root": 81,
+   "loopStart": 26,
+   "loopEnd": 76,
+   "rate": 44100,
+   "file": "zones/64d7bf0144652ef8.flac"
+  },
+  {
+   "position": 4,
+   "low": 93,
+   "high": 127,
+   "root": 93,
+   "loopStart": 13,
+   "loopEnd": 63,
+   "rate": 44100,
+   "file": "zones/1e07b99e3d23d7ea.flac"
+  }
+ ]
+}

@@ -1,0 +1,217 @@
+{
+ "name": "gm_church_organ",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0190_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 36,
+   "root": 36,
+   "loopStart": 24522,
+   "loopEnd": 61248,
+   "rate": 22050,
+   "file": "zones/8c652af560997a2a.flac"
+  },
+  {
+   "position": 1,
+   "low": 37,
+   "high": 39,
+   "root": 39,
+   "loopStart": 43654,
+   "loopEnd": 83215,
+   "rate": 22050,
+   "file": "zones/e63eab5c436f40e1.flac"
+  },
+  {
+   "position": 2,
+   "low": 40,
+   "high": 42,
+   "root": 42,
+   "loopStart": 46262,
+   "loopEnd": 91741,
+   "rate": 22050,
+   "file": "zones/8d86556405b22d32.flac"
+  },
+  {
+   "position": 3,
+   "low": 43,
+   "high": 45,
+   "root": 45,
+   "loopStart": 31693,
+   "loopEnd": 92224,
+   "rate": 22050,
+   "file": "zones/c2393615f504cb2c.flac"
+  },
+  {
+   "position": 4,
+   "low": 46,
+   "high": 48,
+   "root": 48,
+   "loopStart": 57336,
+   "loopEnd": 109969,
+   "rate": 22050,
+   "file": "zones/c140b248bf48dab6.flac"
+  },
+  {
+   "position": 5,
+   "low": 49,
+   "high": 51,
+   "root": 51,
+   "loopStart": 47046,
+   "loopEnd": 97886,
+   "rate": 22050,
+   "file": "zones/5f3c85e60329d021.flac"
+  },
+  {
+   "position": 6,
+   "low": 52,
+   "high": 54,
+   "root": 54,
+   "loopStart": 30714,
+   "loopEnd": 93569,
+   "rate": 22050,
+   "file": "zones/ab1137d489cf08bb.flac"
+  },
+  {
+   "position": 7,
+   "low": 55,
+   "high": 57,
+   "root": 57,
+   "loopStart": 48853,
+   "loopEnd": 91800,
+   "rate": 22050,
+   "file": "zones/e75bc696a3b5f20c.flac"
+  },
+  {
+   "position": 8,
+   "low": 58,
+   "high": 60,
+   "root": 60,
+   "loopStart": 45472,
+   "loopEnd": 90380,
+   "rate": 22050,
+   "file": "zones/8e17a9482d11d8b9.flac"
+  },
+  {
+   "position": 9,
+   "low": 61,
+   "high": 63,
+   "root": 63,
+   "loopStart": 22722,
+   "loopEnd": 69120,
+   "rate": 22050,
+   "file": "zones/a77cd88d4df75241.flac"
+  },
+  {
+   "position": 10,
+   "low": 64,
+   "high": 66,
+   "root": 66,
+   "loopStart": 21118,
+   "loopEnd": 55305,
+   "rate": 22050,
+   "file": "zones/8b8b3131c8a8441c.flac"
+  },
+  {
+   "position": 11,
+   "low": 67,
+   "high": 69,
+   "root": 69,
+   "loopStart": 47913,
+   "loopEnd": 78779,
+   "rate": 22050,
+   "file": "zones/57d2b28a38e1cad6.flac"
+  },
+  {
+   "position": 12,
+   "low": 70,
+   "high": 72,
+   "root": 72,
+   "loopStart": 13747,
+   "loopEnd": 57984,
+   "rate": 22050,
+   "file": "zones/75db5e7df24205d2.flac"
+  },
+  {
+   "position": 13,
+   "low": 73,
+   "high": 75,
+   "root": 75,
+   "loopStart": 34925,
+   "loopEnd": 62419,
+   "rate": 22050,
+   "file": "zones/ea40b7109ec1f543.flac"
+  },
+  {
+   "position": 14,
+   "low": 76,
+   "high": 78,
+   "root": 78,
+   "loopStart": 27869,
+   "loopEnd": 61623,
+   "rate": 22050,
+   "file": "zones/90670fd1a8031f44.flac"
+  },
+  {
+   "position": 15,
+   "low": 79,
+   "high": 81,
+   "root": 81,
+   "loopStart": 26065,
+   "loopEnd": 63168,
+   "rate": 22050,
+   "file": "zones/3b046278eb9d83fc.flac"
+  },
+  {
+   "position": 16,
+   "low": 82,
+   "high": 84,
+   "root": 84,
+   "loopStart": 13633,
+   "loopEnd": 54976,
+   "rate": 22050,
+   "file": "zones/8f247b22061dfdb5.flac"
+  },
+  {
+   "position": 17,
+   "low": 85,
+   "high": 87,
+   "root": 87,
+   "loopStart": 31911,
+   "loopEnd": 71007,
+   "rate": 22050,
+   "file": "zones/30db426faac51751.flac"
+  },
+  {
+   "position": 18,
+   "low": 88,
+   "high": 90,
+   "root": 90,
+   "loopStart": 15110,
+   "loopEnd": 42911,
+   "rate": 22050,
+   "file": "zones/80655bf92e16174e.flac"
+  },
+  {
+   "position": 19,
+   "low": 91,
+   "high": 93,
+   "root": 93,
+   "loopStart": 14156,
+   "loopEnd": 70007,
+   "rate": 22050,
+   "file": "zones/58758731ebe72e51.flac"
+  },
+  {
+   "position": 20,
+   "low": 94,
+   "high": 96,
+   "root": 96,
+   "loopStart": 17894,
+   "loopEnd": 51289,
+   "rate": 22050,
+   "file": "zones/93ca0ec0d3474785.flac"
+  }
+ ]
+}

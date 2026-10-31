@@ -1,0 +1,27 @@
+{
+ "name": "gm_pad_warm",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0890_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 108,
+   "root": 84,
+   "loopStart": 36638,
+   "loopEnd": 51214,
+   "rate": 44100,
+   "file": "zones/d2fbe66d82f6579d.flac"
+  },
+  {
+   "position": 1,
+   "low": 0,
+   "high": 108,
+   "root": 84,
+   "loopStart": 68964,
+   "loopEnd": 94892,
+   "rate": 44100,
+   "file": "zones/86b65549acd49f26.flac"
+  }
+ ]
+}

@@ -1,0 +1,157 @@
+{
+ "name": "gm_choir_aahs",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0520_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 39,
+   "root": 39,
+   "loopStart": 38712,
+   "loopEnd": 65958,
+   "rate": 32000,
+   "file": "zones/6e2ea62b4ab574bb.flac"
+  },
+  {
+   "position": 1,
+   "low": 40,
+   "high": 42,
+   "root": 42,
+   "loopStart": 21521,
+   "loopEnd": 73053,
+   "rate": 32000,
+   "file": "zones/8e2895d2be91a15f.flac"
+  },
+  {
+   "position": 2,
+   "low": 43,
+   "high": 45,
+   "root": 45,
+   "loopStart": 28992,
+   "loopEnd": 89051,
+   "rate": 32000,
+   "file": "zones/dbf2f37822a1e7ff.flac"
+  },
+  {
+   "position": 3,
+   "low": 46,
+   "high": 48,
+   "root": 48,
+   "loopStart": 45568,
+   "loopEnd": 96481,
+   "rate": 32000,
+   "file": "zones/2fbd8d5b80b94093.flac"
+  },
+  {
+   "position": 4,
+   "low": 49,
+   "high": 51,
+   "root": 51,
+   "loopStart": 44077,
+   "loopEnd": 100673,
+   "rate": 32000,
+   "file": "zones/7f236082e6a8a23d.flac"
+  },
+  {
+   "position": 5,
+   "low": 52,
+   "high": 54,
+   "root": 54,
+   "loopStart": 34198,
+   "loopEnd": 97101,
+   "rate": 32000,
+   "file": "zones/ade3b90b382a5aa1.flac"
+  },
+  {
+   "position": 6,
+   "low": 55,
+   "high": 57,
+   "root": 57,
+   "loopStart": 29258,
+   "loopEnd": 83485,
+   "rate": 32000,
+   "file": "zones/63adebb3784ab6d9.flac"
+  },
+  {
+   "position": 7,
+   "low": 58,
+   "high": 60,
+   "root": 60,
+   "loopStart": 41654,
+   "loopEnd": 81848,
+   "rate": 32000,
+   "file": "zones/630347e6a10448f9.flac"
+  },
+  {
+   "position": 8,
+   "low": 61,
+   "high": 63,
+   "root": 63,
+   "loopStart": 33664,
+   "loopEnd": 78736,
+   "rate": 32000,
+   "file": "zones/31473037657b26ab.flac"
+  },
+  {
+   "position": 9,
+   "low": 64,
+   "high": 66,
+   "root": 66,
+   "loopStart": 17951,
+   "loopEnd": 88029,
+   "rate": 32000,
+   "file": "zones/e053742585e3cc53.flac"
+  },
+  {
+   "position": 10,
+   "low": 67,
+   "high": 69,
+   "root": 69,
+   "loopStart": 21023,
+   "loopEnd": 77588,
+   "rate": 32000,
+   "file": "zones/c9cec2ff702d13ef.flac"
+  },
+  {
+   "position": 11,
+   "low": 70,
+   "high": 72,
+   "root": 72,
+   "loopStart": 17992,
+   "loopEnd": 53127,
+   "rate": 32000,
+   "file": "zones/144fa9f14726433c.flac"
+  },
+  {
+   "position": 12,
+   "low": 73,
+   "high": 75,
+   "root": 75,
+   "loopStart": 23488,
+   "loopEnd": 73396,
+   "rate": 32000,
+   "file": "zones/65adfed1f4249c5c.flac"
+  },
+  {
+   "position": 13,
+   "low": 76,
+   "high": 78,
+   "root": 78,
+   "loopStart": 15002,
+   "loopEnd": 55210,
+   "rate": 32000,
+   "file": "zones/32a0c151b068cfbc.flac"
+  },
+  {
+   "position": 14,
+   "low": 79,
+   "high": 96,
+   "root": 81,
+   "loopStart": 26607,
+   "loopEnd": 74266,
+   "rate": 32000,
+   "file": "zones/ab44d004cc2a656b.flac"
+  }
+ ]
+}

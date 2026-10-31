@@ -1,0 +1,117 @@
+{
+ "name": "gm_music_box",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0100_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 44,
+   "root": 44,
+   "loopStart": 36227,
+   "loopEnd": 39197,
+   "rate": 44100,
+   "file": "zones/cb7abc87600819da.flac"
+  },
+  {
+   "position": 1,
+   "low": 45,
+   "high": 50,
+   "root": 50,
+   "loopStart": 34650,
+   "loopEnd": 36751,
+   "rate": 44100,
+   "file": "zones/d64a2f384cc62f9f.flac"
+  },
+  {
+   "position": 2,
+   "low": 51,
+   "high": 55,
+   "root": 55,
+   "loopStart": 32500,
+   "loopEnd": 34074,
+   "rate": 44100,
+   "file": "zones/fe2787bd50daa53b.flac"
+  },
+  {
+   "position": 3,
+   "low": 56,
+   "high": 60,
+   "root": 60,
+   "loopStart": 23866,
+   "loopEnd": 25045,
+   "rate": 44100,
+   "file": "zones/36b072671201d807.flac"
+  },
+  {
+   "position": 4,
+   "low": 61,
+   "high": 64,
+   "root": 64,
+   "loopStart": 36257,
+   "loopEnd": 36658,
+   "rate": 44100,
+   "file": "zones/19b04f9fa6d16d24.flac"
+  },
+  {
+   "position": 5,
+   "low": 65,
+   "high": 70,
+   "root": 70,
+   "loopStart": 23595,
+   "loopEnd": 23973,
+   "rate": 44100,
+   "file": "zones/446d05b5878315c3.flac"
+  },
+  {
+   "position": 6,
+   "low": 71,
+   "high": 73,
+   "root": 73,
+   "loopStart": 27326,
+   "loopEnd": 27962,
+   "rate": 44100,
+   "file": "zones/8b9ebac9383405ed.flac"
+  },
+  {
+   "position": 7,
+   "low": 74,
+   "high": 77,
+   "root": 77,
+   "loopStart": 18162,
+   "loopEnd": 18730,
+   "rate": 44100,
+   "file": "zones/0cdd9c00ab1a74f0.flac"
+  },
+  {
+   "position": 8,
+   "low": 78,
+   "high": 82,
+   "root": 79,
+   "loopStart": 24108,
+   "loopEnd": 24445,
+   "rate": 44100,
+   "file": "zones/9c29fbab281a24e9.flac"
+  },
+  {
+   "position": 9,
+   "low": 83,
+   "high": 88,
+   "root": 88,
+   "loopStart": 25353,
+   "loopEnd": 25687,
+   "rate": 44100,
+   "file": "zones/500d865fd5446440.flac"
+  },
+  {
+   "position": 10,
+   "low": 89,
+   "high": 108,
+   "root": 90,
+   "loopStart": 24360,
+   "loopEnd": 24628,
+   "rate": 44100,
+   "file": "zones/2410b297ea99be33.flac"
+  }
+ ]
+}

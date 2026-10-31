@@ -1,0 +1,97 @@
+{
+ "name": "gm_epiano2",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0050_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 53,
+   "root": 48,
+   "loopStart": null,
+   "loopEnd": null,
+   "rate": 12000,
+   "file": "zones/aee01254aacfd4ee.flac"
+  },
+  {
+   "position": 1,
+   "low": 54,
+   "high": 59,
+   "root": 54,
+   "loopStart": 125191.467,
+   "loopEnd": 142459.733,
+   "rate": 16000,
+   "file": "zones/f567df6475f7ac2c.flac"
+  },
+  {
+   "position": 2,
+   "low": 60,
+   "high": 65,
+   "root": 60,
+   "loopStart": 103958.4,
+   "loopEnd": 119175.467,
+   "rate": 16000,
+   "file": "zones/078c50f8b32ad6cf.flac"
+  },
+  {
+   "position": 3,
+   "low": 66,
+   "high": 71,
+   "root": 66,
+   "loopStart": 125144.775,
+   "loopEnd": 139192.83,
+   "rate": 22050,
+   "file": "zones/7197f5ad8dd29b50.flac"
+  },
+  {
+   "position": 4,
+   "low": 72,
+   "high": 77,
+   "root": 72,
+   "loopStart": 79680.983,
+   "loopEnd": 89278.245,
+   "rate": 22050,
+   "file": "zones/bae136550d71568d.flac"
+  },
+  {
+   "position": 5,
+   "low": 78,
+   "high": 83,
+   "root": 78,
+   "loopStart": 66983.077,
+   "loopEnd": 74368.615,
+   "rate": 24000,
+   "file": "zones/f3dc6c0725c8fece.flac"
+  },
+  {
+   "position": 6,
+   "low": 84,
+   "high": 89,
+   "root": 84,
+   "loopStart": 58555,
+   "loopEnd": 63435,
+   "rate": 24000,
+   "file": "zones/7a63d46faa6b439c.flac"
+  },
+  {
+   "position": 7,
+   "low": 90,
+   "high": 95,
+   "root": 90,
+   "loopStart": 79596,
+   "loopEnd": 84434,
+   "rate": 32000,
+   "file": "zones/e1f5f331082e4544.flac"
+  },
+  {
+   "position": 8,
+   "low": 96,
+   "high": 108,
+   "root": 96,
+   "loopStart": 39396.211,
+   "loopEnd": 50469.053,
+   "rate": 32000,
+   "file": "zones/060b214698fa2e67.flac"
+  }
+ ]
+}
