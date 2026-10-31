@@ -331,8 +331,8 @@ fn scale_steps() -> String {
 }
 
 /// The webaudiofont file each soundfont sound loads, by the sound a pattern asks Strudel for
-/// (`gm_cello:1`): what an offline copy of the instruments has to hold, and what the page's tests
-/// check against the vendored `@strudel/soundfonts`.
+/// (`gm_cello:1`): the file whose zones the page plays (converted beside it by
+/// `scripts/render-soundfonts.mjs`), and which the page's end-to-end test checks is there.
 fn soundfont_files() -> String {
     let entries: Vec<String> = SOUNDFONT_VARIANTS
         .iter()

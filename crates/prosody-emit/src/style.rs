@@ -268,10 +268,13 @@ const fn variant(name: &'static str, sound: &'static str, file: &'static str) ->
 /// The variant each of [`SOUNDFONTS`] plays, in the same order: always one from a bank whose
 /// licence lets the app ship it (`FluidR3` GM, MIT; `GeneralUser` GS, free for any use). Strudel's
 /// first variant is `JCLive`, Aspirin or Chaos for every instrument here, and those banks carry no
-/// licence. Indices are into `@strudel/soundfonts` 1.3.0's `gm` table, which `web/e2e` checks
-/// against the vendored package, so an upgrade that reorders it fails rather than plays another
-/// bank. Choosing a variant is palette work (`CLAUDE.md` §10): it changes the sound, not the poem's
-/// structure.
+/// licence. Indices are into `@strudel/soundfonts` 1.3.0's `gm` table, checked by hand against that
+/// package when they were chosen (2026-10-30). Nothing re-checks them now: the e2e test that did
+/// left with the vendored package when Strudel's runtime left the page (2026-10-31). The page and
+/// the app play `file`'s zones, never the index (`web/e2e` checks those zones are beside the page);
+/// the index matters only where the pattern's text is played by Strudel itself, as on strudel.cc,
+/// whose upgrade could reorder the table and play another bank. Choosing a variant is palette work
+/// (`CLAUDE.md` §10): it changes the sound, not the poem's structure.
 pub const SOUNDFONT_VARIANTS: &[SoundfontVariant] = &[
     variant(
         "gm_acoustic_bass",
