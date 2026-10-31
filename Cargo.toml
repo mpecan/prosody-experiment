@@ -39,6 +39,8 @@ prosody-emit = { path = "crates/prosody-emit" }
 prosody-score = { path = "crates/prosody-score" }
 prosody-web = { path = "crates/prosody-web" }
 prosody-wasm = { path = "crates/prosody-wasm" }
+prosody-synth = { path = "crates/prosody-synth" }
+prosody-synth-wasm = { path = "crates/prosody-synth-wasm" }
 
 # See CLAUDE.md §3. Lints live here, not in per-file `#![allow]`.
 [workspace.lints.rust]

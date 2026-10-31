@@ -16,6 +16,13 @@ prosody-lexicon.workspace = true
 prosody-lts.workspace = true
 prosody-emit.workspace = true
 prosody-score.workspace = true
+prosody-synth.workspace = true
+
+[dev-dependencies]
+# Golden audio for `prosody render` (`tests/render.rs`): the WAV's bytes hashed, the hash
+# snapshotted. Both already in the workspace.
+blake3.workspace = true
+insta.workspace = true
 
 [lints]
 workspace = true

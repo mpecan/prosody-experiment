@@ -2384,12 +2384,15 @@ name = "prosody-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "blake3",
+ "insta",
  "prosody-cmudict",
  "prosody-core",
  "prosody-emit",
  "prosody-lexicon",
  "prosody-lts",
  "prosody-score",
+ "prosody-synth",
 ]
 
 [[package]]
@@ -2453,6 +2456,23 @@ dependencies = [
  "prosody-core",
  "prosody-lexicon",
  "prosody-lts",
+]
+
+[[package]]
+name = "prosody-synth"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "insta",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "prosody-synth-wasm"
+version = "0.1.0"
+dependencies = [
+ "prosody-synth",
+ "wasm-bindgen",
 ]
 
 [[package]]

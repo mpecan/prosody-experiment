@@ -1,0 +1,6 @@
+---
+source: crates/prosody-synth/tests/golden.rs
+expression: "describe(\"oscillators\", Bank::new(), notes, 4.0)"
+---
+oscillators: 216064 frames, peak 0.5445, rms 0.2380, stolen 0, missing 0
+blake3 3e06323d0679137217fb2fa652d3470ec8942252a6a9933377b142c014d21bed

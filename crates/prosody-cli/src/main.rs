@@ -23,10 +23,12 @@ use prosody_core::{
     Fallback, Lexicon, Phonemiser, Poem, meter, repetition, rhyme, role, sound, surprisal,
 };
 use prosody_emit::osc::Schedule;
-use prosody_emit::{Backend as _, Osc, Strudel, Style};
+use prosody_emit::{Backend as _, Osc, Perform, Strudel, Style};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
 use prosody_score::{DEFAULT_PROBES, Profile, Report, sensitivity};
+
+mod render;
 
 fn main() -> ExitCode {
     match run() {
@@ -41,12 +43,14 @@ fn main() -> ExitCode {
 }
 
 /// Which backend to render with.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 enum Target {
     /// Strudel pattern text (`SPEC.md` §7.6).
     Strudel,
     /// A schedule of OSC messages (§7.8).
     Osc,
+    /// The player's own synth, to a WAV file (`docs/player.md`): `prosody render`.
+    Render(PathBuf),
 }
 
 /// What the user asked for.
@@ -71,9 +75,14 @@ struct Arguments {
 }
 
 const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
+     \x20      prosody render --out OUT.wav [OPTIONS] [FILE]\n\
      \n\
      Compiles a poem into Strudel pattern text on stdout.\n\
      Reads standard input when FILE is absent.\n\
+     \n\
+     `prosody render` plays the piece once through the player's own synth into a\n\
+     16-bit stereo WAV file at 48 kHz. It plays the oscillators; drum and soundfont\n\
+     notes need sample decoders it does not have yet, and it says how many it left out.\n\
      \n\
      options:\n\
      \x20 --explain      print the poem with each token annotated, instead of the pattern\n\
@@ -101,6 +110,7 @@ const USAGE: &str = "usage: prosody [OPTIONS] [FILE]\n\
      \x20 --osc         emit a schedule of OSC messages instead of Strudel text\n\
      \x20 --send ADDR    send the OSC schedule to ADDR (implies --osc), e.g. 127.0.0.1:57120\n\
      \x20 --watch        recompile whenever the file changes\n\
+     \x20 -o, --out PATH where `prosody render` writes its WAV file\n\
      \x20 -              read the poem from standard input\n\
      \x20 -h, --help     print this message\n";
 
@@ -122,7 +132,17 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     let mut mappings = Mappings::all();
     let mut expecting_mappings = false;
     let mut expecting_choices = false;
+    let mut arguments = arguments.into_iter().peekable();
+    // `render` is a word of its own, first: `prosody render --out x.wav poem`.
+    let rendering = arguments.next_if(|first| first == "render").is_some();
+    let mut out = None;
+    let mut expecting_out = false;
     for argument in arguments {
+        if expecting_out {
+            out = Some(PathBuf::from(argument));
+            expecting_out = false;
+            continue;
+        }
         if expecting_mappings {
             for name in argument.split(',').filter(|name| !name.is_empty()) {
                 mappings = mappings.without(known(name)?);
@@ -159,6 +179,7 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
             "--profile" => expecting_profile = true,
             "--without" => expecting_mappings = true,
             "--set" => expecting_choices = true,
+            "-o" | "--out" if rendering => expecting_out = true,
             flag if flag.starts_with('-') && flag != "-" => {
                 bail!("unknown option `{flag}`\n\n{USAGE}")
             }
@@ -185,6 +206,12 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
     if expecting_choices {
         bail!("--set needs a list of name=variant\n\n{USAGE}");
     }
+    if expecting_out {
+        bail!("--out needs a path\n\n{USAGE}");
+    }
+    if rendering {
+        target = render_target(out, &target, explain || score || watch)?;
+    }
     Ok(Some(Arguments {
         source,
         explain,
@@ -195,6 +222,20 @@ fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Option<Arguments
         watch,
         send,
     }))
+}
+
+/// What `prosody render` renders to: the `--out` path, refused with anything else asked for.
+fn render_target(out: Option<PathBuf>, target: &Target, other_output: bool) -> Result<Target> {
+    let Some(out) = out else {
+        bail!("prosody render needs --out PATH, the WAV file to write\n\n{USAGE}");
+    };
+    if *target == Target::Osc || other_output {
+        bail!(
+            "prosody render writes a WAV file; it takes none of --osc, --send, --explain, \
+             --score or --watch\n\n{USAGE}"
+        );
+    }
+    Ok(Target::Render(out))
 }
 
 /// The mapping called `name`, or an error naming it.
@@ -299,12 +340,41 @@ fn compile(text: &str, arguments: &Arguments) -> Result<()> {
         return explain(&poem, &score, &style, &roles, mappings);
     }
 
-    match arguments.target {
+    match &arguments.target {
         Target::Strudel => {
             let pattern = Strudel::new()
                 .render(&score, &style)
                 .context("rendering the score")?;
             emit(&pattern)
+        }
+        Target::Render(out) => {
+            let performance = Perform::new()
+                .render(&score, &style)
+                .context("performing the score")?;
+            let rendered = render::render(&performance)?;
+            std::fs::write(out, &rendered.wav)
+                .with_context(|| format!("writing {}", out.display()))?;
+            eprintln!(
+                "prosody: wrote {}: {:.2} s, {} notes played",
+                out.display(),
+                rendered.seconds,
+                rendered.played
+            );
+            // What the render could not play is said, not dropped (`CLAUDE.md` §6).
+            if rendered.drums + rendered.fonts > 0 {
+                eprintln!(
+                    "prosody: {} drum and {} soundfont notes are not in the render: the CLI cannot \
+                     decode their samples yet (FLAC drums, MP3 soundfont zones); the page plays them",
+                    rendered.drums, rendered.fonts
+                );
+            }
+            if rendered.losses.stolen > 0 {
+                eprintln!(
+                    "prosody: {} notes were cut short: more sounded at once than the synth has voices",
+                    rendered.losses.stolen
+                );
+            }
+            Ok(())
         }
         Target::Osc => {
             let schedule = Osc::new()
