@@ -410,6 +410,36 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The player, step 2 — first sound: our own synth, a render worker and a worklet
+
+Step 2 of `docs/player.md`, behind a Strudel/Prosody **Player** switch in the Mixer (Strudel stays
+the default). What reality changed in the design is in its §10.
+
+- **`prosody-synth`** (pure, no workspace dependency): a sampler (drums played through; soundfont
+  zones pitched by 2^((note − root)/12), Catmull–Rom interpolation, loops), PolyBLEP saw and square,
+  a PolyBLAMP triangle, a sine; a linear-attack, exponential-release envelope; an RBJ low-pass at
+  the Butterworth Q; gain × postgain; a fixed pool of 64 voices that steals the voice nearest its
+  end and counts it; missing sounds counted. Four stereo stems. Its own `sin`, `exp2` and `tanh`,
+  so a render is the same bits everywhere; scheduling, looping and the bar-boundary hand-over in
+  whole frames.
+- **`prosody-synth-wasm`**: the synth for the page's render worker (105 kB), fed a flat record of
+  twelve numbers a note.
+- **`prosody render --out x.wav`**: the piece once through the synth to a hand-rolled 16-bit WAV.
+  Oscillators only — FLAC and MP3 decoding are deferred (a dependency to argue for, best settled
+  with the soundfont conversion of decision 3) — and every note left out is named.
+- **The page** (`web/src/player`): the render worker keeps ~0.5 s of stems rendered ahead and posts
+  them straight to the AudioWorklet over a MessageChannel; the worklet mixes the stems at the
+  mixer's gains (mute and solo are instant) through the page's soft clip, counts underruns, and
+  reports its playhead. The lit poem, the roll and the meters read the Performance at that
+  playhead. Live edits hand over at the next bar boundary after the render frontier; presets and
+  A/B switches restart. The reading is not played by it yet (step 4), and the status line says so.
+- **Tests**: hand-worked DSP units (−3 dB at the cutoff, envelope levels at known frames, oscillator
+  periods and Fourier amplitudes, PolyBLEP's alias suppression, sampler pitch ratio, loops, WAV
+  bytes); the renderer's clock (loops, bar hand-over, stealing); golden hashes of oscillator, drum
+  and soundfont scenes and of the corpus rendered with oscillators; the page's records, clock,
+  mixer and soundfont parsing (Vitest); and an e2e that blocks the page's thread for 500 ms while
+  the Prosody player plays — zero underruns, the playhead moving, sound coming out.
+
 ### The player, step 1 — the Performance: every note resolved, and a parity test against Strudel
 
 The user accepted `docs/player.md` (our own player; Strudel stays the text) with its open questions

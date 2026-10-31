@@ -1,7 +1,8 @@
 # The player — design
 
-*Draft, 2026-10-31. Status: step 1 (the Performance) built; steps 2–5 not started. The open
-questions of §8 are decided (§8). What building step 1 changed in this design is in §9.*
+*Draft, 2026-10-31. Status: steps 1 (the Performance) and 2 (first sound) built; steps 3–5 not
+started. The open questions of §8 are decided (§8). What building step 1 changed in this design is
+in §9, and step 2 in §10.*
 
 Prosody plays a poem today by writing Strudel text and handing it to Strudel's runtime
 (`@strudel/web`, its scheduler and the `superdough` synth). This document designs a player of
@@ -305,3 +306,71 @@ departs from §3 above, and why:
 - **The text and the Performance share the walk, not only the numbers.** `strudel::lines` builds
   each lane's steps once; the text writes them (`Line::write`) and the Performance times them
   (`Line::timed`), so a note cannot fall anywhere its pattern step does not.
+
+## 10. What building step 2 changed
+
+Step 2 is `crates/prosody-synth` (the synth), `crates/prosody-synth-wasm` (it, for the render
+worker), `prosody render` in the CLI, and `web/src/player` (the worker, the worklet, the page's
+clock) behind the Mixer's **Player** switch, Strudel still the default. Where it departs from §4–§7
+above, and why:
+
+- **The synth depends on no other crate of the workspace**, not even `prosody-core` (§4 allowed
+  that much). A synth note carries a `tag` — its index in the Performance's notes — and through it
+  its `Span`, so every voice is still attributable (I4: `Renderer::sounding_tags`) while the crate
+  builds for the browser on its own: 105 kB of WebAssembly, where the compiler's is 5.3 MB. Two
+  thin conversions feed it: the CLI from the `Performance` struct, the page from the Performance's
+  JSON as a flat array of twelve numbers a note (the layout is in `prosody-synth-wasm`'s docs, and
+  a test on each side pins it). Defaults for what the text leaves unset are decided once, in the
+  synth (`DEFAULT_ATTACK`, `DEFAULT_RELEASE`).
+- **I1 reaches audio by computing its own transcendental functions.** `f64::sin` and `exp2` call
+  the platform's maths library, whose last bit differs between macOS, Linux and WebAssembly; the
+  synth's `math` module uses only `+`, `*`, `/` and exact rounding. Scheduling is in whole frames:
+  a note's time becomes a frame once, when the piece is made, and where it starts, where the piece
+  loops and where an edit takes over are integer arithmetic. Golden hashes pin three synthetic
+  scenes (`prosody-synth/tests/golden.rs`) and every corpus poem rendered with oscillators
+  (`prosody-cli/tests/render.rs`). Whether the WebAssembly build gives the same bits as the native
+  one is designed for, not yet tested.
+- **The pool steals the voice nearest its end, not the quietest.** "Quietest" is a float compared
+  in control flow (`CLAUDE.md` §4); frames left before a releasing voice (or a drum playing out)
+  ends is a count, and near enough the same voice. With nothing releasing, the oldest goes. Stolen
+  voices and notes whose sound was never loaded are counted and said in the status line.
+- **The CLI renders the oscillators only.** The drums are FLAC and the soundfont zones MP3; the page
+  has the browser decode both, and decoding either in Rust needs a decoder crate that `CLAUDE.md`
+  §10 asks to be argued for. `prosody render` names every note it leaves out. With the default
+  palette that is all of them — a header of `synth = "subtractive"` puts bass and melody on
+  oscillators — so the soundfont conversion of §8's decision 3 (our own lossless zones) is where
+  this should be settled; it was not done in this step. The page still fetches the licensed
+  webaudiofont files from the host its Strudel uses, reads their zones as data (never runs them),
+  and decodes only the zones the piece's keys need. The zones' loop points were set on the original
+  recordings, and an MP3 encoder pads its output by a few frames, so a loop may be a few frames off;
+  the synth checks only that a loop lies inside its sample.
+- **Stems and instant mute/solo arrived now, not in step 3.** The worklet mixes the four stems
+  anyway, so mute and solo are a stem gain from the first sound. The master stage here is the soft
+  clip alone, the page's own curve (also in `prosody_synth::master` for a file); the glue
+  compressor and the reading's duck come with step 3 and step 4. The chords play too: they are the
+  same sampler.
+- **To be matched by measurement in step 3:** the low-pass is fixed at the Butterworth Q (−3 dB at
+  the cutoff, unit-tested); the default attack is 1 ms and release 10 ms; gain and postgain are
+  linear factors. None of these has been compared with Strudel's output yet.
+- **A restart cuts, a live edit hands over.** A live edit is handed to the worker as a swap: the
+  renderer takes over at the first bar boundary *at or after* its frontier (a boundary exactly at
+  the frontier has not been rendered yet), from the same bar of the new piece, counted round a piece
+  with fewer bars; notes already sounding ring on. A preset or an A/B switch starts from the top as
+  Strudel's `hush` does: the voices stop and the worklet's queue is dropped, so the new piece is
+  heard within a block rather than after the half-second lead. Each start of play is a generation;
+  the worker sends its flush down the same channel as its blocks, so nothing rendered before a stop
+  can arrive after it.
+- **The page's clock** is the worklet's count of frames played, moved on by the audio clock since
+  the worklet said it, never further than it had queued, less the output's latency. Notes and marks
+  are found by binary search on onset; a mark's object is kept while it stays lit, so a frame that
+  changes nothing restyles nothing (the measured cost on the Pixel was style recalculation).
+- **The reading is not played by the Prosody player yet** (step 4); the status line says so while
+  it plays.
+- **The player needs the static build.** Its synth (`synth.js`, `synth_bg.wasm`) is written beside
+  the page by `scripts/build-site.sh`; the page served by `prosody-web` or `npm run dev` has none,
+  and the player says it could not start.
+- **The e2e** blocks the page's thread for 500 ms while the Prosody player plays and requires zero
+  underruns, a playhead 0.75 s further on after 0.9 s, and output that is not silence (the worklet
+  reports its peak). It passes in headless Chromium; the Pixel profile (§6, "Device") is still to
+  rerun.
+

@@ -379,6 +379,17 @@ cargo run -p prosody-cli -- --osc examples/dickinson-because.poem
 #     0.500  /prosody/note  0.500 "foundation" 0 1.000 36 0.000 0.688 0.000 1.000 1.000
 ```
 
+To hear a piece through Prosody's own synth instead (`docs/player.md`), render it to a WAV file:
+
+```sh
+cargo run -p prosody-cli -- render --out tyger.wav examples/blake-tyger.poem
+```
+
+It plays the oscillators only for now: the drums (FLAC) and soundfonts (MP3) need sample decoders
+the CLI does not have yet, and it says how many notes it left out. A header of
+`synth = "subtractive"` puts the bass and melody on oscillators. On the page, the Mixer's
+**Player** switch plays the piece through the same synth.
+
 A note's arguments are `beats layer voice gain note detune sharpness family sustain noteGain`.
 `gain` is the drum's accent, always the syllable's own stress; `noteGain` is the pitched note's,
 which differs under `bass = feet`: the foot's note rides on its first syllable but is struck at
@@ -747,7 +758,9 @@ crates/
   prosody-cmudict/    the CMU pronouncing dictionary, vendored
   prosody-lts/        guessing pronunciation from spelling, for words it lacks
   prosody-lexicon/    word-rarity table, built from public-domain texts
-  prosody-emit/       Style, and the Strudel and OSC backends
+  prosody-emit/       Style, and the Strudel, OSC and Performance backends
+  prosody-synth/      the Prosody player's synth: a Performance and samples in, PCM out (docs/player.md)
+  prosody-synth-wasm/ that synth built for the page's render worker
   prosody-score/      how interesting a compiled poem is, and whether it still listens to the poem
   prosody-cli/        arguments, files, stdout, the watcher — all IO lives here
   prosody-web/        what the page asks, answered by a library, plus a local server
