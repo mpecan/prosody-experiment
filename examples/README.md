@@ -74,7 +74,7 @@ Checked rather than assumed, because "it compiles" and "it plays" are different 
 **Strudel: yes, verified.** The emitted text was evaluated in real `@strudel/core` and
 `@strudel/mini` — not just parsed as JavaScript — and it produces genuine control events. Every
 method the emitter calls (`gain`, `lpf`, `attack`, `room`, `crush`, `vowel`, `bank`, `note`, `s`,
-`cpm`, `swingBy`, `stack`) exists on Strudel's `Pattern`. Querying Dickinson cycle by cycle gives
+`cpm`, `layer`, `mask`, `late`, `stack`) exists on Strudel's `Pattern`. Querying Dickinson cycle by cycle gives
 eight events in the first cycle and six in the second — which is the syllable count of "Because I
 could not stop for Death" and "He kindly stopped for me". Successive cycles differ, so the poem's
 lines really do play in order, and repeated queries give identical results. The drum banks were

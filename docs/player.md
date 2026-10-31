@@ -89,7 +89,7 @@ What the Strudel emitter writes, the Performance must mean, note for note. The i
 the text asks for is small (checked 2026-10-31): drum samples from five banks, 28 soundfont
 instruments, four oscillator waves, MIDI pitches, and `gain velocity nudge lpf attack release
 room roomsize delay delaytime delayfeedback crush vowel shape compressor postgain`, with
-`swingBy` and `cpm`. No randomness and no continuous signals: every value is already a literal
+swing and `cpm`. No randomness and no continuous signals: every value is already a literal
 per event.
 
 **One source of the numbers.** Today `strudel.rs` computes each value as it prints it (`gain`
@@ -102,7 +102,8 @@ are the check.
 **Time.** The arrangement's slots, weights and grouping become seconds through the same clock
 helpers the emitter uses (`weights`, `starts`, `cycles_per_minute`), so steady and elastic pulse
 fall out of one code path. Swing follows Strudel's documented `swingBy(x, n)`: each cycle is cut
-into *n* slices and events in the second half of a slice are delayed by *x* of a half-slice.
+into *n* slices and events in the second half of a slice are delayed by *x* of a half-slice (the
+text writes that out rather than calling `swingBy`; §9).
 Nudge delays a note by its seconds. Times are computed as exact rationals and converted to
 seconds once, at the end.
 
@@ -258,21 +259,32 @@ backend), `crates/prosody-web` (`POST /performance`, JSON, the same in the WebAs
 `web/test/parity.test.ts`. Every corpus snapshot of the Strudel text is byte-identical. Where it
 departs from §3 above, and why:
 
-- **Swing follows Strudel's documentation, not Strudel's output, and the parity test names the
-  difference.** Measured with `@strudel/core` 1.2.6 (its haps, not its source): `swingBy(x, n)`
+- **Swing follows Strudel's documentation, not `swingBy`'s output — and the text now says so to
+  Strudel too.** Measured with `@strudel/core` 1.2.6 (its haps, not its source): `swingBy(x, n)`
   decides what to delay by where the delayed copy lands as well as where the event began, so an
   event in a slice's first half whose copy lands in the second half sounds twice, and an event in
   the second half whose copy crosses into the next slice never sounds — `s("a b c d").swingBy(0.5, 1)`
   plays a, b, b, c. Copying that would let a palette value add and remove notes (I3) and play notes
   the score does not have (I4), so the Performance delays each event in a slice's second half by
-  `x` half-slices and plays it once. The parity test works out from the Performance exactly which
-  notes Strudel doubles and drops, and requires those and nothing else to differ; a fixture at
-  swing 0.9 exercises it against Strudel. At the palettes' swing (at most 0.33) under the steady
-  pulse this needs five syllables to a beat or a stacked line's fitting; under the elastic pulse a
-  cycle's slices need not fall on beats, so it can happen at any swing. **Decision for the user:**
-  the Strudel text keeps `swingBy` (its bytes may not change in step 1); a later step could write
-  swing so Strudel plays it as documented (for example per beat, with `late` on the second-half
-  steps only), which changes the text of every swung piece.
+  `x` half-slices and plays it once. At the palettes' swing (at most 0.33) under the steady pulse
+  `swingBy` departed only at five syllables to a beat or a stacked line's fitting; under the elastic
+  pulse a cycle's slices need not fall on beats, so it could at any swing.
+  *Decided (the user): the text swings as documented.* It no longer calls `swingBy`; it writes the
+  documented meaning with Strudel's public `layer`, `mask` and `late`, before `.cpm`:
+
+  ```js
+  .layer(x => x.mask("1 0"), x => x.mask("0 1").late(0.330 / 2)) // swing: the second half of each beat, late by 0.330 of a half-beat
+  ```
+
+  (under the elastic pulse the masks repeat per slice, `"[1 0]*5"`, and the delay is
+  `x / 2n`, `0.330 / 10`). `mask` keeps a note in the half its onset falls in — a note held across
+  the middle leaves only an onsetless fragment in the other half, which nothing plays — and `late`
+  by a constant moves without slicing, so Strudel plays every note once, where the Performance
+  places it: strudel.cc and our player play the same notes. The delay is printed as a division
+  because three decimals cannot hold `x / 2n` for every `n`. The parity test now requires exact
+  equality for swung pieces as for the rest; its swing-0.9 fixture is the case where `swingBy` would
+  have doubled and dropped notes, and a test checks that it still reaches such notes. Only the swing
+  line of a swung piece's text changed; every Performance is byte-identical.
 - **A note carries more than §3 listed:** its `slot` and its `grid` position in cycles before swing
   (structure, which no palette moves: what the I3 property compares, and what step 2's bar-by-bar
   live edits need), and the `postgain` and compressor the text sets per layer. Parameters the text

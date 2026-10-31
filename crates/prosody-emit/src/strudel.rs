@@ -94,8 +94,8 @@ use prosody_core::{BassNote, Chord, Harmony, Silence};
 
 pub use crate::perform::melody_voicing;
 use crate::perform::{
-    self, Cycles, EventKey, MAX_LATE, MAX_SOFTEN, Pitched, Stray, chord_share, density, level_for,
-    lines_sounding, ride_stand_in, sample_for_drum, strays, strudel_bank, under_harmony,
+    self, Cycles, EventKey, MAX_LATE, MAX_SOFTEN, Pitched, Stray, Swing, chord_share, density,
+    level_for, lines_sounding, ride_stand_in, sample_for_drum, strays, strudel_bank, under_harmony,
 };
 use crate::style::{Kit, Named, Style, Voicing};
 use crate::{Backend, fmt_param};
@@ -187,27 +187,12 @@ impl Backend for Strudel {
 /// ([`crate::trace`]), whose events must land where the music's do.
 pub(crate) fn clock(score: &Score, style: &Style) -> String {
     let mut clock = String::new();
-    if style.swing().hundredths() > 0 {
-        // `swingBy(x, n)` is `inside(n, late(seq(0, x / 2)))` (`@strudel/core` 1.2.6
-        // `pattern.mjs`): it slices the *cycle* into `n` and delays the back half of each slice.
-        // The slices must be the beats — with `n = 2` across a bar this was a rubato across half
-        // a line rather than a shuffle between syllables. Under the steady pulse a cycle *is* a
-        // beat, so `n = 1` swings every beat whatever its bar's length; under the elastic pulse a
-        // cycle is a bar, sliced by the mean bar length ([`swing_slices`]).
-        //
-        // It must come *before* `.cpm`. `cpm` is `_fast(cpm / 60)` (`@strudel/core` 1.2.6
-        // `pattern.mjs`, which `@strudel/web` 1.3.0 pins), so after it a cycle is the
-        // scheduler's one second, not a beat or a bar: `swingBy` then sliced the second into `n`,
-        // out of step with the beats — onsets moved to irregular times, and a held chord's
-        // onset could fall in no slice's front half (never sounding) or be split across two
-        // (sounding twice). Swinging first slices the pattern's own cycles, and `cpm` then speeds
-        // the swung piece up as a whole.
-        let _ = writeln!(
-            clock,
-            "  .swingBy({}, {})",
-            fmt_param(f64::from(style.swing().hundredths()) / 100.0),
-            swing_slices(score)
-        );
+    if let Some(swing) = Swing::of(score, style) {
+        // It must come *before* `.cpm`. Measured (`@strudel/core` 1.2.6, its haps): after `.cpm`
+        // a cycle is the scheduler's one second, not a beat or a bar, so swing chained after it
+        // sliced the second, out of step with the beats — onsets moved to irregular times. Swinging
+        // first slices the pattern's own cycles, and `cpm` then speeds the swung piece up whole.
+        let _ = writeln!(clock, "{}", self::swing(swing));
     }
     let _ = writeln!(
         clock,
@@ -470,7 +455,43 @@ pub(crate) fn cycles_per_minute(score: &Score, style: &Style) -> f64 {
     }
 }
 
-/// How many slices `swingBy` cuts a cycle into, so that each slice is a beat: one under the
+/// Swing, written out (`SPEC.md` §5, `docs/player.md` §9): the first half of each of a cycle's
+/// slices as it is, and the second half masked out of the rest and played `x / 2n` cycles late —
+/// `x` of a half-slice, the delay the Performance's [`Swing`] gives the same notes.
+///
+/// Not `swingBy(x, n)`, which Strudel documents as meaning exactly this but which measurably plays
+/// some notes twice and others never ([`Swing`]). `mask` keeps a note in the half it *begins* in
+/// and `late` by a constant only moves it, so every note sounds once — the parity test plays it
+/// through Strudel and requires it note for note. The delay is printed as `x / 2n` rather than as
+/// its value because three decimals cannot hold `x / 2n` for every `n`.
+fn swing(swing: Swing) -> String {
+    let slices = swing.slices().max(1);
+    // Under the steady pulse a cycle is a beat, so one slice is a beat and the masks need no
+    // repeat; under the elastic pulse a cycle is a bar, cut into its mean number of beats.
+    let (first, second, what, slice) = if slices == 1 {
+        (
+            "1 0".to_owned(),
+            "0 1".to_owned(),
+            "each beat".to_owned(),
+            "beat",
+        )
+    } else {
+        (
+            format!("[1 0]*{slices}"),
+            format!("[0 1]*{slices}"),
+            format!("each of a bar's {slices} slices"),
+            "slice",
+        )
+    };
+    format!(
+        "  .layer(x => x.mask(\"{first}\"), x => x.mask(\"{second}\").late({amount} / {halves})) \
+         // swing: the second half of {what}, late by {amount} of a half-{slice}",
+        amount = fmt_param(swing.amount()),
+        halves = 2 * u32::from(slices),
+    )
+}
+
+/// How many slices a cycle is cut into for swing, so that each slice is a beat: one under the
 /// steady pulse, whose cycle is a beat; the mean bar length under the elastic pulse, whose cycle
 /// is a bar — which is a beat only in a bar of exactly that length.
 pub(crate) fn swing_slices(score: &Score) -> u16 {
@@ -3180,7 +3201,7 @@ mod tests {
     #[test]
     fn swing_slices_the_bar_so_it_comes_before_the_tempo() {
         // `.cpm` is `_fast(cpm / 60)`: after it a cycle is the scheduler's second, not a bar, so
-        // a `.swingBy` chained after it sliced the wrong span and moved, dropped and doubled
+        // swing chained after it sliced the wrong span and moved, dropped and doubled
         // onsets. The swing must be applied to the stack itself, and the tempo last.
         let score = harmonised(ABAB, prosody_core::Variant::Both);
         let swung = Style::parse(
@@ -3192,7 +3213,8 @@ swing = 0.33
         let text = Strudel::new().render(&score, &swung).unwrap();
         let tail: Vec<&str> = text.lines().rev().take(3).collect();
         assert_eq!(tail[2], ")", "{text}");
-        assert!(tail[1].starts_with("  .swingBy(0.330, "), "{text}");
+        assert!(tail[1].starts_with("  .layer(x => x.mask("), "{text}");
+        assert!(tail[1].contains(".late(0.330 / "), "{text}");
         assert!(tail[0].starts_with("  .cpm("), "{text}");
     }
 
@@ -3558,7 +3580,7 @@ swing = 0.33
 
     #[test]
     fn swing_slices_every_beat_under_either_pulse() {
-        // `swingBy(x, n)` slices a *cycle* into n. Steady: a cycle is a beat, so n = 1 swings
+        // Swing slices a *cycle* into n. Steady: a cycle is a beat, so n = 1 swings
         // every beat of a three- and a four-beat bar alike. Elastic: a cycle is a bar, sliced by
         // the integer mean, 3 — which is a beat only in a bar of three.
         let swung = Style::parse("+++\ntempo_range = [120, 120]\nswing = 0.33\n+++").unwrap();
@@ -3569,7 +3591,11 @@ swing = 0.33
             )
             .unwrap();
         assert!(
-            steady.ends_with("  .swingBy(0.330, 1)\n  .cpm(120.000)\n"),
+            steady.ends_with(
+                "  .layer(x => x.mask(\"1 0\"), x => x.mask(\"0 1\").late(0.330 / 2)) \
+                 // swing: the second half of each beat, late by 0.330 of a half-beat\n  \
+                 .cpm(120.000)\n"
+            ),
             "{steady}"
         );
         let elastic = Strudel::new()
@@ -3579,7 +3605,11 @@ swing = 0.33
             )
             .unwrap();
         assert!(
-            elastic.ends_with("  .swingBy(0.330, 3)\n  .cpm(40.000)\n"),
+            elastic.ends_with(
+                "  .layer(x => x.mask(\"[1 0]*3\"), x => x.mask(\"[0 1]*3\").late(0.330 / 6)) \
+                 // swing: the second half of each of a bar's 3 slices, late by 0.330 of a \
+                 half-slice\n  .cpm(40.000)\n"
+            ),
             "{elastic}"
         );
     }

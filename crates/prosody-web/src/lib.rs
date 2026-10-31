@@ -2400,7 +2400,7 @@ mod tests {
                 .any(|l| l.trim_start().starts_with("s(\"<") && l.contains("[rd rd]")),
             "the ride keeps time: {body}"
         );
-        assert!(body.contains(".swingBy(0.330,"), "triplet swing: {body}");
+        assert!(body.contains(".late(0.330 / "), "triplet swing: {body}");
         // C dorian, degree 0 as a seventh: C E♭ G B♭ from 60 — 60 63 67 70.
         assert!(body.contains("[60,63,67,70]"), "{body}");
         assert!(body.contains("//   voicing = seventh"), "{body}");

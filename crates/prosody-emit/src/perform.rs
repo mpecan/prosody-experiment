@@ -32,9 +32,8 @@
 //! place that turns one into the other, so a place in the pattern cannot be read as a time.
 //!
 //! **Swing** follows Strudel's documented `swingBy(x, n)`: each cycle is cut into `n` slices, and
-//! an event in the second half of a slice is delayed by `x` of a half-slice. Strudel's own
-//! implementation departs from that in one measured case, and the Performance does not follow it
-//! there — see [`Swing`].
+//! an event in the second half of a slice is delayed by `x` of a half-slice. The text writes that
+//! meaning itself rather than calling `swingBy`, whose output departs from it — see [`Swing`].
 
 use std::collections::BTreeMap;
 
@@ -1121,24 +1120,19 @@ impl Level {
     }
 }
 
-/// How swing moves a note (`.swingBy(x, n)`, before `.cpm`).
+/// How swing moves a note (the text's `.layer(…)` before `.cpm`; see `strudel::swing`).
 ///
-/// Strudel documents `swingBy(x, n)` as cutting each cycle into `n` slices and delaying the events
-/// in the second half of each slice by `x` of a half-slice. That is what this does: every event
-/// sounds exactly once, delayed when it begins in a slice's second half.
+/// Each cycle is cut into `n` slices, and an event that begins in the second half of a slice is
+/// delayed by `x` of a half-slice, `x / 2n` cycles. Every event sounds exactly once: swing is
+/// palette, and moves notes without adding or removing any (I3).
 ///
-/// **Where Strudel differs, measured** (`@strudel/core` 1.2.6, its haps queried in the parity test;
-/// its source was not read): its implementation decides which events to delay by where the
-/// *delayed* copy lands as well as where the event began. An event in a slice's first half whose
-/// delayed copy lands in the second half sounds twice (on time and delayed), and an event in the
-/// second half whose delayed copy crosses into the next slice does not sound at all. With
-/// `s("a b c d").swingBy(0.5, 1)` it plays a, b, b, c: `b` twice and `d` never. Following that
-/// would make a palette value (swing) add and remove notes, which invariant I3 forbids, and a
-/// doubled note is a note the score does not have (I4). So the Performance keeps the documented
-/// meaning, and the parity test names every note where the two differ rather than passing over
-/// them. With the default steady pulse it takes a fifth of a beat or finer, or swing of a half or
-/// more, to reach that case; under the elastic pulse a cycle's slices need not fall on the beats,
-/// and it is common.
+/// That is what Strudel documents `swingBy(x, n)` as doing, but `@strudel/core` 1.2.6's `swingBy`
+/// measurably does not (its haps queried, its source not read): an event in a slice's first half
+/// whose delayed copy lands in the second half sounds twice, and one in the second half whose
+/// delayed copy crosses into the next slice never sounds — `s("a b c d").swingBy(0.5, 1)` plays
+/// a, b, b, c. So the text does not call `swingBy`. It writes this meaning with Strudel's public
+/// `layer`, `mask` and `late`, which Strudel plays exactly as this places each note; the parity
+/// test (`web/test/parity.test.ts`) requires that, note for note.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Swing {
     /// `x` in hundredths, as the palette sets it.
@@ -1148,6 +1142,16 @@ pub struct Swing {
 }
 
 impl Swing {
+    /// The piece's swing — the palette's amount, cut into the pulse's slices — or `None` when the
+    /// palette does not swing. The Strudel text prints these same two numbers.
+    pub(crate) fn of(score: &Score, style: &Style) -> Option<Self> {
+        let hundredths = u16::from(style.swing().hundredths());
+        (hundredths > 0).then(|| Self {
+            hundredths,
+            slices: strudel::swing_slices(score),
+        })
+    }
+
     /// `x`: the share of a half-slice an event in a slice's second half is delayed by.
     #[must_use]
     pub fn amount(self) -> f64 {
@@ -1198,15 +1202,11 @@ impl Clock {
         let cpm = u128::try_from(thousandths(strudel::cycles_per_minute(score, style)))
             .unwrap_or(1)
             .max(1);
-        let hundredths = u16::from(style.swing().hundredths());
         Self {
             starts: strudel::starts(score),
             weights: strudel::weights(score),
             cpm,
-            swing: (hundredths > 0).then(|| Swing {
-                hundredths,
-                slices: strudel::swing_slices(score),
-            }),
+            swing: Swing::of(score, style),
         }
     }
 
@@ -2347,9 +2347,8 @@ mod tests {
     #[test]
     fn swing_delays_only_what_begins_in_a_slices_second_half() {
         // Strudel's documented `swingBy(0.5, 1)` on `a b c d`: a cycle is one slice; `c` and `d`
-        // begin in its second half and move by half of a half-slice, a quarter cycle. Strudel's
-        // own output differs here (it plays `b` twice and `d` never — see `Swing`); this is the
-        // documented meaning.
+        // begin in its second half and move by half of a half-slice, a quarter cycle. (Strudel's
+        // own `swingBy` plays `b` twice and `d` never — see `Swing` — so the text does not use it.)
         let swing = Swing {
             hundredths: 50,
             slices: 1,
@@ -2390,7 +2389,7 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains(".swingBy(0.500, 1)\n  .cpm(120.000)"),
+            text.contains(".late(0.500 / 2)) // swing: the second half of each beat, late by 0.500 of a half-beat\n  .cpm(120.000)"),
             "{text}"
         );
         let performance = Perform::new().render(&score, &swung).unwrap();

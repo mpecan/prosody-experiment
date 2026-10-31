@@ -112,8 +112,11 @@ structure (when events fall), so it is a selector, `Mapping::Pulse`, not palette
   exactly *w* cycles), and `.cpm` is the tempo. Integers throughout; no rounded tempo.
 - **`elastic`** — the pattern as it was, kept to compare against: a cycle is a bar.
 
-Swing (§5) slices a cycle, so under `steady` it is `.swingBy(x, 1)` — every beat swung, in a bar of
-three or of four alike; under `elastic` it keeps the mean bar length as before. The page's trace
+Swing (§5) slices a cycle, so under `steady` every beat is swung, in a bar of three or of four alike
+(`.layer(x => x.mask("1 0"), x => x.mask("0 1").late(x / 2))`: each beat's second half, late);
+under `elastic` it keeps the mean bar length as before (`"[1 0]*n"`, `late(x / 2n)`). The text
+writes swing out rather than calling Strudel's `swingBy`, which measurably plays some notes twice
+and others never (`docs/player.md` §9). The page's trace
 and the reading's cue pattern are built on the same weighted bars and the same `.cpm`, a spoken
 line's rate is fitted to the bar it is spoken in, and the trace hands the page each bar's start so
 the roll's bar lines fall where the bars change. The OSC schedule is in beats and has always been
@@ -936,7 +939,9 @@ second — onsets moved to irregular times, and a held chord could be skipped or
 now `.swingBy(x, n).cpm(c)`: the bar's beats are swung, then the bar is set to the tempo.
 *Since the steady pulse (§4.2) a cycle is a beat, so `n` is 1 and every beat is swung whatever its
 bar's length; under `elastic` `n` is still the mean bar length, which slices a bar of another
-length across its beats.*
+length across its beats.* *Since the player's step 1 (`docs/player.md` §9) the text no longer calls
+`swingBy` but writes its documented meaning with `layer`, `mask` and `late`; it still comes before
+`.cpm`, for the same reason.*
 
 ---
 

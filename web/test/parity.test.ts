@@ -11,11 +11,11 @@
 // hap's time plus its nudge (the page's honourNudge adds it), on a scheduler at one cycle a second
 // (the page's setCps(1), reading::SCHEDULER_CPS), so the pattern's own time after `.cpm` is seconds.
 //
-// One measured departure is expected, and named rather than tolerated: Strudel's swingBy doubles an
-// event whose delayed copy lands in a slice's second half, and drops one whose delayed copy crosses
-// into the next slice (prosody_emit::perform::Swing). The Performance follows swingBy's documented
-// meaning instead, so the test works out exactly which notes Strudel doubles and drops from the
-// Performance's own notes, and requires those and nothing else to differ.
+// Swung pieces included, the two must agree note for note. Strudel's own swingBy was measured to
+// double an event whose delayed copy lands in a slice's second half and to drop one whose delayed
+// copy crosses into the next slice (prosody_emit::perform::Swing), so the text does not call it: it
+// writes swing's documented meaning with layer, mask and late, and a fixture at swing 0.9 checks
+// that Strudel plays exactly the Performance's notes where swingBy would have departed from them.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
@@ -155,28 +155,19 @@ function fraction(value: number): number {
   return value - Math.floor(value + 1e-7);
 }
 
-/** Strudel's swingBy, as measured: from each of the Performance's notes, the notes Strudel plays
- * in its place — itself (or its delayed copy), both, or neither. */
-function asStrudelPlays(performance: Performance): { heard: Heard[]; doubled: number; dropped: number } {
+/** How many of the Performance's notes Strudel's swingBy (as measured) would double or drop: the
+ * ones whose delayed copy would land in the other half of a slice than the note begins in. The text
+ * does not use swingBy; this only shows that a fixture swings far enough to reach those notes. */
+function swingByDepartures(performance: Performance): number {
   const swing = performance.swing;
-  if (!swing) return { heard: performance.notes.map(fromNote), doubled: 0, dropped: 0 };
+  if (!swing) return 0;
   const slices = swing.slices;
   const delay = swing.amount / (2 * slices);
-  const seconds = delay * 60 / performance.cpm;
-  let doubled = 0, dropped = 0;
-  const heard: Heard[] = [];
-  for (const note of performance.notes) {
+  return performance.notes.filter((note) => {
     const swung = fraction(note.cycle * slices) >= 0.5 - 1e-7;
     const copyLate = fraction((note.cycle + delay) * slices) >= 0.5 - 1e-7;
-    const one = fromNote(note);
-    if (swung && !copyLate) { dropped += 1; continue; }
-    heard.push(one);
-    if (!swung && copyLate) {
-      doubled += 1;
-      heard.push({ ...one, onset: one.onset + seconds });
-    }
-  }
-  return { heard, doubled, dropped };
+    return swung !== copyLate;
+  }).length;
 }
 
 /** Pairs two lists of notes by key and onset; what is left unpaired on either side. */
@@ -219,10 +210,9 @@ describe('the Performance plays what the Strudel text says', () => {
     await core.evalScope(core, mini);
   });
 
-  test('there are fixtures, and one of them swings far enough to reach swingBy\'s departures', () => {
+  test('there are fixtures, and one of them swings where swingBy would double and drop notes', () => {
     expect(fixtures.length).toBeGreaterThanOrEqual(7);
-    const departures = fixtures.map((fixture) => asStrudelPlays(fixture.performance))
-      .reduce((sum, { doubled, dropped }) => sum + doubled + dropped, 0);
+    const departures = fixtures.reduce((sum, fixture) => sum + swingByDepartures(fixture.performance), 0);
     expect(departures).toBeGreaterThan(0);
   });
 
@@ -234,12 +224,9 @@ describe('the Performance plays what the Strudel text says', () => {
       // notes are not asked for.
       const haps = pattern.queryArc(0, performance.seconds - 1e-7).filter((hap) => hap.hasOnset());
       const played = haps.map(fromHap);
-      const { heard, doubled, dropped } = asStrudelPlays(performance);
-      const { missing, extra } = unpaired(heard, played);
+      const { missing, extra } = unpaired(performance.notes.map(fromNote), played);
       expect({ missing: missing.slice(0, 5), extra: extra.slice(0, 5) }).toEqual({ missing: [], extra: [] });
-      expect(played.length).toBe(performance.notes.length + doubled - dropped);
-      // Without swing the two agree note for note, with no departure to name.
-      if (!performance.swing) expect(doubled + dropped).toBe(0);
+      expect(played.length).toBe(performance.notes.length);
       expect(performance.notes.length).toBeGreaterThan(0);
     });
   }

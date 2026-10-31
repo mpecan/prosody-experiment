@@ -567,8 +567,8 @@ page). How long a bar of the Strudel pattern lasts.
 
 - **`steady`** — a bar lasts as many beats as it holds, so the beat is the same speed all the way
   through. A cycle is a beat: the bars are weighted with mini-notation's `@` (`<[…]@3 […]@4>`, a
-  bar of weight *w* lasting *w* cycles), and `.cpm` is the tempo itself. Swing is
-  `.swingBy(x, 1)`, so it swings every beat whatever the length of its bar.
+  bar of weight *w* lasting *w* cycles), and `.cpm` is the tempo itself. Swing slices a
+  cycle, so it swings every beat whatever the length of its bar.
 - **`elastic`** — every bar lasts the same time, one cycle, at the tempo over the piece's integer
   mean bar length: the pattern as it was until now. A bar of four beats among bars of three plays
   its beats a third faster — Wilde's Theocritus at 161 bpm against its 121.

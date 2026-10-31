@@ -74,7 +74,7 @@ the winter stays
 /// Every case: a fixture name, a poem, and the page's query — the palette and the mappings. Every
 /// corpus poem under the defaults, and then settings chosen to reach the parameters and the ways a
 /// note is placed that the defaults do not: swing under both pulses (the elastic one reaching
-/// Strudel's `swingBy` departures, which the parity test names), humanise and density, chords and
+/// notes Strudel's `swingBy` would double or drop, which the text's own swing must not), humanise and density, chords and
 /// their turnarounds, chords at a density level below one, walking basses, the straight stack,
 /// anchors, articulated drums, slant rhymes, assonance, oscillators, no compression and no echo, a
 /// long stanza eroding under an arrival and the same stanza handed over line by line with no outro.
@@ -106,8 +106,8 @@ const CASES: &[(&str, &str, &str)] = &[
         "pentameter",
         "set=pulse:elastic&swing=0.33",
     ),
-    // Swing far past any palette's: where Strudel's `swingBy` doubles and drops notes, so the
-    // parity test's account of those departures is checked against Strudel itself.
+    // Swing far past any palette's: where Strudel's `swingBy` would double and drop notes, so the
+    // text's own swing is checked against Strudel exactly where `swingBy` went wrong.
     ("free-verse-hard-swing", "free-verse", "swing=0.9"),
     (
         "free-verse-candidates",

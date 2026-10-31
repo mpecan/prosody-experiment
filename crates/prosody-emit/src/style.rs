@@ -1173,10 +1173,9 @@ fn preset_palette(name: &str) -> Option<Preset> {
 /// - **The ride keeps time, the snare comps** ([`Kit::Ride`] on `r8`, the sampled acoustic kit;
 ///   no brushed kit exists in the sample map). The drums sit lower than the default's because a
 ///   ride rings longer than a kick and every foundation syllable strikes it.
-/// - **Triplet swing**, `0.33`: Strudel's `swingBy(x, n)` delays the second half of each of a
-///   bar's `n` beats by `x / 2` of a beat, so a third puts an iamb's second syllable at two thirds
-///   of the beat — the 2:1 long–short of a swung eighth (`swing(n)` is the same `1/3`;
-///   `@strudel/core` `pattern.mjs`, as bundled in `@strudel/web` 1.3.0).
+/// - **Triplet swing**, `0.33`: swing delays the second half of each beat by `x / 2` of a beat
+///   (Strudel's documented `swingBy`), so a third puts an iamb's second syllable at two thirds
+///   of the beat — the 2:1 long–short of a swung eighth.
 /// - **Dorian** — the minor mode of modal jazz. Its raised sixth makes the seventh chord on its
 ///   fourth degree a dominant seventh, so the chords on degrees 0 and 3 are the minor-seventh and
 ///   dominant-seventh pair of the classic dorian vamp (Dm7 and G7 in D).

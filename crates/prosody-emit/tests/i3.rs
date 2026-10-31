@@ -201,8 +201,8 @@ fn i3_but_the_style_does_reach_the_output() {
         "bank"
     );
     assert!(a.contains("karplus") && b.contains("sawtooth"), "synth");
-    assert!(a.contains(".swingBy"), "swing reaches the output");
-    assert!(!b.contains(".swingBy"), "and no swing means none");
+    assert!(a.contains("// swing: "), "swing reaches the output");
+    assert!(!b.contains("// swing: "), "and no swing means none");
     // Tempo comes from the style's window, positioned by the poem's density, then divided by the
     // beats in a bar because `cpm` counts *cycles* and a cycle is a bar. Both styles must land in
     // their own window before that division, and the windows do not overlap — so the two tempos
@@ -328,7 +328,7 @@ fn i3_the_rendered_arrangement_is_the_same_under_any_palette() {
     let strip = |text: &str| {
         text.lines()
             .filter(|line| !line.starts_with("//") && !line.trim_start().starts_with(".cpm"))
-            .filter(|line| !line.trim_start().starts_with(".swingBy"))
+            .filter(|line| !line.trim_start().starts_with(".layer(x => x.mask("))
             .count()
     };
     assert_eq!(
