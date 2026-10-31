@@ -59,8 +59,10 @@ jobs:
           toolchain: "1.96.1"
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: webkit
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev
+      # WebKitGTK for Tauri; ALSA for cpal, whose Linux backend it is (alsa-sys finds libasound
+      # through pkg-config at build time).
+      - name: webkit and alsa
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libasound2-dev pkg-config
       - name: clippy
         run: cargo clippy -p prosody-app --all-targets --all-features --locked -- -D warnings
       - name: test

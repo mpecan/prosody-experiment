@@ -27,8 +27,10 @@ prosody-synth.workspace = true
 # The phone's audio output. It replaces calling AAudio (Android) and Core Audio (iOS, later) by hand,
 # which is foreign functions and raw sample pointers — `unsafe` this workspace forbids — once per
 # platform; cpal wraps each in a safe callback over `&mut [f32]`, and the same code runs on a desktop,
-# where the app is developed. Apache-2.0, RustAudio's, no default features. On Android it brings
+# where the app is developed. Apache-2.0, RustAudio's, with its default features. On Android it brings
 # `ndk` (already in the app, through the WebView), `jni` and `ndk-context`, and needs API 26: AAudio.
+# On Linux its backend is ALSA (`alsa-sys`, found through pkg-config), so a Linux build needs
+# libasound2-dev, as CI's `app` job installs.
 cpal = "0.18"
 # The player's messages and the media bridge's arguments: Tauri hands a command its arguments
 # through serde and already builds it, with `serde_json`, into the app; these name them so the app
