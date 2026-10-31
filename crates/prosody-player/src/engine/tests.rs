@@ -299,7 +299,7 @@ fn a_line_let_go_gives_its_number_to_the_next() {
 }
 
 #[test]
-fn a_wider_lead_renders_further_ahead_and_a_narrower_one_changes_nothing() {
+fn a_wider_lead_renders_further_ahead_and_a_narrower_one_never_below_its_own() {
     let mut engine = engine();
     engine.play(
         1,
@@ -307,14 +307,55 @@ fn a_wider_lead_renders_further_ahead_and_a_narrower_one_changes_nothing() {
         Pace::Natural,
         unity(),
     );
-    engine.widen(10_000);
+    engine.keep(10_000);
     assert_eq!(engine.lead(), 24_000);
-    // Widened to 48 000 frames: 47 blocks of 1 024 (48 128) before it is full.
-    engine.widen(48_000);
+    // Kept at 48 000 frames: 47 blocks of 1 024 (48 128) before it is full.
+    engine.keep(48_000);
     let mut blocks = 0;
     while engine.due() {
         engine.render();
         blocks += 1;
     }
     assert_eq!(blocks, 47);
+    // Narrowed again: back to the 24 000 it was made with, and nothing rendered is let go — the
+    // output has to play 48 128 - 24 000 = 24 128 frames before another block is due.
+    engine.keep(0);
+    assert_eq!(engine.lead(), 24_000);
+    engine.played(1, 24_128);
+    assert!(!engine.due());
+    engine.played(1, 24_129);
+    assert!(engine.due());
+}
+
+#[test]
+fn a_reopened_output_goes_on_from_the_frontier_in_the_same_start_of_play() {
+    let mut engine = engine();
+    engine.play(
+        2,
+        handed(1, &record(2.0, 0.0, 0.0, 69.0), Vec::new(), Cast::new()),
+        Pace::Natural,
+        unity(),
+    );
+    assert_eq!(engine.take_flush(), Some(2));
+    // The 24 000-frame lead: 24 blocks of 1 024, to frame 24 576.
+    while engine.due() {
+        engine.render();
+    }
+    assert_eq!(engine.frontier(), 24_576);
+    // The output played 2 048 of them, then died with the rest.
+    engine.played(2, 2_048);
+    engine.reopened();
+    // A flush in start of play 2 for the new output, and the lead counted from 24 576: 24 more
+    // blocks, the first from frame 24 576 (nothing re-rendered, nothing skipped in the piece).
+    assert_eq!(engine.take_flush(), Some(2));
+    assert_eq!(engine.generation(), 2);
+    assert!(engine.playing());
+    let mut first = None;
+    let mut blocks = 0;
+    while engine.due() {
+        let (frame, _) = engine.render();
+        first.get_or_insert(frame);
+        blocks += 1;
+    }
+    assert_eq!((first, blocks), (Some(24_576), 24));
 }

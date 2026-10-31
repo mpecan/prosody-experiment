@@ -9,30 +9,25 @@
 
 mod host;
 mod output;
+mod rounds;
 pub(crate) mod wire;
 
-use std::collections::VecDeque;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, sync_channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::Instant;
 
-use prosody_player::{Engine, Mixer};
+use prosody_player::Engine;
 use prosody_synth::SampleRate;
 use serde::Serialize;
 use tauri::State;
 
 use crate::media::{Media, Silent};
-use host::{AudioSide, Shared};
+use host::{IN_FLIGHT, Shared};
+use output::Output;
+use rounds::{ROUND, Rounds, Sink, Wait};
 use wire::{Message, Session};
-
-/// Room in the channel to the audio callback: half a second of 2 048-frame blocks is 12.
-const IN_FLIGHT: usize = 64;
-
-/// How long the render thread sleeps between rounds when nothing wakes it: well inside the lead,
-/// and the output's report moves on at least this often.
-const ROUND: Duration = Duration::from_millis(5);
 
 /// The native player: nothing until the page opens it.
 pub(crate) struct Native {
@@ -49,17 +44,15 @@ impl Default for Native {
     }
 }
 
-/// An open player: the shared state, the output stream and the render thread.
+/// An open player: the shared state and the render thread, which holds the output.
 struct Running {
     shared: Arc<Shared>,
-    stream: Option<cpal::Stream>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
         self.shared.quit.store(true, Ordering::Relaxed);
-        drop(self.stream.take());
         if let Some(thread) = self.thread.take() {
             thread.thread().unpark();
             let _ = thread.join();
@@ -89,7 +82,7 @@ impl Native {
         let mut running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         drop(running.take());
         self.media().show(&Session::Stopped);
-        let (device, config) = output::device()?;
+        let (device, config) = output::device(None)?;
         let rate = config.sample_rate;
         let engine = Engine::new(
             SampleRate::new(rate).map_err(|error| error.to_string())?,
@@ -99,21 +92,14 @@ impl Native {
         let (to_audio, from) = sync_channel(IN_FLIGHT);
         let (back, spent) = sync_channel(IN_FLIGHT);
         let shared = Arc::new(Shared::new(engine, to_audio));
-        let audio = AudioSide {
-            mixer: Mixer::new(f64::from(rate)),
-            from,
-            back,
-            channels: usize::from(config.channels),
-        };
-        let stream = output::start(&device, config, audio, Arc::clone(&shared))?;
+        let mut output = Output::start(&device, config, from, back, &shared)?;
         let renders = Arc::clone(&shared);
         let thread = std::thread::Builder::new()
             .name("prosody-render".to_owned())
-            .spawn(move || render(&renders, &spent))
+            .spawn(move || render(&renders, &spent, &mut output))
             .map_err(|error| format!("the render thread would not start: {error}"))?;
         *running = Some(Running {
             shared,
-            stream: Some(stream),
             thread: Some(thread),
         });
         Ok(rate)
@@ -125,29 +111,40 @@ impl Native {
     ///
     /// The player is not open, or the message could not be read or loaded.
     pub(crate) fn post(&self, message: Message) -> Result<(), String> {
+        let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let running = running.as_ref().ok_or("the player is not open")?;
         let session = {
-            let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
-            let running = running.as_ref().ok_or("the player is not open")?;
-            let session = {
-                let mut engine = running
-                    .shared
-                    .engine
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
-                let session = message.apply(&mut engine);
-                for event in engine.drain() {
-                    running.shared.tell(event.json());
-                }
-                session?
-            };
-            if let Some(thread) = &running.thread {
-                thread.thread().unpark();
+            let mut engine = running
+                .shared
+                .engine
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            let session = message.apply(&mut engine);
+            for event in engine.drain() {
+                running.shared.tell(event.json());
             }
-            session
+            session?
         };
+        if let Some(thread) = &running.thread {
+            thread.thread().unpark();
+        }
+        // Told while the player is still held, so the notification hears of starts and stops in
+        // the order they happened: a button's stop cannot reach it after a later Play.
         if let Some(session) = session {
             self.media().show(&session);
         }
+        Ok(())
+    }
+
+    /// The page was shown or hidden ([`Shared::view`]).
+    ///
+    /// # Errors
+    ///
+    /// The player is not open.
+    pub(crate) fn view(&self, visible: bool) -> Result<(), String> {
+        let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let running = running.as_ref().ok_or("the player is not open")?;
+        running.shared.view(visible);
         Ok(())
     }
 
@@ -172,25 +169,24 @@ impl Native {
     /// player is not open.
     pub(crate) fn poll(&self) -> String {
         let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
-        running
-            .as_ref()
-            .map_or_else(|| "null".to_owned(), |running| running.shared.poll())
+        running.as_ref().map_or_else(
+            || "null".to_owned(),
+            |running| running.shared.poll(Instant::now()),
+        )
     }
 
     /// A button of the notification, the lock screen or a headset ([`Shared::button`]).
     #[cfg_attr(not(target_os = "android"), allow(dead_code))] // only Android's media session calls it
     pub(crate) fn button(&self, action: &str) {
-        let stopped = {
-            let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
-            let Some(running) = running.as_ref() else {
-                return;
-            };
-            let stopped = running.shared.button(action);
-            if let Some(thread) = &running.thread {
-                thread.thread().unpark();
-            }
-            stopped
+        let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(running) = running.as_ref() else {
+            return;
         };
+        let stopped = running.shared.button(action, Instant::now());
+        if let Some(thread) = &running.thread {
+            thread.thread().unpark();
+        }
+        // Under the lock, as in `post`.
         if stopped {
             self.media().show(&Session::Stopped);
         }
@@ -210,27 +206,15 @@ fn lead_frames(lead: f64, rate: u32) -> Result<u64, String> {
         .ok_or_else(|| format!("a lead of {lead} s is not a lead"))
 }
 
-/// The render thread: a round every [`ROUND`], or sooner when a command wakes it.
-fn render(shared: &Shared, spent: &Receiver<Vec<f32>>) {
-    let mut spare = Vec::new();
-    let mut outbox = VecDeque::new();
-    let mut said = (0, 0);
+/// The render thread: a round every [`ROUND`] while something plays, or sooner when a command
+/// wakes it; asleep until one does while nothing plays. It holds the output, and drops it as it ends.
+fn render(shared: &Arc<Shared>, spent: &Receiver<Vec<f32>>, output: &mut impl Sink) {
+    let mut rounds = Rounds::default();
     while !shared.quit.load(Ordering::Relaxed) {
-        spare.extend(spent.try_iter());
-        shared.pump(&mut spare, &mut outbox);
-        // Said in the system's log too, with when: the page may be asleep, and a phone's log is
-        // where a dropout with the screen off can be found afterwards.
-        let now = shared.status.losses();
-        if now != said {
-            log::warn!(
-                "the native player ran dry {} time(s), the output glitched {} time(s), {} frames queued",
-                now.0,
-                now.1,
-                shared.status.queued()
-            );
-            said = now;
+        match rounds.round(shared, spent, output) {
+            Wait::Round => std::thread::park_timeout(ROUND),
+            Wait::Asleep => std::thread::park(),
         }
-        std::thread::park_timeout(ROUND);
     }
 }
 
@@ -278,6 +262,16 @@ pub(crate) async fn player_mix(
     native.mix(gains.as_deref(), duck)
 }
 
+/// The page was shown or hidden (see [`Native::view`]).
+///
+/// # Errors
+///
+/// The player is not open.
+#[tauri::command]
+pub(crate) async fn player_view(native: State<'_, Native>, visible: bool) -> Result<(), String> {
+    native.view(visible)
+}
+
 /// How the player is doing (see [`Native::poll`]).
 ///
 /// # Errors
@@ -290,7 +284,63 @@ pub(crate) async fn player_poll(native: State<'_, Native>) -> Result<String, Str
 
 #[cfg(test)]
 mod tests {
-    use super::lead_frames;
+    use std::sync::{Arc, Mutex, Weak};
+
+    use super::host::tests::rig;
+    use super::wire::{Message, Session};
+    use super::{Native, Running, lead_frames};
+    use crate::media::Media;
+
+    /// Records each session shown, and whether the player was held while it was.
+    struct Witness {
+        native: Mutex<Weak<Native>>,
+        seen: Mutex<Vec<(Session, bool)>>,
+    }
+
+    impl Media for Witness {
+        fn show(&self, session: &Session) {
+            let held = self
+                .native
+                .lock()
+                .unwrap()
+                .upgrade()
+                .is_some_and(|native| native.running.try_lock().is_err());
+            self.seen.lock().unwrap().push((session.clone(), held));
+        }
+    }
+
+    #[test]
+    fn the_notification_is_told_of_a_start_or_a_stop_while_the_player_is_held() {
+        // Held, a button's stop and the page's Play reach the notification in the order they
+        // changed the player: the stop cannot be told after a Play that came after it.
+        let native = Arc::new(Native::default());
+        let witness = Arc::new(Witness {
+            native: Mutex::new(Arc::downgrade(&native)),
+            seen: Mutex::new(Vec::new()),
+        });
+        native.set_media(Arc::clone(&witness) as Arc<dyn Media>);
+        let (shared, _audio, _spent) = rig();
+        *native.running.lock().unwrap() = Some(Running {
+            shared: Arc::new(shared),
+            thread: None,
+        });
+        let play: Message = serde_json::from_str(
+            r#"{"op":"play","generation":1,"serial":1,"notes":"","bars":"","seconds":2,"cues":"","cast":[],"pace":"natural","duck":0.6,"title":"The Tyger"}"#,
+        )
+        .unwrap();
+        native.post(play).unwrap();
+        native.button("pause");
+        let stop: Message = serde_json::from_str(r#"{"op":"stop","generation":2}"#).unwrap();
+        native.post(stop).unwrap();
+        assert_eq!(
+            *witness.seen.lock().unwrap(),
+            vec![
+                (Session::Playing("The Tyger".to_owned()), true),
+                (Session::Stopped, true),
+                (Session::Stopped, true),
+            ]
+        );
+    }
 
     #[test]
     fn a_lead_is_whole_frames_and_nothing_else() {

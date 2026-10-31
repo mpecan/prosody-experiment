@@ -48,6 +48,8 @@ pub struct Engine {
     reader: Reader,
     /// Frames the output may be behind the frontier before rendering stops.
     lead: u64,
+    /// The lead it was made with: the least it keeps, whatever the host asks ([`Engine::keep`]).
+    base: u64,
     playing: bool,
     /// The start of play everything belongs to: the page's count, so what it is told of an older
     /// one is recognised as stale.
@@ -73,6 +75,7 @@ impl Engine {
             stems: Stems::new(block.clamp(128, 16_384)),
             reader: Reader::new(rate.get()),
             lead,
+            base: lead,
             playing: false,
             generation: 0,
             played: 0,
@@ -268,13 +271,22 @@ impl Engine {
         self.lead
     }
 
-    /// Keeps at least `frames` ahead from now on; a smaller number changes nothing. The app's output
-    /// asks for buffers of its own size, which a phone may enlarge — to more than the lead — when
-    /// its screen turns off (`docs/player.md` §13); a lead shorter than a buffer runs dry inside it.
-    pub const fn widen(&mut self, frames: u64) {
-        if frames > self.lead {
-            self.lead = frames;
-        }
+    /// Keeps `frames` ahead from now on, but never less than the lead it was made with. The app's
+    /// output asks for buffers of its own size, which a phone may enlarge — to more than the lead —
+    /// when its screen turns off, and a lead shorter than a buffer runs dry inside it; the host
+    /// widens the lead for that and narrows it again when the buffer is small once more, since every
+    /// frame of lead is a frame later that a live edit is heard (`docs/player.md` §13). Narrowing
+    /// drops nothing already rendered: the engine only waits for the output to catch up.
+    pub fn keep(&mut self, frames: u64) {
+        self.lead = frames.max(self.base);
+    }
+
+    /// The output was replaced (a phone's audio route changed, or its audio server restarted, and
+    /// the stream died with what was queued in it): the lead is counted again from the frontier, and
+    /// a flush in the same start of play tells the new output where its count starts. The piece
+    /// plays on from where it was rendered to; what was in flight is not heard.
+    pub fn reopened(&mut self) {
+        self.restart(self.generation);
     }
 
     /// Whether a block is due: playing, and less than the lead ahead of the output.

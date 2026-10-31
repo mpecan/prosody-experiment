@@ -109,7 +109,7 @@ let frame = 0;
 function startEngine(): Promise<Engine> {
   engine ??= (async () => {
     const started = inApp()
-      ? await startNative(BLOCK, LEAD_SECONDS, { report: reported, heard })
+      ? await startNative(BLOCK, LEAD_SECONDS, { report: reported, heard, playing: () => playing.value })
       : await startWeb();
     ready = started;
     startSpeech({

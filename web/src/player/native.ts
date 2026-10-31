@@ -7,6 +7,7 @@
 //   player_post { message }                         a render worker's message (render-worker.ts)
 //   player_mix  { gains, duck }                     a worklet's message (worklet.ts)
 //   player_poll                   → { report, events, lost } as JSON
+//   player_view { visible }                         the page shown or hidden
 //
 // Two things differ from the browser. A buffer cannot cross: Android's WebView hands Rust strings
 // only (Tauri sends every call as JSON, since that WebView cannot read a request body), so a
@@ -21,6 +22,10 @@ import type { Engine } from './index';
 /** How often the page asks how the native player is doing: about as often as the worklet tells it
  * (50 ms), which is what the page's clock is drawn from. */
 const POLL = 40;
+/** How often it asks while nothing plays: only a lock-screen Play or a failure can be waiting, and
+ * the app keeps a Play for 5 s (host.rs `PLAY_KEPT`). Asking every 40 ms for nothing would keep a
+ * core waking for as long as the app is open. */
+const IDLE_POLL = 500;
 
 interface Internals {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
@@ -70,6 +75,8 @@ export interface Ears {
   report(report: NativeReport & { time: number }): void;
   /** What the render worker would have said (index.ts `heard`), and the media buttons. */
   heard(message: Record<string, unknown>): void;
+  /** Whether the page is playing: it asks often only then. */
+  playing(): boolean;
 }
 
 /** Opens the native player, rendering `block` frames at a time `lead` seconds ahead. */
@@ -80,13 +87,13 @@ export async function startNative(block: number, lead: number, ears: Ears): Prom
   // before the piece that plays it.
   let queue: Promise<void> = Promise.resolve();
   const failed = (error: unknown) => ears.heard({ op: 'error', message: String((error as Error)?.message ?? error) });
-  const post = (message: Record<string, unknown>) => {
-    const crossing = wire(message);
-    queue = queue.then(() => invoke('player_post', { message: crossing })).then(() => undefined, failed);
-  };
+  // Asked every POLL while playing, every IDLE_POLL while not; a message posted (a Play among them)
+  // brings a slow ask forward, so the first reports of a piece are not half a second late.
   let asking = false;
-  setInterval(() => {
-    if (asking) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let slow = false;
+  const ask = () => {
+    timer = undefined;
     asking = true;
     invoke('player_poll')
       .then((answer) => {
@@ -98,8 +105,29 @@ export async function startNative(block: number, lead: number, ears: Ears): Prom
         for (const message of told.events) ears.heard(message);
       })
       .catch(failed)
-      .finally(() => { asking = false; });
-  }, POLL);
+      .finally(() => {
+        asking = false;
+        next();
+      });
+  };
+  const next = (soon = false) => {
+    if (asking || (timer !== undefined && !(slow && soon))) return;
+    clearTimeout(timer);
+    slow = !soon && !ears.playing();
+    timer = setTimeout(ask, slow ? IDLE_POLL : POLL);
+  };
+  next();
+  const post = (message: Record<string, unknown>) => {
+    const crossing = wire(message);
+    queue = queue.then(() => invoke('player_post', { message: crossing })).then(() => undefined, failed);
+    next(true);
+  };
+  // Hidden (the screen off), the app keeps the lead wide enough for the largest buffer its output
+  // has asked for; shown again, it narrows it to what the buffers now need, so a live edit is heard
+  // about as soon as in a browser (`docs/player.md` §13).
+  document.addEventListener('visibilitychange', () => {
+    invoke('player_view', { visible: document.visibilityState === 'visible' }).catch(failed);
+  });
   return {
     rate,
     post,

@@ -66,7 +66,7 @@ describe('the bridge to the native player', () => {
 
   it('opens at the output\'s rate and posts in order, each after the last has been taken', async () => {
     const heard = vi.fn();
-    const engine = await startNative(2048, 0.5, { report: vi.fn(), heard });
+    const engine = await startNative(2048, 0.5, { report: vi.fn(), heard, playing: () => true });
     expect(engine.rate).toBe(44_100);
     expect(calls[0]).toEqual({ command: 'player_open', args: { block: 2048, lead: 0.5 } });
     holding = true;
@@ -91,7 +91,7 @@ describe('the bridge to the native player', () => {
   it('asks how the player is doing, and hands on its report and what it said, in order', async () => {
     const report = vi.fn();
     const heard = vi.fn();
-    const engine = await startNative(2048, 0.5, { report, heard });
+    const engine = await startNative(2048, 0.5, { report, heard, playing: () => true });
     polls.push(JSON.stringify({
       report: { played: 4096, underruns: 0, queued: 2048, started: true, generation: 1, peak: 0.5, speechPeak: 0, latency: 0.02 },
       events: [{ op: 'placement', outStart: 0, pieceStart: 0, serial: 1 }, { op: 'want', keys: [] }],
@@ -106,6 +106,41 @@ describe('the bridge to the native player', () => {
     // A player not open answers null, and nothing is handed on.
     await vi.advanceTimersByTimeAsync(40);
     expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks every half second while nothing plays, and sooner once something is posted', async () => {
+    let playingNow = false;
+    const engine = await startNative(2048, 0.5, { report: vi.fn(), heard: vi.fn(), playing: () => playingNow });
+    const asked = () => calls.filter((call) => call.command === 'player_poll').length;
+    await vi.advanceTimersByTimeAsync(499);
+    expect(asked()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(asked()).toBe(1);
+    // 100 ms into the next half second, a Play is posted: asked 40 ms after it, not 400.
+    await vi.advanceTimersByTimeAsync(100);
+    playingNow = true;
+    engine.post({ op: 'stop', generation: 1 });
+    await vi.advanceTimersByTimeAsync(40);
+    expect(asked()).toBe(2);
+    // Playing: every 40 ms.
+    await vi.advanceTimersByTimeAsync(120);
+    expect(asked()).toBe(5);
+  });
+
+  it('tells the app when the page is hidden and shown again', async () => {
+    await startNative(2048, 0.5, { report: vi.fn(), heard: vi.fn(), playing: () => true });
+    let state = 'hidden';
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+    document.dispatchEvent(new Event('visibilitychange'));
+    state = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);
+    const views = calls.filter((call) => call.command === 'player_view').map((call) => call.args);
+    // Earlier players in this file listen too, each telling both: hidden first, shown last.
+    expect(views.length).toBeGreaterThanOrEqual(2);
+    const half = views.length / 2;
+    expect(views.slice(0, half).every((view) => view!.visible === false)).toBe(true);
+    expect(views.slice(half).every((view) => view!.visible === true)).toBe(true);
   });
 });
 

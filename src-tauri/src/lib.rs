@@ -29,6 +29,7 @@ pub fn run() {
             player::player_post,
             player::player_mix,
             player::player_poll,
+            player::player_view,
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {
