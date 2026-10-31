@@ -5,9 +5,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Reading } from '../src/answers';
-import { duckChanged, handing, speechAt, startSpeech, stopSpeech, told } from '../src/player/speech';
+import { duckChanged, handing, speechAt, speechStats, startSpeech, stopSpeech, told } from '../src/player/speech';
 import { quietReading } from '../src/reading';
-import { duck, readingSettings } from '../src/store';
+import { duck, readingNote, readingSettings } from '../src/store';
 import { speaking } from '../src/watch';
 import { useFixture } from './site.fixture';
 
@@ -19,6 +19,7 @@ const READING = {
 
 /** What the page sent the worklet, and the utterances the browser was asked to speak. */
 let toWorklet: Record<string, unknown>[] = [];
+let toWorker: Record<string, unknown>[] = [];
 let utterances: { text: string; onstart?: () => void; onend?: () => void }[] = [];
 let cancels = 0;
 
@@ -39,6 +40,7 @@ beforeEach(() => {
   readingSettings.value = { engine: 'browser', pace: 'natural', level: 1, voices: {} };
   duck.value = true;
   toWorklet = [];
+  toWorker = [];
   utterances = [];
   cancels = 0;
   vi.stubGlobal('SpeechSynthesisUtterance', FakeUtterance);
@@ -49,7 +51,7 @@ beforeEach(() => {
     addEventListener: () => {},
   });
   startSpeech({
-    post: () => {},
+    post: (message) => { toWorker.push(message); },
     worklet: (message) => { toWorklet.push(message); },
     gains: () => {},
     playhead: () => 0,
@@ -115,5 +117,44 @@ describe('the browser\'s voice through the player', () => {
     duck.value = false;
     duckChanged();
     expect(toWorklet).toEqual([]);
+  });
+});
+
+describe('the browser\'s voice after the page was hidden or asleep', () => {
+  /** Three lines, each a stanza of its own, so none waits on another. */
+  const lines = [0, 1, 2].map((n) => ({ ...LINE, line: n, stanza: n, text: `line ${n + 1}`, onset: 'arrives', slot: n }));
+  const THREE = { ...READING, lines } as unknown as Reading;
+
+  beforeEach(() => {
+    handing(2, THREE, true);
+  });
+
+  it('skips the lines whose moment passed while no frame was drawn, and says so', () => {
+    // Due at 1, 3 and 5 s; the page draws again only at 9 s (its animation frames stopped while it
+    // was hidden, and the music played on).
+    for (const [line, at] of [[0, 1_000], [1, 3_000], [2, 5_000]] as const) {
+      told(1, { op: 'say', serial: 2, line, pace: 'natural', at, late: false, chain: 0 });
+    }
+    speechAt(9_000);
+    expect(utterances).toEqual([]);
+    expect(speechStats().skipped).toBe(3);
+    expect(readingNote.value).toMatch(/not read: lines 1, 2, 3/);
+  });
+
+  it('still speaks a line reached within a moment of its time, and only the stale ones are skipped', () => {
+    told(1, { op: 'say', serial: 2, line: 0, pace: 'natural', at: 1_000, late: false, chain: 0 });
+    told(1, { op: 'say', serial: 2, line: 1, pace: 'natural', at: 3_000, late: false, chain: 0 });
+    speechAt(3_200);
+    expect(utterances.map((u) => u.text)).toEqual(['line 2']);
+    expect(speechStats().skipped).toBe(1);
+    expect(readingNote.value).toMatch(/not read: line 1,/);
+  });
+
+  it('lets the natural pace\'s chain go on from now past a skipped line', () => {
+    // A chain waits for the browser's voice to say it has finished; a line never spoken never would.
+    told(1, { op: 'say', serial: 2, line: 0, pace: 'natural', at: 1_000, late: false, chain: 7 });
+    speechAt(4_000);
+    expect(utterances).toEqual([]);
+    expect(toWorker).toContainEqual({ op: 'said', chain: 7, end: 4_000 });
   });
 });

@@ -31,6 +31,13 @@ export type Told =
  * ducked it). */
 export const DUCK = 0.6;
 
+/** How late, in seconds, a line of the browser's voice may still be spoken. A page being drawn
+ * reaches a due line within a frame of its time — the worker tells it half a second ahead — so a
+ * line this late was due while the page was hidden or asleep and its animation frames stopped (the
+ * music plays on without them). Spoken on waking it would be out of its bar, and every line overdue
+ * would be begun at once, each cutting off the one before; such a line is skipped and said to be. */
+export const STALE_SECONDS = 0.5;
+
 /** What the reading side needs of the player. */
 export interface Link {
   /** Posts to the render worker. */
@@ -79,6 +86,8 @@ let onTimeCount = 0;
 let startsCount = 0;
 let firstLine: number | null = null;
 let lastPace: Pace | null = null;
+/** Lines of the browser's voice skipped since the last start of play, their moment passed. */
+let skippedCount = 0;
 
 /** The line of `reading` the worker names, at `pace`, with what its cue says. */
 function lineOf(reading: Reading | null | undefined, pace: Pace, line: number): (SpokenLine & { rate?: number; slot?: number }) | undefined {
@@ -120,6 +129,7 @@ export function handing(serial: number, reading: Reading | null, fromTheTop: boo
     onTimeCount = 0;
     startsCount += 1;
     firstLine = null;
+    skippedCount = 0;
   }
   readings.set(serial, reading);
   // Only the pieces the worker may still be playing are kept: the one it plays and one to come.
@@ -276,19 +286,21 @@ export function speechAt(at: number): void {
       followWords(shownLine, () => (link?.playhead() ?? 0) / rate);
     }
   }
-  const ready = due.filter((d) => d.at <= at);
+  const reached = due.filter((d) => d.at <= at);
+  due = due.filter((d) => d.at > at);
+  const stale = reached.filter((d) => at - d.at > STALE_SECONDS * rate);
+  const ready = reached.filter((d) => at - d.at <= STALE_SECONDS * rate);
+  skip(stale, at);
   // A cut reached: a line of the browser's voice begun before it stops there. A line due now cuts
   // it anyway (readAloud), keeping the duck down between the two.
-  const reached = cuts.filter((cut) => cut <= at);
-  if (reached.length) {
-    cuts = cuts.filter((cut) => cut > at);
-    if (!ready.length && browserFrom !== null && browserFrom < Math.max(...reached)) {
+  const cut = cuts.filter((c) => c <= at);
+  if (cut.length) {
+    cuts = cuts.filter((c) => c > at);
+    if (!ready.length && browserFrom !== null && browserFrom < Math.max(...cut)) {
       browserFrom = null;
       hushBrowserVoice();
     }
   }
-  if (!ready.length) return;
-  due = due.filter((d) => d.at > at);
   for (const line of ready) {
     console.log(`[reading] line ${line.line.line + 1} with the browser voice at ${(at / rate).toFixed(3)} s (due ${(line.at / rate).toFixed(3)} s): ${line.line.text}`);
     browserFrom = at;
@@ -299,5 +311,21 @@ export function speechAt(at: number): void {
   }
 }
 
+/** Lines of the browser's voice whose moment passed unseen (`STALE_SECONDS`): not spoken, but said
+ * not to have been (`CLAUDE.md` §6), and a natural pace's chain told it may go on from now. */
+function skip(stale: Due[], at: number): void {
+  if (!stale.length || !link) return;
+  const rate = link.rate();
+  skippedCount += stale.length;
+  for (const line of stale) {
+    console.log(`[reading] line ${line.line.line + 1} not read by the browser voice: due ${(line.at / rate).toFixed(3)} s, reached ${(at / rate).toFixed(3)} s`);
+    if (line.chain && line.generation === link.generation()) link.post({ op: 'said', chain: line.chain, end: Math.round(at) });
+  }
+  const lines = stale.map((line) => line.line.line + 1).join(', ');
+  noteLoss(`not read: line${stale.length > 1 ? 's' : ''} ${lines}, due while the page was hidden or asleep`);
+}
+
 /** How the reading has gone, for the end-to-end test. */
-export const speechStats = () => ({ spoken: placedCount, onTime: onTimeCount, starts: startsCount, first: firstLine, pace: lastPace });
+export const speechStats = () => ({
+  spoken: placedCount, onTime: onTimeCount, starts: startsCount, first: firstLine, pace: lastPace, skipped: skippedCount,
+});
