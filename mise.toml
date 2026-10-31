@@ -1,5 +1,179 @@
+# The toolchain and the commands that build, check and ship this repository. `mise install` once,
+# then `mise run gates` before calling a change done (CLAUDE.md §3), `mise tasks` for the rest.
+#
+# Every task runs from the repository root, whatever directory it is started in, and is a thin
+# wrapper: the scripts under scripts/ and the commands CLAUDE.md §3 lists remain the truth, and each
+# task is that command spelled once.
+
 [tools]
 # The page's build and tests (web/): an LTS release, which CI's `web` job uses too.
 node = "24.18.0"
 # Pinned to the version CI deploys with (.github/workflows/ci.yml, `wranglerVersion`).
 wrangler = { version = "4.152.0", allow_builds = ["esbuild", "sharp", "workerd"] }
+# The bindings' generator must be exactly the `wasm-bindgen` crate's version in Cargo.lock (0.2.129);
+# scripts/wasm-bindgen.sh checks that and uses this one when it matches, so bump both together. Its
+# prebuilt binary comes through cargo-binstall rather than a six-minute compile.
+cargo-binstall = "1.20.0"
+"cargo:wasm-bindgen-cli" = "0.2.129"
+# The app's shell (src-tauri): the Tauri CLI, and the JDK its Android project's Gradle build runs on
+# (AGP 8 needs 17).
+"cargo:tauri-cli" = "2.11.3"
+java = "temurin-17.0.9+9"
+# The same patch release as rust-toolchain.toml (keep the two in step), with what that file asks
+# rustup for, plus the Android target the app (src-tauri) builds for. mise sets RUSTUP_TOOLCHAIN to
+# this version, so it wins over the file wherever mise is active. Listed last: its bin directory is
+# ~/.cargo/bin, and whatever `cargo install` put there must not shadow the versions pinned above.
+rust = { version = "1.96.1", components = "rustfmt,clippy,llvm-tools", targets = "wasm32-unknown-unknown,aarch64-linux-android" }
+
+[env]
+# What mise cannot install — the Android SDK and NDK come from Android Studio's SDK manager — is
+# found where Android Studio puts it on macOS unless already set; `mise run android:env` checks it is
+# there. The NDK version is the one the app is built and tested with.
+ANDROID_HOME = "{{ get_env(name='ANDROID_HOME', default=env.HOME ~ '/Library/Android/sdk') }}"
+NDK_HOME = "{{ get_env(name='NDK_HOME', default=env.ANDROID_HOME ~ '/ndk/28.2.13676358') }}"
+_.path = ["{{ env.ANDROID_HOME }}/platform-tools"]
+
+# ── The gates (CLAUDE.md §3), in its order, stopping at the first that fails ──────────────────────
+#
+# PROSODY_CARGO_SCOPE narrows clippy, test and doc to part of the workspace (CI's Linux `gates` job
+# leaves the app out, its `app` job checks only the app); unset, it is the whole workspace.
+
+[tasks.gates]
+description = "Every gate in CLAUDE.md §3: Rust, the page, the built site end to end"
+run = [{ task = "gates:rust" }, { task = "gates:web" }, { task = "e2e" }]
+
+[tasks."gates:rust"]
+description = "fmt, clippy, test, doc — the Rust gates"
+run = [{ task = "gates:fmt" }, { task = "gates:clippy" }, { task = "gates:test" }, { task = "gates:doc" }]
+
+[tasks."gates:fmt"]
+description = "cargo fmt --check"
+run = "cargo fmt --all -- --check"
+
+[tasks."gates:clippy"]
+description = "cargo clippy, warnings denied"
+run = "cargo clippy ${PROSODY_CARGO_SCOPE:---workspace} --all-targets --all-features --locked -- -D warnings"
+
+[tasks."gates:test"]
+description = "cargo test, every target even after one fails"
+run = "cargo test ${PROSODY_CARGO_SCOPE:---workspace} --no-fail-fast --locked"
+
+[tasks."gates:doc"]
+description = "cargo doc with rustdoc warnings denied, as CI runs it"
+env = { RUSTDOCFLAGS = "-D warnings" }
+run = "cargo doc ${PROSODY_CARGO_SCOPE:---workspace} --no-deps --locked"
+
+[tasks."gates:web"]
+description = "The page: install from its lockfile, typecheck, Vitest, Vite build"
+run = ["npm --prefix web ci", "npm --prefix web run check"]
+
+[tasks.e2e]
+description = "Build the static site, then test it in Chromium (Playwright)"
+depends = ["site"]
+run = [
+  # Fetches Chromium once; a no-op when the pinned browser is already there.
+  "npm --prefix web exec -- playwright install chromium",
+  # Serves the site on 127.0.0.1:4802 and fails if that is taken (another checkout's run, say):
+  # PROSODY_E2E_PORT=<port> mise run gates picks another.
+  "npm --prefix web run e2e",
+]
+
+# ── Builds and checks beyond the gates ────────────────────────────────────────────────────────────
+
+[tasks.site]
+description = "The page as static files with the compiler as WebAssembly (scripts/build-site.sh)"
+run = "./scripts/build-site.sh"
+
+[tasks.synth]
+description = "The player's synth for the browser, into web/public (scripts/build-synth.sh)"
+run = "./scripts/build-synth.sh"
+
+[tasks.check-wasm]
+description = "The browser build answers byte for byte as the native server (scripts/check-wasm.sh)"
+run = "./scripts/check-wasm.sh"
+
+[tasks.grammar]
+description = "The grammar's corpus tests, and the committed parser matches the grammar"
+dir = "{{ config_root }}/crates/tree-sitter-prosody"
+run = [
+  "npx --yes tree-sitter-cli@0.26.11 test",
+  "npx --yes tree-sitter-cli@0.26.11 generate",
+  "git diff --exit-code -- src/",
+]
+
+# ── Running it locally (README, "Path A") ─────────────────────────────────────────────────────────
+
+[tasks.serve]
+description = "Build the synth and the page, then serve them with the native compiler on :4747"
+run = [
+  "./scripts/build-synth.sh",
+  "npm --prefix web ci --no-audit --no-fund",
+  "npm --prefix web run build",
+  "cargo run --locked -p prosody-web",
+]
+
+[tasks.dev]
+description = "Work on the page: prosody-web on :4747 answering, Vite with hot reload in front"
+run = """
+set -eu
+./scripts/build-synth.sh
+npm --prefix web ci --no-audit --no-fund
+cargo build --locked -p prosody-web
+cargo run --quiet --locked -p prosody-web &
+server=$!
+trap 'kill $server 2>/dev/null' EXIT INT TERM
+npm --prefix web run dev
+"""
+
+[tasks."dev:page"]
+description = "Vite alone (extra arguments go to Vite); the app's beforeDevCommand runs it with --host"
+run = "npm --prefix web run dev --"
+
+# ── The app (src-tauri), Android ──────────────────────────────────────────────────────────────────
+#
+# Debug builds for a 64-bit ARM phone. `cargo tauri android build` works from the repository root and
+# from src-tauri alike: tauri.conf.json's beforeBuildCommand is `mise run site`, which does not
+# depend on the directory Tauri happens to run it in. An iOS family slots in beside these as
+# `ios:env`, `ios:build`, `ios:install`, `ios:run`.
+
+[tasks."android:env"]
+description = "Check the Android SDK, NDK and adb that mise cannot install are where mise.toml says"
+run = """
+set -eu
+ok=true
+check() { if [ ! -e "$2" ]; then echo "android: $1 not found at $2 — $3" >&2; ok=false; fi; }
+check "SDK (ANDROID_HOME)" "$ANDROID_HOME" "install it with Android Studio, or set ANDROID_HOME"
+check "NDK (NDK_HOME)" "$NDK_HOME" "install NDK 28.2.13676358 with Android Studio's SDK manager, or set NDK_HOME"
+check "adb" "$ANDROID_HOME/platform-tools/adb" "install Android SDK Platform-Tools"
+command -v java >/dev/null 2>&1 || { echo "android: no java — mise install" >&2; ok=false; }
+command -v cargo-tauri >/dev/null 2>&1 || { echo "android: no tauri CLI — mise install" >&2; ok=false; }
+$ok
+echo "android: SDK $ANDROID_HOME, NDK $NDK_HOME"
+"""
+
+[tasks."android:build"]
+description = "Debug APK for aarch64 (its beforeBuildCommand builds the site first)"
+depends = ["android:env"]
+run = "cargo tauri android build --debug --target aarch64 --apk"
+
+[tasks."android:install"]
+description = "adb install -r the debug APK to ANDROID_SERIAL, or to the only attached device"
+depends = ["android:env"]
+run = """
+set -eu
+apk=src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+if [ ! -f "$apk" ]; then echo "android: no $apk — mise run android:build first" >&2; exit 1; fi
+serial=$(./scripts/android-device.sh)
+echo "android: installing $apk ($(date -r "$apk" '+%F %T' 2>/dev/null || echo 'unknown date')) on $serial"
+adb -s "$serial" install -r "$apk"
+"""
+
+[tasks."android:run"]
+description = "Install the debug APK, then launch rocks.prosody.debug"
+depends = ["android:install"]
+run = """
+set -eu
+serial=$(./scripts/android-device.sh)
+adb -s "$serial" shell monkey -p rocks.prosody.debug -c android.intent.category.LAUNCHER 1 >/dev/null
+echo "android: launched rocks.prosody.debug on $serial"
+"""

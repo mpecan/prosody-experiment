@@ -21,10 +21,13 @@ questions, and [`CLAUDE.md`](CLAUDE.md) for the engineering rules.
 
 ## Quick start
 
-Needs Rust 1.96.1 (pinned in `rust-toolchain.toml`; `rustup` will fetch it automatically).
+The toolchain is pinned in [`mise.toml`](mise.toml): Rust 1.96.1 (also in `rust-toolchain.toml`,
+so plain `rustup` fetches it too), node, wrangler, the `wasm-bindgen` CLI, the Tauri CLI and the JDK
+the Android build needs. With [mise](https://mise.jdx.dev) installed:
 
 ```sh
 git clone <this repo> && cd prosody-experiment
+mise trust && mise install
 cargo build --release
 
 # compile a poem to Strudel pattern text
@@ -52,6 +55,31 @@ it is one **foot**; each bracketed group inside that is the **syllables** of tha
 one beat, so `.cpm` is the tempo in beats a minute and a bar of three beats is shorter than a bar
 of four (see [the pulse](#the-pulse)).
 
+### Building and checking: `mise tasks`
+
+Every build, check and run command is a mise task, a thin wrapper over the scripts in `scripts/`
+and the commands in [`CLAUDE.md`](CLAUDE.md) §3. Tasks run from the repository root wherever you
+start them.
+
+| Task | What it does |
+|---|---|
+| `mise run gates` | every quality gate (CLAUDE.md §3) in order, stopping at the first failure: `gates:rust` (fmt, clippy, test, doc), `gates:web` (the page's typecheck, Vitest, build), `e2e` (the built site in Chromium) |
+| `mise run site` | the static site into `target/site` (`scripts/build-site.sh`) |
+| `mise run synth` | the player's synth into `web/public` (`scripts/build-synth.sh`) |
+| `mise run serve` | Path A below: synth, page, then `prosody-web` on :4747 |
+| `mise run dev` | `prosody-web` plus Vite with hot reload, for working on the page |
+| `mise run check-wasm` | the browser build answers byte for byte as the native one |
+| `mise run grammar` | the grammar's corpus tests, and that the committed parser matches it |
+| `mise run android:build` | the Android app's debug APK for 64-bit ARM |
+| `mise run android:install` | `adb install -r` it to `$ANDROID_SERIAL`, or to the only attached device |
+| `mise run android:run` | install, then launch `rocks.prosody.debug` |
+
+The Android SDK and NDK are not something mise installs: install them with Android Studio. mise.toml
+looks for them where Android Studio puts them on macOS (`~/Library/Android/sdk`, NDK
+28.2.13676358) unless `ANDROID_HOME` / `NDK_HOME` are already set, and `mise run android:env` says
+what is missing. `cargo tauri android build` also works by hand, from the repository root or from
+`src-tauri`: the app's `beforeBuildCommand` is `mise run site`.
+
 ---
 
 ## Hearing it
@@ -59,6 +87,8 @@ of four (see [the pulse](#the-pulse)).
 Three ways. The first is the one to start with.
 
 ### Path A — the local web page (easiest)
+
+`mise run serve` does all of this; by hand:
 
 ```sh
 ./scripts/build-synth.sh                            # the player's synth, into the page, once
@@ -73,7 +103,7 @@ The page is its own program in `web/` — Preact and TypeScript, built by Vite i
 `wasm32-unknown-unknown` target, which `rust-toolchain.toml` asks for, and installs the pinned
 `wasm-bindgen` once), and without it the page shows and compiles but says the player could not
 start. Working on the page itself, run
-`npm --prefix web run dev` with `prosody-web` still running: Vite serves the page with hot reload
+`npm --prefix web run dev` with `prosody-web` still running (`mise run dev` starts both): Vite serves the page with hot reload
 and sends every question to the server. `npm --prefix web run check` typechecks it, runs its tests
 (Vitest) and builds it.
 
@@ -265,6 +295,8 @@ The page also builds as static files, with the whole compiler inside it as WebAs
 python3 -m http.server -d target/site    # or any static host; then open http://localhost:8000
 npm --prefix web run e2e                 # the built site in Chromium, end to end
 ```
+
+(`mise run site` and `mise run e2e` are the first and the last.)
 
 It is the same page with the same controls, and it answers itself: every request the served page
 sends to `prosody-web` goes to `prosody_bg.wasm` instead (`crates/prosody-wasm`, bound to the
