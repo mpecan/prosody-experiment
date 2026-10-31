@@ -17,6 +17,11 @@
 // spoken length, which only the rendered line has — which is why it runs where the line is placed.
 // Times are seconds on the output's clock (output frames ÷ rate); "now" is the render frontier, the
 // first frame not yet rendered, so a late line starts there, never in what is already queued.
+//
+// A rendered line is placed when the block its recording begins in is about to be rendered, not as
+// soon as the chain knows when it falls: a stanza's held lines would otherwise all be placed in one
+// go, and a long stanza would overflow the synth's placements (prosody_synth `MAX_PLACED`). Placed
+// that late it starts on the same frame, since nothing before that block is rendered meanwhile.
 import type { PerformedCue } from '../answers';
 
 /** A recorded line the synth holds: its number there, the quiet margin before its speech, and its
@@ -46,8 +51,9 @@ export type Pace = 'fitted' | 'natural';
 /** What the reader drives: the synth's speech stem, and the page. */
 export interface Voice {
   /** Places held line `id`, its recording from frame `start`, its speech from `speech`, the music
-   * kept down `hold` frames after it; gives the frame after its last. */
-  speak(id: number, start: number, speech: number, hold: number): number;
+   * kept down `hold` frames after it; gives the frame after its last, or null if the synth refused
+   * it (and said why) — a line that is not heard is not told as spoken. */
+  speak(id: number, start: number, speech: number, hold: number): number | null;
   /** Cuts every line off at frame `at`. */
   cut(at: number): void;
   tell(told: Told): void;
@@ -126,13 +132,18 @@ export class Reader {
   readonly held = new Map<string, Held>();
   /** The first frame not yet rendered: what "now" is. */
   private frontier = 0;
+  /** While a block is being prepared (before()), the frame after it: a line whose recording begins
+   * before this is placed now, a later one waits for its own block. */
+  private until: number | null = null;
+  /** The chain stopped at a held line whose block has not come yet: before() resumes it. */
+  private deferred = false;
 
   constructor(private readonly rate: number, private readonly voice: Voice) {}
 
   /** A piece from its top, from the frontier: nothing before it is read on. */
   play(segment: Segment): void {
     this.segments = [segment];
-    this.chain = null;
+    this.dropChain();
     this.carry = null;
   }
 
@@ -145,8 +156,13 @@ export class Reader {
   /** Nothing playing. */
   stop(): void {
     this.segments = [];
-    this.chain = null;
+    this.dropChain();
     this.carry = null;
+  }
+
+  private dropChain(): void {
+    this.chain = null;
+    this.deferred = false;
   }
 
   /** The pieces playing and to play, by serial: whose casts the page keeps up to date. */
@@ -168,7 +184,7 @@ export class Reader {
     if (quiet || pace !== this.pace) {
       this.pace = pace;
       this.cutAt(this.frontier);
-      this.chain = null;
+      this.dropChain();
       this.carry = null;
       return;
     }
@@ -224,18 +240,31 @@ export class Reader {
     if (!now) return;
     if (next && next.outStart < to) {
       const at = Math.max(from, next.outStart);
-      this.reach(now, from, at);
+      this.block(now, from, at);
       this.cutAt(at);
       const old = this.chain;
       this.carry = old && old.prevEnd !== null
         ? { prevEnd: Math.min(old.prevEnd, at / this.rate), prevPause: old.prevPause }
         : null;
-      this.chain = null;
+      this.dropChain();
       this.segments = [next];
-      this.reach(next, at, to);
+      this.block(next, at, to);
     } else {
-      this.reach(now, from, to);
+      this.block(now, from, to);
     }
+    this.until = null;
+  }
+
+  /** Output frames `from..to` of `segment`: the lines the chain held back for them placed first
+   * (each falls before any cue reached here, so a round's lines are read before the seam), then
+   * the cues in them. */
+  private block(segment: Segment, from: number, to: number): void {
+    this.until = to;
+    if (this.deferred) {
+      this.deferred = false;
+      this.advance();
+    }
+    this.reach(segment, from, to);
   }
 
   private cutAt(at: number): void {
@@ -283,6 +312,7 @@ export class Reader {
     }
     const start = Math.max(0, out - frameOf(held.lead, this.rate));
     const end = this.voice.speak(held.id, start, out, 0);
+    if (end === null) return;
     const slot = cue.fitted?.slot ?? 0;
     const bar = (segment.bars[slot + 1] ?? Infinity) - (segment.bars[slot] ?? 0);
     const over = held.seconds - 2 * held.lead - bar;
@@ -394,19 +424,20 @@ export class Reader {
         c.next = lines.length;
         return;
       }
-      this.speakNatural(c, line, earliest);
-      if (c.busy) return;
+      if (!this.speakNatural(c, line, earliest) || c.busy) return;
     }
   }
 
-  private speakNatural(c: Chain, line: PerformedCue, earliest: number): void {
+  /** Reads `line`, or waits for it; false when its block has not come yet and it is left for
+   * before() to place. */
+  private speakNatural(c: Chain, line: PerformedCue, earliest: number): boolean {
     const now = this.frontier / this.rate;
     const nextLine = c.lines[c.next + 1];
     const last = !nextLine || nextLine.stanza !== line.stanza;
     // A line the cast leaves out is not read, and the next does not wait for it.
     if (!c.segment.cast.has(line.line)) {
       c.next += 1;
-      return;
+      return true;
     }
     const key = c.segment.cast.get(line.line) ?? null;
     const serial = c.segment.serial;
@@ -417,21 +448,29 @@ export class Reader {
       this.voice.tell({
         op: 'say', serial, line: line.line, pace: 'natural', at: frameOf(Math.max(earliest, 0), this.rate), late: false, chain: c.serial,
       });
-      return;
+      return true;
     }
     const held = this.held.get(key);
     if (!held) {
       c.busy = key;
       this.voice.tell({ op: 'wait', serial, line: line.line, key });
-      return;
+      return true;
     }
     const start = Math.max(earliest, now);
     const speech = frameOf(start, this.rate);
-    const end = this.voice.speak(held.id, Math.max(0, speech - frameOf(held.lead, this.rate)), speech,
-      last ? 0 : frameOf(line.pause, this.rate));
-    this.voice.tell({ op: 'spoken', serial, line: line.line, pace: 'natural', start: speech, end, over: 0, late: start - earliest });
-    c.prevEnd = end / this.rate;
+    const begins = Math.max(0, speech - frameOf(held.lead, this.rate));
+    if (begins >= (this.until ?? this.frontier)) {
+      this.deferred = true;
+      return false;
+    }
+    const end = this.voice.speak(held.id, begins, speech, last ? 0 : frameOf(line.pause, this.rate));
     c.prevPause = line.pause;
     c.next += 1;
+    // Refused (the worker has said why): not heard, so not told as spoken, and the next line follows
+    // the last one heard by this one's pause, as after a line that could not be rendered.
+    if (end === null) return true;
+    this.voice.tell({ op: 'spoken', serial, line: line.line, pace: 'natural', start: speech, end, over: 0, late: start - earliest });
+    c.prevEnd = end / this.rate;
+    return true;
   }
 }

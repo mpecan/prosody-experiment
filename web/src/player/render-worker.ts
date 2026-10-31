@@ -153,7 +153,7 @@ function startReader(): Reader {
         return player!.speak(id, start, speech, hold);
       } catch (error) {
         say({ op: 'error', message: 'a line of the reading could not be placed: ' + String((error as Error)?.message ?? error) });
-        return speech;
+        return null;
       }
     },
     cut: (at) => player?.cut_speech(at),

@@ -133,9 +133,11 @@ describe('the natural pace', () => {
     run(r, 0, 1_500);
     expect(spoken).toEqual([[1, 0, 0, 250]]);
     expect(told.filter((t) => t.op === 'wait')).toEqual([{ op: 'wait', serial: 1, line: 1, key: 'b' }]);
-    // It arrives with the frontier at 1.5 s, past the 0.85 s it was due: it starts there.
+    // It arrives with the frontier at 1.5 s, past the 0.85 s it was due: it starts there, placed
+    // as the block from 1.5 s is rendered.
     r.held.set('b', { id: 2, lead: 0, seconds: 0.6 });
     r.arrived('b');
+    run(r, 1_500, 2_000);
     expect(spoken[1]).toEqual([2, 1_500, 1_500, 0]);
     const placed = told.filter((t) => t.op === 'spoken');
     expect(placed[1]).toMatchObject({ line: 1, start: 1_500, late: expect.closeTo(0.65, 9) });
@@ -148,12 +150,100 @@ describe('the natural pace', () => {
     const say = told.find((t) => t.op === 'say');
     expect(say).toMatchObject({ line: 0, pace: 'natural', at: 0 });
     expect(spoken).toEqual([]);
-    // The page's playhead stood at 0.9 s when the voice finished: line 1 follows 0.25 s later.
+    // The page's playhead stood at 0.9 s when the voice finished: line 1 follows 0.25 s later,
+    // placed with the block it begins in.
     r.said(say!.op === 'say' ? say!.chain : -1, 900);
+    expect(spoken).toEqual([]);
+    run(r, 500, 1_500);
     expect(spoken).toEqual([[2, 1_150, 1_150, 0]]);
     // A word from an older chain changes nothing.
     r.said(-1, 2_000);
     expect(spoken.length).toBe(1);
+  });
+
+  it('places a long stanza a line at a time, as the block each begins in comes, not all at once', () => {
+    // Line 0 where bar 1 begins, then 99 lines each following the last by 0.25 s: line n begins at
+    // n × 0.85 s. Placed all at once they would overflow the synth (MAX_PLACED, 64).
+    const long = [cue(0, 0, { natural: { onset: 'arrives', slot: 0, at: 0 } }),
+      ...Array.from({ length: 99 }, (_, n) => cue(n + 1, 0, { natural: { onset: 'follows', slot: null, at: null } }))];
+    const bars = Array.from({ length: 101 }, (_, n) => n);
+    const { v, spoken } = voice();
+    const r = new Reader(RATE, v);
+    r.pace = 'natural';
+    for (let n = 0; n < 100; n++) r.held.set(`k${n}`, { id: n, lead: 0, seconds: 0.6 });
+    r.play(segment(long, new Map(long.map((c) => [c.line, `k${c.line}`])), { length: 100_000, bars }));
+    run(r, 0, 500);
+    expect(spoken).toEqual([[0, 0, 0, 250]]);
+    run(r, 500, 3_000);
+    expect(spoken.map(([, start]) => start)).toEqual([0, 850, 1_700, 2_550]);
+  });
+
+  it('tells no line as spoken that the synth refused, and goes on from the last heard', () => {
+    // Lines 0, 1, 2 of one stanza, each following the last; the synth refuses line 1 (held as 2).
+    const stanza = [cue(0, 0, { pause: 0.25, natural: { onset: 'arrives', slot: 0, at: 0 } }),
+      cue(1, 0, { pause: 0.5, natural: { onset: 'follows', slot: null, at: null } }),
+      cue(2, 0, { natural: { onset: 'follows', slot: null, at: null } })];
+    const { r, spoken, told } = reader();
+    const speak = r['voice'].speak;
+    r['voice'].speak = (id, start, speech, hold) => (id === 2 ? null : speak(id, start, speech, hold));
+    r.play(segment(stanza, cast));
+    run(r, 0, 2_000);
+    // Line 1 (due at 0.85 s) is not heard; line 2 follows line 0's end (0.6 s) by line 1's pause
+    // (0.5 s), at 1.1 s.
+    expect(spoken).toEqual([[1, 0, 0, 250], [3, 1_100, 1_100, 0]]);
+    expect(told.filter((t) => t.op === 'spoken').map((t) => t.op === 'spoken' && t.line)).toEqual([0, 2]);
+  });
+
+  it('goes on without a line the page could not render, by that line\'s pause', () => {
+    const stanza = [cue(0, 0, { pause: 0.25, natural: { onset: 'arrives', slot: 0, at: 0 } }),
+      cue(1, 0, { pause: 0.5, natural: { onset: 'follows', slot: null, at: null } }),
+      cue(2, 0, { natural: { onset: 'follows', slot: null, at: null } })];
+    const { r, spoken } = reader();
+    r.held.delete('b');
+    r.play(segment(stanza, cast));
+    run(r, 0, 1_000);
+    expect(spoken).toEqual([[1, 0, 0, 250]]);
+    // Line 1 never comes; line 2 follows line 0's end (0.6 s) by line 1's pause (0.5 s): 1.1 s.
+    r.failed('b');
+    run(r, 1_000, 1_500);
+    expect(spoken).toEqual([[1, 0, 0, 250], [3, 1_100, 1_100, 0]]);
+    // A failure of a key nobody waits for changes nothing.
+    r.failed('c');
+    run(r, 1_500, 2_000);
+    expect(spoken.length).toBe(2);
+  });
+
+  it('asks again for a line waited on whose recording the cast no longer names', () => {
+    // Waiting on 'b' for line 1; the voice changes and line 1 is now cast as 'b2', which is held.
+    const { r, spoken } = reader();
+    r.held.delete('b');
+    r.play(segment(cues, cast));
+    run(r, 0, 1_500);
+    expect(spoken).toEqual([[1, 0, 0, 250]]);
+    r.held.set('b2', { id: 5, lead: 0, seconds: 0.6 });
+    r.recast(new Map([[1, new Map([[0, 'a'], [1, 'b2'], [2, 'c']])]]), 'natural', false);
+    run(r, 1_500, 2_000);
+    // Due at 0.85 s, the frontier at 1.5 s: it starts there.
+    expect(spoken[1]).toEqual([5, 1_500, 1_500, 0]);
+  });
+
+  it('comes round while a line is being read: the old round\'s unread lines are said, the new round read', () => {
+    // A 4 s piece: line 0 on bar 1, read by the browser's voice; line 1 follows it. The voice is
+    // still reading line 0 when the piece comes round at 4 s.
+    const { r, told } = reader();
+    r.play(segment(cues.slice(0, 2), new Map([[0, null], [1, 'b']])));
+    run(r, 0, 4_500);
+    const says = () => told.filter((t) => t.op === 'say');
+    expect(says()).toHaveLength(1);
+    expect(says()[0]).toMatchObject({ line: 0, at: 0 });
+    // It finishes at 4.1 s: line 1 of the first round was never read, and is said; the new round's
+    // line 0 (its bar at 4 s) follows the voice's end by its pause, at 4.35 s.
+    r.said(says()[0]!.op === 'say' ? (says()[0] as { chain: number }).chain : -1, 4_100);
+    expect(told.filter((t) => t.op === 'note')).toEqual([
+      { op: 'note', text: 'not read last time round: line 2, the piece came round before its turn', loss: true },
+    ]);
+    expect(says()).toHaveLength(2);
+    expect(says()[1]).toMatchObject({ line: 0, at: 4_350 });
   });
 
   it('says a stanza it cannot reach before the piece ends', () => {
