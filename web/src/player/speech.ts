@@ -1,8 +1,9 @@
 // The reading through the Prosody player, on the page's side (`docs/player.md` §5, "The reading").
 //
-// The render worker times the reading (reader.ts) and places each rendered line on the speech stem
-// itself; this side gives it what only the page has — who reads each line (the cast) and the lines
-// the engines have rendered, as PCM — and does what only the page can do with what the worker says:
+// The player times the reading (crates/prosody-player's reader) and places each rendered line on the
+// speech stem itself; this side gives it what only the page has — who reads each line (the cast) and
+// the lines the engines have rendered, as PCM — and does what only the page can do with what the
+// player says:
 // show the line being read and the word being said at the playhead, say what the reading lost, and
 // speak the lines of the browser's own voice when the playhead reaches them, off the playhead, since
 // that voice cannot be placed in a stream.
@@ -14,7 +15,17 @@ import {
 import { ENGINE_INFO } from '../reading/engines';
 import { duck, readingNote, readingSettings, type Pace } from '../store';
 import { followWords, setSpeaking, speaking, type Speaking } from '../watch';
-import type { Told } from './reader';
+
+/** What the player's reader tells the page (crates/prosody-player `reader::Told`, as its JSON).
+ * Frames are output frames; `serial` names the piece. */
+export type Told =
+  | { op: 'spoken'; serial: number; line: number; pace: Pace; start: number; end: number; over: number | null; late: number }
+  | { op: 'say'; serial: number; line: number; pace: Pace; at: number; late: boolean; chain: number }
+  | { op: 'cut'; at: number }
+  | { op: 'wait'; serial: number; line: number; key: string }
+  | { op: 'note'; text: string; loss: boolean }
+  /** Where the reading is: the line it will want next, by number, or null once the round's are read. */
+  | { op: 'at'; serial: number; pace: Pace; line: number | null };
 
 /** The music's level under a line, with the duck on (`SPEC.md` §4.7's reading, as the page has always
  * ducked it). */
@@ -178,7 +189,7 @@ function post(key: string, buffer: Rendered): void {
   link.post({ op: 'line', key, pcm, rate: buffer.sampleRate, lead: buffer.lead ?? 0 }, [pcm.buffer]);
 }
 
-/** What the worker's reader says (reader.ts `Told`). */
+/** What the player's reader says (`Told`). */
 export function told(generation: number, message: Told): void {
   if (!link || generation !== link.generation()) return;
   const rate = link.rate();
@@ -196,7 +207,7 @@ export function told(generation: number, message: Told): void {
       console.log(`[reading] ${message.pace}: line ${line.line + 1} placed at ${(message.start / rate).toFixed(3)} s`
         + (message.late > 0.001 ? ` (${message.late.toFixed(3)} s late)` : '') + ` (bytes ${line.start}..${line.end}), ${who.engine} ${who.voice ?? ''}: ${line.text}`);
       if (who.fallback) noteReading(`line ${line.line + 1}: ${who.why}`);
-      else if (message.over > 0.02) noteReading(`line ${line.line + 1} runs ${message.over.toFixed(2)} s past its bar and may be cut off at the next cue`);
+      else if (message.over !== null && message.over > 0.02) noteReading(`line ${line.line + 1} runs ${message.over.toFixed(2)} s past its bar and may be cut off at the next cue`);
       else if (readingNote.value.startsWith('waiting for')) noteReading('');
       return;
     }

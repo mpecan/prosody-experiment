@@ -1,12 +1,12 @@
 // The Prosody player's page side (src/player): the note records the synth reads, the clock the page
 // draws by, the worklet's mixing, and reading a soundfont file. Expected values are worked out by
-// hand from the inputs; the record layout is the one crates/prosody-synth-wasm pins on its side.
+// hand from the inputs; the record layouts are the ones crates/prosody-player pins on its side.
 import { describe, expect, it } from 'vitest';
 
 import type { Performance, PerformedNote } from '../src/answers';
 import { indexed, marksAt, notesBetween, pieceTime, settle, within } from '../src/player/clock';
 import { FADE, GLIDE, Glue, glueCurve, MAKEUP, PER_FRAME, softClip, StemQueue } from '../src/player/mixer';
-import { barStarts, records, sampledOf, STRIDE } from '../src/player/notes';
+import { barStarts, CUE_STRIDE, cueRecords, records, sampledOf, STRIDE } from '../src/player/notes';
 import { zonesFor } from '../src/player/samples';
 
 function note(overrides: Partial<PerformedNote>): PerformedNote {
@@ -32,7 +32,7 @@ function performance(notes: PerformedNote[], seconds = 2): Performance {
 
 describe('note records', () => {
   it('lays a note out as the synth reads it', () => {
-    // The same record as crates/prosody-synth-wasm's `record(3, 2, 1, 64)`: tag 3, melody (2), an
+    // The same record as crates/prosody-player's `records` test `record(3, 2, 1, 64)`: tag 3, melody (2), an
     // oscillator (2), sawtooth (1), at 0.25 s for 0.5 s, MIDI 64, gain 0.8, postgain 1, no attack,
     // release 0.1, cutoff 3 kHz; no crush, vowel or shape (NaN), no room (0, size 2.5), no delay
     // (NaN, 0, 0), no compressor (NaN, 1).
@@ -52,7 +52,7 @@ describe('note records', () => {
   });
 
   it('writes the effects as the synth reads them', () => {
-    // The same effects as crates/prosody-synth-wasm's `a_records_effects_are_read_field_by_field`:
+    // The same effects as crates/prosody-player's `a_records_effects_are_read_field_by_field`:
     // 8 bits, /o/ (3), shape 0.1, room 0.35 at 2.5 s, an echo of 0.2 at 0.3 s and 0.35, −24 dB at 7:1.
     const out = records(performance([note({
       crush: 8, vowel: 'o', shape: 0.1, room: 0.35, roomsize: 2.5,
@@ -84,6 +84,29 @@ describe('note records', () => {
     expect([...sounds.keys()]).toEqual(['font:piano', 'drum:uzu/hh']);
     expect([...sounds.get('font:piano')!.keys]).toEqual([60, 72]);
     expect([...barStarts(performance([]))]).toEqual([0, 1]);
+  });
+});
+
+describe('cue records', () => {
+  it('lays a cue out as the player reads it', () => {
+    // The same records as crates/prosody-player's `a_cue_is_read_field_by_field`: line 3 of stanza 1,
+    // pausing 0.5 s, fitted in bar 2 at 4 s and under `breath` from bar 3 at 6 s; then line 4, read
+    // only at the natural pace, following it (no fitted bar, no natural bar: NaN).
+    const out = cueRecords([
+      { line: 3, stanza: 1, from: 0, to: 9, pace: 1, pause: 0.5, fitted: { slot: 2, at: 4, rate: 1 }, natural: { onset: 'breath', slot: 3, at: 6 } },
+      { line: 4, stanza: 1, from: 10, to: 19, pace: 1, pause: 0.25, fitted: null, natural: { onset: 'follows', slot: null, at: null } },
+    ]);
+    expect(out.length).toBe(2 * CUE_STRIDE);
+    expect([...out]).toEqual([3, 1, 0.5, 2, 4, 1, 6, 4, 1, 0.25, NaN, NaN, 2, NaN]);
+  });
+
+  it('writes no natural onset for a line the natural pace does not read, and `at` as 0', () => {
+    const out = cueRecords([
+      { line: 0, stanza: 0, from: 0, to: 1, pace: 1, pause: 0, fitted: { slot: 0, at: 0, rate: 1 }, natural: null },
+      { line: 1, stanza: 0, from: 2, to: 3, pace: 1, pause: 0, fitted: null, natural: { onset: 'at', slot: 1, at: 2 } },
+    ]);
+    expect(Number.isNaN(out[5])).toBe(true);
+    expect([out[CUE_STRIDE + 5], out[CUE_STRIDE + 6]]).toEqual([0, 2]);
   });
 });
 

@@ -10,8 +10,8 @@
 //
 // The drums, the bass, the melody and the chords, with everything the text asks of them — gain,
 // envelope, low-pass, vowel, crush, shape, each channel's compressor, echo and reverb — and the
-// reading, its rendered lines placed on the fifth stem by the worker with the duck (speech.ts,
-// reader.ts), mixed through the page's master.
+// reading, its rendered lines placed on the fifth stem by the worker with the duck (speech.ts, and
+// crates/prosody-player's reader), mixed through the page's master.
 import workletUrl from './worklet?worker&url';
 
 import type { Mark, Performance } from '../answers';
@@ -27,7 +27,7 @@ import {
   clearRoll, drawFrame, elementsBetween, fitRoll, lightMarks, litVersion, resetMeters, rollWindow, watch,
 } from '../watch';
 import { indexed, marksAt, notesBetween, pieceTime, settle, type Indexed, type Placement } from './clock';
-import { barStarts, records, sampledOf, STEM_CHANNELS } from './notes';
+import { barStarts, cueRecords, records, sampledOf, STEM_CHANNELS } from './notes';
 import { decodeDrum, decodeFont, zoneName } from './samples';
 import { dropped, handing, speechAt, speechStats, startSpeech, stopSpeech, told, wanted } from './speech';
 
@@ -262,17 +262,17 @@ export async function play(): Promise<void> {
     generation += 1;
     quietReading();
   }
-  const reads = { cues: reading ? performance.cues : [], ...handing(message.serial, reading, fromTheTop) };
+  const reads = { cues: cueRecords(reading ? performance.cues : []), ...handing(message.serial, reading, fromTheTop) };
   if (fromTheTop) {
     report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation, peak: 0, speechPeak: 0 };
     losses = { stolen: 0, missing: 0 };
-    running.worker.postMessage({ op: 'play', generation, ...message, ...reads }, [message.notes.buffer, message.bars.buffer]);
+    running.worker.postMessage({ op: 'play', generation, ...message, ...reads }, [message.notes.buffer, message.bars.buffer, reads.cues.buffer]);
     // Nothing else is heard now, so the roll takes this piece's bars at once. After a live edit it
     // keeps the old piece's until the new one takes over (draw).
     watch.heardBars = heard.bars;
     fitRoll();
   } else {
-    running.worker.postMessage({ op: 'swap', ...message, ...reads }, [message.notes.buffer, message.bars.buffer]);
+    running.worker.postMessage({ op: 'swap', ...message, ...reads }, [message.notes.buffer, message.bars.buffer, reads.cues.buffer]);
   }
   piece.fromTheTop = false;
   sendGains();

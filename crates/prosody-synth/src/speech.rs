@@ -3,7 +3,7 @@
 //! written into the block's duck lane frame by frame from the same placements.
 //!
 //! The synth does not decide *when* a line is read — that is the reading's chaining, which needs
-//! each line's spoken length and lives in the page's render worker — only where a line placed at a
+//! each line's spoken length and lives in `prosody-player`'s reader — only where a line placed at a
 //! frame sounds, and how the music bows under it. Both come from one list of placements, so the
 //! duck cannot drift from the voice it makes room for, and both are rendered ahead with the music,
 //! so a busy page can make neither late.
@@ -24,12 +24,12 @@ use crate::sample::Sample;
 use crate::stems::Stems;
 use crate::units::{Gain, SampleRate};
 
-/// The most recorded lines held at once. Lines are numbered by whoever loads them (the render
-/// worker numbers them as they arrive); the cap keeps a bad number from allocating without bound.
+/// The most recorded lines held at once. Lines are numbered by whoever loads them (the player
+/// numbers them as they arrive); the cap keeps a bad number from allocating without bound.
 pub const MAX_LINES: u32 = 4_096;
 
-/// The most lines placed and not yet finished at once. The render worker places a line only when
-/// the block its recording begins in is about to be rendered (`web/src/player/reader.ts`), so what is
+/// The most lines placed and not yet finished at once. The player places a line only when the
+/// block its recording begins in is about to be rendered (`prosody_player::reader`), so what is
 /// placed at once is the lines sounding in that block and those whose duck has not yet risen — a
 /// few; more than this is a caller's error, refused rather than allocated.
 pub const MAX_PLACED: usize = 64;

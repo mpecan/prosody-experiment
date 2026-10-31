@@ -91,7 +91,9 @@ describe('the Prosody player', () => {
     answer!();
     await playingNow;
     const play = toWorker.find((m) => m.op === 'play')!;
-    expect(play.cues).toEqual([CUE]);
+    // Its cue as the player's record (notes.ts `cueRecords`): line 0, stanza 0, its 1.5 s pause, no
+    // fitted bar, its natural bar's onset (an unnamed onset waits for its bar, as `at` does, 0) at 0 s.
+    expect([...(play.cues as Float64Array)]).toEqual([0, 0, 1.5, NaN, NaN, 0, 0]);
     // No engine has loaded, so the browser's voice reads it (null): the worker tells the page when.
     expect(play.cast).toEqual([[0, null]]);
     expect(play.pace).toBe('natural');
@@ -121,7 +123,7 @@ describe('the Prosody player', () => {
     await heldAtThePerformance();
     answer!();
     await playingNow;
-    expect(toWorker.find((m) => m.op === 'play')!.cues).toEqual([]);
+    expect([...(toWorker.find((m) => m.op === 'play')!.cues as Float64Array)]).toEqual([]);
   });
 
   it('plays once the Performance arrives, from the top', async () => {

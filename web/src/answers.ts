@@ -154,7 +154,7 @@ export interface PerformedCue {
   fitted: { slot: number; at: number; rate: number } | null;
   /** What it waits for at the natural pace, and the bar it may begin in (`null` for a line that only
    * follows the one before). */
-  natural: { onset: 'arrives' | 'breath' | 'follows' | string; slot: number | null; at: number | null } | null;
+  natural: { onset: 'at' | 'breath' | 'follows' | string; slot: number | null; at: number | null } | null;
 }
 
 /** A line a pace leaves unread, and why. */

@@ -1,15 +1,17 @@
-// A Performance as the render worker's synth reads it: the sampled sounds it needs, numbered, and
-// every note as a flat record of numbers (crates/prosody-synth-wasm/src/lib.rs lays the record out;
-// a test on each side pins it). The synth decides nothing here — this only moves numbers.
-import type { Performance, PerformedNote, PerformedSound } from '../answers';
+// A Performance as the player reads it: the sampled sounds it needs, numbered, and every note and
+// every cue of its reading as a flat record of numbers (crates/prosody-player/src/records.rs lays the
+// records out; a test on each side pins them). The player decides nothing here — this only moves
+// numbers.
+import type { Performance, PerformedCue, PerformedNote, PerformedSound } from '../answers';
 
 /** Numbers a note's record holds. */
 export const STRIDE = 22;
+/** Numbers a cue's record holds. */
+export const CUE_STRIDE = 7;
 /** The channels a note can play on, in the synth's order: a channel's index is its stem. */
 export const CHANNELS = ['drums', 'bass', 'melody', 'chords'] as const;
 /** Every stem, in the synth's order, by the mixer's channel each answers to: the four a note plays
- * on, and the reading's (prosody_synth `Channel::Speech`), silent until the reading comes to the
- * player in step 4. */
+ * on, and the reading's (prosody_synth `Channel::Speech`). */
 export const STEM_CHANNELS = [...CHANNELS, 'voice'] as const;
 /** The vowels, in the synth's order. */
 export const VOWELS = ['a', 'e', 'i', 'o', 'u'] as const;
@@ -91,4 +93,27 @@ export function records(performance: Performance, ids: Map<string, number>): Flo
 /** Where the bars start, in seconds, for the synth's bar-by-bar hand-over. */
 export function barStarts(performance: Performance): Float64Array {
   return Float64Array.from(performance.bars.map((bar) => bar.at));
+}
+
+/** What a line waits for at the natural pace, in the player's order (prosody_player `Onset`). An
+ * onset it does not name waits for its bar, as `at` does: the reader before step 5 anchored every
+ * line that did not only follow. */
+const ONSETS = ['at', 'breath', 'follows'] as const;
+
+/** Every cue of a reading as records: see crates/prosody-player/src/records.rs. */
+export function cueRecords(cues: PerformedCue[]): Float64Array {
+  const out = new Float64Array(cues.length * CUE_STRIDE);
+  cues.forEach((cue, index) => {
+    const natural = cue.natural;
+    out.set([
+      cue.line,
+      cue.stanza,
+      cue.pause,
+      cue.fitted?.slot ?? NaN,
+      cue.fitted?.at ?? NaN,
+      natural ? Math.max(0, ONSETS.indexOf(natural.onset as typeof ONSETS[number])) : NaN,
+      natural?.at ?? NaN,
+    ], index * CUE_STRIDE);
+  });
+  return out;
 }

@@ -2448,6 +2448,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "prosody-player"
+version = "0.1.0"
+dependencies = [
+ "prosody-synth",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "prosody-score"
 version = "0.1.0"
 dependencies = [
@@ -2471,6 +2479,7 @@ dependencies = [
 name = "prosody-synth-wasm"
 version = "0.1.0"
 dependencies = [
+ "prosody-player",
  "prosody-synth",
  "wasm-bindgen",
 ]

@@ -1,7 +1,6 @@
 // The reading's clock: bars on the output's clock, and how a line too long for its bar is refitted.
 import { describe, expect, it } from 'vitest';
 
-import { barAt, barTime } from '../src/player/reader';
 import { barSeconds, fromWhere, refitSpeed, renderKey } from '../src/reading';
 import { barsOf } from '../src/watch';
 
@@ -11,25 +10,6 @@ describe('the music\'s bars', () => {
 
   it('are where the reading says, in seconds', () => {
     expect(seconds).toEqual([0, 2, 4, 8]);
-  });
-
-  it('repeat round the loop on the output\'s clock', () => {
-    const chain = { seconds, origin: 10 };
-    expect(barTime(chain, 0)).toBe(10);
-    expect(barTime(chain, 2)).toBe(14);
-    // The next round: its first bar, then its second.
-    expect(barTime(chain, 3)).toBe(18);
-    expect(barTime(chain, 4)).toBe(20);
-    // The round before.
-    expect(barTime(chain, -1)).toBe(6);
-  });
-
-  it('are found from a time, in any round', () => {
-    const chain = { seconds, origin: 10 };
-    expect(barAt(chain, 10)).toBe(0);
-    expect(barAt(chain, 15)).toBe(2);
-    expect(barAt(chain, 19)).toBe(3);
-    expect(barAt(chain, 9)).toBe(-1);
   });
 
   it('come from a trace the same way, for the roll', () => {

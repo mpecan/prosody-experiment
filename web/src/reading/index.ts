@@ -3,7 +3,7 @@
 // Who reads the poem over the music, in which voice, and the lines rendered ahead of their turn. The
 // reading is *timed* by the Prosody player (`docs/player.md` §5, "The reading"): its render worker
 // knows each line's cue from the Performance and places a rendered line on the speech stem at its
-// frame, with the duck, as it renders the music around it (player/reader.ts). This module decides
+// frame, with the duck, as it renders the music around it (crates/prosody-player). This module decides
 // who reads each line (`castOf`) and renders the lines ahead: a neural engine renders every line
 // after each compile, and keeps what it made by engine, voice, speed and text, so a recompile reuses
 // every line it did not change. A line the recorded readings have no file of — an edited line, a
@@ -468,7 +468,7 @@ export function prerender(): void {
 
 /** Who reads each line of `reading` at `pace`, by line number: the render key of the rendering the
  * player places (the refitted one, at the fitted pace, once it is ready), or null for the browser's
- * own voice. The player's render worker places a line from this (player/reader.ts). */
+ * own voice. The player places a line from this (crates/prosody-player's reader). */
 export function castOf(reading: Reading | null, pace: Pace = settingsNow().pace): Map<number, string | null> {
   const cast = new Map<number, string | null>();
   if (!reading) return cast;
