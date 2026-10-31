@@ -2,11 +2,14 @@
 //! echo and its reverb, into its stem.
 //!
 //! Strudel compresses each note's own chain and sends that to a reverb and an echo shared by every
-//! layer. Here the compressor is the channel's — one detector on the sum — but it is driven by the
-//! voices' sound *before* their `postgain`, and its gain is applied to their sound *after* it and to
-//! what they send, which is where Strudel's per-note compressor sits (measured: a postgain of ½ on
-//! a compressed note halves its compressed output, `docs/player.md` §11). With one note sounding the
-//! two are the same; with several, the loudest sets the reduction for all. The echo and the reverb
+//! layer. Here the compressor is the channel's — one detector on the loudest voice, frame by frame,
+//! not on their sum — but it is driven by the voices' sound *before* their `postgain`, and its gain
+//! is applied to their sound *after* it and to what they send, which is where Strudel's per-note
+//! compressor sits (measured: a postgain of ½ on a compressed note halves its compressed output,
+//! `docs/player.md` §11). With one note sounding the two are the same, and with several equally
+//! loud (a chord's tones) too; with notes of different levels, the loudest sets the reduction for
+//! all. On the sum, a chord of tones each below the threshold was compressed as Strudel never
+//! compresses it. The echo and the reverb
 //! are linear, so one per channel sounds as one shared, and it lets mute and solo silence a
 //! channel's tail too.
 
@@ -19,7 +22,8 @@ use crate::reverb::Reverb;
 /// side.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub(crate) struct Lanes {
-    /// Before `postgain`: what the compressor listens to.
+    /// Before `postgain`, the loudest voice's level on each side (a magnitude, not a sum): what the
+    /// compressor listens to.
     pub(crate) pre: [Vec<f32>; 2],
     /// After `postgain`: what is heard.
     pub(crate) post: [Vec<f32>; 2],

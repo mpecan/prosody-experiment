@@ -41,7 +41,8 @@ pub(crate) struct Reverb {
     /// Its RT60, seconds.
     size: f64,
     rate: f64,
-    /// Frames since anything was sent: past [`Self::tail`] it is silent and is not run.
+    /// Frames since anything was sent: past [`Self::tail`] it is silent and is not run. `u64::MAX`
+    /// once its lines are clear (or before anything was ever sent).
     quiet: u64,
     tail: u64,
 }
@@ -79,8 +80,15 @@ impl Reverb {
         self.size.to_bits() == size.to_bits()
     }
 
-    /// A new RT60, keeping what is ringing.
+    /// A new RT60, keeping what is ringing (`docs/player.md` §11: a changed setting keeps what is
+    /// sounding). A tail still ringing is counted from here, as if just sent: what the lines hold
+    /// now is what falls at the new rate, and it needs the whole new tail to fall 120 dB. Counted
+    /// from the old send instead, a smaller room's tail could already be "over" — cut to silence
+    /// mid-ring (a 10 s room is still at −18 dB 3 s on).
     pub(crate) fn resize(&mut self, size: f64) {
+        if self.quiet < self.tail {
+            self.quiet = 0;
+        }
         self.size = size;
         for (gain, line) in self.gains.iter_mut().zip(&self.lines) {
             #[allow(clippy::cast_precision_loss)] // a few thousand frames
@@ -101,12 +109,13 @@ impl Reverb {
             self.quiet = 0;
         } else if self.quiet >= self.tail {
             // Gone quiet: what is left is under −120 dB, and is cleared once so it cannot come
-            // back when something is next sent.
-            if self.quiet == self.tail {
+            // back when something is next sent — at the first silent frame past the tail, not only
+            // on the frame it is reached, so no tail that changed length can skip it.
+            if self.quiet != u64::MAX {
                 for line in &mut self.lines {
                     line.fill(0.0);
                 }
-                self.quiet += 1;
+                self.quiet = u64::MAX;
             }
             return (0.0, 0.0);
         } else {
@@ -248,5 +257,33 @@ mod tests {
                 .iter()
                 .all(|line| line.iter().all(|x| *x == 0.0))
         );
+    }
+
+    #[test]
+    fn a_room_made_smaller_while_it_rings_rings_on_and_nothing_stale_comes_back() {
+        // A burst into a 10 s room, then 3 s of silence: its tail is at about −18 dB (6 dB a
+        // second) and has 17 s to go. A live edit makes the room 1 s, whose own tail (2 s and the
+        // longest line, 98 833 frames) is shorter than the 3 s already gone by.
+        let mut reverb = Reverb::new(10.0, 48_000.0);
+        reverb.process(1.0, 1.0);
+        for _ in 0..144_000 {
+            reverb.process(0.0, 0.0);
+        }
+        reverb.resize(1.0);
+        // It rings on at the new rate rather than stopping dead on the next frame.
+        let (l, r) = reverb.process(0.0, 0.0);
+        assert!(l.abs() + r.abs() > 0.0, "the tail was cut");
+        // Its new tail run out, it is clear: a burst now sounds exactly as in a fresh 1 s room, with
+        // nothing of the old 10 s room's contents coming round.
+        for _ in 0..98_833 {
+            reverb.process(0.0, 0.0);
+        }
+        let mut fresh = Reverb::new(1.0, 48_000.0);
+        let burst = |reverb: &mut Reverb| -> Vec<(f64, f64)> {
+            (0..10_000)
+                .map(|n| reverb.process(if n == 0 { 0.5 } else { 0.0 }, 0.0))
+                .collect()
+        };
+        assert_eq!(burst(&mut reverb), burst(&mut fresh));
     }
 }

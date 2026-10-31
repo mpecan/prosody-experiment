@@ -359,8 +359,11 @@ impl Voice {
                 self.colour.process(x, y)
             };
             let (heard_x, heard_y) = (x * self.postgain, y * self.postgain);
-            add(pre_l, n, x);
-            add(pre_r, n, y);
+            // The compressor hears the loudest voice, not their sum: Strudel compresses each note on
+            // its own level (`docs/player.md` §11), so a chord of tones each below the threshold is
+            // not compressed there however many there are, and is not here.
+            loudest(pre_l, n, x);
+            loudest(pre_r, n, y);
             add(post_l, n, heard_x);
             add(post_r, n, heard_y);
             if self.room != 0.0 {
@@ -379,6 +382,16 @@ impl Voice {
             self.colour.level_right();
         }
         !self.envelope.done()
+    }
+}
+
+/// Raises frame `n` of `lane` to `value`'s magnitude, if it is the larger: a level, not a sample.
+fn loudest(lane: &mut [f32], n: usize, value: f64) {
+    if let Some(slot) = lane.get_mut(n) {
+        #[allow(clippy::cast_possible_truncation)] // a level, kept as f32 like the lanes
+        {
+            *slot = slot.max(value.abs() as f32);
+        }
     }
 }
 

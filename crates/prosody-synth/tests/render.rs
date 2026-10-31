@@ -373,6 +373,43 @@ fn an_edit_that_changes_a_bus_sounds_the_same_whatever_the_block_size() {
 }
 
 #[test]
+fn a_chord_of_tones_each_below_the_threshold_gets_only_the_makeup() {
+    // Four equal tones of a chord, each a burst at 0.04 for 300 frames — through the low-pass, whose
+    // cutoff sits at the 8 kHz rate's top, at most 0.0455 (−26.8 dB) — compressed at −24 dB 7:1.
+    // Strudel compresses each tone on its own level: below the threshold, each is lifted by the
+    // makeup alone, 9.771 dB (×3.0802), so the chord is its dry self × 3.0802 frame for frame. Their
+    // sum, up to 0.18 (−14.9 dB), is 9 dB into the knee; heard by the compressor, it would take
+    // about 3.5 dB off.
+    let chord = |effects: Effects| {
+        let tones = (0..4)
+            .map(|tag| {
+                Note::new(NoteSpec {
+                    gain: Gain::new(0.04).unwrap(),
+                    effects,
+                    ..*hit(tag, 0.0, Channel::Chords).spec()
+                })
+                .unwrap()
+            })
+            .collect();
+        let mut renderer = Renderer::new(rate(), burst_bank(300));
+        renderer.play(piece(tones, &[0.0], 1.0, Repeat::Once));
+        run(&mut renderer, 3).swap_remove(Channel::Chords.index())
+    };
+    let (squeezed, dry) = (chord(compressed(-24.0, 7.0)), chord(Effects::DRY));
+    let makeup = 10_f64.powf(9.771_43 / 20.0);
+    assert!(dry.iter().all(|x| x.abs() < 4.0 * 0.0456));
+    assert!(dry[..300].iter().any(|x| x.abs() > 0.15));
+    for n in 0..300 {
+        let expected = makeup * f64::from(dry[n]);
+        assert!(
+            (f64::from(squeezed[n]) - expected).abs() < 1e-4,
+            "frame {n}: {} is not {expected}",
+            squeezed[n]
+        );
+    }
+}
+
+#[test]
 fn a_mono_sample_sounds_as_the_same_sample_in_stereo() {
     // A mono sample runs the low-pass and the vowel once for both sides; the same frames given as
     // a stereo sample run them on each. Through a low-pass, a vowel, a crush and a shape, the two

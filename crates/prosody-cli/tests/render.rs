@@ -102,6 +102,30 @@ fn the_same_poem_renders_the_same_bytes() {
 }
 
 #[test]
+fn a_slow_style_with_an_echo_plays_and_renders_its_repeats() {
+    // Any tempo from 1 is a valid style. At 10 the melody's dotted-eighth echo is 0.75 × 60 / 10 =
+    // 4.5 s, which a synth capped at 4 s refused, and the piece did not render at all.
+    let poem = |delay: &str| {
+        format!(
+            "+++\nsynth = \"subtractive\"\nchord_sound = \"square\"\ntempo_range = [10, 10]\ndelay = {delay}\n+++\n{}",
+            // A rhyme, so the melody (the layer with the echo) plays.
+            "the fire will burn the night\nand turn the dark to light\n"
+        )
+    };
+    #[allow(clippy::cast_precision_loss)] // a WAV's length in bytes, far below 2^52
+    let seconds = |wav: &[u8]| (wav.len() - 44) as f64 / 4.0 / 48_000.0;
+    let (echoing, err) = render(&poem("0.5"), "slow-echo");
+    assert!(err.contains("notes played"), "{err}");
+    let (dry, _) = render(&poem("0"), "slow-dry");
+    // The same notes either way (the delay is palette, I3), so the two renders differ only in their
+    // tails. Dry, the tail is 1 s and the 2 s room; with the echo, 1 s and eleven repeats of 4.5 s
+    // down to a 16-bit file's last step (src/render.rs `echo_tail`), 49.5 s: 47.5 s longer, give or
+    // take the 2 048-frame block (43 ms) a render rounds up to.
+    let longer = seconds(&echoing) - seconds(&dry);
+    assert!((longer - 47.5).abs() < 0.05, "{longer} s");
+}
+
+#[test]
 fn a_render_needs_somewhere_to_go_and_nothing_else_to_do() {
     let (err, code) = prosody(&["render"]);
     assert_eq!(code, Some(1));

@@ -20,10 +20,16 @@ const RATE: u32 = 48_000;
 
 /// How long a render runs past the piece's end, for the last notes' releases and the reverb's tail.
 /// The longest release the text sets is the chords' 0.6 s; the reverb rings for its `roomsize`
-/// in seconds (at most 10), which [`tail`] adds.
+/// in seconds (at most 10), and the echo for its repeats, which [`tail`] adds.
 const TAIL: f64 = 1.0;
 
-/// The render's tail: [`TAIL`], and the longest reverb any note sends to.
+/// How far below its first repeat an echo is still rendered: 2^−16, the last step a 16-bit WAV
+/// holds, taking the first repeat at full scale (none is louder) — so what is cut off is below
+/// what the file could say.
+const ECHO_FLOOR: f64 = 1.0 / 65_536.0;
+
+/// The render's tail: [`TAIL`], and the longest of the reverbs and echoes any note sends to, which
+/// ring at once.
 fn tail(performance: &Performance) -> f64 {
     let room = performance
         .notes()
@@ -31,7 +37,29 @@ fn tail(performance: &Performance) -> f64 {
         .filter(|note| note.sends().room().get() > 0.0)
         .map(|note| note.sends().room_size())
         .fold(0.0, f64::max);
-    TAIL + room.clamp(0.0, Room::MAX_SIZE)
+    let echo = performance
+        .notes()
+        .iter()
+        .filter_map(|note| note.sends().delay())
+        .map(|echo| echo_tail(echo.time().get(), echo.feedback().get()))
+        .fold(0.0, f64::max);
+    TAIL + room.clamp(0.0, Room::MAX_SIZE).max(echo)
+}
+
+/// How long an echo `time` behind, each repeat `feedback` of the one before, rings after the last
+/// note sent into it: every repeat down to [`ECHO_FLOOR`] of the first, the first `time` after the
+/// note and each `time` after the last. Without it a render cut a slow piece's echo off — at tempo
+/// 15 (a 3 s echo) before its first repeat.
+fn echo_tail(time: f64, feedback: f64) -> f64 {
+    // `level` is the next repeat's, relative to the first; capped, as the synth's line is, should a
+    // feedback ever come close to 1.
+    let mut repeats = 1_u32;
+    let mut level = feedback;
+    while level >= ECHO_FLOOR && repeats < 1_000 {
+        level *= feedback;
+        repeats += 1;
+    }
+    time * f64::from(repeats)
 }
 
 /// A rendered piece and what it could not play.
@@ -187,4 +215,28 @@ pub(crate) fn render(performance: &Performance) -> Result<Rendered> {
         fonts,
         losses: renderer.losses(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::echo_tail;
+
+    fn close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "{actual} is not {expected}"
+        );
+    }
+
+    #[test]
+    fn an_echo_rings_until_a_repeat_is_below_what_a_wav_holds() {
+        // At the text's feedback, 0.35: 0.35^10 = 2.76e-5 is still above 2^−16 = 1.53e-5, and
+        // 0.35^11 = 9.65e-6 is not, so the first eleven repeats are heard, the last 11 × the time
+        // after the note: 8.25 s at tempo 60's 0.75 s.
+        close(echo_tail(0.75, 0.35), 8.25);
+        // At 0.5, 0.5^16 is 2^−16 exactly, kept: seventeen repeats.
+        close(echo_tail(1.0, 0.5), 17.0);
+        // No feedback: the one repeat.
+        close(echo_tail(0.5, 0.0), 0.5);
+    }
 }

@@ -119,8 +119,12 @@ pub struct Echo {
 }
 
 impl Echo {
-    /// The longest echo the delay line holds.
-    pub const MAX_TIME: f64 = 4.0;
+    /// The longest echo the delay line holds: every echo the compiler can write. The melody's echo
+    /// is a dotted eighth, `0.75 × 60 / tempo` seconds, and a style may set any tempo from 1 up,
+    /// so 45 s at tempo 1. A shorter cap made a valid style (any tempo under 11.25) a piece that
+    /// could not play at all. The line is allocated at the time asked for, so only such a style
+    /// pays for a long one: 45 s at 48 kHz is 17 MB of `f32`.
+    pub const MAX_TIME: f64 = 45.0;
 
     /// `send` into an echo `time` behind, each repeat `feedback` of the one before; `None` for a
     /// time that is not a positive time up to [`Self::MAX_TIME`], or a feedback outside 0..1 (at 1
@@ -233,7 +237,13 @@ mod tests {
         assert!(Room::new(send, Seconds::new(0.0).unwrap()).is_none());
         assert!(Room::new(send, Seconds::new(2.5).unwrap()).is_some());
         assert!(Echo::new(send, Seconds::new(0.25).unwrap(), 1.0).is_none());
-        assert!(Echo::new(send, Seconds::new(5.0).unwrap(), 0.35).is_none());
+        assert!(Echo::new(send, Seconds::new(0.0).unwrap(), 0.35).is_none());
+        assert!(Echo::new(send, Seconds::new(45.001).unwrap(), 0.35).is_none());
+        // Every echo a valid style makes: the slowest tempo, 1, puts the dotted eighth at
+        // 0.75 × 60 / 1 = 45 s; tempo 10 at 4.5 s, which a 4 s line refused, so the piece would
+        // not play at all.
+        assert!(Echo::new(send, Seconds::new(45.0).unwrap(), 0.35).is_some());
+        assert!(Echo::new(send, Seconds::new(4.5).unwrap(), 0.35).is_some());
         assert!(Compression::new(6.0, 4.0).is_none() && Compression::new(-24.0, 0.5).is_none());
         assert_eq!(Vowel::from_index(2), Some(Vowel::I));
         assert_eq!(Vowel::from_index(5), None);
