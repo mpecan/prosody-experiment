@@ -3,7 +3,7 @@
 // WAV file the phone's engine writes.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { offeredEngines, parseWav } from '../src/reading/engines';
+import { offeredEngines, onPhone, parseWav } from '../src/reading/engines';
 
 /** A mono WAV of `samples`: 16-bit PCM, or 32-bit float; `declared` overrides the data chunk's size. */
 function wav(samples: number[], { rate = 24000, float = false, declared, extra = false }: { rate?: number; float?: boolean; declared?: number; extra?: boolean } = {}): ArrayBuffer {
@@ -51,6 +51,13 @@ describe('the engines offered', () => {
     expect(offeredEngines(true, true)).toEqual(['kokoro', 'piper', 'kitten', 'recorded', 'system']);
     expect(offeredEngines(false, true)).toEqual(['recorded', 'system']);
     expect(offeredEngines(true)).toEqual(['kokoro', 'piper', 'kitten', 'recorded', 'browser']);
+  });
+
+  it('offer the system voice on Android, an iPhone and an iPad (which says it is a Mac), not on a Mac', () => {
+    expect(onPhone('Mozilla/5.0 (Linux; Android 16; Pixel 10 Pro XL; wv)', 5)).toBe(true);
+    expect(onPhone('Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15', 5)).toBe(true);
+    expect(onPhone('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', 5)).toBe(true);
+    expect(onPhone('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15', 0)).toBe(false);
   });
 });
 

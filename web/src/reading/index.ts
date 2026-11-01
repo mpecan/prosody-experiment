@@ -62,8 +62,9 @@ const readings = () => piece.readings;
 
 // ---- The reading's own settings, remembered per browser like the voice picker ----
 
-// In the Android app the phone's own voice reads by default (the user's decision, 2026-11-01): on
-// time from the first Play, in the phone's language, with nothing to download.
+// In the phone apps the phone's own voice reads by default (the user's decision, 2026-11-01, for
+// Android; iOS follows it): on time from the first Play, in the phone's language, with nothing to
+// download.
 export const READING_DEFAULTS: ReadingSettings = { engine: SYSTEM_VOICE ? 'system' : 'recorded', pace: 'natural', level: 1, voices: {} };
 
 /** The reading settings saved, read defensively: anything unknown falls back to the default, and so
@@ -115,9 +116,9 @@ interface Who {
   fallback?: boolean;
 }
 
-// Who stands in for a voice that cannot read: the browser's; in the Android app, whose WebView has
-// none, the phone's own once it has started and has a voice in the poem's language — and the
-// browser's (which reads nothing there) until then.
+// Who stands in for a voice that cannot read: the browser's; in the phone apps, the phone's own once
+// it has started and has a voice in the poem's language — and the browser's until then (which reads
+// nothing in the Android app, whose WebView has none).
 export function standIn(): EngineName {
   return SYSTEM_VOICE && engines.system.state === 'ready' && voiceOf('system') ? 'system' : 'browser';
 }
@@ -204,7 +205,7 @@ export function ensureEngine(retry = false): void {
   });
 }
 
-// The phone's own voice, in the Android app: started with the page and on every Play (it is let go
+// The phone's own voice, in the phone apps: started with the page and on every Play (it is let go
 // while the page is hidden and silent), as it costs nothing to download and stands in for any
 // voice that cannot read. A failure is logged; the reading carries on without it.
 function startSystem(): void {

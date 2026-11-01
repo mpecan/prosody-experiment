@@ -700,15 +700,20 @@ the page — `load(onProgress)`, `voices(language)`, `render(text, { voice, spee
 - **`browser`** — the browser's speech synthesiser: instant, the only one that reports word
   boundaries, and the fallback for the others. It cannot be scheduled, so it is started by a timer
   at its line's time and, at the natural pace, chained on its `end` event.
-- **`system`** (*the user's decision, 2026-11-01*) — in the Android app, the phone's own speech
-  engine (`TextToSpeech`, Google's or the maker's) with the voices already on the phone that need
-  no network, rendered a line at a time to a WAV and so placed like any rendered line. It replaces
-  `browser` there — the app's WebView has no speech synthesiser — as the stand-in for any voice
-  that cannot read: nothing to download, no model in the app, a line in about 0.2 s on a Pixel.
-  It starts with the page and is let go while the page is hidden and silent, as the neural voices
-  are. Its sound depends on the phone, so the same poem reads differently on two phones; the
-  compiled piece does not (I1 is the compiler's), and the recordings stay the reading that is the
-  same everywhere. iOS (`AVSpeechSynthesizer.write`) is to follow.
+- **`system`** (*the user's decision, 2026-11-01*) — in the phone apps, the phone's own speech
+  engine with the voices already on the phone that need no network, rendered a line at a time to a
+  WAV and so placed like any rendered line: on Android `TextToSpeech` (Google's or the maker's), on
+  iOS `AVSpeechSynthesizer.write` (no novelty or Personal Voices), its line said at the voice's own
+  rate and time-stretched to the speed asked for, since the utterance's `rate` moves in uneven
+  steps. It is the apps' default engine, and it replaces `browser` there — Android's WebView has
+  no speech synthesiser, iOS's cannot be placed — as the stand-in for any voice that cannot read:
+  nothing to download, no model in the app, a line in about 0.2 s on a Pixel. A live voice that
+  has just loaded hands its lines over: while its rendering of a line is not ready, the system
+  voice's is read, so the line comes on time; the slower voice takes each line over as its
+  rendering arrives. It starts with the page and is let go while the page is hidden and silent,
+  as the neural voices are. Its sound depends on the phone, so the same poem reads differently on
+  two phones; the compiled piece does not (I1 is the compiler's), and the recordings stay the
+  reading that is the same everywhere.
 - **`kokoro`** — Kokoro-82M through kokoro-js, on WebGPU where the browser offers it (the
   full-precision model) and WebAssembly otherwise (the 8-bit one, 92 MB). The default, once it has
   loaded. English (US and UK voices; the kokoro-js release lists no others).

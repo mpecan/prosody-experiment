@@ -7,9 +7,9 @@
 // answers the same three calls: `load(onProgress)`, `voices(language)` and `render(text, { voice,
 // speed })`, which gives an AudioBuffer. A fifth, `recorded`, answers the same calls from files
 // made ahead of time (scripts/readings/): its `render` fetches and decodes a line's recording.
-// In the Android app, `system` is the phone's own speech engine, which renders a line as the neural
+// In the phone apps, `system` is the phone's own speech engine, which renders a line as the neural
 // voices do with nothing to download; it stands in where the browser's voice would, since the
-// app's WebView has no speech synthesis.
+// Android app's WebView has no speech synthesis and iOS's cannot be placed on the beat.
 import type { Reading } from '../answers';
 import { inApp, invoke } from '../player/native';
 import type { EngineName } from '../store';
@@ -67,12 +67,16 @@ export const ENGINE_NAMES: EngineName[] = ['kokoro', 'piper', 'kitten', 'recorde
 export const NEURAL_ENGINES: readonly EngineName[] = ['kokoro', 'piper', 'kitten'];
 export const NEURAL_VOICES = import.meta.env.VITE_PROSODY_NEURAL_VOICES !== 'off';
 
-// The phone's own speech engine is bridged on Android only (src-tauri/src/speech.rs); where it is,
-// it replaces the browser's voice, which the app's WebView does not have.
-export const SYSTEM_VOICE = inApp() && /Android/i.test(navigator.userAgent);
+// The phone's own speech engine is bridged on Android and iOS (src-tauri/src/speech.rs), not on a
+// desktop; where it is, it replaces the browser's voice. An iPad's WebView says it is a Mac, and
+// is told apart by its touch screen.
+export const SYSTEM_VOICE = inApp() && onPhone(navigator.userAgent, navigator.maxTouchPoints);
+export function onPhone(agent: string, touches: number): boolean {
+  return /Android|iPhone|iPad|iPod/.test(agent) || (/Macintosh/.test(agent) && touches > 1);
+}
 
 /** The engines a build offers: all of them, or, without the neural voices, the recordings and the
- * stand-in voice — the browser's, or in the Android app the system's. */
+ * stand-in voice — the browser's, or in the phone apps the system's. */
 export function offeredEngines(neural: boolean, system = false): EngineName[] {
   return ENGINE_NAMES.filter((name) => (neural || !NEURAL_ENGINES.includes(name))
     && name !== (system ? 'browser' : 'system'));
@@ -103,7 +107,7 @@ const browser: Engine = {
 // ---- The phone's own voice ----
 
 /** A WAV file's first channel as samples, and its rate: 16-bit, 8-bit or 32-bit float PCM, as an
- * Android speech engine writes it. */
+ * Android speech engine writes it, and as SpeechPlugin.swift does (float). */
 export function parseWav(bytes: ArrayBuffer): { pcm: Float32Array; rate: number } {
   const view = new DataView(bytes);
   const tag = (at: number) => String.fromCharCode(view.getUint8(at), view.getUint8(at + 1), view.getUint8(at + 2), view.getUint8(at + 3));

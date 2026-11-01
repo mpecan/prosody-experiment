@@ -1,6 +1,7 @@
 // swift-tools-version:5.3
-// The app's own iOS plugin (docs/player.md §14): MediaPlugin.swift, the iOS twin of the Android
-// project's MediaPlugin.kt and PlaybackService.kt. src-tauri/build.rs builds this package and links
+// The app's own iOS plugins (docs/player.md §14): MediaPlugin.swift, the iOS twin of the Android
+// project's MediaPlugin.kt and PlaybackService.kt, and SpeechPlugin.swift, the twin of its
+// SpeechPlugin.kt. src-tauri/build.rs builds this package and links
 // it into the app's library when the target is iOS, as Tauri builds its own plugins' Swift; `Tauri`
 // is the tauri crate's Swift API, which build.rs copies into ../.tauri/tauri-api first.
 

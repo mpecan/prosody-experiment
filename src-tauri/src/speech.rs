@@ -1,31 +1,39 @@
 //! The phone's own speech engine as a voice of the reading (`system`, `web/src/reading/engines.ts`):
-//! on Android, `TextToSpeech` through `SpeechPlugin` (Kotlin, in the Android project), which renders
-//! a line to a WAV file; this reads the file back and hands the page its bytes, so the page gets a
-//! line as it gets a neural voice's — audio to place on the beat — with nothing downloaded and no
-//! model held in the app. The web view has no speech synthesis of its own.
+//! `TextToSpeech` on Android and `AVSpeechSynthesizer` on iOS, each through a `SpeechPlugin` in the
+//! platform's language (Kotlin, in the Android project; Swift, in `ios/Sources`) that renders a line
+//! to a WAV file. This reads the file back and hands the page its bytes, so the page gets a line as
+//! it gets a neural voice's — audio to place on the beat — with nothing downloaded and no model held
+//! in the app. Android's web view has no speech synthesis of its own; iOS's speaks, but cannot be
+//! placed on the beat.
 //!
-//! Elsewhere (a desktop, and iOS until its side is written) every command answers that there is no
-//! system voice, and the page offers none.
+//! On a desktop every command answers that there is no system voice, and the page offers none.
 
 use tauri::ipc::Response;
 use tauri::{AppHandle, Runtime};
 
 /// Says so where the phone's speech engine is not bridged.
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const NONE: &str = "no system voice here";
 
-/// The bridge, as a Tauri plugin: on Android it loads `SpeechPlugin` for the commands below.
+/// The bridge, as a Tauri plugin: on a phone it loads `SpeechPlugin` for the commands below.
 pub(crate) fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     let builder = tauri::plugin::Builder::new("speech");
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     let builder = builder.setup(|app, api| {
         use tauri::Manager;
+        #[cfg(target_os = "android")]
         let handle = api.register_android_plugin("rocks.prosody", "SpeechPlugin")?;
+        #[cfg(target_os = "ios")]
+        let handle = api.register_ios_plugin(init_plugin_speech)?;
         app.manage(phone::Speech(handle));
         Ok(())
     });
     builder.build()
 }
+
+// The Swift plugin's entry point (`init_plugin_speech` in `ios/Sources/SpeechPlugin.swift`).
+#[cfg(target_os = "ios")]
+tauri::ios_plugin_binding!(init_plugin_speech);
 
 /// The voices on the phone and the one it reads with, as JSON: `{ voices: [{ id, lang, quality }],
 /// default, engine }`.
@@ -37,9 +45,9 @@ pub(crate) fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 pub(crate) async fn speech_voices<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<serde_json::Value, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     return phone::call(app, "voices", serde_json::json!({})).await;
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Err(NONE.to_owned())
@@ -58,14 +66,16 @@ pub(crate) async fn speech_render<R: Runtime>(
     voice: String,
     speed: f32,
 ) -> Result<Response, String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
+        let began = std::time::Instant::now();
         let answer = phone::call(
             app,
             "render",
             serde_json::json!({ "text": text, "voice": voice, "speed": speed }),
         )
-        .await?;
+        .await
+        .inspect_err(|error| log::warn!("speech: {voice} could not read \"{text}\": {error}"))?;
         let path = answer
             .get("path")
             .and_then(serde_json::Value::as_str)
@@ -75,9 +85,15 @@ pub(crate) async fn speech_render<R: Runtime>(
             .map_err(|error| format!("the line's file could not be read: {error}"));
         // Read or not, the file has done its work: the page keeps the line, the cache does not.
         let _ = std::fs::remove_file(&path);
-        Ok(Response::new(bytes?))
+        let bytes = bytes?;
+        log::info!(
+            "speech: {voice} at {speed:.3}, {} kB in {:.2} s: {text}",
+            bytes.len() / 1024,
+            began.elapsed().as_secs_f64()
+        );
+        Ok(Response::new(bytes))
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = (app, text, voice, speed);
         Err(NONE.to_owned())
@@ -91,18 +107,18 @@ pub(crate) async fn speech_render<R: Runtime>(
 /// No system voice here.
 #[tauri::command]
 pub(crate) async fn speech_release<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     return phone::call(app, "release", serde_json::json!({}))
         .await
         .map(|_| ());
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;
         Err(NONE.to_owned())
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 mod phone {
     use tauri::plugin::PluginHandle;
     use tauri::{AppHandle, Manager, Runtime};
@@ -110,7 +126,7 @@ mod phone {
     /// `SpeechPlugin`, once loaded.
     pub(super) struct Speech<R: Runtime>(pub(super) PluginHandle<R>);
 
-    /// Calls `SpeechPlugin.<command>` on a thread of its own: a call into Kotlin waits for its
+    /// Calls `SpeechPlugin.<command>` on a thread of its own: a call into Kotlin or Swift waits for its
     /// answer, and a line takes the engine a fraction of a second to render.
     pub(super) async fn call<R: Runtime>(
         app: AppHandle<R>,
