@@ -129,6 +129,27 @@ describe('the Prosody player', () => {
     load.mockRestore();
   });
 
+  it('keeps the reading\'s voices while a Play loads with the page hidden, and lets them go on Stop', async () => {
+    // The phone locked straight after Play: let go now, nothing would load them again before the
+    // piece played, and it would play unread.
+    engines.kokoro.state = 'ready';
+    const cancel = vi.spyOn(engines.kokoro, 'cancel').mockImplementation(() => {});
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const prosody = await import('../src/player');
+    const { letVoicesGo } = await import('../src/reading');
+    const playingNow = prosody.play();
+    await heldAtThePerformance();
+    letVoicesGo();
+    expect(cancel).not.toHaveBeenCalled();
+    prosody.stop();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    answer!();
+    await playingNow;
+    hidden.mockRestore();
+    cancel.mockRestore();
+    engines.kokoro.state = 'idle';
+  });
+
   it('hands over no cues for a reading compiled from another text', async () => {
     piece.readings = { A: null, B: null, poem: 'something else' };
     const prosody = await import('../src/player');

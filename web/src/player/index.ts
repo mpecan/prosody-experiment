@@ -23,7 +23,7 @@ import { site } from '../data';
 import { closeLoader, openLoader } from '../loader';
 import { audible } from '../mix';
 import { piece, query, summaryOf } from '../piece';
-import { ensureEngine, letVoicesGo, prerender, quietReading, voiceLevel } from '../reading';
+import { ensureEngine, letVoicesGo, prerender, quietReading, speech as readingNow, voiceLevel } from '../reading';
 import type { RollNote } from '../roll';
 import { beat, hearing, playing, poem, readingSettings, settings, status, type Channel } from '../store';
 import {
@@ -271,6 +271,19 @@ export async function play(): Promise<void> {
   clearTimeout(resting);
   resting = undefined;
   const mine = ++attempt;
+  // Hidden while this loads (the phone locked straight after Play), the page keeps the reading's
+  // voices: let go, they would not load again until the next Play, and the piece would play unread.
+  readingNow.starting = true;
+  try {
+    await loadAndPlay(mine);
+  } finally {
+    // Unless a newer play() has it, or Stop cleared it.
+    if (mine === attempt) readingNow.starting = false;
+  }
+}
+
+/** play(), from its start of loading, as attempt `mine`. */
+async function loadAndPlay(mine: number): Promise<void> {
   // Overtaken by Stop or a newer play(): checked after every wait.
   const overtaken = () => mine !== attempt;
   const text = poem.value;
@@ -323,6 +336,8 @@ export async function play(): Promise<void> {
     generation += 1;
     quietReading();
   }
+  // An engine let go before Play (hidden and silent) starts loading again, if it has not.
+  ensureEngine();
   const reads = { cues: cueRecords(reading ? performance.cues : []), ...handing(message.serial, reading, fromTheTop) };
   if (fromTheTop) {
     report = { played: 0, underruns: 0, queued: 0, started: false, time: 0, generation, peak: 0, speechPeak: 0 };
@@ -388,6 +403,7 @@ export function stop(): void {
   clearRoll();
   resetMeters();
   playing.value = false;
+  readingNow.starting = false;
   // Stopped from the lock screen or the notification, the page is already hidden.
   letVoicesGo();
   showBeat();

@@ -128,17 +128,19 @@ export function parseWav(bytes: ArrayBuffer): { pcm: Float32Array; rate: number 
       rate = view.getUint32(at + 12, true);
       bits = view.getUint16(at + 22, true);
     } else if (id === 'data') {
+      // Android's FileSynthesisCallback labels float audio as PCM (format 1, 32 bits): any 32-bit
+      // file is read as float. A pair not read here is refused, never decoded as silence.
+      const float = bits === 32 && (format === 3 || format === 1);
+      if (!rate || !(float || (format === 1 && (bits === 16 || bits === 8)))) throw new Error(`a WAV the reading cannot read (format ${format}, ${bits} bits)`);
       const width = bits / 8;
       const frames = width && channels ? Math.floor(size / (width * channels)) : 0;
       const pcm = new Float32Array(frames);
       for (let i = 0; i < frames; i += 1) {
         const p = at + 8 + i * width * channels;
-        pcm[i] = format === 3 && bits === 32 ? view.getFloat32(p, true)
+        pcm[i] = float ? view.getFloat32(p, true)
           : bits === 16 ? view.getInt16(p, true) / 32768
-            : bits === 8 ? (view.getUint8(p) - 128) / 128
-              : 0;
+            : (view.getUint8(p) - 128) / 128;
       }
-      if (!rate || (format !== 1 && format !== 3) || (bits !== 8 && bits !== 16 && bits !== 32)) throw new Error(`a WAV the reading cannot read (format ${format}, ${bits} bits)`);
       return { pcm, rate };
     }
     at += 8 + size + (size % 2);   // chunks are padded to an even length
@@ -173,11 +175,13 @@ function languageName(tag: string): string {
 }
 /** What the voice menu calls a phone voice: its name, its language and how good it is (iOS:
  * "Ava (American English, Premium)"); Android's, which have only ids, by language and the id's
- * variant ("American English, iob"). */
+ * whole variant ("American English, iob"; "American English, sfg female 1" for
+ * en-us-x-sfg#female_1-local, so its male twin is told apart). */
 export function systemVoiceLabel(voice: SystemVoice): string {
   const language = languageName(voice.lang);
   if (voice.name) return `${voice.name} (${language}${voice.tier ? ', ' + voice.tier : ''})`;
-  const variant = /-x-([a-z0-9]+)/i.exec(voice.id)?.[1] ?? (voice.id.endsWith('-language') ? 'default' : voice.id);
+  const variant = /-x-(.+?)(?:-local|-network)?$/i.exec(voice.id)?.[1]?.replace(/[#_]/g, ' ')
+    ?? (voice.id.endsWith('-language') ? 'default' : voice.id);
   return `${language}, ${variant}`;
 }
 
@@ -329,7 +333,9 @@ function workerEngine(name: EngineName): Engine {
       waiting.clear();
       worker?.terminate();
       worker = null;
-      if (!engine.cancelling) { engine.state = 'idle'; engine.listed = null; }
+      // A loaded engine let go keeps its list of voices, which no reload changes: the menu goes on
+      // showing the voice chosen, not the engine's default (voiceOf finds only a voice listed).
+      if (!engine.cancelling) engine.state = 'idle';
     },
     voices(lang) {
       const listed = engine.listed || Object.entries(ENGINE_INFO[name].defaults)

@@ -32,6 +32,9 @@ export { ENGINE_INFO, engines } from './engines';
 export const speech = {
   /** The reading of the piece now playing. */
   playing: null as Reading | null,
+  /** A Play still loading (player/index.ts): not yet playing, but the voices it will read with are
+   * kept (letVoicesGo), or the piece it starts would play with nobody to read it. */
+  starting: false,
 };
 
 /** The player, as the reading needs it. The player registers itself (`hostReading`) when it loads,
@@ -123,6 +126,20 @@ export function standIn(): EngineName {
   return SYSTEM_VOICE && engines.system.state === 'ready' && voiceOf('system') ? 'system' : 'browser';
 }
 
+// What reads instead, as the status bar says it. The Android app's WebView has no voice of its own,
+// so a line handed to the browser's voice there is not read at all, and that is what is said
+// (CLAUDE.md §6: a fallback is visible, and true).
+function readingBy(back: EngineName, meanwhile = false): string {
+  const when = meanwhile ? ' meanwhile' : '';
+  return back === 'browser' && SYSTEM_VOICE && !('speechSynthesis' in window)
+    ? `nothing reads it${when} (this app has no browser voice)`
+    : `reading with the ${ENGINE_INFO[back].label}${when}`;
+}
+// The stand-in as the download question and the loader name it, before it may have started: the
+// phone's own voice in the apps.
+const standInName = () => (SYSTEM_VOICE ? 'the phone\'s own voice' : 'your browser\'s own voice');
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 // Who reads now, and why not the chosen one when it is not: the chosen engine once it has
 // loaded and has a voice in the poem's language; the stand-in meanwhile, and instead.
 export function speaker(): Who {
@@ -130,10 +147,10 @@ export function speaker(): Who {
   const engine = engines[chosen];
   if (chosen === 'browser') return { engine: 'browser', why: '' };
   const back = chosen === 'system' ? 'browser' : standIn();
-  const by = `reading with the ${ENGINE_INFO[back].label}`;
+  const by = readingBy(back);
   const name = ENGINE_INFO[chosen].label;
   if (engine.state === 'failed') return { engine: back, why: `${name} could not load (${engine.error}); ${by}`, bad: true };
-  if (engine.state !== 'ready') return { engine: back, why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; ${by} meanwhile` };
+  if (engine.state !== 'ready') return { engine: back, why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; ${readingBy(back, true)}` };
   const lang = language.value;
   if (!voiceOf(chosen)) return { engine: back, why: `${name} has no ${LANGUAGES[lang] || lang} voice; ${by}${lang === 'sl' && NEURAL_VOICES ? ' (Piper has one)' : ''}`, bad: true };
   return { engine: chosen, why: '' };
@@ -189,6 +206,9 @@ export function ensureEngine(retry = false): void {
   }).then(() => {
     console.log(`[reading] ${engine.name} loaded on ${engine.device}`);
     save('prosody.fetched.' + engine.name, '1');
+    // Loaded while the page is hidden and silent (it was still loading when it was hidden, or
+    // stopped): let go now, as it would have been then. Its files are kept for the next Play.
+    if (hiddenAndSilent()) { letVoicesGo(); showVoices(); return; }
     showVoices();
     host?.recast(false);
     if (!chosenEngine(engine)) return;
@@ -197,28 +217,40 @@ export function ensureEngine(retry = false): void {
   }, (error: Error & { cancelled?: boolean }) => {
     if (error.cancelled) { showVoices(); return; }
     console.warn(`[reading] ${engine.name} failed to load:`, error);
-    loaderFailed(engine.name, name, error);
+    loaderFailed(engine.name, name, error, capital(standInName()));
     showVoices();
     host?.recast(false);
     if (!chosenEngine(engine)) return;
-    noteReading(`${name} could not load: ${error.message} — reading with the browser voice`, true);
+    noteReading(`${name} could not load: ${error.message} — ${readingBy(standIn())}`, true);
   });
 }
 
 // The phone's own voice, in the phone apps: started with the page and on every Play (it is let go
 // while the page is hidden and silent), as it costs nothing to download and stands in for any
-// voice that cannot read. A failure is logged; the reading carries on without it.
+// voice that cannot read. A failure is logged, and said where it is the voice chosen; the reading
+// carries on without it.
 function startSystem(): void {
   const engine = engines.system;
   if (!SYSTEM_VOICE || engine.state === 'ready' || engine.state === 'loading') return;
+  // Chosen, it is said here: ensureEngine finds it loading (this started it) and leaves it, so
+  // nothing else replaces the status bar's "loading" with what came of it.
+  const said = () => {
+    if (settingsNow().engine !== 'system') return;
+    const who = speaker();
+    noteReading(who.why, who.bad);
+  };
   engine.load().then(() => {
     console.log(`[reading] system voice: ${engine.device}, ${engine.listed?.length ?? 0} voices on the phone`);
+    if (hiddenAndSilent()) { letVoicesGo(); showVoices(); return; }
     showVoices();
     host?.recast(false);
     prerender();
+    said();
   }, (error: Error) => {
     console.warn('[reading] the system voice did not start:', error);
     showVoices();
+    host?.recast(false);
+    said();
   });
 }
 
@@ -230,7 +262,7 @@ failures.onFailed = (engine, error) => {
   showVoices();
   host?.recast(false);
   if (!chosenEngine(engine)) return;
-  noteReading(`${ENGINE_INFO[engine.name].label} failed: ${error.message} — reading with the browser voice; choose it again to retry`, true);
+  noteReading(`${ENGINE_INFO[engine.name].label} failed: ${error.message} — ${readingBy(standIn())}; choose it again to retry`, true);
 };
 
 // ---- Rendering ahead ----
@@ -351,7 +383,12 @@ async function pumpRenders(name: EngineName): Promise<void> {
     if (at < 0) break;
     const job = renderQueue.splice(at, 1)[0]!;
     const engine = engines[name];
-    if (engine.state !== 'ready' || !engine.render) { renders.delete(job.key); job.entry.reject(new Error('not loaded')); continue; }
+    if (engine.state !== 'ready' || !engine.render) {
+      // An engine let go (hidden and silent, or its download cancelled) drops its lines, as a line
+      // no longer to be read is dropped: nothing failed, so nothing is said. A failed engine's lines fail.
+      if (engine.state === 'failed') { renders.delete(job.key); job.entry.reject(new Error('not loaded')); } else dropJob(job);
+      continue;
+    }
     renderingJobs.set(name, job);
     try {
       const buffer = await engine.render(job.text, { voice: job.voice, speed: job.speed });
@@ -363,12 +400,18 @@ async function pumpRenders(name: EngineName): Promise<void> {
       arrived(job.key, buffer);
       console.log(`[reading] rendered with ${job.engine} ${job.voice} at ${Number(job.speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${((buffer.took ?? 0) / 1000).toFixed(2)} s: ${job.text}`);
     } catch (error) {
-      renders.delete(job.key);
-      job.entry.reject(error as Error);
-      console.warn(`[reading] ${job.engine} could not render "${job.text}":`, error);
+      // Let go while it rendered (its state changed under the await): dropped, as above.
+      if ((error as { cancelled?: boolean }).cancelled || (engine.state as Engine['state']) === 'idle') dropJob(job);
+      else {
+        renders.delete(job.key);
+        job.entry.reject(error as Error);
+        console.warn(`[reading] ${job.engine} could not render "${job.text}":`, error);
+      }
     } finally {
       renderingJobs.delete(name);
     }
+    // An engine kept while it rendered (letVoicesGo) is let go once its line is done.
+    letVoicesGo();
   }
   trimRenders();
 }
@@ -669,16 +712,21 @@ export function noteLoss(text: string): void {
 // A better voice, while the phone's voice reads — chosen, or standing in — in a basic one: the
 // better one on the phone, by name, if there is one (the reader chose the basic one, or chose it
 // before the better one was downloaded); otherwise where to get one, as the phone says it (iOS has
-// that to say, Android not). An app cannot download a voice; the reader can, in Settings.
+// that to say, Android not). An app cannot download a voice; the reader can, in Settings. Standing
+// in, the Voice menu lists the chosen engine's voices, so the hint says how to reach the phone's.
 export function voiceHint(): string | null {
   const engine = engines.system;
-  if (!engine.improve || engine.state !== 'ready') return null;
-  if (settingsNow().engine !== 'system' && standIn() !== 'system') return null;
+  if (engine.state !== 'ready') return null;
+  const chosen = settingsNow().engine === 'system';
+  if (!chosen && standIn() !== 'system') return null;
   const offered = engine.voices(language.value);
   const now = voiceOf('system');
   if (offered.find((v) => v.id === now)?.good) return null;
   const better = offered.find((v) => v.good);
-  return better ? `${better.name} is on this phone: choose it under Voice for a better reading.` : engine.improve;
+  if (!better) return engine.improve ?? null;
+  return chosen
+    ? `${better.name} is on this phone: choose it under Voice for a better reading.`
+    : `${better.name} is on this phone: choose the ${ENGINE_INFO.system.label}, then ${better.name} under Voice, for a better stand-in.`;
 }
 
 export function showVoices(): void {
@@ -787,7 +835,7 @@ export function chooseEngine(name: EngineName): void {
     downloadQuestion.value = {
       title: `${label} needs a one-time download of ${size()}.`,
       text: 'It runs entirely in your browser and is kept after this, so it won\'t download again. '
-        + 'Until it\'s ready, the poem is read by your browser\'s own voice, and the music plays on.',
+        + `Until it's ready, the poem is read by ${standInName()}, and the music plays on.`,
       yes: `Download ${label}`,
       answer: (yes) => {
         downloadQuestion.value = null;
@@ -810,7 +858,7 @@ function useEngine(name: EngineName, show: boolean): void {
     engine: name,
     back: before === name ? 'recorded' : before,
     title: `Downloading ${ENGINE_INFO[name].label}`,
-    text: `${DOWNLOADS[name]?.() ?? 'A download'}, once. Your browser's voice reads meanwhile; Hide lets it carry on in the background.`,
+    text: `${DOWNLOADS[name]?.() ?? 'A download'}, once. ${capital(standInName())} reads meanwhile; Hide lets it carry on in the background.`,
   });
   void warmVoice(name);
 }
@@ -822,7 +870,11 @@ async function warmVoice(name: EngineName): Promise<void> {
   const engine = engines[name];
   try {
     if (engine.loading) await engine.loading;
-    if (engine.state !== 'ready') return;
+    if (engine.state !== 'ready') {
+      // Loaded and let go at once, the page being hidden and silent (ensureEngine): nothing failed.
+      if (engine.state === 'idle' && loaderEngine() === name) closeLoader();
+      return;
+    }
     const line = (piece.readings[hearing.value]?.lines || []).find((l) => l.text.trim());
     const voice = voiceOf(name);
     if (line && engine.render && voice) {
@@ -832,7 +884,9 @@ async function warmVoice(name: EngineName): Promise<void> {
     if (loaderEngine() === name) closeLoader();
   } catch (error) {
     const failed = error as Error & { cancelled?: boolean; dropped?: boolean };
-    if (!failed.cancelled && !failed.dropped) loaderFailed(name, ENGINE_INFO[name].label, failed);
+    // Let go mid-line, the loader would otherwise stay frozen at its last progress.
+    if (failed.cancelled || failed.dropped) { if (loaderEngine() === name) closeLoader(); return; }
+    loaderFailed(name, ENGINE_INFO[name].label, failed, capital(standInName()));
   }
 }
 
@@ -883,11 +937,15 @@ export function relistSystem(): void {
 // A loaded neural voice keeps its model and working memory in its worker until it is let go: about
 // 800 MB for Kokoro on WebAssembly, measured on a Pixel, which a phone short of memory swaps out
 // once another app is in front — and then every app stalls. So hidden and silent, the page lets
-// each loaded voice go (a download under way carries on), and the phone's own engine with them;
-// the next Play loads them again, as at start-up, and the lines they rendered are kept.
+// each loaded voice go (a download under way carries on, and the voice is let go once it has
+// loaded), and the phone's own engine with them; the next Play loads them again, as at start-up,
+// and the lines they rendered are kept. A Play still loading counts as playing (speech.starting).
+// One rendering a line is let go once the line is done (pumpRenders): cut off, Piper would lose the
+// voice it fetches with its first line, and the phone's engine leave the line unanswered.
+const hiddenAndSilent = () => document.visibilityState === 'hidden' && !playing.value && !speech.starting;
 export function letVoicesGo(): void {
-  if (document.visibilityState !== 'hidden' || playing.value) return;
+  if (!hiddenAndSilent()) return;
   for (const name of [...NEURAL_ENGINES, 'system'] as const) {
-    if (engines[name].state === 'ready') engines[name].cancel?.();
+    if (engines[name].state === 'ready' && !renderingJobs.has(name)) engines[name].cancel?.();
   }
 }

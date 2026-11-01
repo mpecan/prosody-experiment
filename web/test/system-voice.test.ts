@@ -5,8 +5,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { offeredEngines, onPhone, parseWav, systemVoiceLabel } from '../src/reading/engines';
 
-/** A mono WAV of `samples`: 16-bit PCM, or 32-bit float; `declared` overrides the data chunk's size. */
-function wav(samples: number[], { rate = 24000, float = false, declared, extra = false }: { rate?: number; float?: boolean; declared?: number; extra?: boolean } = {}): ArrayBuffer {
+/** A mono WAV of `samples`: 16-bit PCM, or 32-bit float; `declared` overrides the data chunk's size,
+ * `format` the format its header says (1 PCM, 3 float). */
+function wav(samples: number[], { rate = 24000, float = false, declared, extra = false, format }: { rate?: number; float?: boolean; declared?: number; extra?: boolean; format?: number } = {}): ArrayBuffer {
   const width = float ? 4 : 2;
   const pad = extra ? 8 + 3 + 1 : 0;   // an odd-sized chunk before the data, padded to even
   const bytes = new ArrayBuffer(12 + 24 + pad + 8 + samples.length * width);
@@ -14,7 +15,7 @@ function wav(samples: number[], { rate = 24000, float = false, declared, extra =
   const tag = (at: number, text: string) => [...text].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
   tag(0, 'RIFF'); view.setUint32(4, bytes.byteLength - 8, true); tag(8, 'WAVE');
   tag(12, 'fmt '); view.setUint32(16, 16, true);
-  view.setUint16(20, float ? 3 : 1, true); view.setUint16(22, 1, true);
+  view.setUint16(20, format ?? (float ? 3 : 1), true); view.setUint16(22, 1, true);
   view.setUint32(24, rate, true); view.setUint32(28, rate * width, true);
   view.setUint16(32, width, true); view.setUint16(34, width * 8, true);
   let at = 36;
@@ -30,6 +31,14 @@ describe('a WAV from the phone\'s engine', () => {
     expect(rate).toBe(22050);
     expect([...pcm].map((s) => Math.round(s * 100) / 100)).toEqual([0, 0.5, -0.5]);
     expect([...parseWav(wav([0.25, -1], { float: true })).pcm]).toEqual([0.25, -1]);
+  });
+
+  it('reads 32-bit audio as float though the header says PCM, as Android\'s writes it', () => {
+    expect([...parseWav(wav([0, 0.5, -0.5], { float: true, format: 1 })).pcm]).toEqual([0, 0.5, -0.5]);
+  });
+
+  it('refuses a format it does not read, rather than reading silence', () => {
+    expect(() => parseWav(wav([0.5], { format: 3 }))).toThrow('a WAV the reading cannot read (format 3, 16 bits)');
   });
 
   it('skips a chunk it does not know, padding and all', () => {
@@ -52,6 +61,11 @@ describe('a phone voice in the menu', () => {
     expect(systemVoiceLabel({ id: 'com.apple.voice.compact.en-GB.Daniel', lang: 'en-GB', name: 'Daniel', tier: null, rank: 20 })).toBe('Daniel (British English)');
     expect(systemVoiceLabel({ id: 'en-us-x-iob-local', lang: 'en-US', rank: 400 })).toBe('American English, iob');
     expect(systemVoiceLabel({ id: 'en-US-language', lang: 'en-US', rank: 400 })).toBe('American English, default');
+  });
+
+  it('tells apart Android voices whose ids differ only past the variant', () => {
+    expect(systemVoiceLabel({ id: 'en-us-x-sfg#female_1-local', lang: 'en-US', rank: 400 })).toBe('American English, sfg female 1');
+    expect(systemVoiceLabel({ id: 'en-us-x-sfg#male_1-local', lang: 'en-US', rank: 400 })).toBe('American English, sfg male 1');
   });
 });
 
@@ -87,6 +101,8 @@ class FakeBuffer {
 
 describe('in the Android app', () => {
   const calls: { command: string; args?: Record<string, unknown> }[] = [];
+  // A test's own answer to a command, in place of the phone's below (undefined: the phone answers).
+  let answering: ((command: string) => unknown) | null = null;
   let reading: typeof import('../src/reading');
   let store: typeof import('../src/store');
   let piece: typeof import('../src/piece')['piece'];
@@ -107,6 +123,8 @@ describe('in the Android app', () => {
     vi.stubGlobal('__TAURI_INTERNALS__', {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         calls.push({ command, args });
+        const own = answering?.(command);
+        if (own !== undefined) return own;
         if (command === 'speech_voices') return phone;
         if (command === 'speech_render') return wav([...new Array(2400).fill(0), ...new Array(2400).fill(0.5)]);
         return null;
@@ -200,7 +218,8 @@ describe('in the Android app', () => {
 
   it('says where to get a better voice while the phone has only basic ones, and lists one got meanwhile', async () => {
     store.readingSettings.value = { ...store.readingSettings.value, engine: 'system' };
-    expect(reading.voiceHint()).toBeNull();   // Android says nothing of where to get one
+    // Android says nothing of where to get one, but names the better voice it has.
+    expect(reading.voiceHint()).toBe('American English, iob is on this phone: choose it under Voice for a better reading.');
     const IMPROVE = 'For a better voice, download an Enhanced or Premium one in Settings.';
     phone = {
       voices: [
@@ -231,6 +250,103 @@ describe('in the Android app', () => {
     expect(reading.voiceOf('system')).toBe('com.apple.voice.super-compact.en-US.Samantha');
     expect(reading.voiceHint()).toBe('Ava (American English, Premium) is on this phone: choose it under Voice for a better reading.');
     store.readingSettings.value = { ...store.readingSettings.value, voices: {} };
+    vi.restoreAllMocks();
+  });
+
+  it('points a reader of another voice to the phone\'s better one by way of the system voice', () => {
+    // The recordings chosen, the phone's voice standing in: the Voice menu lists the recordings.
+    store.readingSettings.value = { ...store.readingSettings.value, engine: 'recorded', voices: { system: { en: 'com.apple.voice.super-compact.en-US.Samantha' } } };
+    expect(reading.standIn()).toBe('system');
+    expect(reading.voiceHint()).toBe('Ava (American English, Premium) is on this phone: choose the system voice, then Ava (American English, Premium) under Voice, for a better stand-in.');
+    store.readingSettings.value = { ...store.readingSettings.value, engine: 'system', voices: {} };
+  });
+
+  it('keeps a released neural voice\'s list, so the menu shows the voice chosen', () => {
+    const kokoro = reading.engines.kokoro;
+    kokoro.state = 'ready';
+    kokoro.listed = [{ id: 'af_heart', name: 'Heart', lang: 'en-us' }, { id: 'am_adam', name: 'Adam', lang: 'en-us' }];
+    store.readingSettings.value = { ...store.readingSettings.value, voices: { kokoro: { en: 'am_adam' } } };
+    kokoro.cancel!();
+    expect(kokoro.state).toBe('idle');
+    expect(reading.voiceOf('kokoro')).toBe('am_adam');
+    kokoro.listed = null;
+    store.readingSettings.value = { ...store.readingSettings.value, voices: {} };
+  });
+
+  it('says what came of starting the phone\'s voice, when it is the voice chosen', async () => {
+    store.readingSettings.value = { ...store.readingSettings.value, engine: 'system' };
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    answering = (command) => (command === 'speech_voices' ? Promise.reject(new Error('no engine')) : undefined);
+    reading.relistSystem();
+    await vi.waitFor(() => expect(reading.engines.system.state).toBe('failed'));
+    // The WebView has no voice of its own: nothing reads, and that is said.
+    await vi.waitFor(() => expect(store.readingNote.value).toBe('system voice could not load (no engine); nothing reads it (this app has no browser voice)'));
+    expect(store.readingNoteBad.value).toBe(true);
+    answering = null;
+    reading.relistSystem();
+    await vi.waitFor(() => expect(reading.engines.system.state).toBe('ready'));
+    await vi.waitFor(() => expect(store.readingNote.value).toBe(''));
+    vi.restoreAllMocks();
+  });
+
+  it('names the phone\'s voice where it stands in for a voice that failed', async () => {
+    store.readingSettings.value = { ...store.readingSettings.value, engine: 'kokoro' };
+    // The reading's own copy of the module (vi.resetModules above), whose handler it set.
+    const { failures } = await import('../src/reading/engines');
+    failures.onFailed(reading.engines.kokoro, new Error('the worker failed'));
+    expect(store.readingNote.value).toBe('Kokoro-82M failed: the worker failed — reading with the system voice; choose it again to retry');
+    store.readingSettings.value = { ...store.readingSettings.value, engine: 'system' };
+  });
+
+  it('keeps the voices for a Play still loading while the page is hidden', () => {
+    expect(reading.engines.system.state).toBe('ready');
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    reading.speech.starting = true;
+    reading.letVoicesGo();
+    expect(reading.engines.system.state).toBe('ready');
+    reading.speech.starting = false;
+    reading.letVoicesGo();
+    expect(reading.engines.system.state).toBe('idle');
+    vi.restoreAllMocks();
+  });
+
+  it('lets go a phone voice that finished starting while the page was hidden and silent', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    calls.length = 0;
+    reading.ensureEngine();
+    expect(calls.map((c) => c.command)).toEqual(['speech_voices']);
+    await vi.waitFor(() => expect(calls.map((c) => c.command)).toEqual(['speech_voices', 'speech_release']));
+    expect(reading.engines.system.state).toBe('idle');
+    vi.restoreAllMocks();
+  });
+
+  it('lets go a voice rendering a line only once the line is done, and drops what was queued quietly', async () => {
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    await reading.engines.system.load();
+    let finish!: () => void;
+    const slow = new Promise<void>((resolve) => { finish = resolve; });
+    answering = (command) => (command === 'speech_render'
+      ? slow.then(() => wav([...new Array(2400).fill(0), ...new Array(2400).fill(0.5)]))
+      : undefined);
+    const lines = [{ line: 0, text: 'Never seen before', pace: 1 }, { line: 1, text: 'Nor this one either', pace: 1 }];
+    const poem = { lines, cues: [] } as unknown as import('../src/answers').Reading;
+    piece.readings = { A: poem, B: null, poem: '' };
+    store.hearing.value = 'A';
+    reading.prerender();
+    // The second line is due now: a failure to render it would be said, in red.
+    reading.renderUrgently(poem, { ...lines[1], stanza: 0 } as unknown as import('../src/answers').SpokenLine, 'natural');
+    reading.noteReading('');
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    reading.letVoicesGo();
+    expect(reading.engines.system.state).toBe('ready');
+    finish();
+    await vi.waitFor(() => expect(reading.engines.system.state).toBe('idle'));
+    expect(calls.at(-1)?.command).toBe('speech_release');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(store.readingNoteBad.value).toBe(false);
+    expect(store.readingNote.value).toBe('');
+    answering = null;
+    piece.readings = { A: null, B: null, poem: '' };
     vi.restoreAllMocks();
   });
 });
