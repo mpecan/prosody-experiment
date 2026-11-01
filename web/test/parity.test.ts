@@ -4,7 +4,7 @@
 // requests (crates/prosody-web/tests/parity.rs keeps them current): the pattern text, and the
 // Performance. Here the text is evaluated by Strudel itself — @strudel/core, @strudel/mini and
 // @strudel/transpiler, through their public API only (evalScope, evaluate, queryArc), never their
-// source — and every note Strudel would play over the whole piece is compared with the
+// source — and every note Strudel would play over the whole piece, twice round, is compared with the
 // Performance's: the same onsets and lengths, sounds, pitches, levels and every parameter, to 1e-6.
 //
 // What the scheduler plays is a hap with an onset (its part begins where its whole does), at the
@@ -16,6 +16,11 @@
 // copy crosses into the next slice (prosody_emit::perform::Swing), so the text does not call it: it
 // writes swing's documented meaning with layer, mask and late, and a fixture at swing 0.9 checks
 // that Strudel plays exactly the Performance's notes where swingBy would have departed from them.
+//
+// Strudel's pattern is cyclic, so a note swung past the piece's end sounds at the start of the next
+// time round — the first round included, as the last note of the round before — and the
+// Performance places it there too (docs/player.md §9). Two rounds are compared so the seam between
+// them is played on both sides, and a fixture (swung-round) has such a note.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
@@ -170,6 +175,13 @@ function swingByDepartures(performance: Performance): number {
   }).length;
 }
 
+/** How many of the Performance's notes swing carried past the piece's end, round to the start of
+ * the next time round: their onset is earlier than where their place in the pattern begins. */
+function comeRound(performance: Performance): number {
+  const perCycle = 60 / performance.cpm;
+  return performance.notes.filter((note) => note.onset + 1e-6 < note.cycle * perCycle).length;
+}
+
 /** Pairs two lists of notes by key and onset; what is left unpaired on either side. */
 function unpaired(expected: Heard[], played: Heard[]): { missing: Heard[]; extra: Heard[] } {
   const groups = new Map<string, { expected: Heard[]; played: Heard[] }>();
@@ -216,17 +228,27 @@ describe('the Performance plays what the Strudel text says', () => {
     expect(departures).toBeGreaterThan(0);
   });
 
+  test('one of them has a note swung past the end, round to the start of the next time round', () => {
+    const swungRound = fixtures.find((fixture) => fixture.name === 'swung-round');
+    expect(swungRound).toBeDefined();
+    expect(comeRound(swungRound!.performance)).toBeGreaterThan(0);
+  });
+
   for (const fixture of fixtures) {
     test(`${fixture.name}${fixture.query ? ` (${fixture.query})` : ''}`, async () => {
       const { pattern } = await core.evaluate(fixture.pattern, transpiler) as { pattern: { queryArc(begin: number, end: number): Hap[] } };
       const performance = fixture.performance;
-      // The whole piece, once: up to a hair short of where it loops round, so the next loop's first
-      // notes are not asked for.
-      const haps = pattern.queryArc(0, performance.seconds - 1e-7).filter((hap) => hap.hasOnset());
+      // The whole piece, twice round: up to a hair short of where it comes round the second time,
+      // so the third round's first notes are not asked for. The Performance's notes are one round's,
+      // so each is expected in both, the second a round later.
+      const seconds = performance.seconds;
+      const haps = pattern.queryArc(0, 2 * seconds - 1e-7).filter((hap) => hap.hasOnset());
       const played = haps.map(fromHap);
-      const { missing, extra } = unpaired(performance.notes.map(fromNote), played);
+      const once = performance.notes.map(fromNote);
+      const expected = [...once, ...once.map((note) => ({ ...note, onset: note.onset + seconds }))];
+      const { missing, extra } = unpaired(expected, played);
       expect({ missing: missing.slice(0, 5), extra: extra.slice(0, 5) }).toEqual({ missing: [], extra: [] });
-      expect(played.length).toBe(performance.notes.length);
+      expect(played.length).toBe(2 * performance.notes.length);
       expect(performance.notes.length).toBeGreaterThan(0);
     });
   }

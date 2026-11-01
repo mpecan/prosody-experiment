@@ -914,6 +914,15 @@ impl Rational {
         )
     }
 
+    /// The difference, or zero where `other` is the larger: a value never goes below zero.
+    pub(crate) const fn less(self, other: Self) -> Self {
+        Self::new(
+            (self.numerator.saturating_mul(other.denominator))
+                .saturating_sub(other.numerator.saturating_mul(self.denominator)),
+            self.denominator.saturating_mul(other.denominator),
+        )
+    }
+
     /// The product.
     pub(crate) const fn mul(self, other: Self) -> Self {
         Self::new(
@@ -1006,6 +1015,11 @@ impl Cycles {
     /// The sum.
     pub(crate) const fn plus(self, other: Self) -> Self {
         Self(self.0.plus(other.0))
+    }
+
+    /// The difference, or zero cycles where `other` is the larger.
+    pub(crate) const fn less(self, other: Self) -> Self {
+        Self(self.0.less(other.0))
     }
 
     /// Times a whole number.
@@ -1223,16 +1237,41 @@ impl Clock {
         ExactSeconds(cycles.0.mul(Rational::new(60_000, self.cpm)))
     }
 
-    /// Where a note at `grid` sounds, after swing, in seconds — before any nudge.
-    fn onset(&self, grid: Cycles) -> ExactSeconds {
+    /// Where a note at `grid` sounds, after swing, in seconds — before any nudge — always within
+    /// one time round the piece.
+    ///
+    /// Swing can carry a note on the last half-slice past the piece's end. Strudel's pattern is
+    /// cyclic, so its `late` puts that note at the start of the next time round — the first round
+    /// too, as the last note of the round before it (measured: `docs/player.md` §9) — and so does
+    /// this: such a note's onset is counted from the start of the piece, and it says so in
+    /// [`Round::Next`]. Its place in the pattern (`grid`, its slot) does not move (I3, I4).
+    fn onset(&self, grid: Cycles) -> (ExactSeconds, Round) {
         let swung = self.swing.map_or(grid, |swing| swing.place(grid));
-        self.seconds(swung)
+        let end = self.cycles();
+        if end > Cycles::whole(0) && swung >= end {
+            (self.seconds(swung.less(end)), Round::Next)
+        } else {
+            (self.seconds(swung), Round::Same)
+        }
     }
 
     /// The piece's length in cycles: the cycle it loops round on.
     fn cycles(&self) -> Cycles {
         Cycles::whole(self.starts.last().copied().unwrap_or(0))
     }
+}
+
+/// Which time round the piece a note sounds in: the round its bar is in, or — for a note swing
+/// carries past the piece's end — the next, from whose start its onset is counted
+/// ([`Note::round`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Round {
+    /// The round its bar is in.
+    Same,
+    /// The next: swing carried it past the piece's end, so it sounds at the start of the next time
+    /// round, as Strudel's looping pattern plays it — in the first round as well, as the last note
+    /// of the round before.
+    Next,
 }
 
 /// A nudge as the text prints it, in exact seconds.
@@ -1411,6 +1450,7 @@ pub struct Note {
     slot: usize,
     grid: Cycles,
     onset: ExactSeconds,
+    round: Round,
     length: ExactSeconds,
     sound: Sound,
     pitch: Option<Midi>,
@@ -1453,10 +1493,19 @@ impl Note {
         self.grid
     }
 
-    /// When it sounds, after swing and nudge.
+    /// When it sounds, after swing and nudge, counted from the start of the time round it sounds
+    /// in ([`Note::round`]): never past the piece's end but for its nudge.
     #[must_use]
     pub fn onset(&self) -> Seconds {
         self.onset.seconds()
+    }
+
+    /// Which time round it sounds in: [`Round::Next`] when swing carried it past the piece's end,
+    /// so its onset is counted from the start of the next round. A piece played round and round
+    /// needs nothing else; one played once (`prosody render`) may place it after the end instead.
+    #[must_use]
+    pub const fn round(&self) -> Round {
+        self.round
     }
 
     /// The exact onset, for ordering.
@@ -1553,6 +1602,7 @@ pub struct Mark {
     lane: Lane,
     slot: usize,
     onset: ExactSeconds,
+    round: Round,
     length: ExactSeconds,
     fresh: bool,
     melody: bool,
@@ -1578,10 +1628,16 @@ impl Mark {
         self.slot
     }
 
-    /// When it lights.
+    /// When it lights, counted from the start of the time round it lights in ([`Mark::round`]).
     #[must_use]
     pub fn onset(&self) -> Seconds {
         self.onset.seconds()
+    }
+
+    /// Which time round it lights in, as its note's [`Note::round`].
+    #[must_use]
+    pub const fn round(&self) -> Round {
+        self.round
     }
 
     /// When it lights, exactly.
@@ -2000,12 +2056,10 @@ impl Context<'_> {
         Level(quantised(gain) * velocity)
     }
 
-    /// A note's onset, after swing and its nudge.
-    fn onset(&self, grid: Cycles, event: &Event) -> ExactSeconds {
-        nudged(
-            self.clock.onset(grid),
-            nudge(&self.strays, event, self.style),
-        )
+    /// A note's onset, after swing and its nudge, and the round it sounds in.
+    fn onset(&self, grid: Cycles, event: &Event) -> (ExactSeconds, Round) {
+        let (onset, round) = self.clock.onset(grid);
+        (nudged(onset, nudge(&self.strays, event, self.style)), round)
     }
 
     /// One voice's drums: every syllable it sounds, and what §4.3 and §4.4 do to each (the
@@ -2025,13 +2079,15 @@ impl Context<'_> {
             for timed in self.timed(walk) {
                 let event = timed.event;
                 let level = self.density.get(timed.slot).copied().unwrap_or(1.0);
+                let (onset, round) = self.onset(timed.grid, event);
                 notes.push(Note {
                     span: event.span(),
                     channel: Channel::Drums,
                     lane,
                     slot: timed.slot,
                     grid: timed.grid,
-                    onset: self.onset(timed.grid, event),
+                    onset,
+                    round,
                     length: self.clock.seconds(timed.length),
                     sound: Sound::Drum {
                         bank: strudel_bank(style.bank()),
@@ -2055,11 +2111,13 @@ impl Context<'_> {
                     postgain,
                     compressor,
                 });
+                let (onset, round) = self.clock.onset(timed.grid);
                 marks.push(Mark {
                     span: event.span(),
                     lane,
                     slot: timed.slot,
-                    onset: self.clock.onset(timed.grid),
+                    onset,
+                    round,
                     length: self.clock.seconds(timed.length),
                     fresh: crate::trace::fresh(score, timed.slot, event),
                     melody: event.pitch().is_some(),
@@ -2108,10 +2166,10 @@ impl Context<'_> {
             }
             Pitched::Bass => None,
         };
-        let shape = match role {
-            Pitched::Melody => None,
-            Pitched::Bass => drive(style).map(|shape| Level(quantised(shape))),
-        };
+        // The bass is driven; the melody is not.
+        let shape = drive(style)
+            .filter(|_| role == Pitched::Bass)
+            .map(|shape| Level(quantised(shape)));
         for walk in strudel::Lane::all(score, &pitched, role == Pitched::Bass) {
             // W2's note is its foot: it holds the beat (`prosody_core::bass`).
             let walk = if role == Pitched::Bass && score.bass() == Variant::Feet {
@@ -2140,6 +2198,7 @@ impl Context<'_> {
                 };
                 let level = self.density.get(timed.slot).copied().unwrap_or(1.0);
                 let gain = self.level(gain(score, event, velocity, level), event);
+                let (onset, round) = self.onset(timed.grid, event);
                 for pitch in tones {
                     notes.push(Note {
                         span: event.span(),
@@ -2147,7 +2206,8 @@ impl Context<'_> {
                         lane,
                         slot: timed.slot,
                         grid: timed.grid,
-                        onset: self.onset(timed.grid, event),
+                        onset,
+                        round,
                         length: self.clock.seconds(timed.length),
                         sound,
                         pitch: Some(pitch),
@@ -2203,6 +2263,7 @@ impl Context<'_> {
             };
             let level = Level(quantised(self.density.get(slot).copied().unwrap_or(1.0)));
             for (chord, grid, length) in held {
+                let (onset, round) = self.clock.onset(grid);
                 for tone in chord_tones(chord, style) {
                     notes.push(Note {
                         span: chord.span(),
@@ -2210,7 +2271,8 @@ impl Context<'_> {
                         lane: Lane::Chords,
                         slot,
                         grid,
-                        onset: self.clock.onset(grid),
+                        onset,
+                        round,
                         length: self.clock.seconds(length),
                         sound,
                         pitch: Some(Midi(f64::from(tone))),
@@ -2248,7 +2310,7 @@ mod tests {
     use prosody_core::voice::Score;
     use prosody_core::{Poem, meter, repetition, rhyme, role, sound, surprisal};
 
-    use super::{Channel, Cycles, Perform, Rational, Swing, quantised, thousandths};
+    use super::{Channel, Cycles, Perform, Rational, Round, Swing, quantised, thousandths};
     use crate::{Backend as _, Strudel, Style};
 
     /// Spelling is pronunciation: `A` and `o` are stressed vowels, `e` unstressed.
@@ -2624,5 +2686,72 @@ mod tests {
             })
             .collect();
         assert_eq!(lit, traced);
+    }
+
+    #[test]
+    fn a_note_swung_past_the_end_sounds_at_the_start_of_the_next_round() {
+        // "teA bAn tete" is two beats, `[[bd bd] [bd bd bd]]@2`, played twice (the outro repeats
+        // it): four cycles at `.cpm(120)`, half a second each, so the piece loops round at 2 s.
+        // Swing 0.9 over one slice a beat delays what begins in a beat's second half by 0.45 of a
+        // cycle. The last syllable of each bar begins at 2/3 of its second beat: in the first bar
+        // at cycle 5/3, which swing carries to 5/3 + 9/20 = 127/60 — into the second bar, where it
+        // stays (127/120 s). In the second bar at cycle 11/3, carried to 247/60: past the end at
+        // cycle 4. Strudel's pattern is cyclic, so it plays that note 7/60 of a cycle into the
+        // next time round — the first round included, as the last note of the round before
+        // (`docs/player.md` §9) — and so does the Performance: at 7/120 s, in `Round::Next`, still
+        // in its own bar and at its own place in the pattern.
+        let score = score_of("teA bAn tete\n");
+        let swung = style("swing = 0.9\nhumanise = 0\n");
+        let text = Strudel::new().render(&score, &swung).unwrap();
+        assert!(
+            text.contains("s(\"<[[bd bd] [bd bd bd]]@2 [[bd bd] [bd bd bd]]@2>\")"),
+            "{text}"
+        );
+        assert!(text.contains(".late(0.900 / 2))"), "{text}");
+        let performance = Perform::new().render(&score, &swung).unwrap();
+        assert!(close(performance.seconds().get(), 2.0));
+        let drums: Vec<_> = performance
+            .notes()
+            .iter()
+            .filter(|note| note.channel() == Channel::Drums)
+            .collect();
+        let at = |grid: (u128, u128)| {
+            drums
+                .iter()
+                .find(|note| note.grid().parts() == grid)
+                .unwrap()
+        };
+        let stays = at((5, 3));
+        assert_eq!(stays.exact_onset().parts(), (127, 120));
+        assert_eq!((stays.slot(), stays.round()), (0, Round::Same));
+        let wraps = at((11, 3));
+        assert_eq!(wraps.exact_onset().parts(), (7, 120));
+        assert_eq!((wraps.slot(), wraps.round()), (1, Round::Next));
+        // Sorted by onset, it is the piece's second note, after the first syllable at 0.
+        assert_eq!(performance.notes()[0].exact_onset().parts(), (0, 1));
+        assert_eq!(performance.notes()[1].grid().parts(), (11, 3));
+        // Every other note stays in its round; no onset reaches the end.
+        assert_eq!(
+            performance
+                .notes()
+                .iter()
+                .filter(|note| note.round() == Round::Next)
+                .count(),
+            1
+        );
+        assert!(
+            performance
+                .notes()
+                .iter()
+                .all(|note| note.onset().get() < performance.seconds().get())
+        );
+        // Its light comes round with it.
+        let mark = performance
+            .marks()
+            .iter()
+            .find(|mark| mark.round() == Round::Next)
+            .unwrap();
+        assert_eq!(mark.exact_onset().parts(), (7, 120));
+        assert_eq!(mark.slot(), 1);
     }
 }

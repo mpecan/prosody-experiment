@@ -71,13 +71,24 @@ the summer goes
 the winter stays
 ";
 
+/// A poem the corpus does not have: one whose piece ends on a beat of three syllables
+/// ("shim-mer-ing"), so its last note begins two thirds into its last beat, where a swing past two
+/// thirds carries it beyond the piece's end. Strudel's pattern is cyclic, so it plays that note at
+/// the start of the next time round, the first included (`docs/player.md` §9); the parity test
+/// plays two rounds to see it on both sides of the seam.
+const SWUNG_ROUND: &str = "\
+the morning comes
+the meadow wakes, and the river is shimmering
+";
+
 /// Every case: a fixture name, a poem, and the page's query — the palette and the mappings. Every
 /// corpus poem under the defaults, and then settings chosen to reach the parameters and the ways a
 /// note is placed that the defaults do not: swing under both pulses (the elastic one reaching
 /// notes Strudel's `swingBy` would double or drop, which the text's own swing must not), humanise and density, chords and
 /// their turnarounds, chords at a density level below one, walking basses, the straight stack,
 /// anchors, articulated drums, slant rhymes, assonance, oscillators, no compression and no echo, a
-/// long stanza eroding under an arrival and the same stanza handed over line by line with no outro.
+/// long stanza eroding under an arrival and the same stanza handed over line by line with no outro,
+/// and a note swung past the piece's end, round to the start of the next time round.
 ///
 /// Not every combination: a placement or parameter the cases do not reach is compared only through
 /// the Rust properties (`prosody-emit/tests/perform.rs`), not against Strudel.
@@ -135,12 +146,16 @@ const CASES: &[(&str, &str, &str)] = &[
         "long-stanza",
         "set=long-stanzas:gradual&off=outro",
     ),
+    // The last note swung past the piece's end, to the start of the next time round, nudged too.
+    ("swung-round", "swung-round", "swing=0.9&humanise=1"),
 ];
 
 /// The poem a case names: a corpus poem, or [`LONG_STANZA`].
 fn poem_named(name: &str) -> &'static str {
-    if name == "long-stanza" {
-        return LONG_STANZA;
+    match name {
+        "long-stanza" => return LONG_STANZA,
+        "swung-round" => return SWUNG_ROUND,
+        _ => {}
     }
     POEMS.iter().find(|(poem, _)| *poem == name).unwrap().1
 }
@@ -269,4 +284,32 @@ fn the_cases_reach_what_they_claim() {
     );
     let (gradual, _) = made(&site, "long-stanza-gradual");
     assert!(!gradual.contains("over an eroding loop"), "{gradual}");
+
+    // A note swing carries past the piece's end sounds at the start of the next round: its onset
+    // is earlier than where its place in the pattern (`cycle`) begins, which no other note's is.
+    let (_, performance) = made(&site, "swung-round");
+    let number = |json: &str, key: &str| -> f64 {
+        json.split(&format!("\"{key}\":"))
+            .nth(1)
+            .and_then(|rest| rest.split([',', '}']).next())
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let per_cycle = 60.0 / number(&performance, "cpm");
+    let seconds = number(&performance, "seconds");
+    let round = performance
+        .split("{\"from\":")
+        .filter(|note| note.contains("\"channel\":"))
+        .filter(|note| number(note, "onset") + 1e-6 < number(note, "cycle") * per_cycle)
+        .collect::<Vec<_>>();
+    assert!(!round.is_empty(), "no note comes round: {performance}");
+    for note in round {
+        // At the start of the round: within swing's delay (0.45 of a beat) and the nudge.
+        assert!(number(note, "onset") < 0.45 * per_cycle + 0.03, "{note}");
+        assert!(
+            number(note, "cycle") * per_cycle > seconds - per_cycle,
+            "{note}"
+        );
+    }
 }

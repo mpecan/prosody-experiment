@@ -74,9 +74,11 @@ function firstFrom<T>(items: T[], onset: (item: T) => number, at: number): numbe
 }
 
 /** The marks lit at `time` (any time round): each with its index in the Performance's marks. Once the
- * piece has come round, a mark of the round before that runs over the loop's end is lit too: a
- * swung onset (`docs/player.md` §9) can push the last step of a slice past the piece's length, and
- * its mark would otherwise go dark the moment the piece comes round, as `notesBetween` keeps it. */
+ * piece has come round, a mark of the round before that runs over the loop's end is lit too: swing
+ * (`docs/player.md` §9) can delay the last step of a slice to begin just before the piece's end and
+ * end past it, and its mark would otherwise go dark the moment the piece comes round, as
+ * `notesBetween` keeps it. (A step swung to begin past the end is the next round's: its onset is
+ * already counted from that round's start, as Strudel plays it.) */
 export function marksAt(piece: Indexed, time: number): { mark: PerformedMark; index: number }[] {
   const seconds = piece.performance.seconds;
   const at = within(time, seconds);

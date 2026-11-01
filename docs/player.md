@@ -286,6 +286,35 @@ departs from §3 above, and why:
   equality for swung pieces as for the rest; its swing-0.9 fixture is the case where `swingBy` would
   have doubled and dropped notes, and a test checks that it still reaches such notes. Only the swing
   line of a swung piece's text changed; every Performance is byte-identical.
+- **A note swung past the piece's end sounds at the start of the next time round — the first round
+  too.** Swing can carry a step that begins late in the piece's last half-slice past the end (it
+  takes a step in the last `x / 2n` of a cycle: two thirds into a beat at swing 0.9, never at the
+  palettes' 0.33 under the steady pulse unless a beat holds six or more steps). Measured with
+  `@strudel/core` 1.2.6's `queryArc` (public API only): `.late` shifts a cyclic pattern, so on
+  `s("<[a b] [c d e f g h]>")` swung by `late(0.5 / 2)`, `h` (at cycle 1⅚, delayed to 2 1⁄12, past
+  the loop at 2) comes back as a hap whose whole is `[1⁄12, ¼)` with an onset, in every round's
+  query — `queryArc(0, 2)` included. So Strudel plays it at the start of round one as well, as the
+  last note of a round 0 that never played. A step delayed to *begin* before the end but *last*
+  past it (`g`, `[1 11⁄12, 2 1⁄12)`) is different: the next round's query sees only its tail,
+  without an onset, so it sounds once, in its own round, and the first round starts without it.
+  *Decided (the user): our player does what Strudel does.* The Performance's clock wraps it: such a
+  note's onset is counted from the start of the piece (`swung − cycles`, still an exact fraction,
+  then the nudge, which is the scheduler's and does not wrap), and it carries
+  `Round::Next` (`Note::round`, `Mark::round`, Rust-only: the JSON is unchanged), while its `slot`
+  and `grid` stay its own bar's (I3, I4). Every onset before the nudge is now within one round, so
+  nothing that loops needed changing: the synth's renderer (page, Android, iOS) loops by frames and
+  plays it at the start of every round, first included, exactly as Strudel; the page's clock walks
+  rounds and lights its mark there. An edit handed over at a bar boundary needs nothing either:
+  handed over mid-piece, the new piece starts from that bar and its wrapped note waits for its next
+  time round; handed over at the loop's end (bar 0), the new piece's own wrapped note opens it,
+  as a pattern swapped in Strudel would be queried, and the old piece's never sounds — before, it
+  was lost at that seam (the old piece stopped at the boundary, and the new one had it only past
+  its end). `prosody render` plays a piece once, with no next round, so there it places a
+  `Round::Next` note a whole piece later, after the last bar, in the tail: the file ends on the
+  poem's last syllable instead of opening with it. The parity test now plays every fixture twice
+  round, so the seam is compared on both sides, and the `swung-round` fixture (a poem of the
+  test's own, ending on "shimmering", at swing 0.9 with humanise) has such a note; with the
+  unwrapped onset Strudel's note at 0.058 s has no partner and the test fails.
 - **A note carries more than §3 listed:** its `slot` and its `grid` position in cycles before swing
   (structure, which no palette moves: what the I3 property compares, and what step 2's bar-by-bar
   live edits need), and the `postgain` and compressor the text sets per layer. Parameters the text
@@ -310,12 +339,13 @@ departs from §3 above, and why:
 - **The parity test reads committed fixtures.** It needs Strudel (in Vitest) and the compiler (in
   Rust), so `crates/prosody-web/tests/parity.rs` makes each piece's pattern and Performance through
   the page's own requests and fails when a committed fixture under `web/test/parity/` is stale
-  (`PROSODY_BLESS=1` rewrites them). Sixteen fixtures, about 2.4 MB: every corpus poem under the
+  (`PROSODY_BLESS=1` rewrites them). Seventeen fixtures, about 2.4 MB: every corpus poem under the
   defaults, and settings chosen to reach the parameters and placements the defaults do not — among
-  them chords at a density level below one, and a long stanza (a poem of the test's own, since no
+  them chords at a density level below one, a long stanza (a poem of the test's own, since no
   corpus stanza is longer than four lines) eroding under an arrival and handed over gradually with
-  no outro. Not every combination is compared with Strudel; the rest is covered only by the Rust
-  properties, and a test checks that each case still reaches what it was added for.
+  no outro, and a note swung past the piece's end (`swung-round`, above). Not every combination
+  is compared with Strudel; the rest is covered only by the Rust properties, and a test checks that
+  each case still reaches what it was added for.
   `@strudel/core`, `@strudel/mini`
   and `@strudel/transpiler` 1.2.6 are now direct dev dependencies (they were already installed under
   `@strudel/web`; nothing new is downloaded), and Vitest inlines them so `@kabelsalat/web` resolves

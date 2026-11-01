@@ -29,7 +29,7 @@ use prosody_core::surprisal::{Lexicon, Rarity};
 use prosody_core::voice::Score;
 use prosody_core::{Mapping, Mappings, Poem, Span, Variant};
 use prosody_core::{meter, repetition, rhyme, role, sound, surprisal};
-use prosody_emit::perform::{Cycles, Lane, Note};
+use prosody_emit::perform::{Cycles, Lane, Note, Round};
 use prosody_emit::{Backend as _, Perform, Performance, Style, reading};
 
 /// Spelling is pronunciation, so a test can choose a poem's shape by writing it.
@@ -301,32 +301,44 @@ proptest! {
     /// I4: every note stands on a word of the poem, every light on a word, every cue on its line;
     /// and every note sounds within the piece, in the bar it says: its place in the pattern within
     /// that bar's cycles, and its onset no earlier than the bar begins and no later than the next
-    /// one does, but for swing's delay and the nudge.
+    /// one does, but for swing's delay and the nudge. A note swing carries past the piece's end
+    /// sounds at the start of the next time round (`Round::Next`, as Strudel's cyclic pattern
+    /// plays it), so its onset, counted from there, is checked one round on; and no onset before
+    /// the nudge reaches the end.
     #[test]
     fn i4_every_note_resolves_to_a_word(body in poem(), header in palette(), chosen in mappings()) {
         let source = format!("{header}{body}");
         let Some((poem, performance)) = performed(&source, &chosen) else { return Ok(()) };
         let words = words(&poem);
         let (begins, ends) = (bar_begins(&performance), bar_ends(&performance));
+        let end = performance.seconds().get();
+        let unrounded = |onset: f64, round: Round| match round {
+            Round::Same => onset,
+            Round::Next => onset + end,
+        };
         for note in performance.notes() {
             prop_assert!(words.contains(&note.span()), "{:?} is not a word", note.span());
             prop_assert!(note.span().text(poem.source()).is_some_and(|text| !text.is_empty()));
             let bar = &performance.bars()[note.slot()];
             prop_assert!(bar.cycle() <= note.grid(), "{:?} before {:?}", note.grid(), bar);
             prop_assert!(note.grid() < ends[note.slot()].0, "{:?} past slot {}", note.grid(), note.slot());
-            prop_assert!(note.onset().get() >= begins[note.slot()]);
+            let onset = unrounded(note.onset().get(), note.round());
+            prop_assert!(onset >= begins[note.slot()]);
             prop_assert!(
-                note.onset().get() < ends[note.slot()].1 + late(&performance),
+                onset < ends[note.slot()].1 + late(&performance),
                 "{} s is past slot {}, which ends at {} s",
-                note.onset().get(), note.slot(), ends[note.slot()].1
+                onset, note.slot(), ends[note.slot()].1
             );
+            prop_assert!(note.onset().get() < end + MAX_LATE + 1e-9, "{} s is past the end", note.onset().get());
             prop_assert!(note.length().get() > 0.0);
         }
         for mark in performance.marks() {
             prop_assert!(words.contains(&mark.span()));
             // A light has no nudge: only swing may carry it past its bar's end.
-            prop_assert!(mark.onset().get() >= begins[mark.slot()]);
-            prop_assert!(mark.onset().get() < ends[mark.slot()].1 + late(&performance) - MAX_LATE);
+            let onset = unrounded(mark.onset().get(), mark.round());
+            prop_assert!(onset >= begins[mark.slot()]);
+            prop_assert!(onset < ends[mark.slot()].1 + late(&performance) - MAX_LATE);
+            prop_assert!(mark.onset().get() < end, "a light at {} s is past the end", mark.onset().get());
         }
         for cue in performance.cues() {
             prop_assert!(cue.span().text(poem.source()).is_some_and(|text| !text.trim().is_empty()));

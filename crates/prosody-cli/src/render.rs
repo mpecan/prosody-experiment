@@ -9,7 +9,7 @@
 //! silently (`CLAUDE.md` §6).
 
 use anyhow::{Context as _, Result};
-use prosody_emit::perform::{Channel, Note as Performed, Performance, Sound, Vowel, Wave};
+use prosody_emit::perform::{Channel, Note as Performed, Performance, Round, Sound, Vowel, Wave};
 use prosody_synth::{
     Bank, Compression, Crush, Echo, Effects, Gain, Hertz, Losses, Midi, Note, NoteSpec, Piece,
     Renderer, Repeat, Room, STEMS, SampleRate, Seconds, Shape, Source, Stems, master::Master, wav,
@@ -130,9 +130,23 @@ fn effects(tag: u32, note: &Performed) -> Result<Effects> {
     })
 }
 
-/// The note the synth plays for a Performance's note `tag`, or `None` for one it cannot sound
-/// here (a sample it cannot decode).
-fn synth_note(tag: u32, note: &Performed) -> Result<Option<Note>> {
+/// When a note sounds in a render played once through, `end` being the piece's length.
+///
+/// A note swing carries past the piece's end comes round to the start of the next time round
+/// ([`Round::Next`]): where a loop plays it, as Strudel does, the first time round included. A
+/// file plays once and has no next round, so here it sounds where the swing put it, after the
+/// last bar, in the render's tail — the poem's last syllable ends the file rather than sounding
+/// before its first (`docs/player.md` §9).
+fn once_through(note: &Performed, end: f64) -> f64 {
+    match note.round() {
+        Round::Same => note.onset().get(),
+        Round::Next => note.onset().get() + end,
+    }
+}
+
+/// The note the synth plays for a Performance's note `tag`, played once through a piece `end`
+/// seconds long, or `None` for one it cannot sound here (a sample it cannot decode).
+fn synth_note(tag: u32, note: &Performed, end: f64) -> Result<Option<Note>> {
     let Sound::Wave(wave) = note.sound() else {
         return Ok(None);
     };
@@ -156,7 +170,7 @@ fn synth_note(tag: u32, note: &Performed) -> Result<Option<Note>> {
         tag,
         channel,
         source: Source::Wave(wave),
-        onset: time(note.onset().get(), "onset")?,
+        onset: time(once_through(note, end), "onset")?,
         length: time(note.length().get(), "length")?,
         pitch: note.pitch().and_then(|pitch| Midi::new(pitch.get())),
         gain: Gain::new(note.gain().get()).with_context(|| format!("note {tag}'s gain"))?,
@@ -179,7 +193,7 @@ pub(crate) fn render(performance: &Performance) -> Result<Rendered> {
     let (mut drums, mut fonts) = (0, 0);
     for (index, performed) in performance.notes().iter().enumerate() {
         let tag = u32::try_from(index).context("more notes than a render can number")?;
-        match synth_note(tag, performed)? {
+        match synth_note(tag, performed, performance.seconds().get())? {
             Some(note) => notes.push(note),
             None if matches!(performed.sound(), Sound::Drum { .. }) => drums += 1,
             None => fonts += 1,
@@ -219,7 +233,49 @@ pub(crate) fn render(performance: &Performance) -> Result<Rendered> {
 
 #[cfg(test)]
 mod tests {
-    use super::echo_tail;
+    use anyhow::{Context as _, Result};
+    use prosody_cmudict::CmuDict;
+    use prosody_core::mapping::Mappings;
+    use prosody_core::{Fallback, Poem};
+    use prosody_emit::perform::Round;
+    use prosody_emit::{Backend as _, Perform, Style};
+    use prosody_lexicon::EnglishLexicon;
+    use prosody_lts::LetterToSound;
+
+    use super::{echo_tail, once_through};
+
+    #[test]
+    fn a_note_swung_past_the_end_sounds_after_it_in_a_render_played_once() -> Result<()> {
+        // The parity fixture `swung-round`'s poem: its last syllable, "-ing", begins two thirds into
+        // the piece's last beat, and swing 0.9 carries it past the end. A loop plays it at the start
+        // of the next round, where the Performance counts its onset from; a render played once has
+        // no next round, so it sounds a whole piece later than that onset, after the last bar.
+        // Every other note stays where the Performance puts it.
+        let source = "+++\nswing = 0.9\nhumanise = 0\n+++\n\
+                      the morning comes\nthe meadow wakes, and the river is shimmering\n";
+        let poem = Poem::parse(source.to_owned()).context("the poem")?;
+        let header = poem.frontmatter().and_then(|span| span.text(poem.source()));
+        let style = Style::parse_optional(header).context("the header")?;
+        let phonemiser =
+            Fallback::new(CmuDict::new(), LetterToSound::new()).context("the phonemisers")?;
+        let (score, _) =
+            crate::lower_poem(&poem, &phonemiser, &EnglishLexicon::new(), &Mappings::all())?;
+        let performance = Perform::new().render(&score, &style)?;
+        let end = performance.seconds().get();
+        let mut rounded = 0;
+        for note in performance.notes() {
+            let onset = once_through(note, end);
+            if note.round() == Round::Next {
+                rounded += 1;
+                close(onset, note.onset().get() + end);
+                assert!(onset > end, "{onset} is not after the end at {end}");
+            } else {
+                close(onset, note.onset().get());
+            }
+        }
+        assert_eq!(rounded, 1);
+        Ok(())
+    }
 
     fn close(actual: f64, expected: f64) {
         assert!(
