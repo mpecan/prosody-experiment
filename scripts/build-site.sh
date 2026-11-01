@@ -12,6 +12,8 @@
 #                        into web/public by scripts/build-synth.sh and so carried by the page's build
 #   readings/            the recorded readings of the example poems (examples/readings, made by
 #                        scripts/readings/render.mjs): a manifest and an MP3 a line and voice
+#   notices.json         every package the site and the apps ship, with its licence texts
+#                        (scripts/notices.mjs), for the page's Licences dialog
 #
 #   ./scripts/build-site.sh              into target/site
 #   ./scripts/build-site.sh DIR          into DIR
@@ -71,6 +73,8 @@ if [ "$neural" = off ]; then
   echo "build-site: without the neural voices (PROSODY_NEURAL_VOICES=off): no speech-worker.mjs in $dir"
 fi
 cargo run --quiet --release --locked -p prosody-web -- --site "$dir"
+# What the site and the apps ship, and the licence of each, for the page's Licences dialog.
+node scripts/notices.mjs "$dir"
 
 target_dir=$(cargo metadata --format-version 1 --no-deps |
   grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)

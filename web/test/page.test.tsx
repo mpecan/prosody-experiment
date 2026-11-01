@@ -71,15 +71,45 @@ describe('a first visit', () => {
     expect(within(welcome).getByText('github.com/mpecan/prosody-experiment').getAttribute('href'))
       .toBe('https://github.com/mpecan/prosody-experiment');
     expect(within(welcome).getByText('me@prosody.rocks').getAttribute('href')).toBe('mailto:me@prosody.rocks');
-    // The credits link each soundfont licence that ships beside the page (public.test.ts checks
-    // the files are there).
-    const credits = [...document.querySelectorAll('#credits a')].map((a) => a.getAttribute('href'));
-    expect(credits).toEqual([
-      'soundfonts/LICENSES/FluidR3_GM.txt', 'soundfonts/LICENSES/GeneralUser_GS.txt', 'soundfonts/LICENSES/webaudiofontdata.txt',
-    ]);
     fireEvent.click(within(welcome).getByText('Start listening'));
     await waitFor(() => expect(welcome.open).toBe(false));
     expect(localStorage.getItem('prosody.welcomed')).toBe('1');
+  });
+
+  it('leads from the welcome to the licences: every notice the page owes, and the packages it is built with', async () => {
+    const NOTICES = {
+      own: { prosody: 'mit', cmudict: 'cmu' },
+      packages: [
+        { kind: 'crate', name: 'objc2', version: '0.6.5', licence: 'MIT', url: 'https://github.com/madsmtm/objc2', texts: ['objc2'], standard: true },
+        { kind: 'npm', name: 'preact', version: '10.29.8', licence: 'MIT', url: 'https://github.com/preactjs/preact', texts: ['preact'] },
+      ],
+      texts: { mit: 'MIT License\n\nCopyright (c) 2026 Matjaz Domen Pecan', cmu: 'Copyright (C) 1993-2015 Carnegie Mellon University.', objc2: 'MIT License\n\nCopyright (c) Mads Marquart', preact: 'The MIT License (MIT)\n\nCopyright (c) 2015-present Jason Miller' },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: URL | string) => (String(url).endsWith('notices.json')
+      ? new Response(JSON.stringify(NOTICES)) : new Response('', { status: 404 }))));
+    start();
+    const welcome = document.getElementById('welcome') as HTMLDialogElement;
+    fireEvent.click(within(welcome).getByText('licences and notices'));
+    const licences = document.getElementById('licences') as HTMLDialogElement;
+    await waitFor(() => expect(licences.open).toBe(true));
+    expect(welcome.open).toBe(false);
+    // Each soundfont licence that ships beside the page (public.test.ts checks the files are there),
+    // and the drums' sources.
+    const links = [...licences.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(links).toEqual(expect.arrayContaining([
+      'soundfonts/LICENSES/FluidR3_GM.txt', 'soundfonts/LICENSES/GeneralUser_GS.txt', 'soundfonts/LICENSES/webaudiofontdata.txt',
+      'drums/SOURCES.md', 'https://github.com/espeak-ng/espeak-ng',
+    ]));
+    expect(licences.textContent).toContain('Carnegie Mellon');
+    expect(licences.textContent).toContain('CC BY 4.0');
+    // The packages, from notices.json; a row opens on its licence text.
+    await waitFor(() => expect(licences.textContent).toContain('built with 2 open-source packages'));
+    const row = within(licences).getByText('objc2 0.6.5 — MIT').closest('details')!;
+    expect(row.querySelector('pre')).toBeNull();   // drawn only once opened
+    row.open = true;
+    fireEvent(row, new Event('toggle'));
+    await waitFor(() => expect(row.querySelector('pre')?.textContent).toBe('MIT License\n\nCopyright (c) Mads Marquart'));
+    expect(row.textContent).toContain('standard text');
   });
 
   it('says at the top that it is an experiment, and stays closed once seen', () => {

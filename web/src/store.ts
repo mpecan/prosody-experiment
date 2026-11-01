@@ -79,6 +79,8 @@ export const sharedOpened = signal(false);
 /** The share dialog: open, and the link it offers once made. */
 export const shareLink = signal<{ link: string; copied: boolean } | null>(null);
 export const welcomeOpen = signal(false);
+/** The Licences dialog: what the site and the apps are made of, and the notices they owe. */
+export const licencesOpen = signal(false);
 /** How many bars the roll shows. */
 export const rollBars = signal('4');
 /** The beat the Play button breathes on, in seconds, while it plays under the steady pulse. */

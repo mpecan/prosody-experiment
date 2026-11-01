@@ -888,6 +888,16 @@ licence that allows it:
 `manifest.json` repeats each voice's licence. The tool's one dependency, playwright-core 1.64.0,
 is Apache-2.0, and is used only on the machine that renders.
 
+## Notices
+
+The page and the apps carry the notices their parts' licences ask for: **about → licences and
+notices** names who made the words, sounds, voices and fonts and under what terms, and lists every
+package the build ships — each crate the compiler, the synth and the app link (for Android, iOS
+and the browser), and each npm package in the page's bundle — with the licence texts it carries.
+`scripts/notices.mjs` writes that list into the built site (`notices.json`) from `cargo metadata`
+and `web/node_modules`; a package whose published source holds no licence file is given its
+licence's standard text, and is marked so.
+
 ## Development
 
 ```sh

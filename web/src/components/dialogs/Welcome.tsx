@@ -1,7 +1,13 @@
 // The welcome: open on a first visit; once closed it stays closed, and "about" opens it again.
 import { closeWelcome } from '../../actions';
-import { welcomeOpen } from '../../store';
+import { licencesOpen, welcomeOpen } from '../../store';
 import { Dialog } from './Dialog';
+
+// The licences take the welcome's place: one card at a time.
+function openLicences(): void {
+  closeWelcome();
+  licencesOpen.value = true;
+}
 
 export function Welcome() {
   return (
@@ -28,13 +34,11 @@ export function Welcome() {
         <p class="small">How it works, and the source: <a href="https://github.com/mpecan/prosody-experiment"
           rel="noopener" target="_blank">github.com/mpecan/prosody-experiment</a>. Questions, poems,
           ideas: <a href="mailto:me@prosody.rocks">me@prosody.rocks</a>.</p>
-        {/* The soundfonts' recordings ship with the page, and their notices with them. */}
-        <p class="small" id="credits">The instruments are recordings from FluidR3 GM, © Frank Wen
-          (<a href="soundfonts/LICENSES/FluidR3_GM.txt" target="_blank">MIT licence</a>), and GeneralUser
-          GS by S. Christian Collins (<a href="soundfonts/LICENSES/GeneralUser_GS.txt" target="_blank">its
-          licence</a>), by way of the webaudiofont files, © Srgy Surkv
-          (<a href="soundfonts/LICENSES/webaudiofontdata.txt" target="_blank">MIT licence</a>). The drums
-          are in the public domain.</p>
+        {/* What the page is made of travels with it, and its notices with that (Licences.tsx). */}
+        <p class="small" id="credits">The instruments are recordings from FluidR3 GM and GeneralUser GS;
+          the drums are in the public domain; the pronunciations come from the CMU Pronouncing
+          Dictionary. Who made what, and under what terms:{' '}
+          <button type="button" class="link" id="open-licences" onClick={openLicences}>licences and notices</button>.</p>
       </div>
     </Dialog>
   );

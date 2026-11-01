@@ -27,6 +27,26 @@ test('compiles the opening poem in the browser, under A and then B', async ({ pa
   await expect(page.locator('#scoreRows tr.total').first()).toContainText('interest');
 });
 
+test('carries its licences: from "about" to every package the build ships, each with its texts', async ({ page }) => {
+  await open(page);
+  await page.click('#about');
+  await page.click('#open-licences');
+  const licences = page.locator('#licences');
+  await expect(licences).toBeVisible();
+  // notices.json, as scripts/notices.mjs wrote it: the crates the app links, and the page's packages.
+  await expect(licences).toContainText(/built with \d{3} open-source packages/);
+  for (const name of ['tauri ', 'cpal ', 'preact ', '@fontsource/spectral ']) {
+    await expect(licences.locator('#packages summary', { hasText: name }).first()).toBeVisible();
+  }
+  const font = licences.locator('#packages details', { hasText: '@fontsource/spectral' });
+  await font.locator('summary').click();
+  await expect(font.locator('pre').first()).toContainText('SIL Open Font License');
+  // The licences the dialog links are beside the page.
+  for (const href of ['soundfonts/LICENSES/FluidR3_GM.txt', 'drums/SOURCES.md']) {
+    expect((await page.request.get(href)).ok()).toBe(true);
+  }
+});
+
 test('reads an example poem in its own language, from its recordings', async ({ page }) => {
   await open(page);
   await page.selectOption('#preset', 'preseren-zdravljica');
