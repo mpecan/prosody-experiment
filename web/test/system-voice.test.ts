@@ -73,6 +73,7 @@ describe('in the Android app', () => {
   const calls: { command: string; args?: Record<string, unknown> }[] = [];
   let reading: typeof import('../src/reading');
   let store: typeof import('../src/store');
+  let piece: typeof import('../src/piece')['piece'];
   const agent = navigator.userAgent;
 
   beforeAll(async () => {
@@ -99,6 +100,7 @@ describe('in the Android app', () => {
     vi.resetModules();
     reading = await import('../src/reading');
     store = await import('../src/store');
+    piece = (await import('../src/piece')).piece;
     const { useFixture } = await import('./site.fixture');
     useFixture();
     store.language.value = 'en';
@@ -147,5 +149,36 @@ describe('in the Android app', () => {
     reading.ensureEngine();
     expect(calls.at(-1)?.command).toBe('speech_voices');
     vi.restoreAllMocks();
+  });
+
+  it('reads with the phone\'s own voice by default', () => {
+    expect(reading.READING_DEFAULTS.engine).toBe('system');
+    expect(reading.readSaved(null, null).engine).toBe('system');
+    expect(reading.readSaved({ engine: 'browser' }, null).engine).toBe('system');
+  });
+
+  it('hands a line to the phone\'s voice until the chosen voice has rendered it, then takes it back', async () => {
+    await reading.engines.system.load();
+    const kokoro = reading.engines.kokoro;
+    kokoro.state = 'ready';
+    kokoro.listed = [{ id: 'af_heart', name: 'Heart', lang: 'en-us' }];
+    // Kokoro's line takes as long as the test says: the phone's must not wait behind it.
+    let finish!: () => void;
+    const slow = new Promise<void>((resolve) => { finish = resolve; });
+    const real = kokoro.render;
+    kokoro.render = async () => {
+      await slow;
+      return new FakeBuffer({ length: 24000, sampleRate: 24000 }) as unknown as import('../src/reading/engines').Rendered;
+    };
+    store.readingSettings.value = { ...store.readingSettings.value, engine: 'kokoro', pace: 'natural' };
+    store.hearing.value = 'A';
+    const poem = { lines: [{ line: 0, text: 'Tyger Tyger', pace: 1 }], cues: [] } as unknown as import('../src/answers').Reading;
+    piece.readings = { A: poem, B: null, poem: '' };
+    reading.prerender();
+    await vi.waitFor(() => expect(reading.castOf(poem, 'natural').get(0)).toBe('system|en-gb-x-gba-local|1.000|Tyger Tyger'));
+    finish();
+    await vi.waitFor(() => expect(reading.castOf(poem, 'natural').get(0)).toBe('kokoro|af_heart|1.000|Tyger Tyger'));
+    kokoro.render = real;
+    kokoro.state = 'idle';
   });
 });

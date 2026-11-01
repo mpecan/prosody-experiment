@@ -62,7 +62,9 @@ const readings = () => piece.readings;
 
 // ---- The reading's own settings, remembered per browser like the voice picker ----
 
-export const READING_DEFAULTS: ReadingSettings = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };
+// In the Android app the phone's own voice reads by default (the user's decision, 2026-11-01): on
+// time from the first Play, in the phone's language, with nothing to download.
+export const READING_DEFAULTS: ReadingSettings = { engine: SYSTEM_VOICE ? 'system' : 'recorded', pace: 'natural', level: 1, voices: {} };
 
 /** The reading settings saved, read defensively: anything unknown falls back to the default, and so
  * does an engine this build does not offer (a neural voice saved before, in a build without them). */
@@ -177,7 +179,8 @@ export function ensureEngine(retry = false): void {
   let shown = '';
   engine.load((progress: Progress) => {
     if (!chosenEngine(engine)) return;
-    if (engine.state === 'ready' && renderingJob && (renderingJob.engine !== engine.name || renderingJob.voice !== voiceOf(engine.name))) return;
+    const busy = renderingJobs.get(engine.name);
+    if (engine.state === 'ready' && busy && busy.voice !== voiceOf(engine.name)) return;
     // Said in the status bar as it moves, a whole percent at a time; logged only when it is done.
     const said = `${name}: ${progress.text}${progress.fraction != null ? ' (' + Math.round(progress.fraction * 100) + '%)' : ''}`;
     if (said !== shown) { noteReading(shown = said, false, true); progressShown = true; }
@@ -250,8 +253,11 @@ interface Job {
 const renders = new Map<string, Entry>();   // engine|voice|speed|text → { buffer, promise }
 const RENDERS_KEPT = 600;
 let renderQueue: Job[] = [];
-let rendering = false;
-let renderingJob: Job | null = null;     // the job the engine is rendering now
+// Each engine renders one line at a time, and the engines side by side: each is a process or
+// worker of its own, and a fast stand-in's line (the phone's own voice, in a fraction of a second)
+// must not wait behind a neural voice's (seconds).
+const renderingJobs = new Map<EngineName, Job>();   // the job each engine is rendering now
+const isRendering = (key: string) => [...renderingJobs.values()].some((job) => job.key === key);
 // A pending line is in `renders` exactly while its job is queued or rendering: a job dropped from
 // the queue (no longer to be read: the poem, engine, voice or pace changed) takes its entry with it
 // and rejects its promise as `dropped`, so asking for that line again queues it afresh rather than
@@ -286,7 +292,7 @@ function whenRendered(engine: EngineName, voice: string, speed: number, text: st
   if (entry?.direct) return entry.promise;   // a recording being fetched (below)
   // An entry neither queued nor rendering has lost its job (it cannot, by `dropJob`, but a line
   // waiting on it would wait for good): it is asked for afresh.
-  if (entry && renderingJob?.key !== key && !renderQueue.some((job) => job.key === key)) {
+  if (entry && !isRendering(key) && !renderQueue.some((job) => job.key === key)) {
     renders.delete(key);
     entry = undefined;
   }
@@ -319,7 +325,7 @@ function whenRendered(engine: EngineName, voice: string, speed: number, text: st
     const at = renderQueue.findIndex((job) => job.key === key);
     if (at > 0) renderQueue.unshift(...renderQueue.splice(at, 1));
   }
-  void pumpRenders();
+  void pumpRenders(engine);
   return entry.promise;
 }
 /** A line is ready: the player hears of it, and of who reads now (a refit may move a fitted line onto
@@ -337,34 +343,31 @@ function trimRenders(): void {
     renders.delete(oldest);
   }
 }
-async function pumpRenders(): Promise<void> {
-  if (rendering) return;
-  rendering = true;
-  try {
-    while (renderQueue.length) {
-      const job = renderQueue.shift()!;
-      const engine = engines[job.engine];
-      if (engine.state !== 'ready' || !engine.render) { renders.delete(job.key); job.entry.reject(new Error('not loaded')); continue; }
-      renderingJob = job;
-      try {
-        const buffer = await engine.render(job.text, { voice: job.voice, speed: job.speed });
-        job.entry.buffer = buffer;
-        job.entry.resolve(buffer);
-        // A voice's download shown while it rendered has done its work.
-        if (progressShown) { progressShown = false; noteReading(speaker().why, speaker().bad); }
-        afterRender(job, buffer);
-        arrived(job.key, buffer);
-        console.log(`[reading] rendered with ${job.engine} ${job.voice} at ${Number(job.speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${((buffer.took ?? 0) / 1000).toFixed(2)} s: ${job.text}`);
-      } catch (error) {
-        renders.delete(job.key);
-        job.entry.reject(error as Error);
-        console.warn(`[reading] ${job.engine} could not render "${job.text}":`, error);
-      } finally {
-        renderingJob = null;
-      }
+async function pumpRenders(name: EngineName): Promise<void> {
+  if (renderingJobs.has(name)) return;
+  for (;;) {
+    const at = renderQueue.findIndex((queued) => queued.engine === name);
+    if (at < 0) break;
+    const job = renderQueue.splice(at, 1)[0]!;
+    const engine = engines[name];
+    if (engine.state !== 'ready' || !engine.render) { renders.delete(job.key); job.entry.reject(new Error('not loaded')); continue; }
+    renderingJobs.set(name, job);
+    try {
+      const buffer = await engine.render(job.text, { voice: job.voice, speed: job.speed });
+      job.entry.buffer = buffer;
+      job.entry.resolve(buffer);
+      // A voice's download shown while it rendered has done its work.
+      if (progressShown) { progressShown = false; noteReading(speaker().why, speaker().bad); }
+      afterRender(job, buffer);
+      arrived(job.key, buffer);
+      console.log(`[reading] rendered with ${job.engine} ${job.voice} at ${Number(job.speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${((buffer.took ?? 0) / 1000).toFixed(2)} s: ${job.text}`);
+    } catch (error) {
+      renders.delete(job.key);
+      job.entry.reject(error as Error);
+      console.warn(`[reading] ${job.engine} could not render "${job.text}":`, error);
+    } finally {
+      renderingJobs.delete(name);
     }
-  } finally {
-    rendering = false;
   }
   trimRenders();
 }
@@ -446,7 +449,7 @@ function fitWhenRendered(key: string, entry: Entry | undefined, job: Omit<Job, '
   if (!entry || refits.has(key)) return;
   if (entry.buffer) { afterRender(job, entry.buffer); return; }
   if (entry.direct) { entry.promise.then((buffer) => { if (!refits.has(key)) afterRender(job, buffer); }, () => {}); return; }
-  const queued = renderingJob?.key === key ? renderingJob : renderQueue.find((queuedJob) => queuedJob.key === key);
+  const queued = [...renderingJobs.values()].find((busy) => busy.key === key) ?? renderQueue.find((queuedJob) => queuedJob.key === key);
   if (queued && !queued.room) queued.room = job.room;
 }
 // The speed a fitted cue is rendered at for this engine and voice: refitted if it was too long.
@@ -480,6 +483,17 @@ export function prerender(): void {
         keys.add(key);
         wanted.push({ key, engine, voice, text, speed: s, room: r });
       }
+      // The phone's own voice renders the line too, in a fraction of a second, to be read while
+      // the slower voice's rendering is not yet ready (castOf).
+      const back = handsOver(engine) ? voiceOf('system') : null;
+      if (back) {
+        const speed = baseSpeed('system', item);
+        const key = renderKey('system', back, speed, text);
+        if (!keys.has(key)) {
+          keys.add(key);
+          wanted.push({ key, engine: 'system', voice: back, text, speed, room: room ?? null });
+        }
+      }
     }
   }
   renderQueue = renderQueue.filter((job) => {
@@ -494,6 +508,23 @@ export function prerender(): void {
 
 // ---- Who reads each line, for the player ----
 
+// A live voice that hands its lines over (the user's decision, 2026-11-01): where the phone's own
+// voice stands in, a line the chosen voice has not rendered yet is read by the phone's, which has,
+// so it comes on time rather than late; the chosen voice takes each line over as its rendering
+// arrives (arrived → recast). Kokoro just loaded renders a line in seconds on a phone, so without
+// this the first line it read was the fourth. A recording is fetched in milliseconds: it waits.
+function handsOver(engine: EngineName): boolean {
+  return engine !== 'system' && engine !== 'recorded' && engine !== 'browser' && standIn() === 'system';
+}
+/** `key`, the line as the chosen voice renders it — or, while that is not ready, the phone's own
+ * voice's rendering of it at `speed`, if that is. */
+function orStandIn(key: string, engine: EngineName, text: string, speed: number): string {
+  if (!handsOver(engine) || renderedFor(key)) return key;
+  const voice = voiceOf('system');
+  const other = voice ? renderKey('system', voice, speed, text) : null;
+  return other && renderedFor(other) ? other : key;
+}
+
 /** Who reads each line of `reading` at `pace`, by line number: the render key of the rendering the
  * player places (the refitted one, at the fitted pace, once it is ready), or null for the browser's
  * own voice. The player places a line from this (crates/prosody-player's reader). */
@@ -505,12 +536,15 @@ export function castOf(reading: Reading | null, pace: Pace = settingsNow().pace)
       const who = speakerOf(cue.text);
       if (who.engine === 'browser' || !who.voice) { cast.set(cue.line, null); continue; }
       const base = baseSpeed(who.engine, { speed: cue.rate, pace: cue.pace });
-      cast.set(cue.line, renderKey(who.engine, who.voice, fittedSpeed(who.engine, who.voice, cue, base), cue.text));
+      const key = renderKey(who.engine, who.voice, fittedSpeed(who.engine, who.voice, cue, base), cue.text);
+      const back = voiceOf('system');
+      cast.set(cue.line, orStandIn(key, who.engine, cue.text, back ? fittedSpeed('system', back, cue) : cue.rate));
     }
   } else {
     for (const line of reading.lines) {
       const who = speakerOf(line.text);
-      cast.set(line.line, who.engine === 'browser' || !who.voice ? null : renderKey(who.engine, who.voice, line.pace, line.text));
+      cast.set(line.line, who.engine === 'browser' || !who.voice ? null
+        : orStandIn(renderKey(who.engine, who.voice, line.pace, line.text), who.engine, line.text, line.pace));
     }
   }
   return cast;
