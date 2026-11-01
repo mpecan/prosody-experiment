@@ -12,7 +12,12 @@ settingGroups:
     base:
       PRODUCT_NAME: Prosody
       PRODUCT_BUNDLE_IDENTIFIER: rocks.prosody
-      DEVELOPMENT_TEAM: A98UV6DX7K
+    # The debug build installs beside the release one, as on Android (rocks.prosody.debug). The
+    # development team is not written here: a device build takes it from APPLE_DEVELOPMENT_TEAM
+    # (`mise run ios:build:device`; the Tauri CLI reads the same variable).
+    configs:
+      debug:
+        PRODUCT_BUNDLE_IDENTIFIER: rocks.prosody.debug
 targetTemplates:
   app:
     type: application
@@ -49,6 +54,9 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
+        # Plays on in the background and with the screen locked, as long as it plays (the native
+        # player, with the audio session's `playback` category: docs/player.md §14).
+        UIBackgroundModes: [audio]
     entitlements:
       path: prosody-app_iOS/prosody-app_iOS.entitlements
     scheme:
@@ -75,21 +83,30 @@ targets:
       - sdk: Security.framework
       - sdk: UIKit.framework
       - sdk: WebKit.framework
+      # The media plugin's (src-tauri/ios): the audio session, Now Playing and the remote commands.
+      - sdk: AVFoundation.framework
+      - sdk: MediaPlayer.framework
     preBuildScripts:
       - script: |
           if [ -n "$TAURI_CLI_PORT" ]; then
               cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
           else
+              # The configuration is cargo's profile: debug, or release with --release. tauri/custom-protocol
+              # serves the page built into the app (frontendDist), as the Tauri CLI's builds do; without
+              # it the app loads devUrl, a Vite dev server on this machine.
+              release=""
+              if [ "$CONFIGURATION" = "release" ]; then release="--release"; fi
               if [ "$PLATFORM_NAME" = "iphonesimulator" ]; then
-                  cargo build --manifest-path "$PROJECT_DIR/../../Cargo.toml" --target-dir "$PROJECT_DIR/../../target" -p prosody-app --target aarch64-apple-ios-sim
+                  cargo build --manifest-path "$PROJECT_DIR/../../Cargo.toml" --target-dir "$PROJECT_DIR/../../target" -p prosody-app --target aarch64-apple-ios-sim --locked --features tauri/custom-protocol $release
                   mkdir -p "$PROJECT_DIR/Externals/arm64/$CONFIGURATION"
                   cp "$PROJECT_DIR/../../target/aarch64-apple-ios-sim/$CONFIGURATION/libapp.a" "$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a"
               else
-                  cargo build --manifest-path "$PROJECT_DIR/../../Cargo.toml" --target-dir "$PROJECT_DIR/../../target" -p prosody-app --target aarch64-apple-ios
+                  cargo build --manifest-path "$PROJECT_DIR/../../Cargo.toml" --target-dir "$PROJECT_DIR/../../target" -p prosody-app --target aarch64-apple-ios --locked --features tauri/custom-protocol $release
                   mkdir -p "$PROJECT_DIR/Externals/arm64/$CONFIGURATION"
                   cp "$PROJECT_DIR/../../target/aarch64-apple-ios/$CONFIGURATION/libapp.a" "$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a"
               fi
           fi
         name: Build Rust Code
         basedOnDependencyAnalysis: false
+        outputFiles:
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a

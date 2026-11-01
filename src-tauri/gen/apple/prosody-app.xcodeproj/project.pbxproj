@@ -15,24 +15,34 @@
 		4E9442A63EF20F0CA1575FB4 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C5BF95078515D2C96D5A046D /* CoreGraphics.framework */; };
 		A303993A6B75917F7FFB3006 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 7E0756765887565F61804A13 /* main.mm */; };
 		AA503040518B22FB3840C411 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EB96B7806137A4DFDBDB1ACD /* MetalKit.framework */; };
+		AF94BDD01CE1066B6B68157C /* MediaPlayer.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 64B591F0EB06CD4BB092DD69 /* MediaPlayer.framework */; };
 		BC015D87E4D19A4619589BF5 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 232A555066E2A255BE19AE94 /* WebKit.framework */; };
+		C9B41172FD13D30798DA8D8C /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1CFF50019B22BEB3DA8B2207 /* AVFoundation.framework */; };
 		DD81B77E6AD49A4EF1760058 /* Metal.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CEB68816F201A058BF57A0F2 /* Metal.framework */; };
 		F11BEA44AB82B7D446CA7C21 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 5127D28E857A571B21EF38A7 /* assets */; };
 		F8837DEAF2C22559BF802440 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B66F98BBF9B685C3F20E0B97 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		08ECC47F681A06DCF557115C /* tests.rs */ = {isa = PBXFileReference; path = tests.rs; sourceTree = "<group>"; };
+		0C70E745A303240E077752F4 /* rounds.rs */ = {isa = PBXFileReference; path = rounds.rs; sourceTree = "<group>"; };
 		1B3D182D053B92E43CFB7F28 /* prosody-app_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "prosody-app_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1CFF50019B22BEB3DA8B2207 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
 		232A555066E2A255BE19AE94 /* WebKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WebKit.framework; path = System/Library/Frameworks/WebKit.framework; sourceTree = SDKROOT; };
+		30B2A843948F537C2ACC511D /* host.rs */ = {isa = PBXFileReference; path = host.rs; sourceTree = "<group>"; };
 		4A2079F318AA1EDA33EB2915 /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		5127D28E857A571B21EF38A7 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = assets; sourceTree = SOURCE_ROOT; };
 		582FE8E934C5710BFE76C7AC /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		64B591F0EB06CD4BB092DD69 /* MediaPlayer.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MediaPlayer.framework; path = System/Library/Frameworks/MediaPlayer.framework; sourceTree = SDKROOT; };
 		7068AD2E03895EA7CAA373A8 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		7E0756765887565F61804A13 /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		7F3F8ABC1B4EC34D9A455DC5 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		8D23BD5984FC21C377DFE11B /* mod.rs */ = {isa = PBXFileReference; path = mod.rs; sourceTree = "<group>"; };
 		B66F98BBF9B685C3F20E0B97 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C178AADA680DF0218E5FE2D6 /* prosody-app_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "prosody-app_iOS.entitlements"; sourceTree = "<group>"; };
 		C5BF95078515D2C96D5A046D /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		C71E17B5A0160BB657FF002E /* output.rs */ = {isa = PBXFileReference; path = output.rs; sourceTree = "<group>"; };
+		CC0206E469A501A53B0A0C91 /* wire.rs */ = {isa = PBXFileReference; path = wire.rs; sourceTree = "<group>"; };
 		CEB68816F201A058BF57A0F2 /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 		D35B3024429AE5A6E26678CC /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		DFC634D82201DEE314F999BF /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
@@ -40,6 +50,7 @@
 		EB96B7806137A4DFDBDB1ACD /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		F503722F0465E0904250D77B /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		F703324E35B8B5A8D8026921 /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
+		FB2B3009E1FAE6CBC2349F37 /* media.rs */ = {isa = PBXFileReference; path = media.rs; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,6 +66,8 @@
 				02D7394879DAE29F1A554346 /* Security.framework in Frameworks */,
 				2425364835D64C1FA886E3F0 /* UIKit.framework in Frameworks */,
 				BC015D87E4D19A4619589BF5 /* WebKit.framework in Frameworks */,
+				C9B41172FD13D30798DA8D8C /* AVFoundation.framework in Frameworks */,
+				AF94BDD01CE1066B6B68157C /* MediaPlayer.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -100,14 +113,37 @@
 			);
 			sourceTree = "<group>";
 		};
+		71D77CD99CB0D789994CF291 /* player */ = {
+			isa = PBXGroup;
+			children = (
+				30B2A843948F537C2ACC511D /* host.rs */,
+				8D23BD5984FC21C377DFE11B /* mod.rs */,
+				C71E17B5A0160BB657FF002E /* output.rs */,
+				0C70E745A303240E077752F4 /* rounds.rs */,
+				CC0206E469A501A53B0A0C91 /* wire.rs */,
+				7BD7FD4111BB5D1DF22A27F4 /* rounds */,
+			);
+			path = player;
+			sourceTree = "<group>";
+		};
 		79172B9D4E4A115C024B48FB /* src */ = {
 			isa = PBXGroup;
 			children = (
 				7068AD2E03895EA7CAA373A8 /* lib.rs */,
 				F703324E35B8B5A8D8026921 /* main.rs */,
+				FB2B3009E1FAE6CBC2349F37 /* media.rs */,
+				71D77CD99CB0D789994CF291 /* player */,
 			);
 			name = src;
 			path = ../../src;
+			sourceTree = "<group>";
+		};
+		7BD7FD4111BB5D1DF22A27F4 /* rounds */ = {
+			isa = PBXGroup;
+			children = (
+				08ECC47F681A06DCF557115C /* tests.rs */,
+			);
+			path = rounds;
 			sourceTree = "<group>";
 		};
 		E0F88F1E0648F79F374C256B /* prosody-app */ = {
@@ -130,8 +166,10 @@
 		F74191ED4D2975165473C0FC /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				1CFF50019B22BEB3DA8B2207 /* AVFoundation.framework */,
 				C5BF95078515D2C96D5A046D /* CoreGraphics.framework */,
 				DFC634D82201DEE314F999BF /* libapp.a */,
+				64B591F0EB06CD4BB092DD69 /* MediaPlayer.framework */,
 				CEB68816F201A058BF57A0F2 /* Metal.framework */,
 				EB96B7806137A4DFDBDB1ACD /* MetalKit.framework */,
 				F503722F0465E0904250D77B /* QuartzCore.framework */,
@@ -174,9 +212,6 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
-					CE97BD5C8FD57CCB82890943 = {
-						DevelopmentTeam = A98UV6DX7K;
-					};
 				};
 			};
 			buildConfigurationList = C649F853E53ACE9C696BA5E6 /* Build configuration list for PBXProject "prosody-app" */;
@@ -214,6 +249,7 @@
 /* Begin PBXShellScriptBuildPhase section */
 		1368C9DD899B90B503BA11D8 /* Build Rust Code */ = {
 			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = (
 			);
@@ -225,10 +261,11 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ -n \"$TAURI_CLI_PORT\" ]; then\n    cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}\nelse\n    if [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n        cargo build --manifest-path \"$PROJECT_DIR/../../Cargo.toml\" --target-dir \"$PROJECT_DIR/../../target\" -p prosody-app --target aarch64-apple-ios-sim\n        mkdir -p \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION\"\n        cp \"$PROJECT_DIR/../../target/aarch64-apple-ios-sim/$CONFIGURATION/libapp.a\" \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a\"\n    else\n        cargo build --manifest-path \"$PROJECT_DIR/../../Cargo.toml\" --target-dir \"$PROJECT_DIR/../../target\" -p prosody-app --target aarch64-apple-ios\n        mkdir -p \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION\"\n        cp \"$PROJECT_DIR/../../target/aarch64-apple-ios/$CONFIGURATION/libapp.a\" \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a\"\n    fi\nfi\n";
+			shellScript = "if [ -n \"$TAURI_CLI_PORT\" ]; then\n    cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths \"${FRAMEWORK_SEARCH_PATHS:?}\" --header-search-paths \"${HEADER_SEARCH_PATHS:?}\" --gcc-preprocessor-definitions \"${GCC_PREPROCESSOR_DEFINITIONS:-}\" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}\nelse\n    # The configuration is cargo's profile: debug, or release with --release. tauri/custom-protocol\n    # serves the page built into the app (frontendDist), as the Tauri CLI's builds do; without\n    # it the app loads devUrl, a Vite dev server on this machine.\n    release=\"\"\n    if [ \"$CONFIGURATION\" = \"release\" ]; then release=\"--release\"; fi\n    if [ \"$PLATFORM_NAME\" = \"iphonesimulator\" ]; then\n        cargo build --manifest-path \"$PROJECT_DIR/../../Cargo.toml\" --target-dir \"$PROJECT_DIR/../../target\" -p prosody-app --target aarch64-apple-ios-sim --locked --features tauri/custom-protocol $release\n        mkdir -p \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION\"\n        cp \"$PROJECT_DIR/../../target/aarch64-apple-ios-sim/$CONFIGURATION/libapp.a\" \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a\"\n    else\n        cargo build --manifest-path \"$PROJECT_DIR/../../Cargo.toml\" --target-dir \"$PROJECT_DIR/../../target\" -p prosody-app --target aarch64-apple-ios --locked --features tauri/custom-protocol $release\n        mkdir -p \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION\"\n        cp \"$PROJECT_DIR/../../target/aarch64-apple-ios/$CONFIGURATION/libapp.a\" \"$PROJECT_DIR/Externals/arm64/$CONFIGURATION/libapp.a\"\n    fi\nfi\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -311,7 +348,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "prosody-app_iOS/prosody-app_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = A98UV6DX7K;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -344,7 +380,6 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "prosody-app_iOS/prosody-app_iOS.entitlements";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = A98UV6DX7K;
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
 				FRAMEWORK_SEARCH_PATHS = (
@@ -358,7 +393,7 @@
 				);
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = rocks.prosody;
+				PRODUCT_BUNDLE_IDENTIFIER = rocks.prosody.debug;
 				PRODUCT_NAME = Prosody;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";

@@ -16,9 +16,18 @@
 mod media;
 mod player;
 
+/// Where a phone enters the app: `start_app`, which iOS's `main.mm` calls, and Android's JNI entry.
+#[cfg(mobile)]
+#[allow(missing_docs)] // the entry point's macro adds `start_app` (iOS), which it cannot document
+mod entry {
+    #[tauri::mobile_entry_point]
+    fn start() {
+        super::run();
+    }
+}
+
 /// Opens the app's window on the built site. A failure to start is logged and ends the process:
 /// there is nothing to show without the window.
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())

@@ -62,7 +62,7 @@ impl Drop for Running {
 
 impl Native {
     /// What shows the notification and the lock screen's controls.
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))] // only Android's media bridge sets one
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))] // only a phone's media bridge sets one
     pub(crate) fn set_media(&self, media: Arc<dyn Media>) {
         *self.media.lock().unwrap_or_else(PoisonError::into_inner) = media;
     }
@@ -176,7 +176,7 @@ impl Native {
     }
 
     /// A button of the notification, the lock screen or a headset ([`Shared::button`]).
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))] // only Android's media session calls it
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))] // only a phone's media buttons call it
     pub(crate) fn button(&self, action: &str) {
         let running = self.running.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(running) = running.as_ref() else {
@@ -206,12 +206,25 @@ fn lead_frames(lead: f64, rate: u32) -> Result<u64, String> {
         .ok_or_else(|| format!("a lead of {lead} s is not a lead"))
 }
 
+/// How often a debug build logs the output's state while it plays.
+const SAY_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The render thread: a round every [`ROUND`] while something plays, or sooner when a command
 /// wakes it; asleep until one does while nothing plays. It holds the output, and drops it as it ends.
 fn render(shared: &Arc<Shared>, spent: &Receiver<Vec<f32>>, output: &mut impl Sink) {
     let mut rounds = Rounds::default();
+    let mut said = Instant::now();
     while !shared.quit.load(Ordering::Relaxed) {
-        match rounds.round(shared, spent, output) {
+        let wait = rounds.round(shared, spent, output);
+        // Debug builds say how the output is doing every few seconds while it plays: the only view
+        // of it where the web view cannot be watched (a simulator, the screen off).
+        if cfg!(debug_assertions) && said.elapsed() >= SAY_EVERY {
+            said = Instant::now();
+            if let Some(summary) = shared.status.summary() {
+                log::info!("player: {summary}");
+            }
+        }
+        match wait {
             Wait::Round => std::thread::park_timeout(ROUND),
             Wait::Asleep => std::thread::park(),
         }

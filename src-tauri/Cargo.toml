@@ -16,6 +16,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2.6.3", default-features = false , features = [] }
 
+# Builds and links the app's own Swift plugin for iOS (build.rs, `ios/`): `link_apple_library` is how
+# the tauri crate links its own Swift API and every Tauri plugin links its Swift. Not new to the
+# build: tauri and tauri-build already depend on it with this feature. Hand-rolling it would mean
+# driving `swift build` per target and SDK, and knowing the Swift runtime's link flags, ourselves.
+[target.'cfg(target_os = "macos")'.build-dependencies]
+tauri-utils = { version = "~2.10.2", features = ["build-2"] }
+
 [dependencies]
 tauri = { version = "2.11.3", default-features = false, features = ["wry"] }
 tauri-plugin-log = "2"

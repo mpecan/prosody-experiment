@@ -1,10 +1,11 @@
 # The player — design
 
 *Draft, 2026-10-31. Status: steps 1 (the Performance), 2 (first sound), 3 (everything the text
-asks for), 4 (the reading, and the Prosody player the only one) and 5 for Android (the native
-player, with the screen off and lock-screen controls; iOS later) built. The open questions of §8
+asks for), 4 (the reading, and the Prosody player the only one) and 5 for Android and iOS (the
+native player, with the screen off and lock-screen controls) built. The open questions of §8
 are decided (§8). What building step 1 changed in this design is in §9, step 2 in §10, step 3 in
-§11, with the measurements against Strudel, step 4 in §12 and step 5 in §13.*
+§11, with the measurements against Strudel, step 4 in §12, step 5 in §13, and step 5 for iOS in
+§14.*
 
 Prosody plays a poem today by writing Strudel text and handing it to Strudel's runtime
 (`@strudel/web`, its scheduler and the `superdough` synth). This document designs a player of
@@ -708,3 +709,99 @@ departs from §5 and §7 above, and why:
     timer runs only while something plays — before, both ran for as long as the tab was open, where
     the app's native player parks.
   - CI's `app` job installs ALSA's headers (`libasound2-dev`): cpal's Linux backend links it.
+
+## 14. What building step 5 changed, for iOS
+
+The iOS app is the Android app's twin: the same page, the same native player (`src-tauri/src/player`,
+unchanged but for two `cfg`s), the same two media commands. What is iOS's own is
+`src-tauri/ios` (a Swift package: `MediaPlugin.swift`), `src-tauri/build.rs` (which builds and links
+it), `src-tauri/tauri.ios.conf.json`, the Xcode project under `src-tauri/gen/apple` (made by `cargo
+tauri ios init` from its `project.yml`, which is the file to edit), and the `ios:*` tasks.
+
+- **The output is cpal's Core Audio backend**, a RemoteIO unit under the shared `AVAudioSession`;
+  nothing in the player changed for it. cpal watches the session itself: an interruption stops the
+  unit (and starts it again if iOS says it should resume), and a route change or a media-services
+  reset reaches the error callback, which marks the output lost and the render thread reopens it,
+  as on Android. A route change mid-play therefore costs what was in flight and one counted glitch.
+- **Playing on in the background is the session's category and one Info.plist key.** iOS has no
+  foreground service and needs no wake lock: an app in the `playback` category with
+  `UIBackgroundModes: audio` keeps running for as long as its audio unit plays. `MediaPlugin` sets
+  the category when it loads and again at each Play (a web view's own audio may have changed it;
+  setting what is already set changes nothing), and activates the session at each Play. Not mixed
+  with others: starting pauses another app's music, as Android's audio focus does. The category is
+  also what makes it heard with the silent switch on.
+- **A call, Siri or an alarm stops the music; headphones pulled out stop it.** An interruption that
+  begins while it plays, and a route change whose reason is `oldDeviceUnavailable`, send the native
+  player a `pause`, which stops it at once (the page may be asleep) and tells the page — the same
+  path as Android's loss of audio focus and its "becoming noisy". When an interruption ends nothing
+  resumes: Prosody has no pause to resume from. A session that will not activate (a call is on)
+  stops the music too, as Android's refused focus does.
+- **The lock screen is Now Playing and the remote commands.** Play, Pause, Stop and the toggle go
+  down the channel Rust gave the plugin, exactly as the Android media session's buttons do: a stop
+  stops natively, a Play asks the page (kept 5 s, §13). After a stop the Now Playing entry stays, at
+  rate 0, so the lock screen shows Play — as Android leaves its notification. The session is not
+  deactivated on a stop for the same reason, which means another app's music is not told it may
+  resume; a Stop is followed within a second by the output pausing (§13), so the audio hardware
+  does not stay busy.
+- **The Swift is a Swift package linked by the app's build script, as Tauri's plugins link theirs.**
+  `build.rs`, for an iOS target only, copies the tauri crate's Swift API (`Tauri`, which every
+  plugin's Swift imports) to `src-tauri/.tauri/tauri-api` and builds `src-tauri/ios` with
+  `tauri_utils::build::link_apple_library`, the helper tauri uses for its own Swift. That is the one
+  new entry in the app's manifest, a macOS-only build dependency on a crate tauri and tauri-build
+  already build with the same feature; hand-rolling it would mean driving `swift build` per SDK and
+  getting the Swift runtime's link flags right ourselves. Rust binds the plugin with
+  `tauri::ios_plugin_binding!` and registers it with `register_ios_plugin` — no `unsafe` in the app.
+  The first build fetches swift-rs from GitHub (Tauri's Swift package depends on it by URL).
+- **The neural voices are switched off on iOS: `PROSODY_NEURAL_VOICES=off`.** Kokoro's phonemiser,
+  piper-wasm and Kitten's phonemiser carry eSpeak NG (GPL-3), and all three fetch their code from a
+  CDN at run time; neither fits the App Store. `scripts/build-site.sh` reads the variable, passes it
+  to Vite (`VITE_PROSODY_NEURAL_VOICES`), and leaves `speech-worker.mjs` out of the site; the page
+  (`reading/engines.ts`, `NEURAL_VOICES`, `OFFERED_ENGINES`) then offers only the recorded readings
+  and the browser's (on iOS, the system's) voice, falls back to the recordings if a neural engine
+  was saved, and says nothing of Piper or Kokoro. It is set in one place, the `site:ios` task in
+  `mise.toml`, which `tauri.ios.conf.json`'s `beforeBuildCommand` and `ios:build` run, into
+  `target/site-ios` so the Android site (`target/site`, every engine) is not overwritten. Flip it
+  to `on` there to build the iOS app with them. The web and Android builds do not set it and are
+  unchanged.
+- **The Xcode build phase builds the Rust library itself, with `tauri/custom-protocol`.** The
+  committed project's phase runs `cargo build` for the simulator or device target (with `--release`
+  for the release configuration) unless the Tauri CLI drives it. Without `tauri/custom-protocol`,
+  which the Tauri CLI always adds, a debug app loads `devUrl` — whatever Vite dev server happens to
+  run on the Mac — instead of the page built into it; the first simulator run did exactly that.
+  `ios:build` calls `xcodebuild` directly (arm64): Tauri CLI 2.11.3's `ios build --target
+  aarch64-sim` passed `ARCHS=x86_64` and failed to link. The debug build is `rocks.prosody.debug`,
+  installed beside a release `rocks.prosody`, as on Android. The development team is no longer
+  written in the project (it held one team's ID): `ios:build:device` passes
+  `$APPLE_DEVELOPMENT_TEAM`, and the Tauri CLI reads the same variable.
+- **The soundfont zones were re-encoded for Apple's decoder.** ffmpeg had written every zone in
+  47-frame FLAC blocks — valid FLAC, refused outright by Core Audio (`afconvert` and WebKit's
+  `decodeAudioData` alike) — so on iOS, and in Safari, every soundfont instrument was silent (the
+  page said "Decoding failed" and counted the unheard notes). `scripts/render-soundfonts.mjs` now
+  asks for 4 096-frame blocks; the 282 committed zones were re-encoded from themselves, each
+  checked to decode to byte-identical samples (ffmpeg's md5 of the PCM), and shrank from 31.1 MB to
+  17.2 MB. The drums were already in 4 096-frame blocks.
+- **Debug builds log the output every 5 s while it plays** (`player: played … frames, queued …,
+  underruns …, output glitches …, peak …; reading: … lines placed, … for the browser's voice`), on
+  every platform: the only view of the player where the web view cannot be watched.
+- **Verified on the iOS 27.0 simulator (iPhone 17), not on a phone.** The page loaded from the app
+  with nothing fetched from the network (its scripts from `tauri://localhost`; the built site names
+  no host but links), its menu offering "recorded readings" and "browser voice" only. Play: the
+  output ran at 48 kHz (240 128 frames every 5 s), the queue held 23 552–25 088 frames ahead, zero
+  underruns and zero glitches in each run (the longest three and a half minutes). The reading's
+  lines were placed from the recordings (`recorded kokoro:af_heart`), none handed to the browser's
+  voice. With the app
+  sent to the background (another app opened) WebKit gave up its background assertions within 4 s
+  (its processes may be suspended from then on), and the
+  native player played on — playhead advancing at 48 kHz, zero underruns, and the reading's second
+  time round (8 more lines) placed from the recordings it already had, over the minute watched.
+  Stop from the page stopped it. The page was driven through the simulator's web inspector
+  (`ios_webkit_debug_proxy`), the player watched in the app's log.
+- **Not verified:** the lock screen's controls and the Now Playing entry (the simulator has no lock
+  screen to press; the log shows Now Playing being set), interruptions (no call or Siri in the
+  simulator), a route change (no headphones), the silent switch, and anything on a real iPhone,
+  including the device build (it compiles, unsigned; signing needs a team) and TestFlight.
+- **TestFlight**, untried: an App Store Connect record for `rocks.prosody`, then
+  `APPLE_DEVELOPMENT_TEAM=<team> cargo tauri ios build --export-method app-store-connect` (release,
+  signed with the team's distribution certificate, Xcode managing the profile), and the IPA uploaded
+  with Transporter or `xcrun altool`. The version comes from `tauri.conf.json`; each upload needs a
+  new `--build-number`.

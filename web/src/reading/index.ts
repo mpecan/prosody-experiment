@@ -21,7 +21,7 @@ import {
 import { audible } from '../mix';
 import { setSpeaking, showSpoken, speaking, type Speaking } from '../watch';
 import {
-  ENGINE_INFO, ENGINE_NAMES, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
+  ENGINE_INFO, NEURAL_VOICES, OFFERED_ENGINES, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
 } from './engines';
 
 export type { Rendered } from './engines';
@@ -63,14 +63,14 @@ const readings = () => piece.readings;
 // ---- The reading's own settings, remembered per browser like the voice picker ----
 
 export const READING_DEFAULTS: ReadingSettings = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };
-const ENGINE_IDS: EngineName[] = ['browser', 'kokoro', 'piper', 'kitten', 'recorded'];
 
-/** The reading settings saved, read defensively: anything unknown falls back to the default. */
-export function readSaved(saved: unknown, oldVoice: string | null): ReadingSettings {
+/** The reading settings saved, read defensively: anything unknown falls back to the default, and so
+ * does an engine this build does not offer (a neural voice saved before, in a build without them). */
+export function readSaved(saved: unknown, oldVoice: string | null, offered: readonly EngineName[] = OFFERED_ENGINES): ReadingSettings {
   const out: ReadingSettings = { ...READING_DEFAULTS, voices: {} };
   if (saved && typeof saved === 'object') {
     const s = saved as Record<string, unknown>;
-    out.engine = ENGINE_IDS.includes(s.engine as EngineName) ? s.engine as EngineName : READING_DEFAULTS.engine;
+    out.engine = offered.includes(s.engine as EngineName) ? s.engine as EngineName : READING_DEFAULTS.engine;
     out.pace = s.pace === 'natural' || s.pace === 'fitted' ? s.pace : READING_DEFAULTS.pace;
     out.level = Number(s.level) >= 0 && Number(s.level) <= 2 ? Number(s.level) : 1;
     out.voices = s.voices && typeof s.voices === 'object' ? s.voices as ReadingSettings['voices'] : {};
@@ -123,7 +123,7 @@ export function speaker(): Who {
   if (engine.state === 'failed') return { engine: 'browser', why: `${name} could not load (${engine.error}); reading with the browser voice`, bad: true };
   if (engine.state !== 'ready') return { engine: 'browser', why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; reading with the browser voice meanwhile` };
   const lang = language.value;
-  if (!voiceOf(chosen)) return { engine: 'browser', why: `${name} has no ${LANGUAGES[lang] || lang} voice; reading with the browser voice${lang === 'sl' ? ' (Piper has one)' : ''}`, bad: true };
+  if (!voiceOf(chosen)) return { engine: 'browser', why: `${name} has no ${LANGUAGES[lang] || lang} voice; reading with the browser voice${lang === 'sl' && NEURAL_VOICES ? ' (Piper has one)' : ''}`, bad: true };
   return { engine: chosen, why: '' };
 }
 
@@ -613,7 +613,7 @@ export function showVoices(): void {
   const engine = settings.engine;
   const offered = engines[engine].voices(language.value);
   readingMenus.value = {
-    engines: ENGINE_NAMES.map((name) => {
+    engines: OFFERED_ENGINES.map((name) => {
       const state = engines[name].state === 'failed' ? ' — could not load' : engines[name].state === 'loading' ? ' — loading…' : '';
       return { value: name, label: ENGINE_INFO[name].label + state };
     }),

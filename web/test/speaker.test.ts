@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { engines, readSaved, speaker, speakerOf, voiceOf } from '../src/reading';
+import { NEURAL_VOICES, offeredEngines } from '../src/reading/engines';
 import { language, readingSettings } from '../src/store';
 import { useFixture } from './site.fixture';
 
@@ -85,5 +86,24 @@ describe('the reading\'s saved settings', () => {
 
   it('carry over the browser voice picked before there were engines', () => {
     expect(readSaved(null, 'Samantha').voices.browser).toEqual({ en: 'Samantha' });
+  });
+
+  it('fall back to the recordings when a neural voice was saved in a build that has none (the iOS app)', () => {
+    const offered = offeredEngines(false);
+    for (const engine of ['kokoro', 'piper', 'kitten'] as const) {
+      expect(readSaved({ engine, pace: 'fitted' }, null, offered)).toMatchObject({ engine: 'recorded', pace: 'fitted' });
+    }
+    expect(readSaved({ engine: 'browser' }, null, offered).engine).toBe('browser');
+  });
+});
+
+describe('the engines a build offers', () => {
+  it('are all five by default, and only the recordings and the browser voice without the neural ones', () => {
+    expect(offeredEngines(true)).toEqual(['kokoro', 'piper', 'kitten', 'recorded', 'browser']);
+    expect(offeredEngines(false)).toEqual(['recorded', 'browser']);
+  });
+
+  it('are all five in a build that does not switch the neural voices off — the web and Android', () => {
+    expect(NEURAL_VOICES).toBe(true);
   });
 });

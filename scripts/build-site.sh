@@ -16,6 +16,12 @@
 #   ./scripts/build-site.sh              into target/site
 #   ./scripts/build-site.sh DIR          into DIR
 #
+# PROSODY_NEURAL_VOICES=off builds the page without the reading's neural voices (Kokoro, Piper,
+# Kitten): speech-worker.mjs is left out and the page offers only the recorded readings and the
+# browser's voice. Those engines carry eSpeak NG (GPL-3) and fetch their code at run time, which an
+# App Store app may not; the iOS app is built this way (`mise run site:ios`). Unset, or `on`, every
+# engine is there, as the web page and the Android app have them.
+#
 # Serve the directory with any static file server (`python3 -m http.server -d target/site`);
 # opening index.html from disk does not work, because browsers refuse to fetch beside a file://.
 set -eu
@@ -23,6 +29,11 @@ set -eu
 here=$(dirname "$0")
 cd "$here/.."
 dir="${1:-target/site}"
+neural="${PROSODY_NEURAL_VOICES:-on}"
+case "$neural" in
+  on | off) ;;
+  *) echo "build-site: PROSODY_NEURAL_VOICES is '$neural' — 'on' or 'off'" >&2; exit 1 ;;
+esac
 
 # The C parser's objects are wasm, and macOS's `ar` cannot index them — the link then fails with
 # every `ts_*` symbol undefined. The toolchain's own `llvm-ar` can (rust-toolchain.toml asks for
@@ -41,7 +52,7 @@ AR_wasm32_unknown_unknown="$llvm_ar" \
 
 # The page, from its lockfile. Node comes from mise (mise.toml) or the PATH.
 npm --prefix web ci --no-audit --no-fund --loglevel=error
-npm --prefix web run --silent build >/dev/null
+VITE_PROSODY_NEURAL_VOICES="$neural" npm --prefix web run --silent build >/dev/null
 mkdir -p "$dir"
 # Each of the page's files and folders replaces its older copy rather than merging into it: hashed
 # names and removed files must not linger beside the new ones. The app ships this directory
@@ -54,6 +65,11 @@ done
 # target, before the Prosody player replaced it. Left in place, the app would ship them.
 rm -rf "${dir:?}/vendor" "${dir:?}/strudel-globals.mjs"
 cp -R web/dist/. "$dir/"
+if [ "$neural" = off ]; then
+  # The page offers no neural engine (VITE_PROSODY_NEURAL_VOICES), so nothing asks for their worker.
+  rm -f "$dir/speech-worker.mjs"
+  echo "build-site: without the neural voices (PROSODY_NEURAL_VOICES=off): no speech-worker.mjs in $dir"
+fi
 cargo run --quiet --release --locked -p prosody-web -- --site "$dir"
 
 target_dir=$(cargo metadata --format-version 1 --no-deps |

@@ -2,3 +2,8 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+# The tauri crate's Swift API, copied here by build.rs for the iOS plugin (ios/), and what
+# Swift's builds of the plugin leave behind.
+/.tauri
+/ios/.build
+/ios/Package.resolved

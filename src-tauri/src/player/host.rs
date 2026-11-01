@@ -112,6 +112,10 @@ pub(crate) struct Status {
     counting: AtomicU32,
     /// The most frames the output has asked for in one buffer since the page was last shown.
     buffer: AtomicU64,
+    /// Lines of the reading placed on the speech stem (rendered or recorded), and lines handed to
+    /// the browser's voice, since the player opened: for the log's summary.
+    spoken: AtomicU64,
+    said: AtomicU64,
 }
 
 impl Status {
@@ -153,6 +157,38 @@ impl Status {
     pub(crate) fn begin(&self, generation: u32) {
         if self.counting.swap(generation, Ordering::Relaxed) != generation {
             self.glitches.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// A line for the app's log while something plays, `None` while nothing does. Read only: the
+    /// page's peaks are left for the page. Debug builds log it every few seconds (`render`), so a
+    /// player whose web view cannot be watched — a simulator, a phone with its screen off — can be.
+    pub(crate) fn summary(&self) -> Option<String> {
+        self.started.load(Ordering::Relaxed).then(|| {
+            format!(
+                "played {} frames, queued {}, underruns {}, output glitches {}, peak {:.3}; \
+                 reading: {} lines placed, {} for the browser's voice",
+                self.played.load(Ordering::Relaxed),
+                self.queued.load(Ordering::Relaxed),
+                self.underruns.load(Ordering::Relaxed),
+                self.glitches.load(Ordering::Relaxed),
+                f32::from_bits(self.peak.load(Ordering::Relaxed)),
+                self.spoken.load(Ordering::Relaxed),
+                self.said.load(Ordering::Relaxed),
+            )
+        })
+    }
+
+    /// Counts the reading's lines among the engine's events, for [`Status::summary`].
+    fn heard(&self, event: &str) {
+        // The reader's word comes inside the engine's `reading` event (`Event::Reading`).
+        if !event.starts_with(r#"{"op":"reading""#) {
+            return;
+        }
+        if event.contains(r#""told":{"op":"spoken""#) {
+            self.spoken.fetch_add(1, Ordering::Relaxed);
+        } else if event.contains(r#""told":{"op":"say""#) {
+            self.said.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -276,6 +312,7 @@ impl Shared {
 
     /// Keeps an event for the page.
     pub(crate) fn tell(&self, json: String) {
+        self.status.heard(&json);
         let mut kept = self.events.lock().unwrap_or_else(PoisonError::into_inner);
         if kept.0.len() >= KEPT {
             kept.0.pop_front();
@@ -558,6 +595,36 @@ pub(super) mod tests {
             report.starts_with(r#"{"report":{"played":6144,"underruns":0,"queued":0,"#),
             "{report}"
         );
+    }
+
+    #[test]
+    fn the_logs_summary_says_nothing_while_nothing_plays_and_leaves_the_peak_for_the_page() {
+        let status = super::Status::default();
+        assert_eq!(status.summary(), None);
+        status.store(
+            prosody_player::Report {
+                played: 96_000,
+                underruns: 0,
+                queued: 24_576,
+                started: true,
+                generation: 1,
+                peak: -0.25,
+                speech_peak: 0.0,
+            },
+            0,
+        );
+        status.glitched();
+        status.heard(r#"{"op":"reading","generation":1,"told":{"op":"spoken","serial":1}}"#);
+        status.heard(r#"{"op":"reading","generation":1,"told":{"op":"say","serial":1}}"#);
+        // Not an engine's event, so not counted.
+        status.heard(r#"{"op":"spoken","serial":1,"line":2}"#);
+        status.heard(r#"{"op":"want","keys":[]}"#);
+        let said = "played 96000 frames, queued 24576, underruns 0, output glitches 1, peak 0.250; \
+                    reading: 1 lines placed, 1 for the browser's voice";
+        assert_eq!(status.summary().as_deref(), Some(said));
+        // Read twice, the same: the page's report still has its peak.
+        assert_eq!(status.summary().as_deref(), Some(said));
+        assert!(status.json().contains(r#""peak":0.25,"#));
     }
 
     #[test]

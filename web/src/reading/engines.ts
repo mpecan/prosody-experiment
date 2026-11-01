@@ -54,6 +54,21 @@ export const ENGINE_INFO: Record<EngineName, { label: string; defaults: Record<s
 };
 export const ENGINE_NAMES: EngineName[] = ['kokoro', 'piper', 'kitten', 'recorded', 'browser'];
 
+// The neural engines carry eSpeak NG (GPL-3) inside them — Kokoro's phonemiser, piper-wasm, Kitten's
+// — and run code fetched at run time, neither of which an App Store app may ship. A build made with
+// `PROSODY_NEURAL_VOICES=off` (scripts/build-site.sh passes it to Vite; `mise run site:ios` sets it
+// for the iOS app) leaves speech-worker.mjs out and offers only the recorded readings and the
+// browser's voice. Every other build offers all five, as before.
+export const NEURAL_ENGINES: readonly EngineName[] = ['kokoro', 'piper', 'kitten'];
+export const NEURAL_VOICES = import.meta.env.VITE_PROSODY_NEURAL_VOICES !== 'off';
+
+/** The engines a build offers: all of them, or, without the neural voices, the recordings and the
+ * browser's voice. */
+export function offeredEngines(neural: boolean): EngineName[] {
+  return neural ? [...ENGINE_NAMES] : ENGINE_NAMES.filter((name) => !NEURAL_ENGINES.includes(name));
+}
+export const OFFERED_ENGINES = offeredEngines(NEURAL_VOICES);
+
 export const sameLanguage = (lang: string | undefined, wanted: string) =>
   (lang || '').toLowerCase().replace('_', '-').split('-')[0] === wanted;
 

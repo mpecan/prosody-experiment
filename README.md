@@ -73,12 +73,26 @@ start them.
 | `mise run android:build` | the Android app's debug APK for 64-bit ARM |
 | `mise run android:install` | `adb install -r` it to `$ANDROID_SERIAL`, or to the only attached device |
 | `mise run android:run` | install, then launch `rocks.prosody.debug` |
+| `mise run site:ios` | the static site for the iOS app into `target/site-ios`, without the neural voices (`PROSODY_NEURAL_VOICES=off`) |
+| `mise run ios:env` | check Xcode, the iOS SDKs, the Rust targets and a simulator |
+| `mise run ios:build` | the iOS app's debug build for the simulator (arm64), into `target/ios/simulator` |
+| `mise run ios:build:device` | the debug build for an iPhone, signed for `$APPLE_DEVELOPMENT_TEAM`, into `target/ios/device` |
+| `mise run ios:install` | boot the simulator (`$PROSODY_IOS_SIMULATOR`, or an iPhone 17) and install the debug build |
+| `mise run ios:run` | install, then launch `rocks.prosody.debug` on the simulator |
 
 The Android SDK and NDK are not something mise installs: install them with Android Studio. mise.toml
 looks for them where Android Studio puts them on macOS (`~/Library/Android/sdk`, NDK
 28.2.13676358) unless `ANDROID_HOME` / `NDK_HOME` are already set, and `mise run android:env` says
 what is missing. `cargo tauri android build` also works by hand, from the repository root or from
 `src-tauri`: the app's `beforeBuildCommand` is `mise run site`.
+
+The iOS app needs a Mac with Xcode, its iOS platform, and `rustup target add aarch64-apple-ios
+aarch64-apple-ios-sim`; `mise run ios:env` says what is missing. Its first build fetches swift-rs
+(which Tauri's Swift code depends on) from GitHub. A simulator build needs no Apple account; a
+device build is signed, so it needs your development team's ID in `APPLE_DEVELOPMENT_TEAM`. The
+iOS app reads with the recorded readings and the system's voice only: the neural voices carry
+eSpeak NG (GPL-3) and fetch their code at run time, which the App Store does not allow
+(`docs/player.md` §14 says how to switch them back on, and how to make a TestFlight build).
 
 ---
 
@@ -850,7 +864,9 @@ design, not a bug fix.
 ## Voices and their licences
 
 The reading's neural voices are not part of this repository: the page loads each from a CDN at an
-exact version, and its model from Hugging Face, only when you choose it.
+exact version, and its model from Hugging Face, only when you choose it. The iOS app does not offer
+them at all (`PROSODY_NEURAL_VOICES=off`, `docs/player.md` §14): only the recorded readings and the
+system's voice.
 
 | Engine | Code (version, licence) | Model and voices (licence) |
 |---|---|---|

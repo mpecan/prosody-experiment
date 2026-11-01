@@ -133,8 +133,7 @@ run = "npm --prefix web run dev --"
 #
 # Debug builds for a 64-bit ARM phone. `cargo tauri android build` works from the repository root and
 # from src-tauri alike: tauri.conf.json's beforeBuildCommand is `mise run site`, which does not
-# depend on the directory Tauri happens to run it in. An iOS family slots in beside these as
-# `ios:env`, `ios:build`, `ios:install`, `ios:run`.
+# depend on the directory Tauri happens to run it in. The iOS family is below.
 
 [tasks."android:env"]
 description = "Check the Android SDK, NDK and adb that mise cannot install are where mise.toml says"
@@ -176,4 +175,103 @@ set -eu
 serial=$(./scripts/android-device.sh)
 adb -s "$serial" shell monkey -p rocks.prosody.debug -c android.intent.category.LAUNCHER 1 >/dev/null
 echo "android: launched rocks.prosody.debug on $serial"
+"""
+
+# ── The app (src-tauri), iOS ──────────────────────────────────────────────────────────────────────
+#
+# Xcode, its simulators and the Rust targets are not something mise installs: `mise run ios:env` says
+# what is missing. The builds drive xcodebuild on the committed project (src-tauri/gen/apple, made by
+# `cargo tauri ios init` from its project.yml), whose build phase compiles the app's Rust library,
+# after the page is built without the neural voices (`site:ios`). Their products go under
+# target/ios. A TestFlight build goes through the Tauri CLI instead (docs/player.md §14).
+
+[tasks."site:ios"]
+description = "The static site for the iOS app, into target/site-ios: without the neural voices"
+# The one switch for the reading's neural engines on iOS (docs/player.md §14): `off` leaves out
+# Kokoro, Piper and Kitten (the eSpeak NG inside them is GPL-3, and they fetch code at run time,
+# which the App Store does not allow); `on` builds the page with them, as the web and Android have.
+env = { PROSODY_NEURAL_VOICES = "off" }
+run = "./scripts/build-site.sh target/site-ios"
+
+[tasks."ios:env"]
+description = "Check Xcode, the iOS SDKs, the Rust targets and a simulator, which mise cannot install"
+run = """
+set -eu
+ok=true
+if ! xcodebuild -version >/dev/null 2>&1; then
+  echo "ios: no Xcode — install it from the App Store, then: sudo xcode-select -s /Applications/Xcode.app" >&2
+  ok=false
+else
+  for sdk in iphoneos iphonesimulator; do
+    xcrun --sdk "$sdk" --show-sdk-path >/dev/null 2>&1 ||
+      { echo "ios: Xcode has no $sdk SDK — add the iOS platform in Xcode > Settings > Components" >&2; ok=false; }
+  done
+fi
+for target in aarch64-apple-ios aarch64-apple-ios-sim; do
+  rustup target list --installed 2>/dev/null | grep -qx "$target" ||
+    { echo "ios: no Rust target $target — rustup target add $target" >&2; ok=false; }
+done
+command -v cargo-tauri >/dev/null 2>&1 || { echo "ios: no tauri CLI — mise install" >&2; ok=false; }
+simulator=$(./scripts/ios-simulator.sh) || ok=false
+$ok
+echo "ios: $(xcodebuild -version | head -n 1), simulator $simulator"
+"""
+
+[tasks."ios:build"]
+description = "Debug app for the iOS simulator (arm64), into target/ios/simulator"
+depends = ["ios:env", "site:ios"]
+run = """
+set -eu
+xcodebuild -quiet -project src-tauri/gen/apple/prosody-app.xcodeproj -scheme prosody-app_iOS \\
+  -configuration debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \\
+  -derivedDataPath target/ios/simulator ARCHS=arm64 build
+echo "ios: target/ios/simulator/Build/Products/debug-iphonesimulator/Prosody.app"
+"""
+
+[tasks."ios:build:device"]
+description = "Debug app for an iPhone, signed for APPLE_DEVELOPMENT_TEAM, into target/ios/device"
+depends = ["ios:env"]
+run = """
+set -eu
+if [ -z "${APPLE_DEVELOPMENT_TEAM:-}" ]; then
+  echo "ios: a device build must be signed, and signing needs your Apple development team:" >&2
+  echo "ios:   APPLE_DEVELOPMENT_TEAM=<your 10-character team ID> mise run ios:build:device" >&2
+  echo "ios: the ID is under Membership at developer.apple.com, or in Xcode > Settings > Accounts." >&2
+  exit 1
+fi
+mise run site:ios
+xcodebuild -quiet -project src-tauri/gen/apple/prosody-app.xcodeproj -scheme prosody-app_iOS \\
+  -configuration debug -sdk iphoneos -destination 'generic/platform=iOS' \\
+  -derivedDataPath target/ios/device -allowProvisioningUpdates \\
+  DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" build
+app=target/ios/device/Build/Products/debug-iphoneos/Prosody.app
+echo "ios: $app — install it on a connected iPhone with"
+echo "ios:   xcrun devicectl device install app --device <name or UDID> $app"
+"""
+
+[tasks."ios:install"]
+description = "Boot the simulator (PROSODY_IOS_SIMULATOR, or an iPhone 17), install the debug app"
+run = """
+set -eu
+app=target/ios/simulator/Build/Products/debug-iphonesimulator/Prosody.app
+if [ ! -d "$app" ]; then echo "ios: no $app — mise run ios:build first" >&2; exit 1; fi
+udid=$(./scripts/ios-simulator.sh)
+xcrun simctl boot "$udid" 2>/dev/null || true # already booted
+# Its window, where there is a Simulator app to show it in; the simulator runs without one.
+open -b com.apple.iphonesimulator --args -CurrentDeviceUDID "$udid" 2>/dev/null ||
+  echo "ios: no Simulator app to show it in; the simulator runs headless (xcrun simctl io $udid screenshot …)"
+xcrun simctl bootstatus "$udid" -b >/dev/null
+echo "ios: installing $app ($(date -r "$app" '+%F %T')) on $udid"
+xcrun simctl install "$udid" "$app"
+"""
+
+[tasks."ios:run"]
+description = "Install the debug app on the simulator, then launch rocks.prosody.debug"
+depends = ["ios:install"]
+run = """
+set -eu
+udid=$(./scripts/ios-simulator.sh)
+xcrun simctl launch "$udid" rocks.prosody.debug >/dev/null
+echo "ios: launched rocks.prosody.debug on $udid; its log:"
+echo "ios:   xcrun simctl spawn $udid log stream --level info --predicate 'process == \\"Prosody\\"'"
 """
