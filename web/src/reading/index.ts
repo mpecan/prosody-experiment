@@ -666,6 +666,21 @@ export function noteLoss(text: string): void {
 // ---- The reading panel's menus ----
 
 /** The reading panel's menus, from the settings and what each engine offers. */
+// A better voice, while the phone's voice reads — chosen, or standing in — in a basic one: the
+// better one on the phone, by name, if there is one (the reader chose the basic one, or chose it
+// before the better one was downloaded); otherwise where to get one, as the phone says it (iOS has
+// that to say, Android not). An app cannot download a voice; the reader can, in Settings.
+export function voiceHint(): string | null {
+  const engine = engines.system;
+  if (!engine.improve || engine.state !== 'ready') return null;
+  if (settingsNow().engine !== 'system' && standIn() !== 'system') return null;
+  const offered = engine.voices(language.value);
+  const now = voiceOf('system');
+  if (offered.find((v) => v.id === now)?.good) return null;
+  const better = offered.find((v) => v.good);
+  return better ? `${better.name} is on this phone: choose it under Voice for a better reading.` : engine.improve;
+}
+
 export function showVoices(): void {
   const settings = settingsNow();
   const known: Record<string, string> = { ...LANGUAGES };
@@ -685,6 +700,7 @@ export function showVoices(): void {
       .concat(offered.map((v) => ({ value: v.id, label: v.name }))),
     voice: voiceOf(engine) ?? '',
     voiceDisabled: !offered.length && engine !== 'browser',
+    voiceHint: voiceHint(),
   };
 }
 
@@ -852,6 +868,16 @@ export function startReading(): void {
   if (readingSettings.value.engine === 'recorded') ensureEngine();
   startSystem();
   document.addEventListener('visibilitychange', letVoicesGo);
+  document.addEventListener('visibilitychange', relistSystem);
+}
+
+// Back in front with nothing playing, the phone's voice lists its voices again: the reader may have
+// been to Settings to download a better one. While a piece plays it is left be, so the stand-in
+// never drops out mid-piece.
+export function relistSystem(): void {
+  if (document.visibilityState !== 'visible' || playing.value) return;
+  if (engines.system.state === 'ready') engines.system.state = 'idle';
+  startSystem();
 }
 
 // A loaded neural voice keeps its model and working memory in its worker until it is let go: about

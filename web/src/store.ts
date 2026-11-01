@@ -107,6 +107,8 @@ export interface ReadingMenus {
   voices: Option[];
   voice: string;
   voiceDisabled: boolean;
+  /** Where to get a better voice, when the phone has only basic ones in the poem's language. */
+  voiceHint?: string | null;
 }
 export const readingMenus = signal<ReadingMenus>({ engines: [], languages: [], voices: [], voice: '', voiceDisabled: false });
 /** The mixer's channels, and which are muted and soloed. Not remembered: a visit starts hearing

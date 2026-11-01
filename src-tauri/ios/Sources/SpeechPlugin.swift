@@ -39,12 +39,56 @@ class SpeechPlugin: Plugin {
     }
     let language = AVSpeechSynthesisVoice.currentLanguageCode()
     let fallback = AVSpeechSynthesisVoice(language: language)?.identifier
-    let best = usable.filter { $0.language == language }
-      .max { a, b in a.quality.rawValue != b.quality.rawValue ? a.quality.rawValue < b.quality.rawValue : b.identifier == fallback }
-    let list = usable.sorted { $0.identifier < $1.identifier }.map { voice -> [String: Any] in
-      ["id": voice.identifier, "lang": voice.language, "quality": voice.quality.rawValue]
+    // The best voice in the phone's language: a Premium British voice before a super-compact American
+    // one on an American phone (quality over accent), the phone's own accent between equals, and its
+    // own choice between those. Matched on the base language: an iPhone set to English in Slovenia
+    // says en-SI, which no voice is.
+    let base = { (tag: String) in tag.split(separator: "-").first.map(String.init) ?? tag }
+    let key = { (voice: AVSpeechSynthesisVoice) in
+      (SpeechPlugin.rank(voice), voice.language == language ? 1 : 0, voice.identifier == fallback ? 1 : 0)
     }
-    invoke.resolve(["voices": list, "default": (best?.identifier ?? fallback) as Any, "engine": "AVSpeechSynthesizer"])
+    let best = usable.filter { base($0.language) == base(language) }.max { key($0) < key($1) }
+    let list = usable.sorted { $0.identifier < $1.identifier }.map { voice -> [String: Any] in
+      let rank = SpeechPlugin.rank(voice)
+      return [
+        "id": voice.identifier, "lang": voice.language, "name": voice.name,
+        "tier": SpeechPlugin.tier(voice) as Any, "rank": rank, "good": rank >= SpeechPlugin.enhanced,
+      ]
+    }
+    invoke.resolve([
+      "voices": list, "default": (best?.identifier ?? fallback) as Any, "engine": "AVSpeechSynthesizer",
+      // Apps cannot download a voice; the reader can, and the reading says where.
+      "improve": "For a better voice, download an Enhanced or Premium one in Settings → Accessibility → Read & Speak → Voices.",
+    ])
+  }
+
+  // How good a voice is, for choosing one: Premium, then Enhanced, then the compact voices iOS comes
+  // with, then the smaller super-compact ones; last, whatever quality iOS gives them, Eloquence's
+  // voices (Reed, Shelley…) and MacinTalk's (Fred, Albert, Zarvox…), deliberately retro — iOS does
+  // not mark MacinTalk's as novelty voices, and on an iPhone with no Premium voice Fred came first.
+  private static let enhanced = 30
+  private static func retro(_ voice: AVSpeechSynthesisVoice) -> String? {
+    if voice.identifier.hasPrefix("com.apple.eloquence") { return "Eloquence" }
+    if voice.identifier.hasPrefix("com.apple.speech.synthesis.voice") { return "classic" }
+    return nil
+  }
+  private static func rank(_ voice: AVSpeechSynthesisVoice) -> Int {
+    if retro(voice) != nil { return 0 }
+    // By raw value: `.premium` (3) is iOS 16's, and the app runs on 13.
+    switch voice.quality.rawValue {
+    case 3: return 40
+    case 2: return enhanced
+    default: return voice.identifier.contains("super-compact") ? 10 : 20
+    }
+  }
+  /** What the voice menu says of a voice's quality, where it says anything. */
+  private static func tier(_ voice: AVSpeechSynthesisVoice) -> String? {
+    if let retro = retro(voice) { return retro }
+    switch voice.quality.rawValue {
+    case 3: return "Premium"
+    case 2: return "Enhanced"
+    default: return nil
+    }
   }
 
   /** Renders `text` in `voice` at `speed` (1 the voice's own) to a WAV file, answering its path. */

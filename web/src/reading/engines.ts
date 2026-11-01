@@ -19,6 +19,8 @@ export interface Voice {
   name: string;
   lang: string;
   have?: number;
+  /** A phone voice good enough not to suggest a better one (Enhanced or Premium on iOS). */
+  good?: boolean;
 }
 
 export interface Progress {
@@ -43,6 +45,8 @@ export interface Engine {
   /** Null for the browser's voice, which is spoken, not made. */
   render: ((text: string, options: { voice: string; speed: number }) => Promise<Rendered>) | null;
   cancel?(): void;
+  /** Where the reader can get a better voice than the ones listed, as the phone says it. */
+  improve?: string | null;
 }
 
 // What each neural engine offers before it has loaded — its default voice per language — and,
@@ -142,10 +146,39 @@ export function parseWav(bytes: ArrayBuffer): { pcm: Float32Array; rate: number 
   throw new Error('a WAV file with no audio');
 }
 
+interface SystemVoice {
+  id: string;
+  lang: string;
+  /** Its own name, where the phone gives one (iOS: Ava, Daniel); Android gives only the id. */
+  name?: string | null;
+  /** What the menu says of its quality (Premium, Enhanced, Eloquence), if anything. */
+  tier?: string | null;
+  rank: number;
+  good?: boolean;
+}
 interface SystemVoices {
-  voices: { id: string; lang: string; quality: number }[];
+  voices: SystemVoice[];
   default: string | null;
   engine: string | null;
+  improve?: string | null;
+}
+
+// A language tag as a reader says it (en-GB: British English), falling back to the tag itself.
+let languageNames: Intl.DisplayNames | null | undefined;
+function languageName(tag: string): string {
+  if (languageNames === undefined) {
+    try { languageNames = new Intl.DisplayNames(['en'], { type: 'language' }); } catch { languageNames = null; }
+  }
+  try { return languageNames?.of(tag) ?? tag; } catch { return tag; }
+}
+/** What the voice menu calls a phone voice: its name, its language and how good it is (iOS:
+ * "Ava (American English, Premium)"); Android's, which have only ids, by language and the id's
+ * variant ("American English, iob"). */
+export function systemVoiceLabel(voice: SystemVoice): string {
+  const language = languageName(voice.lang);
+  if (voice.name) return `${voice.name} (${language}${voice.tier ? ', ' + voice.tier : ''})`;
+  const variant = /-x-([a-z0-9]+)/i.exec(voice.id)?.[1] ?? (voice.id.endsWith('-language') ? 'default' : voice.id);
+  return `${language}, ${variant}`;
 }
 
 const system: Engine = {
@@ -165,9 +198,10 @@ const system: Engine = {
       try {
         const answer = await invoke('speech_voices') as SystemVoices;
         // The phone's own choice first, then the better voices: voiceOf takes the first offered.
-        const rank = (v: SystemVoices['voices'][number]) => (v.id === answer.default ? 1000 : 0) + v.quality;
-        system.listed = [...answer.voices].sort((a, b) => rank(b) - rank(a))
-          .map((v) => ({ id: v.id, name: `${v.id} (${v.lang})`, lang: v.lang }));
+        const rank = (v: SystemVoice) => (v.id === answer.default ? 1000 : 0) + v.rank;
+        system.listed = [...answer.voices].sort((a, b) => rank(b) - rank(a) || systemVoiceLabel(a).localeCompare(systemVoiceLabel(b)))
+          .map((v) => ({ id: v.id, name: systemVoiceLabel(v), lang: v.lang, good: v.good ?? true }));
+        system.improve = answer.improve ?? null;
         system.device = answer.engine;
         system.state = 'ready';
       } catch (error) {

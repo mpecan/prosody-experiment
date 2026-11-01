@@ -35,8 +35,8 @@ pub(crate) fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_speech);
 
-/// The voices on the phone and the one it reads with, as JSON: `{ voices: [{ id, lang, quality }],
-/// default, engine }`.
+/// The voices on the phone and the one it reads with, as JSON: `{ voices: [{ id, lang, name?, tier?,
+/// rank, good }], default, engine, improve? }`.
 ///
 /// # Errors
 ///
@@ -46,7 +46,23 @@ pub(crate) async fn speech_voices<R: Runtime>(
     app: AppHandle<R>,
 ) -> Result<serde_json::Value, String> {
     #[cfg(any(target_os = "android", target_os = "ios"))]
-    return phone::call(app, "voices", serde_json::json!({})).await;
+    {
+        let answer = phone::call(app, "voices", serde_json::json!({})).await?;
+        let voices = answer.get("voices").and_then(serde_json::Value::as_array);
+        let good = voices.map_or(0, |all| {
+            all.iter()
+                .filter(|voice| {
+                    voice.get("good").and_then(serde_json::Value::as_bool) == Some(true)
+                })
+                .count()
+        });
+        log::info!(
+            "speech: {} voices on the phone, {good} of them good; it reads with {}",
+            voices.map_or(0, Vec::len),
+            answer.get("default").unwrap_or(&serde_json::Value::Null)
+        );
+        Ok(answer)
+    }
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let _ = app;

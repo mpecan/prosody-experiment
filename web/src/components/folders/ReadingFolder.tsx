@@ -31,6 +31,7 @@ export function ReadingFolder() {
         </div>
         <div class="wide">
   <Patch id="voice" label="Voice" value={menus.voice} options={menus.voices} onChange={setVoice} colour="var(--rhyme)" disabled={menus.voiceDisabled} />
+          {menus.voiceHint && <span class="hint" id="voice-hint">{menus.voiceHint}</span>}
         </div>
       </div>
       <More label="How the reading works">

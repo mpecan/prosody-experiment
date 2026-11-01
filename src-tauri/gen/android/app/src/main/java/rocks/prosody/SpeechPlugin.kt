@@ -91,7 +91,9 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
         val entry = JSObject()
         entry.put("id", voice.name)
         entry.put("lang", voice.locale.toLanguageTag())
-        entry.put("quality", voice.quality)
+        // Android names a voice only by an id (en-us-x-iob-local): the page names it by its language.
+        entry.put("rank", voice.quality)
+        entry.put("good", voice.quality >= Voice.QUALITY_HIGH)
         list.put(entry)
       }
       val answer = JSObject()

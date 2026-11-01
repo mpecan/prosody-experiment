@@ -3,7 +3,7 @@
 // WAV file the phone's engine writes.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { offeredEngines, onPhone, parseWav } from '../src/reading/engines';
+import { offeredEngines, onPhone, parseWav, systemVoiceLabel } from '../src/reading/engines';
 
 /** A mono WAV of `samples`: 16-bit PCM, or 32-bit float; `declared` overrides the data chunk's size. */
 function wav(samples: number[], { rate = 24000, float = false, declared, extra = false }: { rate?: number; float?: boolean; declared?: number; extra?: boolean } = {}): ArrayBuffer {
@@ -46,6 +46,15 @@ describe('a WAV from the phone\'s engine', () => {
   });
 });
 
+describe('a phone voice in the menu', () => {
+  it('is named, with its language and how good it is, never by its raw id', () => {
+    expect(systemVoiceLabel({ id: 'com.apple.voice.premium.en-US.Ava', lang: 'en-US', name: 'Ava', tier: 'Premium', rank: 40 })).toBe('Ava (American English, Premium)');
+    expect(systemVoiceLabel({ id: 'com.apple.voice.compact.en-GB.Daniel', lang: 'en-GB', name: 'Daniel', tier: null, rank: 20 })).toBe('Daniel (British English)');
+    expect(systemVoiceLabel({ id: 'en-us-x-iob-local', lang: 'en-US', rank: 400 })).toBe('American English, iob');
+    expect(systemVoiceLabel({ id: 'en-US-language', lang: 'en-US', rank: 400 })).toBe('American English, default');
+  });
+});
+
 describe('the engines offered', () => {
   it('are the system voice in place of the browser\'s where the phone\'s engine is bridged', () => {
     expect(offeredEngines(true, true)).toEqual(['kokoro', 'piper', 'kitten', 'recorded', 'system']);
@@ -82,23 +91,23 @@ describe('in the Android app', () => {
   let store: typeof import('../src/store');
   let piece: typeof import('../src/piece')['piece'];
   const agent = navigator.userAgent;
+  // What the phone answers speech_voices with: Android's shape, until a test hands it an iPhone's.
+  let phone: Record<string, unknown> = {
+    voices: [
+      { id: 'en-us-x-iob-local', lang: 'en-US', rank: 400, good: true },
+      { id: 'en-gb-x-gba-local', lang: 'en-GB', rank: 300, good: false },
+      { id: 'de-de-x-deb-local', lang: 'de-DE', rank: 400, good: true },
+    ],
+    default: 'en-gb-x-gba-local',
+    engine: 'com.google.android.tts',
+  };
 
   beforeAll(async () => {
     vi.stubGlobal('AudioBuffer', FakeBuffer);
     vi.stubGlobal('__TAURI_INTERNALS__', {
       invoke: async (command: string, args?: Record<string, unknown>) => {
         calls.push({ command, args });
-        if (command === 'speech_voices') {
-          return {
-            voices: [
-              { id: 'en-us-x-iob-local', lang: 'en-US', quality: 400 },
-              { id: 'en-gb-x-gba-local', lang: 'en-GB', quality: 300 },
-              { id: 'de-de-x-deb-local', lang: 'de-DE', quality: 400 },
-            ],
-            default: 'en-gb-x-gba-local',
-            engine: 'com.google.android.tts',
-          };
-        }
+        if (command === 'speech_voices') return phone;
         if (command === 'speech_render') return wav([...new Array(2400).fill(0), ...new Array(2400).fill(0.5)]);
         return null;
       },
@@ -187,5 +196,41 @@ describe('in the Android app', () => {
     await vi.waitFor(() => expect(reading.castOf(poem, 'natural').get(0)).toBe('kokoro|af_heart|1.000|Tyger Tyger'));
     kokoro.render = real;
     kokoro.state = 'idle';
+  });
+
+  it('says where to get a better voice while the phone has only basic ones, and lists one got meanwhile', async () => {
+    store.readingSettings.value = { ...store.readingSettings.value, engine: 'system' };
+    expect(reading.voiceHint()).toBeNull();   // Android says nothing of where to get one
+    const IMPROVE = 'For a better voice, download an Enhanced or Premium one in Settings.';
+    phone = {
+      voices: [
+        { id: 'com.apple.voice.super-compact.en-US.Samantha', lang: 'en-US', name: 'Samantha', tier: null, rank: 10, good: false },
+        { id: 'com.apple.eloquence.en-US.Reed', lang: 'en-US', name: 'Reed', tier: 'Eloquence', rank: 0, good: false },
+      ],
+      default: 'com.apple.voice.super-compact.en-US.Samantha',
+      engine: 'AVSpeechSynthesizer',
+      improve: IMPROVE,
+    };
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    reading.relistSystem();
+    await vi.waitFor(() => expect(reading.engines.system.state).toBe('ready'));
+    expect(reading.engines.system.voices('en').map((v) => v.name)).toEqual(['Samantha (American English)', 'Reed (American English, Eloquence)']);
+    expect(reading.voiceHint()).toBe(IMPROVE);
+    // Back from Settings with a Premium voice: it is listed, first, and the hint is gone.
+    phone = {
+      ...phone,
+      voices: [...(phone.voices as object[]), { id: 'com.apple.voice.premium.en-US.Ava', lang: 'en-US', name: 'Ava', tier: 'Premium', rank: 40, good: true }],
+      default: 'com.apple.voice.premium.en-US.Ava',
+    };
+    reading.relistSystem();
+    await vi.waitFor(() => expect(reading.engines.system.voices('en')).toHaveLength(3));
+    expect(reading.voiceOf('system')).toBe('com.apple.voice.premium.en-US.Ava');
+    expect(reading.voiceHint()).toBeNull();
+    // A reader who chose Samantha keeps her, and is told of Ava.
+    store.readingSettings.value = { ...store.readingSettings.value, voices: { system: { en: 'com.apple.voice.super-compact.en-US.Samantha' } } };
+    expect(reading.voiceOf('system')).toBe('com.apple.voice.super-compact.en-US.Samantha');
+    expect(reading.voiceHint()).toBe('Ava (American English, Premium) is on this phone: choose it under Voice for a better reading.');
+    store.readingSettings.value = { ...store.readingSettings.value, voices: {} };
+    vi.restoreAllMocks();
   });
 });
