@@ -23,7 +23,7 @@ import { site } from '../data';
 import { closeLoader, openLoader } from '../loader';
 import { audible } from '../mix';
 import { piece, query, summaryOf } from '../piece';
-import { ensureEngine, prerender, quietReading, voiceLevel } from '../reading';
+import { ensureEngine, letVoicesGo, prerender, quietReading, voiceLevel } from '../reading';
 import type { RollNote } from '../roll';
 import { beat, hearing, playing, poem, readingSettings, settings, status, type Channel } from '../store';
 import {
@@ -388,6 +388,8 @@ export function stop(): void {
   clearRoll();
   resetMeters();
   playing.value = false;
+  // Stopped from the lock screen or the notification, the page is already hidden.
+  letVoicesGo();
   showBeat();
   status('stopped');
 }

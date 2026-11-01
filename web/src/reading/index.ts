@@ -21,7 +21,7 @@ import {
 import { audible } from '../mix';
 import { setSpeaking, showSpoken, speaking, type Speaking } from '../watch';
 import {
-  ENGINE_INFO, NEURAL_VOICES, OFFERED_ENGINES, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
+  ENGINE_INFO, NEURAL_ENGINES, NEURAL_VOICES, OFFERED_ENGINES, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
 } from './engines';
 
 export type { Rendered } from './engines';
@@ -787,4 +787,17 @@ export function startReading(): void {
   // read from its file, not by the browser while the manifest is still on its way. A live engine
   // still loads only when chosen or played, its model being hundreds of MB.
   if (readingSettings.value.engine === 'recorded') ensureEngine();
+  document.addEventListener('visibilitychange', letVoicesGo);
+}
+
+// A loaded neural voice keeps its model and working memory in its worker until it is let go: about
+// 800 MB for Kokoro on WebAssembly, measured on a Pixel, which a phone short of memory swaps out
+// once another app is in front — and then every app stalls. So hidden and silent, the page lets
+// each loaded voice go (a download under way carries on); the next Play loads it again, as at
+// start-up, and the lines it rendered are kept.
+export function letVoicesGo(): void {
+  if (document.visibilityState !== 'hidden' || playing.value) return;
+  for (const name of NEURAL_ENGINES) {
+    if (engines[name].state === 'ready') engines[name].cancel?.();
+  }
 }

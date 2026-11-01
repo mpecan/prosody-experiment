@@ -1,10 +1,10 @@
 // Who reads a line: the chosen engine once it can, the recording where there is one, and otherwise
 // whoever can stand in — said, never silent.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { engines, readSaved, speaker, speakerOf, voiceOf } from '../src/reading';
+import { engines, letVoicesGo, readSaved, speaker, speakerOf, voiceOf } from '../src/reading';
 import { NEURAL_VOICES, offeredEngines } from '../src/reading/engines';
-import { language, readingSettings } from '../src/store';
+import { language, playing, readingSettings } from '../src/store';
 import { useFixture } from './site.fixture';
 
 const RECORDED = 'Tyger Tyger, burning bright,';
@@ -105,5 +105,47 @@ describe('the engines a build offers', () => {
 
   it('are all five in a build that does not switch the neural voices off — the web and Android', () => {
     expect(NEURAL_VOICES).toBe(true);
+  });
+});
+
+// A loaded voice's model is hundreds of MB, which a phone swaps out behind another app.
+describe('a loaded neural voice, while the page is hidden', () => {
+  const hidden = (yes: boolean) => vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(yes ? 'hidden' : 'visible');
+  const cancels = () => ({
+    kokoro: vi.spyOn(engines.kokoro, 'cancel'),
+    piper: vi.spyOn(engines.piper, 'cancel'),
+    kitten: vi.spyOn(engines.kitten, 'cancel'),
+  });
+  beforeEach(() => {
+    engines.kokoro.state = 'ready';
+    engines.piper.state = 'loading';
+    engines.kitten.state = 'idle';
+    playing.value = false;
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    engines.piper.state = 'idle';
+  });
+
+  it('is let go once nothing plays — a download under way, and an engine not loaded, are left be', () => {
+    hidden(true);
+    const cancel = cancels();
+    letVoicesGo();
+    expect(cancel.kokoro).toHaveBeenCalledOnce();
+    expect(cancel.piper).not.toHaveBeenCalled();
+    expect(cancel.kitten).not.toHaveBeenCalled();
+    expect(engines.kokoro.state).toBe('idle');
+  });
+
+  it('is kept while the piece plays on with the screen off, and while the page is in front', () => {
+    const cancel = cancels();
+    hidden(true);
+    playing.value = true;
+    letVoicesGo();
+    hidden(false);
+    playing.value = false;
+    letVoicesGo();
+    expect(cancel.kokoro).not.toHaveBeenCalled();
+    expect(engines.kokoro.state).toBe('ready');
   });
 });
