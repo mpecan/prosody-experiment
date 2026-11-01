@@ -21,7 +21,7 @@ import {
 import { audible } from '../mix';
 import { setSpeaking, showSpoken, speaking, type Speaking } from '../watch';
 import {
-  ENGINE_INFO, NEURAL_ENGINES, NEURAL_VOICES, OFFERED_ENGINES, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
+  ENGINE_INFO, NEURAL_ENGINES, NEURAL_VOICES, OFFERED_ENGINES, SYSTEM_VOICE, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
 } from './engines';
 
 export type { Rendered } from './engines';
@@ -113,24 +113,33 @@ interface Who {
   fallback?: boolean;
 }
 
+// Who stands in for a voice that cannot read: the browser's; in the Android app, whose WebView has
+// none, the phone's own once it has started and has a voice in the poem's language — and the
+// browser's (which reads nothing there) until then.
+export function standIn(): EngineName {
+  return SYSTEM_VOICE && engines.system.state === 'ready' && voiceOf('system') ? 'system' : 'browser';
+}
+
 // Who reads now, and why not the chosen one when it is not: the chosen engine once it has
-// loaded and has a voice in the poem's language; the browser's voice meanwhile, and instead.
+// loaded and has a voice in the poem's language; the stand-in meanwhile, and instead.
 export function speaker(): Who {
   const chosen = settingsNow().engine;
   const engine = engines[chosen];
   if (chosen === 'browser') return { engine: 'browser', why: '' };
+  const back = chosen === 'system' ? 'browser' : standIn();
+  const by = `reading with the ${ENGINE_INFO[back].label}`;
   const name = ENGINE_INFO[chosen].label;
-  if (engine.state === 'failed') return { engine: 'browser', why: `${name} could not load (${engine.error}); reading with the browser voice`, bad: true };
-  if (engine.state !== 'ready') return { engine: 'browser', why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; reading with the browser voice meanwhile` };
+  if (engine.state === 'failed') return { engine: back, why: `${name} could not load (${engine.error}); ${by}`, bad: true };
+  if (engine.state !== 'ready') return { engine: back, why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; ${by} meanwhile` };
   const lang = language.value;
-  if (!voiceOf(chosen)) return { engine: 'browser', why: `${name} has no ${LANGUAGES[lang] || lang} voice; reading with the browser voice${lang === 'sl' && NEURAL_VOICES ? ' (Piper has one)' : ''}`, bad: true };
+  if (!voiceOf(chosen)) return { engine: back, why: `${name} has no ${LANGUAGES[lang] || lang} voice; ${by}${lang === 'sl' && NEURAL_VOICES ? ' (Piper has one)' : ''}`, bad: true };
   return { engine: chosen, why: '' };
 }
 
 // Who reads the line `text`, in which voice, and why not the chosen one when it is not. As
 // speaker(), and for the recorded readings line by line: a line recorded in the chosen voice is
 // read from its file; one that is not is read by the live voice that made the recordings, if its
-// engine has loaded, and otherwise by the browser's voice (`fallback`, with the reason, which the
+// engine has loaded, and otherwise by the stand-in (`fallback`, with the reason, which the
 // caller says with the line's number).
 export function speakerOf(text: string): Who {
   const who = speaker();
@@ -142,7 +151,8 @@ export function speakerOf(text: string): Who {
   if (engine?.render && engine.state === 'ready' && engine.voices(language.value).some((v) => v.id === liveVoice)) {
     return { engine: live, voice: liveVoice, why: `no recording of it; read live by ${ENGINE_INFO[live].label} ${liveVoice}`, fallback: true };
   }
-  return { engine: 'browser', voice: null, why: 'no recording of it; read by the browser voice', fallback: true };
+  const back = standIn();
+  return { engine: back, voice: back === 'browser' ? null : voiceOf(back), why: `no recording of it; read by the ${ENGINE_INFO[back].label}`, fallback: true };
 }
 
 // The speed a line is rendered at by `engine`: a recording's own (the line's pace, at which it was
@@ -159,6 +169,7 @@ export function baseSpeed(engine: EngineName, item: { speed: number; pace: numbe
 let progressShown = false;   // the reading's note is an engine's progress, cleared when it is done
 const chosenEngine = (engine: Engine) => settingsNow().engine === engine.name;
 export function ensureEngine(retry = false): void {
+  startSystem();
   const engine = engines[settingsNow().engine];
   if (engine.state === 'ready' || engine.state === 'loading' || !engine.render) return;
   if (engine.state === 'failed' && !retry) return;
@@ -187,6 +198,23 @@ export function ensureEngine(retry = false): void {
     host?.recast(false);
     if (!chosenEngine(engine)) return;
     noteReading(`${name} could not load: ${error.message} — reading with the browser voice`, true);
+  });
+}
+
+// The phone's own voice, in the Android app: started with the page and on every Play (it is let go
+// while the page is hidden and silent), as it costs nothing to download and stands in for any
+// voice that cannot read. A failure is logged; the reading carries on without it.
+function startSystem(): void {
+  const engine = engines.system;
+  if (!SYSTEM_VOICE || engine.state === 'ready' || engine.state === 'loading') return;
+  engine.load().then(() => {
+    console.log(`[reading] system voice: ${engine.device}, ${engine.listed?.length ?? 0} voices on the phone`);
+    showVoices();
+    host?.recast(false);
+    prerender();
+  }, (error: Error) => {
+    console.warn('[reading] the system voice did not start:', error);
+    showVoices();
   });
 }
 
@@ -787,17 +815,18 @@ export function startReading(): void {
   // read from its file, not by the browser while the manifest is still on its way. A live engine
   // still loads only when chosen or played, its model being hundreds of MB.
   if (readingSettings.value.engine === 'recorded') ensureEngine();
+  startSystem();
   document.addEventListener('visibilitychange', letVoicesGo);
 }
 
 // A loaded neural voice keeps its model and working memory in its worker until it is let go: about
 // 800 MB for Kokoro on WebAssembly, measured on a Pixel, which a phone short of memory swaps out
 // once another app is in front — and then every app stalls. So hidden and silent, the page lets
-// each loaded voice go (a download under way carries on); the next Play loads it again, as at
-// start-up, and the lines it rendered are kept.
+// each loaded voice go (a download under way carries on), and the phone's own engine with them;
+// the next Play loads them again, as at start-up, and the lines they rendered are kept.
 export function letVoicesGo(): void {
   if (document.visibilityState !== 'hidden' || playing.value) return;
-  for (const name of NEURAL_ENGINES) {
+  for (const name of [...NEURAL_ENGINES, 'system'] as const) {
     if (engines[name].state === 'ready') engines[name].cancel?.();
   }
 }

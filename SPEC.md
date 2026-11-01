@@ -695,11 +695,20 @@ voice. Not a style key: the CLI never reads aloud, and no palette moves a cue (I
 
 **Engines** (*the same decision*; `recorded` *the user's decision, 2026-10-24*). One interface on
 the page — `load(onProgress)`, `voices(language)`, `render(text, { voice, speed })` → an
-`AudioBuffer` — and five engines, the listener's choice, remembered:
+`AudioBuffer` — and six engines, the listener's choice, remembered:
 
 - **`browser`** — the browser's speech synthesiser: instant, the only one that reports word
   boundaries, and the fallback for the others. It cannot be scheduled, so it is started by a timer
   at its line's time and, at the natural pace, chained on its `end` event.
+- **`system`** (*the user's decision, 2026-11-01*) — in the Android app, the phone's own speech
+  engine (`TextToSpeech`, Google's or the maker's) with the voices already on the phone that need
+  no network, rendered a line at a time to a WAV and so placed like any rendered line. It replaces
+  `browser` there — the app's WebView has no speech synthesiser — as the stand-in for any voice
+  that cannot read: nothing to download, no model in the app, a line in about 0.2 s on a Pixel.
+  It starts with the page and is let go while the page is hidden and silent, as the neural voices
+  are. Its sound depends on the phone, so the same poem reads differently on two phones; the
+  compiled piece does not (I1 is the compiler's), and the recordings stay the reading that is the
+  same everywhere. iOS (`AVSpeechSynthesizer.write`) is to follow.
 - **`kokoro`** — Kokoro-82M through kokoro-js, on WebGPU where the browser offers it (the
   full-precision model) and WebAssembly otherwise (the 8-bit one, 92 MB). The default, once it has
   loaded. English (US and UK voices; the kokoro-js release lists no others).

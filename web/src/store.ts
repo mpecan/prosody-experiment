@@ -85,7 +85,7 @@ export const rollBars = signal('4');
 export const beat = signal<number | null>(null);
 
 // The reading's settings and its menus (reading/index.ts `showVoices`).
-export type EngineName = 'browser' | 'kokoro' | 'piper' | 'kitten' | 'recorded';
+export type EngineName = 'browser' | 'system' | 'kokoro' | 'piper' | 'kitten' | 'recorded';
 export type Pace = 'natural' | 'fitted';
 export interface ReadingSettings {
   engine: EngineName;

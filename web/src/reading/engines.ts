@@ -7,7 +7,11 @@
 // answers the same three calls: `load(onProgress)`, `voices(language)` and `render(text, { voice,
 // speed })`, which gives an AudioBuffer. A fifth, `recorded`, answers the same calls from files
 // made ahead of time (scripts/readings/): its `render` fetches and decodes a line's recording.
+// In the Android app, `system` is the phone's own speech engine, which renders a line as the neural
+// voices do with nothing to download; it stands in where the browser's voice would, since the
+// app's WebView has no speech synthesis.
 import type { Reading } from '../answers';
+import { inApp, invoke } from '../player/native';
 import type { EngineName } from '../store';
 
 export interface Voice {
@@ -46,13 +50,14 @@ export interface Engine {
 // catalogue (rhasspy/piper-voices) and offers every language there.
 export const ENGINE_INFO: Record<EngineName, { label: string; defaults: Record<string, string> }> = {
   browser: { label: 'browser voice', defaults: {} },
+  system: { label: 'system voice', defaults: {} },
   kokoro: { label: 'Kokoro-82M', defaults: { en: 'af_heart' } },
   piper: { label: 'Piper', defaults: { en: 'en_GB-cori-medium', sl: 'sl_SI-artur-medium' } },
   kitten: { label: 'Kitten TTS (nano)', defaults: { en: 'Bella' } },
   // The recorded readings' voices are named `engine:voice`, after the live voice that made them.
   recorded: { label: 'recorded readings', defaults: { en: 'kokoro:af_heart', sl: 'piper:sl_SI-artur-medium' } },
 };
-export const ENGINE_NAMES: EngineName[] = ['kokoro', 'piper', 'kitten', 'recorded', 'browser'];
+export const ENGINE_NAMES: EngineName[] = ['kokoro', 'piper', 'kitten', 'recorded', 'system', 'browser'];
 
 // The neural engines carry eSpeak NG (GPL-3) inside them — Kokoro's phonemiser, piper-wasm, Kitten's
 // — and run code fetched at run time, neither of which an App Store app may ship. A build made with
@@ -62,12 +67,17 @@ export const ENGINE_NAMES: EngineName[] = ['kokoro', 'piper', 'kitten', 'recorde
 export const NEURAL_ENGINES: readonly EngineName[] = ['kokoro', 'piper', 'kitten'];
 export const NEURAL_VOICES = import.meta.env.VITE_PROSODY_NEURAL_VOICES !== 'off';
 
+// The phone's own speech engine is bridged on Android only (src-tauri/src/speech.rs); where it is,
+// it replaces the browser's voice, which the app's WebView does not have.
+export const SYSTEM_VOICE = inApp() && /Android/i.test(navigator.userAgent);
+
 /** The engines a build offers: all of them, or, without the neural voices, the recordings and the
- * browser's voice. */
-export function offeredEngines(neural: boolean): EngineName[] {
-  return neural ? [...ENGINE_NAMES] : ENGINE_NAMES.filter((name) => !NEURAL_ENGINES.includes(name));
+ * stand-in voice — the browser's, or in the Android app the system's. */
+export function offeredEngines(neural: boolean, system = false): EngineName[] {
+  return ENGINE_NAMES.filter((name) => (neural || !NEURAL_ENGINES.includes(name))
+    && name !== (system ? 'browser' : 'system'));
 }
-export const OFFERED_ENGINES = offeredEngines(NEURAL_VOICES);
+export const OFFERED_ENGINES = offeredEngines(NEURAL_VOICES, SYSTEM_VOICE);
 
 export const sameLanguage = (lang: string | undefined, wanted: string) =>
   (lang || '').toLowerCase().replace('_', '-').split('-')[0] === wanted;
@@ -88,6 +98,101 @@ const browser: Engine = {
   voices: (lang) => browserVoices.filter((v) => sameLanguage(v.lang, lang)).map((v) => ({ id: v.name, name: `${v.name} (${v.lang})`, lang: v.lang })),
   // The browser's voice cannot be rendered ahead: it is spoken, not made.
   render: null,
+};
+
+// ---- The phone's own voice ----
+
+/** A WAV file's first channel as samples, and its rate: 16-bit, 8-bit or 32-bit float PCM, as an
+ * Android speech engine writes it. */
+export function parseWav(bytes: ArrayBuffer): { pcm: Float32Array; rate: number } {
+  const view = new DataView(bytes);
+  const tag = (at: number) => String.fromCharCode(view.getUint8(at), view.getUint8(at + 1), view.getUint8(at + 2), view.getUint8(at + 3));
+  if (bytes.byteLength < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('not a WAV file');
+  let format = 0, channels = 1, rate = 0, bits = 0;
+  for (let at = 12; at + 8 <= bytes.byteLength;) {
+    const id = tag(at);
+    // An engine still writing gives the data chunk's size as 0 or past the end: it runs to the end.
+    const declared = view.getUint32(at + 4, true);
+    const size = id === 'data' && (declared === 0 || at + 8 + declared > bytes.byteLength) ? bytes.byteLength - at - 8 : declared;
+    if (id === 'fmt ') {
+      format = view.getUint16(at + 8, true);
+      channels = view.getUint16(at + 10, true);
+      rate = view.getUint32(at + 12, true);
+      bits = view.getUint16(at + 22, true);
+    } else if (id === 'data') {
+      const width = bits / 8;
+      const frames = width && channels ? Math.floor(size / (width * channels)) : 0;
+      const pcm = new Float32Array(frames);
+      for (let i = 0; i < frames; i += 1) {
+        const p = at + 8 + i * width * channels;
+        pcm[i] = format === 3 && bits === 32 ? view.getFloat32(p, true)
+          : bits === 16 ? view.getInt16(p, true) / 32768
+            : bits === 8 ? (view.getUint8(p) - 128) / 128
+              : 0;
+      }
+      if (!rate || (format !== 1 && format !== 3) || (bits !== 8 && bits !== 16 && bits !== 32)) throw new Error(`a WAV the reading cannot read (format ${format}, ${bits} bits)`);
+      return { pcm, rate };
+    }
+    at += 8 + size + (size % 2);   // chunks are padded to an even length
+  }
+  throw new Error('a WAV file with no audio');
+}
+
+interface SystemVoices {
+  voices: { id: string; lang: string; quality: number }[];
+  default: string | null;
+  engine: string | null;
+}
+
+const system: Engine = {
+  name: 'system',
+  state: 'idle',
+  device: null,
+  error: null,
+  progress: '',
+  listed: null,
+  // Starting the phone's engine and asking for its voices: a fraction of a second, nothing fetched.
+  load() {
+    if (system.state === 'ready') return Promise.resolve();
+    if (system.loading) return system.loading;
+    system.state = 'loading';
+    system.error = null;
+    system.loading = (async () => {
+      try {
+        const answer = await invoke('speech_voices') as SystemVoices;
+        // The phone's own choice first, then the better voices: voiceOf takes the first offered.
+        const rank = (v: SystemVoices['voices'][number]) => (v.id === answer.default ? 1000 : 0) + v.quality;
+        system.listed = [...answer.voices].sort((a, b) => rank(b) - rank(a))
+          .map((v) => ({ id: v.id, name: `${v.id} (${v.lang})`, lang: v.lang }));
+        system.device = answer.engine;
+        system.state = 'ready';
+      } catch (error) {
+        system.state = 'failed';
+        system.error = String((error as Error).message ?? error);
+        throw error;
+      } finally {
+        system.loading = null;
+      }
+    })();
+    return system.loading;
+  },
+  // Let go while the page is hidden and silent; the next Play starts it again (ensureEngine).
+  cancel() {
+    if (system.state !== 'ready') return;
+    system.state = 'idle';
+    invoke('speech_release').catch(() => {});
+  },
+  voices: (lang) => (system.listed ?? []).filter((v) => sameLanguage(v.lang, lang)),
+  async render(text, { voice, speed }) {
+    const began = performance.now();
+    const bytes = await invoke('speech_render', { text, voice, speed }) as ArrayBuffer;
+    const { pcm, rate } = parseWav(bytes);
+    const buffer = new AudioBuffer({ numberOfChannels: 1, length: Math.max(1, pcm.length), sampleRate: rate });
+    buffer.copyToChannel(pcm as Float32Array<ArrayBuffer>, 0);
+    const kept = trimmedBuffer(buffer);
+    kept.took = performance.now() - began;
+    return kept;
+  },
 };
 
 /** Called when an engine that had loaded fails (its worker died). Set by the reading. */
@@ -323,6 +428,7 @@ const recorded: RecordedEngine = {
 
 export const engines: Record<EngineName, Engine> & { recorded: RecordedEngine } = {
   browser,
+  system,
   kokoro: workerEngine('kokoro'),
   piper: workerEngine('piper'),
   kitten: workerEngine('kitten'),

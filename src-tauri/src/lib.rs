@@ -6,6 +6,8 @@
 //! render worker runs in a browser, here on a thread of the app and played through the phone's own
 //! audio output, so playback survives the screen turning off and has the lock screen's controls.
 //! The page drives it through the `player_*` commands (`web/src/player/native.ts`).
+//!
+//! On Android it also lends the reading the phone's own speech engine (the `speech_*` commands, `src/speech.rs`).
 
 // Tests may unwrap, index and fail with a message; production code may not. See CLAUDE.md §3.
 #![cfg_attr(
@@ -15,6 +17,7 @@
 
 mod media;
 mod player;
+mod speech;
 
 /// Where a phone enters the app: `start_app`, which iOS's `main.mm` calls, and Android's JNI entry.
 #[cfg(mobile)]
@@ -33,12 +36,16 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::default().build())
         .manage(player::Native::default())
         .plugin(media::plugin())
+        .plugin(speech::plugin())
         .invoke_handler(tauri::generate_handler![
             player::player_open,
             player::player_post,
             player::player_mix,
             player::player_poll,
             player::player_view,
+            speech::speech_voices,
+            speech::speech_render,
+            speech::speech_release,
         ])
         .run(tauri::generate_context!());
     if let Err(error) = result {

@@ -36,7 +36,7 @@ export function inApp(): boolean {
   return typeof globalThis === 'object' && '__TAURI_INTERNALS__' in globalThis;
 }
 
-function invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
+export function invoke(command: string, args?: Record<string, unknown>): Promise<unknown> {
   return (globalThis as unknown as { __TAURI_INTERNALS__: Internals }).__TAURI_INTERNALS__.invoke(command, args);
 }
 
