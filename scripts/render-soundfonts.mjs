@@ -96,8 +96,11 @@ for (const { name, file } of variants) {
     if (!written.has(hash)) {
       const local = path.join(cache, `${hash}.mp3`);
       fs.writeFileSync(local, mp3);
+      // 4096-frame blocks, stated: left to itself ffmpeg wrote these zones in 47-frame blocks, which
+      // are valid FLAC but which Apple's decoder refuses outright — on iOS and in Safari every zone
+      // failed to decode and its instrument was silent (docs/player.md §14).
       execFileSync('ffmpeg', ['-hide_banner', '-v', 'error', '-y', '-i', local, '-sample_fmt', 's16',
-        '-compression_level', '12', path.join(out, flac)]);
+        '-compression_level', '12', '-frame_size', '4096', path.join(out, flac)]);
       const [rate] = probe(path.join(out, flac));
       written.set(hash, rate);
       bytes += fs.statSync(path.join(out, flac)).size;
