@@ -107,6 +107,8 @@ describe('in the Android app', () => {
   let store: typeof import('../src/store');
   let piece: typeof import('../src/piece')['piece'];
   const agent = navigator.userAgent;
+  // When the phone answers a release: at once, unless a test holds it back.
+  let release: Promise<void> = Promise.resolve();
   // What the phone answers speech_voices with: Android's shape, until a test hands it an iPhone's.
   let phone: Record<string, unknown> = {
     voices: [
@@ -126,6 +128,7 @@ describe('in the Android app', () => {
         const own = answering?.(command);
         if (own !== undefined) return own;
         if (command === 'speech_voices') return phone;
+        if (command === 'speech_release') await release;
         if (command === 'speech_render') return wav([...new Array(2400).fill(0), ...new Array(2400).fill(0.5)]);
         return null;
       },
@@ -175,13 +178,22 @@ describe('in the Android app', () => {
     expect(line.length).toBe(240 + 2400);
   });
 
-  it('is let go while the page is hidden and silent, and started again by the next Play', () => {
-    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+  it('is let go while the page is hidden and silent, and started again by the next Play — once the release has landed', async () => {
+    let answer!: () => void;
+    release = new Promise((resolve) => { answer = resolve; });
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     reading.letVoicesGo();
     expect(reading.engines.system.state).toBe('idle');
     expect(calls.at(-1)).toEqual({ command: 'speech_release', args: undefined });
+    hidden.mockReturnValue('visible');   // shown again, and Play pressed
     reading.ensureEngine();
-    expect(calls.at(-1)?.command).toBe('speech_voices');
+    // The phone has not answered the release: asking for the voices now could land before it.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls.at(-1)?.command).toBe('speech_release');
+    answer();
+    await vi.waitFor(() => expect(calls.at(-1)?.command).toBe('speech_voices'));
+    await vi.waitFor(() => expect(reading.engines.system.state).toBe('ready'));
+    release = Promise.resolve();
     vi.restoreAllMocks();
   });
 
@@ -253,11 +265,11 @@ describe('in the Android app', () => {
     vi.restoreAllMocks();
   });
 
-  it('points a reader of another voice to the phone\'s better one by way of the system voice', () => {
-    // The recordings chosen, the phone's voice standing in: the Voice menu lists the recordings.
+  it('gives no hint while the phone\'s voice only stands in: the Voice menu lists another engine\'s', () => {
+    // The recordings chosen, the phone's voice standing in in a basic voice.
     store.readingSettings.value = { ...store.readingSettings.value, engine: 'recorded', voices: { system: { en: 'com.apple.voice.super-compact.en-US.Samantha' } } };
     expect(reading.standIn()).toBe('system');
-    expect(reading.voiceHint()).toBe('Ava (American English, Premium) is on this phone: choose the system voice, then Ava (American English, Premium) under Voice, for a better stand-in.');
+    expect(reading.voiceHint()).toBeNull();
     store.readingSettings.value = { ...store.readingSettings.value, engine: 'system', voices: {} };
   });
 
@@ -314,7 +326,6 @@ describe('in the Android app', () => {
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     calls.length = 0;
     reading.ensureEngine();
-    expect(calls.map((c) => c.command)).toEqual(['speech_voices']);
     await vi.waitFor(() => expect(calls.map((c) => c.command)).toEqual(['speech_voices', 'speech_release']));
     expect(reading.engines.system.state).toBe('idle');
     vi.restoreAllMocks();

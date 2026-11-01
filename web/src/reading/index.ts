@@ -129,15 +129,23 @@ export function standIn(): EngineName {
 // What reads instead, as the status bar says it. The Android app's WebView has no voice of its own,
 // so a line handed to the browser's voice there is not read at all, and that is what is said
 // (CLAUDE.md §6: a fallback is visible, and true).
+/** Whether a line handed to the browser's voice is not read at all: the Android app's WebView. */
+export const noBrowserVoice = () => SYSTEM_VOICE && !('speechSynthesis' in window);
 function readingBy(back: EngineName, meanwhile = false): string {
   const when = meanwhile ? ' meanwhile' : '';
-  return back === 'browser' && SYSTEM_VOICE && !('speechSynthesis' in window)
+  return back === 'browser' && noBrowserVoice()
     ? `nothing reads it${when} (this app has no browser voice)`
     : `reading with the ${ENGINE_INFO[back].label}${when}`;
 }
 // The stand-in as the download question and the loader name it, before it may have started: the
 // phone's own voice in the apps.
 const standInName = () => (SYSTEM_VOICE ? 'the phone\'s own voice' : 'your browser\'s own voice');
+// What reads instead of a voice that could not load, as the loader says it: the phone's own voice
+// unless it could not start either, and then the browser's, which in the Android app is nothing.
+function readsInstead(): string {
+  if (SYSTEM_VOICE && engines.system.state !== 'failed') return 'The phone\'s own voice reads instead';
+  return noBrowserVoice() ? 'Nothing reads instead (this app has no browser voice)' : 'The browser\'s voice reads instead';
+}
 const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // Who reads now, and why not the chosen one when it is not: the chosen engine once it has
@@ -172,7 +180,8 @@ export function speakerOf(text: string): Who {
     return { engine: live, voice: liveVoice, why: `no recording of it; read live by ${ENGINE_INFO[live].label} ${liveVoice}`, fallback: true };
   }
   const back = standIn();
-  return { engine: back, voice: back === 'browser' ? null : voiceOf(back), why: `no recording of it; read by the ${ENGINE_INFO[back].label}`, fallback: true };
+  const by = back === 'browser' && noBrowserVoice() ? 'nothing reads it (this app has no browser voice)' : `read by the ${ENGINE_INFO[back].label}`;
+  return { engine: back, voice: back === 'browser' ? null : voiceOf(back), why: `no recording of it; ${by}`, fallback: true };
 }
 
 // The speed a line is rendered at by `engine`: a recording's own (the line's pace, at which it was
@@ -217,7 +226,7 @@ export function ensureEngine(retry = false): void {
   }, (error: Error & { cancelled?: boolean }) => {
     if (error.cancelled) { showVoices(); return; }
     console.warn(`[reading] ${engine.name} failed to load:`, error);
-    loaderFailed(engine.name, name, error, capital(standInName()));
+    loaderFailed(engine.name, name, error, readsInstead());
     showVoices();
     host?.recast(false);
     if (!chosenEngine(engine)) return;
@@ -708,27 +717,25 @@ export function noteLoss(text: string): void {
 
 // ---- The reading panel's menus ----
 
-/** The reading panel's menus, from the settings and what each engine offers. */
-// A better voice, while the phone's voice reads — chosen, or standing in — in a basic one: the
+// A better voice, while the phone's voice is the one chosen and reads in a basic one: the
 // better one on the phone, by name, if there is one (the reader chose the basic one, or chose it
 // before the better one was downloaded); otherwise where to get one, as the phone says it (iOS has
-// that to say, Android not). An app cannot download a voice; the reader can, in Settings. Standing
-// in, the Voice menu lists the chosen engine's voices, so the hint says how to reach the phone's.
+// that to say, Android not). An app cannot download a voice; the reader can, in Settings.
 export function voiceHint(): string | null {
   const engine = engines.system;
   if (engine.state !== 'ready') return null;
-  const chosen = settingsNow().engine === 'system';
-  if (!chosen && standIn() !== 'system') return null;
+  // Only while it is the voice chosen, whose voices the menu lists: standing in for another, the
+  // way to a better one would be to switch engines and back, which a hint should not ask.
+  if (settingsNow().engine !== 'system') return null;
   const offered = engine.voices(language.value);
   const now = voiceOf('system');
   if (offered.find((v) => v.id === now)?.good) return null;
   const better = offered.find((v) => v.good);
   if (!better) return engine.improve ?? null;
-  return chosen
-    ? `${better.name} is on this phone: choose it under Voice for a better reading.`
-    : `${better.name} is on this phone: choose the ${ENGINE_INFO.system.label}, then ${better.name} under Voice, for a better stand-in.`;
+  return `${better.name} is on this phone: choose it under Voice for a better reading.`;
 }
 
+/** The reading panel's menus, from the settings and what each engine offers. */
 export function showVoices(): void {
   const settings = settingsNow();
   const known: Record<string, string> = { ...LANGUAGES };
@@ -886,7 +893,7 @@ async function warmVoice(name: EngineName): Promise<void> {
     const failed = error as Error & { cancelled?: boolean; dropped?: boolean };
     // Let go mid-line, the loader would otherwise stay frozen at its last progress.
     if (failed.cancelled || failed.dropped) { if (loaderEngine() === name) closeLoader(); return; }
-    loaderFailed(name, ENGINE_INFO[name].label, failed, capital(standInName()));
+    loaderFailed(name, ENGINE_INFO[name].label, failed, readsInstead());
   }
 }
 

@@ -47,9 +47,14 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
   private var released = false
   private val watchdog = Handler(Looper.getMainLooper())
 
-  /** Runs `then` once the engine is up, with an error if it could not start. */
+  /** Runs `then` once the engine is up, with an error if it could not start. A render (`render`)
+   * is refused once the engine was let go, in the same lock that would start a new one, so a line
+   * that crosses a release cannot start an engine behind the hidden page's back; the next voices()
+   * (the page shown again, or Play) starts it. */
   @Synchronized
-  private fun started(then: (String?) -> Unit) {
+  private fun started(render: Boolean, then: (String?) -> Unit) {
+    if (render && released) { then("released"); return }
+    if (!render) released = false
     if (ready) { then(null); return }
     starting.add(then)
     if (tts != null) return
@@ -104,8 +109,7 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
   /** The voices on the phone, each with its language tag, and which one the phone reads with. */
   @Command
   fun voices(invoke: Invoke) {
-    synchronized(this) { released = false }
-    started { error ->
+    started(render = false) { error ->
       val engine = tts
       if (error != null || engine == null) { invoke.reject(error ?: "the phone's speech engine is not running"); return@started }
       val list = JSArray()
@@ -130,8 +134,7 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun render(invoke: Invoke) {
     val args = invoke.parseArgs(RenderArgs::class.java)
-    synchronized(this) { if (released) { invoke.reject("released"); return } }
-    started { error ->
+    started(render = true) { error ->
       val engine = tts
       if (error != null || engine == null) { invoke.reject(error ?: "the phone's speech engine is not running"); return@started }
       val voice = engine.voices?.firstOrNull { it.name == args.voice }

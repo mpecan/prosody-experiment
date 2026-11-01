@@ -14,10 +14,13 @@ const CUE = { line: 0, stanza: 0, from: 0, to: 28, pace: 1, pause: 1.5, fitted: 
 /** The Performance request, held until the test lets it answer. */
 let answer: (() => void) | null = null;
 const asked = vi.fn();
+/** Whether the Performance request fails once let answer. */
+let failing = false;
 vi.mock('../src/compiler', () => ({
   ask: vi.fn(async (path: string, _query: string, text: string) => {
     asked(path, text);
     await new Promise<void>((resolve) => { answer = resolve; });
+    if (failing) return new Response('the compiler is down', { status: 500 });
     return new Response(JSON.stringify({
       seconds: 2, cpm: 30, bars: [{ slot: 0, at: 0 }], notes: [], marks: [], cues: [CUE], unread: [], natural_unread: [],
     }));
@@ -145,6 +148,25 @@ describe('the Prosody player', () => {
     expect(cancel).toHaveBeenCalledTimes(1);
     answer!();
     await playingNow;
+    hidden.mockRestore();
+    cancel.mockRestore();
+    engines.kokoro.state = 'idle';
+  });
+
+  it('lets the reading\'s voices go when a Play started with the page hidden fails', async () => {
+    engines.kokoro.state = 'ready';
+    const cancel = vi.spyOn(engines.kokoro, 'cancel').mockImplementation(() => {});
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const prosody = await import('../src/player');
+    failing = true;
+    const playingNow = prosody.play();
+    await heldAtThePerformance();
+    expect(cancel).not.toHaveBeenCalled();
+    answer!();
+    await playingNow;
+    expect(playing.value).toBe(false);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    failing = false;
     hidden.mockRestore();
     cancel.mockRestore();
     engines.kokoro.state = 'idle';

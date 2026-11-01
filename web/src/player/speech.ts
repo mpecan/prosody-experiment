@@ -9,7 +9,7 @@
 // that voice cannot be placed in a stream.
 import type { Reading, SpokenLine } from '../answers';
 import {
-  castOf, hostReading, hushBrowserVoice, noteLoss, noteReading, readAloud, readingIsAt, renderedFor, renderUrgently, speakerOf,
+  castOf, hostReading, hushBrowserVoice, noBrowserVoice, noteLoss, noteReading, readAloud, readingIsAt, renderedFor, renderUrgently, speakerOf,
   speech, type Rendered,
 } from '../reading';
 import { ENGINE_INFO } from '../reading/engines';
@@ -228,8 +228,11 @@ export function told(generation: number, message: Told): void {
       const who = speakerOf(line.text);
       if (message.late) renderUrgently(reading ?? null, line, message.pace);
       const why = message.late ? 'not rendered in time' : who.why;
-      noteReading(`line ${line.line + 1} read by the browser voice, off the playhead and not in step with the music`
-        + (why ? ` (${why})` : ''), !!who.bad);
+      // In the Android app there is no browser voice: the line is not read, and that is said.
+      noteReading((noBrowserVoice()
+        ? `line ${line.line + 1} not read: this app has no browser voice`
+        : `line ${line.line + 1} read by the browser voice, off the playhead and not in step with the music`)
+        + (why ? ` (${why})` : ''), !!who.bad || noBrowserVoice());
       const lines = reading?.lines ?? [];
       const next = lines[lines.findIndex((l) => l.line === line.line) + 1];
       due.push({

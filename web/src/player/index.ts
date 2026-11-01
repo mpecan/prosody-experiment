@@ -277,8 +277,12 @@ export async function play(): Promise<void> {
   try {
     await loadAndPlay(mine);
   } finally {
-    // Unless a newer play() has it, or Stop cleared it.
-    if (mine === attempt) readingNow.starting = false;
+    // Unless a newer play() has it, or Stop cleared it. A Play that failed or gave up while hidden
+    // lets go what the hidden page kept for it (letVoicesGo does nothing once the piece plays).
+    if (mine === attempt) {
+      readingNow.starting = false;
+      letVoicesGo();
+    }
   }
 }
 

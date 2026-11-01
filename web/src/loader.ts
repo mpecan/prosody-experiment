@@ -37,12 +37,12 @@ export function loaderSays(name: EngineName, text: string): void {
   loader.value = { ...loader.value, progress: text };
 }
 
-export function loaderFailed(name: EngineName, label: string, error: Error, instead = "The browser's voice"): void {
+export function loaderFailed(name: EngineName, label: string, error: Error, instead = "The browser's voice reads instead"): void {
   if (loading?.engine !== name || !loader.value) return;
   loader.value = {
     ...loader.value,
     title: `${label} could not load`,
-    progress: `${error.message}. ${instead} reads instead; choose it again to try again.`,
+    progress: `${error.message}. ${instead}; choose it again to try again.`,
     fraction: 0,
     failed: true,
     cancellable: false,

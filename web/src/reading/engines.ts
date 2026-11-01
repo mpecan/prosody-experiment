@@ -185,6 +185,9 @@ export function systemVoiceLabel(voice: SystemVoice): string {
   return `${language}, ${variant}`;
 }
 
+/** The last release asked of the phone's engine, until it has been answered. */
+let releasing: Promise<unknown> = Promise.resolve();
+
 const system: Engine = {
   name: 'system',
   state: 'idle',
@@ -200,6 +203,9 @@ const system: Engine = {
     system.error = null;
     system.loading = (async () => {
       try {
+        // A release still on its way is let arrive first: the two cross to the phone on threads of
+        // their own, and a release landing after this load would leave the engine let go.
+        await releasing;
         const answer = await invoke('speech_voices') as SystemVoices;
         // The phone's own choice first, then the better voices: voiceOf takes the first offered.
         const rank = (v: SystemVoice) => (v.id === answer.default ? 1000 : 0) + v.rank;
@@ -222,7 +228,7 @@ const system: Engine = {
   cancel() {
     if (system.state !== 'ready') return;
     system.state = 'idle';
-    invoke('speech_release').catch(() => {});
+    releasing = invoke('speech_release').catch(() => {});
   },
   voices: (lang) => (system.listed ?? []).filter((v) => sameLanguage(v.lang, lang)),
   async render(text, { voice, speed }) {
