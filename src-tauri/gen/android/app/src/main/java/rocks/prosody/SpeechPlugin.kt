@@ -9,6 +9,8 @@ package rocks.prosody
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
@@ -39,6 +41,11 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
   /** Each line being rendered, by its utterance id: its call and its file. */
   private val rendering = ConcurrentHashMap<String, Pair<Invoke, File>>()
   private val count = AtomicInteger()
+  /** Set by release() until the page lists the voices again: a render sent before the release can
+   * arrive after it (each call has a thread of its own, speech.rs), and must not start an engine
+   * the page has let go. */
+  private var released = false
+  private val watchdog = Handler(Looper.getMainLooper())
 
   /** Runs `then` once the engine is up, with an error if it could not start. */
   @Synchronized
@@ -46,16 +53,30 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
     if (ready) { then(null); return }
     starting.add(then)
     if (tts != null) return
-    tts = TextToSpeech(activity.applicationContext) { status ->
+    // With no engine to bind, TextToSpeech answers from inside its constructor, before it is
+    // assigned: that answer is kept and handled once it is. An engine released before its answer
+    // came must not mark its successor ready.
+    var made: TextToSpeech? = null
+    var early: Int? = null
+    val engine = TextToSpeech(activity.applicationContext) { status ->
       synchronized(this) {
-        val error = if (status == TextToSpeech.SUCCESS) null else "the phone's speech engine did not start ($status)"
-        ready = error == null
-        if (!ready) { tts?.shutdown(); tts = null }
-        else tts?.setOnUtteranceProgressListener(listener)
-        starting.forEach { it(error) }
-        starting.clear()
+        val mine = made
+        if (mine == null) early = status
+        else if (tts === mine) answered(mine, status)
       }
     }
+    made = engine
+    tts = engine
+    early?.let { answered(engine, it) }
+  }
+
+  /** The engine's answer to starting: every call waiting on it is told. Called holding the lock. */
+  private fun answered(engine: TextToSpeech, status: Int) {
+    val error = if (status == TextToSpeech.SUCCESS) null else "the phone's speech engine did not start ($status)"
+    if (error == null) { ready = true; engine.setOnUtteranceProgressListener(listener) }
+    else { engine.shutdown(); tts = null }
+    starting.forEach { it(error) }
+    starting.clear()
   }
 
   private val listener = object : UtteranceProgressListener() {
@@ -83,6 +104,7 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
   /** The voices on the phone, each with its language tag, and which one the phone reads with. */
   @Command
   fun voices(invoke: Invoke) {
+    synchronized(this) { released = false }
     started { error ->
       val engine = tts
       if (error != null || engine == null) { invoke.reject(error ?: "the phone's speech engine is not running"); return@started }
@@ -108,6 +130,7 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun render(invoke: Invoke) {
     val args = invoke.parseArgs(RenderArgs::class.java)
+    synchronized(this) { if (released) { invoke.reject("released"); return } }
     started { error ->
       val engine = tts
       if (error != null || engine == null) { invoke.reject(error ?: "the phone's speech engine is not running"); return@started }
@@ -116,6 +139,9 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
       val id = "line-${count.incrementAndGet()}"
       val file = File(activity.cacheDir, "speech-$id.wav")
       rendering[id] = Pair(invoke, file)
+      // An engine whose process dies mid-line (it crashed, or was updated) sends neither onDone nor
+      // onError: without this the line, and every line queued behind it on the page, waits for good.
+      watchdog.postDelayed({ lost(id) }, 15_000L + 100L * args.text.length)
       // The voice and rate go with the request as it is queued, so lines asked for in turn keep theirs.
       synchronized(this) {
         engine.voice = voice
@@ -123,6 +149,7 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
         engine.setPitch(1f)
         if (engine.synthesizeToFile(args.text, Bundle(), file, id) != TextToSpeech.SUCCESS) {
           rendering.remove(id)
+          file.delete()   // made before the engine refused the line
           invoke.reject("the phone's speech engine would not take the line")
         }
       }
@@ -133,12 +160,32 @@ class SpeechPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun release(invoke: Invoke) {
     synchronized(this) {
-      tts?.shutdown()
-      tts = null
-      ready = false
-      for ((_, pending) in rendering) { pending.second.delete(); pending.first.reject("released") }
-      rendering.clear()
+      released = true
+      letGo("released")
     }
     invoke.resolve()
+  }
+
+  /** A line the engine never answered: rejected, and the engine let go as release() lets it go, so
+   * the next call starts a fresh one. */
+  private fun lost(id: String) {
+    synchronized(this) {
+      val (invoke, file) = rendering.remove(id) ?: return
+      file.delete()
+      invoke.reject("the phone's speech engine stopped answering")
+      letGo("the phone's speech engine stopped answering")
+    }
+  }
+
+  /** The engine shut down and every line it was rendering rejected with `why`. Called holding the lock. */
+  private fun letGo(why: String) {
+    tts?.shutdown()
+    tts = null
+    ready = false
+    for ((_, pending) in rendering) { pending.second.delete(); pending.first.reject(why) }
+    rendering.clear()
+    // Calls waiting on an engine still starting: its answer, if it comes, is ignored (started).
+    starting.forEach { it(why) }
+    starting.clear()
   }
 }

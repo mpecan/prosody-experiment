@@ -7,7 +7,7 @@
 //! audio output, so playback survives the screen turning off and has the lock screen's controls.
 //! The page drives it through the `player_*` commands (`web/src/player/native.ts`).
 //!
-//! On Android it also lends the reading the phone's own speech engine (the `speech_*` commands, `src/speech.rs`).
+//! On Android and iOS it also lends the reading the phone's own speech engine (the `speech_*` commands, `src/speech.rs`).
 
 // Tests may unwrap, index and fail with a message; production code may not. See CLAUDE.md §3.
 #![cfg_attr(

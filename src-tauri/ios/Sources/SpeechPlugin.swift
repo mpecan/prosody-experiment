@@ -26,6 +26,10 @@ class SpeechPlugin: Plugin {
   // Read and written on the main queue, where the synthesizer's callbacks arrive.
   private var synthesizer: AVSpeechSynthesizer?
   private var count = 0
+  /** Each line being rendered, by its number: answered by its last buffer, or rejected by release.
+   * A synthesizer stopped mid-line may never send that buffer, or send it after a cut-off line,
+   * which must not be answered as the whole line (SpeechPlugin.kt does the same). */
+  private var pending: [Int: Invoke] = [:]
 
   /** The voices on the phone, each with its language tag, and the best one in the phone's language. */
   @objc public func voices(_ invoke: Invoke) {
@@ -106,15 +110,19 @@ class SpeechPlugin: Plugin {
       utterance.rate = AVSpeechUtteranceDefaultSpeechRate
       if #available(iOS 14.0, *) { utterance.prefersAssistiveTechnologySettings = false }
       self.count += 1
-      let file = FileManager.default.temporaryDirectory.appendingPathComponent("speech-line-\(self.count).wav")
+      let id = self.count
+      self.pending[id] = invoke
+      let file = FileManager.default.temporaryDirectory.appendingPathComponent("speech-line-\(id).wav")
       var samples: [Float] = []
       var rate = 0.0
       var done = false
       synthesizer.write(utterance) { buffer in
-        guard !done, let pcm = buffer as? AVAudioPCMBuffer else { return }
+        // A line released (below) is answered already: what it still sends is let go.
+        guard !done, self.pending[id] != nil, let pcm = buffer as? AVAudioPCMBuffer else { return }
         // The last buffer is empty: the line is all here.
         if pcm.frameLength == 0 {
           done = true
+          self.pending[id] = nil
           guard rate > 0, !samples.isEmpty else {
             invoke.reject("the phone's speech engine gave no audio for the line")
             return
@@ -139,8 +147,11 @@ class SpeechPlugin: Plugin {
   /** Lets the synthesizer go (the page is hidden and silent); the next line makes another. */
   @objc public func release(_ invoke: Invoke) {
     DispatchQueue.main.async {
+      let cut = self.pending
+      self.pending.removeAll()
       self.synthesizer?.stopSpeaking(at: .immediate)
       self.synthesizer = nil
+      for line in cut.values { line.reject("released") }
       invoke.resolve()
     }
   }

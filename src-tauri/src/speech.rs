@@ -91,7 +91,14 @@ pub(crate) async fn speech_render<R: Runtime>(
             serde_json::json!({ "text": text, "voice": voice, "speed": speed }),
         )
         .await
-        .inspect_err(|error| log::warn!("speech: {voice} could not read \"{text}\": {error}"))?;
+        // The line's length, not its text: release builds keep these logs, and a poem has no
+        // business in the system log or the app's log file.
+        .inspect_err(|error| {
+            log::warn!(
+                "speech: {voice} could not read a {}-char line: {error}",
+                text.chars().count()
+            );
+        })?;
         let path = answer
             .get("path")
             .and_then(serde_json::Value::as_str)
@@ -103,7 +110,8 @@ pub(crate) async fn speech_render<R: Runtime>(
         let _ = std::fs::remove_file(&path);
         let bytes = bytes?;
         log::info!(
-            "speech: {voice} at {speed:.3}, {} kB in {:.2} s: {text}",
+            "speech: {voice} at {speed:.3}, {} chars, {} kB in {:.2} s",
+            text.chars().count(),
             bytes.len() / 1024,
             began.elapsed().as_secs_f64()
         );
