@@ -73,12 +73,16 @@ start them.
 | `mise run android:build` | the Android app's debug APK for 64-bit ARM |
 | `mise run android:install` | `adb install -r` it to `$ANDROID_SERIAL`, or to the only attached device |
 | `mise run android:run` | install, then launch `rocks.prosody.debug` |
+| `mise run android:deploy` | build, install and launch: what goes on the phone is this checkout (`android:install` alone installs the last APK built, however old) |
 | `mise run site:ios` | the static site for the iOS app into `target/site-ios`, without the neural voices (`PROSODY_NEURAL_VOICES=off`) |
 | `mise run ios:env` | check Xcode, the iOS SDKs, the Rust targets and a simulator |
 | `mise run ios:build` | the iOS app's debug build for the simulator (arm64), into `target/ios/simulator` |
 | `mise run ios:build:device` | the debug build for an iPhone, signed for `$APPLE_DEVELOPMENT_TEAM`, into `target/ios/device` |
 | `mise run ios:install` | boot the simulator (`$PROSODY_IOS_SIMULATOR`, or an iPhone 17) and install the debug build |
 | `mise run ios:run` | install, then launch `rocks.prosody.debug` on the simulator |
+| `mise run ios:install:device` | install the device build on the iPhone (`$PROSODY_IOS_DEVICE`, a name or UDID, or the only one paired) |
+| `mise run ios:run:device` | install, then launch it on the iPhone |
+| `mise run ios:deploy` | build the device app, install and launch it on the iPhone |
 
 The Android SDK and NDK are not something mise installs: install them with Android Studio. mise.toml
 looks for them where Android Studio puts them on macOS (`~/Library/Android/sdk`, NDK
@@ -89,7 +93,9 @@ what is missing. `cargo tauri android build` also works by hand, from the reposi
 The iOS app needs a Mac with Xcode, its iOS platform, and `rustup target add aarch64-apple-ios
 aarch64-apple-ios-sim`; `mise run ios:env` says what is missing. Its first build fetches swift-rs
 (which Tauri's Swift code depends on) from GitHub. A simulator build needs no Apple account; a
-device build is signed, so it needs your development team's ID in `APPLE_DEVELOPMENT_TEAM`. The
+device build is signed, so it needs your development team's ID in `APPLE_DEVELOPMENT_TEAM`: set it
+once in a `mise.local.toml` (gitignored) beside mise.toml, under `[env]`, where `ANDROID_SERIAL`
+and `PROSODY_IOS_DEVICE` can go too when more than one phone is attached. The
 iOS app reads with the recorded readings and the system's voice only: the neural voices carry
 eSpeak NG (GPL-3) and fetch their code at run time, which the App Store does not allow
 (`docs/player.md` §14 says how to switch them back on, and how to make a TestFlight build).

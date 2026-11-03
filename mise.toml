@@ -177,6 +177,16 @@ adb -s "$serial" shell monkey -p rocks.prosody.debug -c android.intent.category.
 echo "android: launched rocks.prosody.debug on $serial"
 """
 
+[tasks."android:deploy"]
+description = "Build the debug APK from this checkout, install it and launch it: the one to use after a change"
+# In sequence rather than as `depends`, which mise runs in parallel: android:install alone installs
+# whatever APK was built last, however old.
+run = """
+set -eu
+mise run android:build
+mise run android:run
+"""
+
 # ── The app (src-tauri), iOS ──────────────────────────────────────────────────────────────────────
 #
 # Xcode, its simulators and the Rust targets are not something mise installs: `mise run ios:env` says
@@ -236,6 +246,7 @@ set -eu
 if [ -z "${APPLE_DEVELOPMENT_TEAM:-}" ]; then
   echo "ios: a device build must be signed, and signing needs your Apple development team:" >&2
   echo "ios:   APPLE_DEVELOPMENT_TEAM=<your 10-character team ID> mise run ios:build:device" >&2
+  echo "ios: or once, in mise.local.toml (gitignored): [env] APPLE_DEVELOPMENT_TEAM = \\"<team ID>\\"" >&2
   echo "ios: the ID is under Membership at developer.apple.com, or in Xcode > Settings > Accounts." >&2
   exit 1
 fi
@@ -244,9 +255,41 @@ xcodebuild -quiet -project src-tauri/gen/apple/prosody-app.xcodeproj -scheme pro
   -configuration debug -sdk iphoneos -destination 'generic/platform=iOS' \\
   -derivedDataPath target/ios/device -allowProvisioningUpdates \\
   DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" build
+echo "ios: target/ios/device/Build/Products/debug-iphoneos/Prosody.app — mise run ios:install:device"
+"""
+
+[tasks."ios:install:device"]
+description = "Install the device build on the iPhone (PROSODY_IOS_DEVICE, or the only one paired)"
+run = """
+set -eu
 app=target/ios/device/Build/Products/debug-iphoneos/Prosody.app
-echo "ios: $app — install it on a connected iPhone with"
-echo "ios:   xcrun devicectl device install app --device <name or UDID> $app"
+if [ ! -d "$app" ]; then echo "ios: no $app — mise run ios:build:device first" >&2; exit 1; fi
+udid=$(./scripts/ios-device.sh)
+echo "ios: installing $app ($(date -r "$app" '+%F %T')) on $udid"
+xcrun devicectl device install app --quiet --device "$udid" "$app" || {
+  # devicectl's own words for an unreachable phone are a CoreDevice usage-assertion error.
+  echo "ios: the install failed — is the iPhone unlocked, and on a cable or the same Wi-Fi as this Mac?" >&2
+  exit 1
+}
+"""
+
+[tasks."ios:run:device"]
+description = "Install the device build on the iPhone, then launch rocks.prosody.debug (unlock it first)"
+depends = ["ios:install:device"]
+run = """
+set -eu
+udid=$(./scripts/ios-device.sh)
+xcrun devicectl device process launch --quiet --device "$udid" rocks.prosody.debug >/dev/null
+echo "ios: launched rocks.prosody.debug on $udid"
+"""
+
+[tasks."ios:deploy"]
+description = "Build the signed debug app from this checkout, install it on the iPhone and launch it"
+# In sequence, as android:deploy is, so that what goes on the phone is what this checkout builds.
+run = """
+set -eu
+mise run ios:build:device
+mise run ios:run:device
 """
 
 [tasks."ios:install"]
