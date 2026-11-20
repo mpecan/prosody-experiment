@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <radialGradient id="playheadGlow" cx="512" cy="512" r="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffb86b" stop-opacity="0.32"/>
+      <stop offset="40%" stop-color="#8fb3ff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#8fb3ff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glowAmber" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glowBlue" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <circle cx="512" cy="512" r="280" fill="url(#playheadGlow)"/>
+
+  <!-- Bar Lines -->
+  <line x1="284" y1="210" x2="284" y2="814" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+  <line x1="398" y1="210" x2="398" y2="814" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1.5" stroke-dasharray="4 6"/>
+  <line x1="626" y1="210" x2="626" y2="814" stroke="#ffffff" stroke-opacity="0.05" stroke-width="1.5" stroke-dasharray="4 6"/>
+  <line x1="740" y1="210" x2="740" y2="814" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- Row 1: Pulse (Lavender/Violet #c9a6ff) -->
+  <rect x="200" y="270" width="48" height="34" rx="17" fill="#c9a6ff" fill-opacity="0.6"/>
+  <rect x="330" y="270" width="48" height="34" rx="17" fill="#c9a6ff" fill-opacity="0.6"/>
+  <rect x="488" y="270" width="48" height="34" rx="17" fill="#c9a6ff" fill-opacity="1"/>
+  <rect x="646" y="270" width="48" height="34" rx="17" fill="#c9a6ff" fill-opacity="0.6"/>
+  <rect x="776" y="270" width="48" height="34" rx="17" fill="#c9a6ff" fill-opacity="0.6"/>
+
+  <!-- Row 2: Ornament (Teal/Mint #6fd6c5) -->
+  <rect x="260" y="372" width="60" height="34" rx="17" fill="#6fd6c5" fill-opacity="0.65"/>
+  <rect x="390" y="372" width="52" height="34" rx="17" fill="#6fd6c5" fill-opacity="0.65"/>
+  <rect x="578" y="372" width="56" height="34" rx="17" fill="#6fd6c5" fill-opacity="0.65"/>
+  <rect x="704" y="372" width="64" height="34" rx="17" fill="#6fd6c5" fill-opacity="0.65"/>
+
+  <!-- Row 3: Bass / Lead Melody (Golden Amber #ffb86b) -->
+  <rect x="180" y="478" width="94" height="46" rx="23" fill="#ffb86b" fill-opacity="0.6"/>
+  <rect x="314" y="478" width="86" height="46" rx="23" fill="#ffb86b" fill-opacity="0.6"/>
+  <rect x="444" y="474" width="136" height="54" rx="27" fill="#ffb86b" filter="url(#glowAmber)"/>
+  <rect x="628" y="478" width="86" height="46" rx="23" fill="#ffb86b" fill-opacity="0.6"/>
+  <rect x="750" y="478" width="94" height="46" rx="23" fill="#ffb86b" fill-opacity="0.6"/>
+
+  <!-- Row 4: Rhyme (Rose/Pink #ff7aa8) -->
+  <rect x="236" y="596" width="112" height="38" rx="19" fill="#ff7aa8" fill-opacity="0.6"/>
+  <rect x="410" y="596" width="96" height="38" rx="19" fill="#ff7aa8" fill-opacity="0.65"/>
+  <rect x="584" y="596" width="124" height="38" rx="19" fill="#ff7aa8" fill-opacity="0.6"/>
+  <rect x="748" y="596" width="76" height="38" rx="19" fill="#ff7aa8" fill-opacity="0.55"/>
+
+  <!-- Row 5: Chords / Sustained Base (Blue #8fb3ff) -->
+  <rect x="180" y="704" width="168" height="42" rx="21" fill="#8fb3ff" fill-opacity="0.55"/>
+  <rect x="382" y="700" width="260" height="50" rx="25" fill="#8fb3ff" filter="url(#glowBlue)"/>
+  <rect x="674" y="704" width="170" height="42" rx="21" fill="#8fb3ff" fill-opacity="0.55"/>
+
+  <!-- Playhead Vertical Needle -->
+  <rect x="504" y="210" width="16" height="604" rx="8" fill="#ffffff" fill-opacity="0.12"/>
+  <rect x="508" y="210" width="8" height="604" rx="4" fill="#ffffff" fill-opacity="0.35"/>
+  <rect x="510" y="210" width="4" height="604" rx="2" fill="#ffffff"/>
+</svg>

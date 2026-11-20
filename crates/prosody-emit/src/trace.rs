@@ -176,7 +176,7 @@ pub fn plan(score: &Score, style: &Style) -> Trace {
 
 /// Whether `event` is heard anew in slot `slot`: its line's placement there is a statement, an
 /// arrival or an overruling rather than a loop of something already heard.
-fn fresh(score: &Score, slot: usize, event: &Event) -> bool {
+pub(crate) fn fresh(score: &Score, slot: usize, event: &Event) -> bool {
     score
         .arrangement()
         .slots()

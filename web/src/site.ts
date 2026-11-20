@@ -47,7 +47,13 @@ export interface SiteData {
   scales: string[];
   /** Each scale's semitones above its root, for the note circle. */
   scaleSteps: Record<string, number[]>;
+  /** The webaudiofont file each soundfont sound (`gm_cello:1`) loads. */
+  soundfonts: Record<string, string>;
   banks: string[];
+  /** A retired bank's name → the kit a header naming it now plays (`tr909` → `uzu`). */
+  retiredBanks: Record<string, string>;
+  /** The drums every bank has, each `drums/<bank>/<drum>.flac` beside the page. */
+  drumSamples: string[];
   instruments: string[];
   kits: string[];
   voicings: string[];

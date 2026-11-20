@@ -76,6 +76,11 @@ fn write_site(dir: &std::path::Path) -> Result<()> {
     let site = Site::new(Transport::Wasm)?;
     let path = dir.join("site.json");
     std::fs::write(&path, site.data()).with_context(|| format!("writing {}", path.display()))?;
+    let drums = dir.join("drums");
+    std::fs::create_dir_all(&drums).with_context(|| format!("creating {}", drums.display()))?;
+    let path = drums.join("strudel.json");
+    std::fs::write(&path, prosody_web::drum_map())
+        .with_context(|| format!("writing {}", path.display()))?;
     println!("prosody: wrote the page's data to {}", dir.display());
     Ok(())
 }

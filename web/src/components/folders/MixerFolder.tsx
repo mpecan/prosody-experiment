@@ -6,6 +6,7 @@ import type { ComponentChildren } from 'preact';
 import { toggleMute, toggleSolo, turnControl } from '../../actions';
 import { audible } from '../../mix';
 import { setLevel } from '../../reading';
+import { duckSwitched } from '../../transport';
 import { controls, duck, muted, readingSettings, soloed, type Channel } from '../../store';
 import { Fader, Knob, Switch } from '../desk/parts';
 
@@ -64,7 +65,7 @@ export function MixerFolder() {
         </Strip>
       </div>
       <div class="module duck">
-        <Switch id="duck" checked={duck.value} onChange={(on) => { duck.value = on; }}>Duck the band while a stanza is read</Switch>
+        <Switch id="duck" checked={duck.value} onChange={(on) => { duck.value = on; duckSwitched(); }}>Duck the band while a stanza is read</Switch>
       </div>
       <div class="module fx" aria-label="Effects">
         <span class="label fx-title">Effects</span>

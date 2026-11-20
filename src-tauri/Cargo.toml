@@ -1,0 +1,46 @@
+[package]
+name = "prosody-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Prosody — a poem as the source code for music"
+
+[lints]
+workspace = true
+
+[lib]
+name = "app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", default-features = false , features = [] }
+
+# Builds and links the app's own Swift plugin for iOS (build.rs, `ios/`): `link_apple_library` is how
+# the tauri crate links its own Swift API and every Tauri plugin links its Swift. Not new to the
+# build: tauri and tauri-build already depend on it with this feature. Hand-rolling it would mean
+# driving `swift build` per target and SDK, and knowing the Swift runtime's link flags, ourselves.
+[target.'cfg(target_os = "macos")'.build-dependencies]
+tauri-utils = { version = "~2.10.2", features = ["build-2"] }
+
+[dependencies]
+tauri = { version = "2.11.3", default-features = false, features = ["wry"] }
+tauri-plugin-log = "2"
+log = "0.4"
+# The native player (`docs/player.md` §13): the engine the browser's render worker runs, and the
+# synth's types it is handed.
+prosody-player.workspace = true
+prosody-synth.workspace = true
+# The phone's audio output. It replaces calling AAudio (Android) and Core Audio (iOS, later) by hand,
+# which is foreign functions and raw sample pointers — `unsafe` this workspace forbids — once per
+# platform; cpal wraps each in a safe callback over `&mut [f32]`, and the same code runs on a desktop,
+# where the app is developed. Apache-2.0, RustAudio's, with its default features. On Android it brings
+# `ndk` (already in the app, through the WebView), `jni` and `ndk-context`, and needs API 26: AAudio.
+# On Linux its backend is ALSA (`alsa-sys`, found through pkg-config), so a Linux build needs
+# libasound2-dev, as CI's `app` job installs.
+cpal = "0.18"
+# The player's messages and the media bridge's arguments: Tauri hands a command its arguments
+# through serde and already builds it, with `serde_json`, into the app; these name them so the app
+# can derive for its own types and read the media buttons' JSON.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

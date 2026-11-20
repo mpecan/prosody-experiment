@@ -56,6 +56,19 @@ Voice IR  ←──────── per-unit seeded PRNG ── style resoluti
 Backend: Strudel/Tidal emit  |  OSC → SuperCollider  |  direct DSP
 ```
 
+**The direct-DSP backend's first half has landed (2026-10-31, `docs/player.md` step 1):** the
+`Performance` resolves every note of the piece — onset and length in seconds, sound, pitch, every
+parameter, and the token span it came from — from the same per-event functions the Strudel text
+prints (`prosody_emit::perform`), so the two backends cannot drift. It is realisation, where the
+style may be read (I3); no mapping changed. A parity test plays the Strudel text with Strudel itself
+and compares it note for note.
+
+**And the rest (steps 2–4):** `prosody-synth` renders the Performance to stems in a worker, and since
+step 4 it is the page's and the app's only player — the reading included (§4.7): its lines are
+placed on the music's clock by the render worker, from the Performance's cues. Strudel's runtime is
+no longer loaded; Strudel/Tidal text remains what the compiler writes, and the page shows, copies,
+shares and links it to strudel.cc. No mapping changed.
+
 ---
 
 ## 4. Mappings
@@ -99,8 +112,11 @@ structure (when events fall), so it is a selector, `Mapping::Pulse`, not palette
   exactly *w* cycles), and `.cpm` is the tempo. Integers throughout; no rounded tempo.
 - **`elastic`** — the pattern as it was, kept to compare against: a cycle is a bar.
 
-Swing (§5) slices a cycle, so under `steady` it is `.swingBy(x, 1)` — every beat swung, in a bar of
-three or of four alike; under `elastic` it keeps the mean bar length as before. The page's trace
+Swing (§5) slices a cycle, so under `steady` every beat is swung, in a bar of three or of four alike
+(`.layer(x => x.mask("1 0"), x => x.mask("0 1").late(x / 2))`: each beat's second half, late);
+under `elastic` it keeps the mean bar length as before (`"[1 0]*n"`, `late(x / 2n)`). The text
+writes swing out rather than calling Strudel's `swingBy`, which measurably plays some notes twice
+and others never (`docs/player.md` §9). The page's trace
 and the reading's cue pattern are built on the same weighted bars and the same `.cpm`, a spoken
 line's rate is fitted to the bar it is spoken in, and the trace hands the page each bar's start so
 the roll's bar lines fall where the bars change. The OSC schedule is in beats and has always been
@@ -226,8 +242,8 @@ strikes a drum piece; its first variant is what preceded it):
       beats.
 
 Every sample (`bd`, `sd`, `hh`, `ht`, `mt`, `lt`, plus `rd`/`oh`/`cr` for the ride kit) is present
-across all 6 allowed Strudel drum banks (`tr909`, `tr808`, `tr707`, `linn`, `casio`, `r8`) and
-both kits (12 configurations, checked by `every_kit_asks_every_bank_for_a_sample_the_bank_has`). No
+across all 5 allowed drum banks (`uzu`, `fm_drums`, `modular`, `big_rusty`, `virtuosity`) and
+both kits (10 configurations, checked by `every_kit_asks_every_bank_for_a_sample_the_bank_has`). No
 event is added, removed or re-timed; every parameter after `s("…")` on the drum lane and every other
 lane in the pattern is byte-identical between `flat` and `articulated`. Locality holds (I2): a
 syllable's drum piece depends only on its own layer, beat index, stress and foot mates within the
@@ -660,8 +676,8 @@ voice. Not a style key: the CLI never reads aloud, and no palette moves a cue (I
   `Onset`), deterministic and hand-tested, and travel in the `/reading` answer per line (`lines`,
   with `pace`, `pause`, `ends`, `onset`, `slot`, `stanza` and each word's syllables) and in the
   header comments of a second cue pattern (`natural`), whose cues are the onset bars. The rest is
-  timed by the page on the audio clock, from the time Strudel's `onTrigger` gives for each onset
-  bar, because only it knows how long a voice takes. **Past the end** at this pace: a line that
+  timed by the player's render worker on the music's clock, from each onset bar's time in the
+  Performance's cues, because only it knows how long a voice takes (`docs/player.md` §5). **Past the end** at this pace: a line that
   would start at or after the piece's end is not read that time round, and the page says so in its
   status (`not read this time round: line …`); a stanza the music never begins is listed in the
   answer's `natural_unread`. **Disclosed against I2:** a stanza's start can depend on how long the
@@ -679,11 +695,25 @@ voice. Not a style key: the CLI never reads aloud, and no palette moves a cue (I
 
 **Engines** (*the same decision*; `recorded` *the user's decision, 2026-10-24*). One interface on
 the page — `load(onProgress)`, `voices(language)`, `render(text, { voice, speed })` → an
-`AudioBuffer` — and five engines, the listener's choice, remembered:
+`AudioBuffer` — and six engines, the listener's choice, remembered:
 
 - **`browser`** — the browser's speech synthesiser: instant, the only one that reports word
   boundaries, and the fallback for the others. It cannot be scheduled, so it is started by a timer
   at its line's time and, at the natural pace, chained on its `end` event.
+- **`system`** (*the user's decision, 2026-11-01*) — in the phone apps, the phone's own speech
+  engine with the voices already on the phone that need no network, rendered a line at a time to a
+  WAV and so placed like any rendered line: on Android `TextToSpeech` (Google's or the maker's), on
+  iOS `AVSpeechSynthesizer.write` (no novelty or Personal Voices), its line said at the voice's own
+  rate and time-stretched to the speed asked for, since the utterance's `rate` moves in uneven
+  steps. It is the apps' default engine, and it replaces `browser` there — Android's WebView has
+  no speech synthesiser, iOS's cannot be placed — as the stand-in for any voice that cannot read:
+  nothing to download, no model in the app, a line in about 0.2 s on a Pixel. A live voice that
+  has just loaded hands its lines over: while its rendering of a line is not ready, the system
+  voice's is read, so the line comes on time; the slower voice takes each line over as its
+  rendering arrives. It starts with the page and is let go while the page is hidden and silent,
+  as the neural voices are. Its sound depends on the phone, so the same poem reads differently on
+  two phones; the compiled piece does not (I1 is the compiler's), and the recordings stay the
+  reading that is the same everywhere.
 - **`kokoro`** — Kokoro-82M through kokoro-js, on WebGPU where the browser offers it (the
   full-precision model) and WebAssembly otherwise (the 8-bit one, 92 MB). The default, once it has
   loaded. English (US and UK voices; the kokoro-js release lists no others).
@@ -725,17 +755,19 @@ the page — `load(onProgress)`, `voices(language)`, `render(text, { voice, spee
   line's text or its pace fails until they are rendered again.
 
 The neural engines each run in a module worker of their own (`speech-worker.mjs`), so their
-computing never blocks the thread Strudel's scheduler ticks on. A model downloads only once its
+computing never blocks the page's own thread. A model downloads only once its
 engine is chosen (the default on the first play), with its progress in the status bar, and is kept
 by the browser. After each compile every line is **rendered ahead**, at the speed the pace asks for
 — the line's pace (render-time speed, so no pitch shift), or under `fitted` its rate — and kept by
 engine, voice, speed and text, so a recompile reuses every line it did not change. A rendered line
-is trimmed of the model's silence, keeping 10 ms either side, and is **started exactly on the
-audio clock** by an `AudioBufferSourceNode`, its speech beginning at the time the cue's bar begins
-(or the chain gives) — never by a timer. A line not rendered by its turn: at the natural pace the
-chain waits for it and the status says so; at the fitted pace the browser's voice reads it. The
-voice goes through the page's master stage at its own **reading level**, and the music is ducked
-while any line of a stanza is read (kept down through the pauses between them). The word marker
+is trimmed of the model's silence, keeping 10 ms either side, and is **placed exactly on the
+music's clock**: the player's render worker puts it on the reading's stem by the frame, its speech
+beginning where the cue's bar begins (or the chain gives) — never by a timer. A line not rendered by
+its turn: at the natural pace the chain waits for it and the status says so; at the fitted pace the
+browser's voice reads it. The browser's voice cannot be placed in a stream: it starts when the
+playhead reaches its line, not in step with the music, and says so. The voice goes through the
+master stage at its own **reading level**, and the music is ducked while any line of a stanza is
+read (kept down through the pauses between them), the duck written from the same placements. The word marker
 follows the voice's word boundaries where it reports them, and otherwise spreads a rendered line's
 words over its length by their syllable counts.
 
@@ -767,16 +799,15 @@ is still being read (the browser's voice runs past the seam, or a neural line is
 the new round starts once that line has finished, from its first cue, after its breath; a line of
 the old round it leaves unread is said in the status bar, never dropped in silence.
 
-"In order" holds from the first bar. Strudel's scheduler keeps its cycle count when it is handed a
-new pattern, so a change while playing would start the new piece partway through. The page
-therefore restarts the clock at bar 1 when the poem is replaced by a preset or the listener
-switches A/B, and reads from the first line. A live edit keeps the clock running, because the
-writer is listening in place: the reading carries on from the bar the clock has reached, and any
-line before that bar waits until the arrangement loops round. A line already queued or being
-spoken from the previous version is dropped when the new one starts. The cue pattern's comments
-escape line terminators and control characters (a pasted U+2028 would otherwise end the comment
-early), and the page evaluates the cue pattern separately, so a reading it cannot cue never stops
-the music.
+"In order" holds from the first bar. The player starts a piece from bar 1 when the poem is
+replaced by a preset or the listener switches A/B, and reads from the first line. A live edit hands
+over at the next bar instead, because the writer is listening in place: the reading carries on from
+that bar, any line before it waits until the arrangement loops round, and a stanza still waits its
+silent bar after the old version's last line. A line already placed or being spoken from the
+previous version is cut off where the new one takes over. The cue pattern's comments escape line
+terminators and control characters (a pasted U+2028 would otherwise end the comment early); the
+page no longer evaluates it — it is shown under the pattern, for reading — and a reading the
+compiler cannot plan never stops the music.
 
 ---
 
@@ -862,7 +893,17 @@ Three more keys, every one palette:
 - **`ride_fallback = "open_hat" | "crash"`** (default `open_hat`) — what keeps time under
   `kit = "ride"` on a bank with no ride sample (TR-808, TR-707). The stand-in strikes exactly where
   the ride would; the `plays:` line of the pattern's header names it ("crash in place of the ride,
-  which RolandTR808 does not have"). A bank with a ride ignores it.
+  which RolandTR808 does not have"). A bank with a ride ignores it. *Since 2026-10-31 every bank
+  has a ride (see below), so nothing stands in; the key is still read.*
+
+*Changed 2026-10-31 (the drums).* The six drum machines (`tr909`, `tr808`, `tr707`, `linn`, `casio`,
+`r8`) were strudel.cc's sample map, whose recordings carry no licence: the app could neither ship
+them nor cache them for offline use. Five kits in the public domain replace them, chosen by ear
+and rendered into `web/public/drums/` (one file a drum, with its sources): `uzu`, `fm_drums`,
+`modular`, `big_rusty` and `virtuosity`. A header naming a retired machine plays the kit nearest its
+character (`style::RETIRED_BANKS`), so an old poem or link still compiles; the genres moved the
+same way (jazz and bossa to `virtuosity`, techno to `uzu`, lo-fi to `modular`, ambient, chamber and
+hymn to `big_rusty`). Which kit plays is palette; no event moved.
 - **`density_level`** (`0..=1`, default `0`, today's fixed levels) — levels that follow density.
   Every gain in a bar is multiplied by *n*^−`density_level`, where *n* is the number of lines
   sounding in that bar (every placement of the arrangement that plays at least one event): at
@@ -912,7 +953,9 @@ second — onsets moved to irregular times, and a held chord could be skipped or
 now `.swingBy(x, n).cpm(c)`: the bar's beats are swung, then the bar is set to the tempo.
 *Since the steady pulse (§4.2) a cycle is a beat, so `n` is 1 and every beat is swung whatever its
 bar's length; under `elastic` `n` is still the mean bar length, which slices a bar of another
-length across its beats.*
+length across its beats.* *Since the player's step 1 (`docs/player.md` §9) the text no longer calls
+`swingBy` but writes its documented meaning with `layer`, `mask` and `late`; it still comes before
+`.cpm`, for the same reason.*
 
 ---
 

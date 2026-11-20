@@ -1,0 +1,15 @@
+[package]
+name = "prosody-player"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# The player around the synth (`docs/player.md` §13): rendering ahead, the reading's timing, the
+# output's mix. Pure, like the synth, so the browser's render worker (`prosody-synth-wasm`) and the
+# app's native player (`prosody-app`) run the same code.
+[dependencies]
+prosody-synth.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

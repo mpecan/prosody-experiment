@@ -1,4 +1,5 @@
-// The static page, end to end: the real compiler answering in the browser.
+// The static page, end to end: the real compiler answering in the browser, the Prosody player
+// making the sound.
 import { expect, test, type Page } from '@playwright/test';
 
 /** The page, the welcome already seen. */
@@ -6,6 +7,13 @@ async function open(page: Page) {
   await page.addInitScript(() => localStorage.setItem('prosody.welcomed', '1'));
   await page.goto('/');
 }
+
+/** How the Prosody player is doing (src/player/index.ts `prosodyPlayer.stats`). */
+type Stats = {
+  underruns: number; playhead: number | null; missing: number; peak: number; speechPeak: number; spoken: number; onTime: number;
+  starts: number; first: number | null; pace: 'fitted' | 'natural' | null; handed: number;
+};
+const stats = (page: Page) => page.evaluate(() => (globalThis as unknown as { prosodyPlayer: { stats(): Stats } }).prosodyPlayer.stats());
 
 test('compiles the opening poem in the browser, under A and then B', async ({ page }) => {
   await open(page);
@@ -17,6 +25,42 @@ test('compiles the opening poem in the browser, under A and then B', async ({ pa
   await expect(page.locator('#pattern')).toContainText('// compiled from a poem by prosody');
   await page.locator('#views').getByText('Score A vs B').click();
   await expect(page.locator('#scoreRows tr.total').first()).toContainText('interest');
+});
+
+test('carries its licences: from "about" to every package the build ships, each with its texts', async ({ page }) => {
+  await open(page);
+  await page.click('#about');
+  await page.click('#open-licences');
+  const licences = page.locator('#licences');
+  await expect(licences).toBeVisible();
+  // notices.json, as scripts/notices.mjs wrote it: the crates the app links, and the page's packages.
+  await expect(licences).toContainText(/built with \d{3} open-source packages/);
+  for (const name of ['tauri ', 'cpal ', 'preact ', '@fontsource/spectral ']) {
+    await expect(licences.locator('#packages summary', { hasText: name }).first()).toBeVisible();
+  }
+  const font = licences.locator('#packages details', { hasText: '@fontsource/spectral' });
+  await font.locator('summary').click();
+  await expect(font.locator('pre').first()).toContainText('SIL Open Font License');
+  // The licences the dialog links are beside the page.
+  for (const href of ['soundfonts/LICENSES/FluidR3_GM.txt', 'drums/SOURCES.md']) {
+    expect((await page.request.get(href)).ok()).toBe(true);
+  }
+});
+
+test('carries its privacy policy: from "about" to the page and back, with nothing fetched elsewhere', async ({ page, baseURL }) => {
+  const elsewhere: string[] = [];
+  // By origin: the page's own blob: URLs (its workers) belong to it.
+  page.on('request', (request) => {
+    if (new URL(request.url()).origin !== new URL(baseURL!).origin) elsewhere.push(request.url());
+  });
+  await open(page);
+  await page.click('#about');
+  await page.locator('#privacy').getByRole('link', { name: 'privacy' }).click();
+  await expect(page.getByRole('heading', { name: 'Privacy', level: 1 })).toBeVisible();
+  await expect(page.locator('body')).toContainText('Prosody collects nothing about you');
+  await page.getByRole('link', { name: '← back to prosody' }).click();
+  await expect(page.locator('#status')).toContainText('bars');
+  expect(elsewhere).toEqual([]);
 });
 
 test('reads an example poem in its own language, from its recordings', async ({ page }) => {
@@ -43,7 +87,6 @@ test('plays, lighting the poem as it goes, and stops', async ({ page }) => {
   await open(page);
   await expect(page.locator('#status')).toContainText('24 bars');
   await page.click('#play');
-  // Strudel, the drum machines and the soundfonts come from their CDNs on the first Play.
   await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
   await expect(page.locator('#lit span.on').first()).toBeAttached({ timeout: 15_000 });
   await page.click('#stop');
@@ -106,7 +149,7 @@ test('solos a layer while it plays: the others fall silent on the meters and fai
   await page.click('#stop');
 });
 
-test('shares a poem as a link that opens to the same piece, for someone else', async ({ page, browser }) => {
+test('shares a poem as a link that opens to the same piece, for someone else', async ({ page, browser, baseURL }) => {
   await open(page);
   await page.selectOption('#preset', 'carroll-jabberwocky');
   await expect(page.locator('#status')).toContainText('bars from');
@@ -121,7 +164,7 @@ test('shares a poem as a link that opens to the same piece, for someone else', a
   // Someone else, with a browser of their own.
   const other = await (await browser.newContext()).newPage();
   await other.addInitScript(() => localStorage.setItem('prosody.welcomed', '1'));
-  await other.goto(link.replace('https://prosody.rocks', 'http://127.0.0.1:4802'));
+  await other.goto(link.replace('https://prosody.rocks', baseURL!));
   await expect(other.locator('#sharedNote')).toContainText('A shared poem.');
   await expect(other.locator('#poem')).toHaveValue(await page.locator('#poem').inputValue());
   await expect(other.locator('#hearB')).toHaveAttribute('aria-pressed', 'true');
@@ -130,4 +173,216 @@ test('shares a poem as a link that opens to the same piece, for someone else', a
   // And its A carries what techno suggested for it.
   await other.getByRole('tab', { name: 'Mappings' }).click();
   await expect(other.locator('.mapping[data-name="bass"] [aria-label="bass, setting A"] button[aria-pressed="true"]')).toHaveText('feet');
+});
+
+test('plays and reads from beside the page, with every other host refused', async ({ page, baseURL }) => {
+  // The phone app plays offline: the player, its synth, the drums, the soundfonts (our own FLAC
+  // zones, scripts/render-soundfonts.mjs) and the recorded readings are all beside the page, and
+  // Strudel's runtime is not loaded at all. Every other host is refused here, so anything that still
+  // came from one would fail — and nothing may be missing.
+  const elsewhere = new Set<string>();
+  const fonts: string[] = [];
+  const drums: string[] = [];
+  const asked: string[] = [];
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin === new URL(baseURL!).origin) {
+      asked.push(url.pathname);
+      if (url.pathname.includes('/soundfonts/')) fonts.push(url.pathname);
+      if (url.pathname.includes('/drums/')) drums.push(url.pathname);
+      return route.continue();
+    }
+    elsewhere.add(url.host);
+    return route.abort();
+  });
+  await open(page);
+  // Jazz: soundfont bass and electric piano, compressed, with room and echo, on the Virtuosity kit's
+  // ride.
+  await page.getByRole('tab', { name: 'Sound' }).click();
+  await page.locator('#styles [data-style="jazz"]').click();
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).peak, { timeout: 20_000 }).toBeGreaterThan(0.01);
+  // The first line is read from its recording, on the player's reading stem.
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  expect((await stats(page)).missing).toBe(0);
+  expect(drums).toContain('/drums/virtuosity/rd.flac');
+  expect(fonts.some((path) => path.endsWith('0320_FluidR3_GM_sf2_file.json'))).toBe(true);
+  expect(fonts.some((path) => path.endsWith('.flac'))).toBe(true);
+  expect(asked.some((path) => path.startsWith('/readings/') && path.endsWith('.mp3'))).toBe(true);
+  expect(asked.filter((path) => /strudel|vendor/.test(path) && !path.endsWith('strudel.json'))).toEqual([]);
+  expect([...elsewhere]).toEqual([]);
+  await page.click('#stop');
+});
+
+test('every drum a pattern can ask for is beside the page, in a form the browser can play', async ({ page }) => {
+  await open(page);
+  const decoded = await page.evaluate(async () => {
+    const site = await (await fetch('/site.json')).json() as { banks: string[]; drumSamples: string[] };
+    const context = new OfflineAudioContext(2, 44_100, 44_100);
+    return Promise.all(site.banks.flatMap((bank) => site.drumSamples.map(async (drum) => {
+      const response = await fetch(`/drums/${bank}/${drum}.flac`);
+      if (!response.ok) return `${bank}/${drum}: ${response.status}`;
+      const audio = await context.decodeAudioData(await response.arrayBuffer());
+      return audio.duration > 0.02 ? 'ok' : `${bank}/${drum}: ${audio.duration}s`;
+    })));
+  });
+  expect(decoded.length).toBe(45);
+  expect(decoded.filter((result) => result !== 'ok')).toEqual([]);
+});
+
+test('every soundfont the compiler can name is beside the page, as our own zones', async ({ request }) => {
+  // The page plays a soundfont from the file the compiler names for it (site.json), converted to
+  // FLAC zones beside the page. A name with no file there would leave its notes unheard.
+  const site = (await (await request.get('/site.json')).json()) as { soundfonts: Record<string, string> };
+  const sounds = Object.entries(site.soundfonts);
+  expect(sounds.length).toBeGreaterThan(20);
+  for (const [sound, file] of sounds) {
+    const manifest = await request.get(`/soundfonts/${file}.json`);
+    expect(manifest.ok(), sound).toBe(true);
+    const zones = ((await manifest.json()) as { zones: { file: string }[] }).zones;
+    expect(zones.length, sound).toBeGreaterThan(0);
+    expect((await request.head(`/soundfonts/${zones[0]!.file}`)).ok(), sound).toBe(true);
+  }
+});
+
+test('the Prosody player keeps playing while the page is blocked for half a second', async ({ page }) => {
+  // The failure measured on the Pixel (docs/player.md §1): a page busy for a moment made Strudel's
+  // scheduler skip notes. Here the page's thread does nothing at all for 500 ms while the piece
+  // plays; the render worker and the worklet are not on it, so the music must not notice.
+  await open(page);
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).playhead ?? -1, { timeout: 20_000 }).toBeGreaterThan(0.5);
+  // It is making a sound.
+  await expect.poll(async () => (await stats(page)).peak, { timeout: 5_000 }).toBeGreaterThan(0.01);
+  // The poem lights from the Performance at the playhead.
+  await expect(page.locator('#lit span.on').first()).toBeAttached({ timeout: 10_000 });
+  const before = await stats(page);
+  await page.evaluate(() => {
+    const end = performance.now() + 500;
+    while (performance.now() < end) { /* the page's thread, blocked */ }
+  });
+  await page.waitForTimeout(400);
+  const after = await stats(page);
+  expect(after.underruns).toBe(0);
+  // Half a second blocked and 0.4 s waited: the playhead has moved on by about 0.9 s.
+  expect(after.playhead! - before.playhead!).toBeGreaterThan(0.75);
+  expect(after.missing).toBe(0);
+  await expect(page.locator('#status')).not.toContainText('ran dry');
+  await page.click('#stop');
+  await expect(page.locator('#status')).toContainText('stopped');
+  await expect(page.locator('#lit span.on')).toHaveCount(0);
+});
+
+test('reads the poem through the player: each recorded line on the reading stem, lit while it is heard', async ({ page }) => {
+  // The recorded readings are the default engine; The Tyger is read from its recordings, the first
+  // line where the music begins (SPEC.md §4.7). The render worker places the line on the reading's
+  // stem at its frame (docs/player.md §5), so it is heard, and the page lights it at the playhead.
+  await open(page);
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Reading' }).click();
+  await expect(page.locator('#voice option:checked')).toContainText('lines recorded', { timeout: 15_000 });
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  await expect.poll(async () => (await stats(page)).speechPeak, { timeout: 10_000 }).toBeGreaterThan(0.001);
+  // Placed exactly on its cue, by the frame: the recording was in the worker before its bar.
+  expect((await stats(page)).onTime).toBeGreaterThan(0);
+  await expect(page.locator('#lit span.reading').first()).toBeAttached({ timeout: 10_000 });
+  // Nothing says the reading is not played, and nothing went missing.
+  await expect(page.locator('#status')).not.toContainText('not played');
+  await expect(page.locator('#status')).not.toContainText('browser voice');
+  await page.click('#stop');
+  await expect(page.locator('#lit span.reading')).toHaveCount(0);
+});
+
+test('a muted voice is silent on the reading stem, and comes back when unmuted', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page);
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Mixer' }).click();
+  await page.getByRole('button', { name: 'Mute voice' }).click();
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  // Placed, but at a gain of nothing: the reading's stem stays silent while the music sounds.
+  await page.waitForTimeout(1_500);
+  await stats(page);
+  await page.waitForTimeout(1_000);
+  const muted = await stats(page);
+  expect(muted.peak).toBeGreaterThan(0.01);
+  expect(muted.speechPeak).toBe(0);
+  // The stanza is still being read: unmuted, it is heard again, within the 5 ms glide.
+  await page.getByRole('button', { name: 'Mute voice' }).click();
+  await expect.poll(async () => (await stats(page)).speechPeak, { timeout: 10_000 }).toBeGreaterThan(0.001);
+  await page.click('#stop');
+});
+
+/** The page with the recorded readings' voices listed, ready to read from them. */
+async function readyToRead(page: Page) {
+  await expect(page.locator('#status')).toContainText('24 bars');
+  await page.getByRole('tab', { name: 'Reading' }).click();
+  await expect(page.locator('#voice option:checked')).toContainText('lines recorded', { timeout: 15_000 });
+}
+
+test('reads at the fitted pace through the player: each recorded line placed on its bar', async ({ page }) => {
+  // The pace saved from an earlier visit: a line a bar, each cut off at the next (SPEC.md §4.7).
+  await page.addInitScript(() => localStorage.setItem('prosody.reading',
+    JSON.stringify({ engine: 'recorded', pace: 'fitted', level: 1, voices: {} })));
+  await open(page);
+  await readyToRead(page);
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  const read = await stats(page);
+  expect(read.pace).toBe('fitted');
+  expect(read.onTime).toBeGreaterThan(0);
+  await expect.poll(async () => (await stats(page)).speechPeak, { timeout: 10_000 }).toBeGreaterThan(0.001);
+  await expect(page.locator('#status')).not.toContainText('browser voice');
+  await page.click('#stop');
+});
+
+test('a preset chosen while reading starts the piece, and the reading, from the top', async ({ page }) => {
+  // (B's defaults switch the reading off, so the restart is a preset's: also from the top.)
+  await open(page);
+  await readyToRead(page);
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  // Into the stanza: line 2 has been placed, so a reading that went on would not begin at line 1.
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 30_000 }).toBeGreaterThan(1);
+  const before = await stats(page);
+  await page.selectOption('#preset', 'blake-tyger');
+  await expect.poll(async () => {
+    const now = await stats(page);
+    return now.starts > before.starts && now.spoken > 0;
+  }, { timeout: 30_000 }).toBe(true);
+  const after = await stats(page);
+  expect(after.first).toBe(0);
+  expect(after.underruns).toBe(0);
+  await page.click('#stop');
+});
+
+test('a live edit while reading hands over: the reading goes on and the music never runs dry', async ({ page }) => {
+  await open(page);
+  await readyToRead(page);
+  await page.click('#play');
+  await expect(page.locator('#play')).toHaveText('Playing', { timeout: 45_000 });
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 20_000 }).toBeGreaterThan(0);
+  const before = await stats(page);
+  // The poem's last line changed: the lines read before it are the same, and still recorded.
+  const poem = page.locator('#poem');
+  const lines = (await poem.inputValue()).trimEnd().split('\n');
+  lines[lines.length - 1] = lines[lines.length - 1]!.replace(/[?!.,;:]*$/, ', still?');
+  await poem.fill(lines.join('\n') + '\n');
+  // The new version is handed to the worker as it plays — not started again from the top.
+  await expect.poll(async () => (await stats(page)).handed, { timeout: 20_000 }).toBeGreaterThan(before.handed);
+  await expect.poll(async () => (await stats(page)).spoken, { timeout: 30_000 }).toBeGreaterThan(before.spoken + 1);
+  const after = await stats(page);
+  expect(after.starts).toBe(before.starts);
+  expect(after.underruns).toBe(0);
+  await expect(page.locator('#status')).not.toContainText('ran dry');
+  await page.click('#stop');
 });

@@ -1,0 +1,98 @@
+{
+ "name": "gm_flute",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0730_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 62,
+   "root": 61,
+   "loopStart": 29084,
+   "loopEnd": 40192,
+   "rate": 44100,
+   "file": "zones/1dd5e8b1a51187fc.flac"
+  },
+  {
+   "position": 1,
+   "low": 63,
+   "high": 65,
+   "root": 63.89,
+   "loopStart": 31993,
+   "loopEnd": 43009,
+   "rate": 44100,
+   "file": "zones/f3065f8c1beb12b8.flac"
+  },
+  {
+   "position": 2,
+   "low": 66,
+   "high": 68,
+   "root": 67,
+   "loopStart": 28411,
+   "loopEnd": 38401,
+   "rate": 44100,
+   "file": "zones/b95388cade97dd10.flac"
+  },
+  {
+   "position": 3,
+   "low": 69,
+   "high": 71,
+   "root": 70.98,
+   "loopStart": 16790,
+   "loopEnd": 27137,
+   "rate": 44100,
+   "file": "zones/a58a5ffe1035d63e.flac"
+  },
+  {
+   "position": 4,
+   "low": 72,
+   "high": 75,
+   "root": 74.1,
+   "loopStart": 44803,
+   "loopEnd": 55297,
+   "rate": 44100,
+   "file": "zones/88f87067d8b12d91.flac"
+  },
+  {
+   "position": 5,
+   "low": 76,
+   "high": 78,
+   "root": 78.11,
+   "loopStart": 19435,
+   "loopEnd": 29952,
+   "rate": 44100,
+   "file": "zones/c2ba830b0dd6f67d.flac"
+  },
+  {
+   "position": 6,
+   "low": 79,
+   "high": 81,
+   "root": 80.11,
+   "loopStart": 11271,
+   "loopEnd": 22016,
+   "rate": 44100,
+   "file": "zones/50874467c2851759.flac"
+  },
+  {
+   "position": 7,
+   "low": 82,
+   "high": 84,
+   "root": 84.21,
+   "loopStart": 22529,
+   "loopEnd": 32513,
+   "rate": 44100,
+   "file": "zones/a41ee637289f3b28.flac"
+  },
+  {
+   "position": 8,
+   "low": 85,
+   "high": 127,
+   "root": 90.32,
+   "loopStart": 18767,
+   "loopEnd": 29952,
+   "rate": 44100,
+   "file": "zones/628ccb1c4841f813.flac"
+  }
+ ]
+}

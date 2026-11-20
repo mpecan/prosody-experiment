@@ -258,7 +258,7 @@ fn the_jazz_palette_compiles_to_a_committed_pattern() {
         "the fixture has no header of its own"
     );
     let (pattern, _) = compile(&format!("+++\npreset = \"jazz\"\n+++\n{source}"));
-    assert!(pattern.contains(".swingBy(0.330,"), "{pattern}");
+    assert!(pattern.contains(".late(0.330 / "), "{pattern}");
     insta::assert_snapshot!("pattern-villanelle-jazz", pattern);
 }
 

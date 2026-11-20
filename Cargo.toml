@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -28,7 +28,7 @@ tree-sitter = "0.26"
 # script. The alternative is hand-written exports passing raw pointers, which needs `unsafe` in our
 # code and a calling convention kept in step by hand on both sides. Pinned exactly, because the
 # `wasm-bindgen` CLI that generates the JavaScript must be the same version
-# (`scripts/build-site.sh` installs that version).
+# (`scripts/wasm-bindgen.sh` installs that version).
 wasm-bindgen = "=0.2.129"
 tree-sitter-prosody = { path = "crates/tree-sitter-prosody" }
 prosody-core = { path = "crates/prosody-core" }
@@ -39,6 +39,9 @@ prosody-emit = { path = "crates/prosody-emit" }
 prosody-score = { path = "crates/prosody-score" }
 prosody-web = { path = "crates/prosody-web" }
 prosody-wasm = { path = "crates/prosody-wasm" }
+prosody-synth = { path = "crates/prosody-synth" }
+prosody-synth-wasm = { path = "crates/prosody-synth-wasm" }
+prosody-player = { path = "crates/prosody-player" }
 
 # See CLAUDE.md §3. Lints live here, not in per-file `#![allow]`.
 [workspace.lints.rust]
@@ -73,4 +76,13 @@ opt-level = 2
 opt-level = 2
 
 [profile.dev.package.prosody-lts]
+opt-level = 2
+
+# The native player renders in these on a thread of the app, a debug build's included
+# (`docs/player.md` §13): at opt-level 0 its render thread took 36% of a core on an Android
+# emulator, and a page busy resuming starved it past its lead.
+[profile.dev.package.prosody-synth]
+opt-level = 2
+
+[profile.dev.package.prosody-player]
 opt-level = 2

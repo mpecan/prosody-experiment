@@ -7,7 +7,7 @@ scale       = "dorian"
 root        = "G"
 tempo_range = [86, 94]
 swing       = 0.33
-bank        = "r8"
+bank        = "virtuosity"
 kit         = "ride"
 +++
 We wear the mask that grins and lies,

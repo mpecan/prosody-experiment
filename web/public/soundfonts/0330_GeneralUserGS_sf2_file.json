@@ -1,0 +1,48 @@
+{
+ "name": "gm_electric_bass_finger",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0330_GeneralUserGS_sf2_file.js",
+ "licence": "GeneralUser GS by S. Christian Collins, free for any use (its licence permits use and redistribution, commercial included)",
+ "licenceFile": "LICENSES/GeneralUser_GS.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 30,
+   "root": 65.85,
+   "loopStart": 10300,
+   "loopEnd": 10540,
+   "rate": 44100,
+   "file": "zones/156637954ac025f2.flac"
+  },
+  {
+   "position": 1,
+   "low": 31,
+   "high": 35,
+   "root": 71.82,
+   "loopStart": 9617,
+   "loopEnd": 9787,
+   "rate": 44100,
+   "file": "zones/50c996e642bdc8f0.flac"
+  },
+  {
+   "position": 2,
+   "low": 36,
+   "high": 40,
+   "root": 75.68,
+   "loopStart": 10229,
+   "loopEnd": 10365,
+   "rate": 44100,
+   "file": "zones/b02618a5e5724f1c.flac"
+  },
+  {
+   "position": 3,
+   "low": 41,
+   "high": 92,
+   "root": 80.67,
+   "loopStart": 10149,
+   "loopEnd": 10251,
+   "rate": 44100,
+   "file": "zones/0281691f4d1b8672.flac"
+  }
+ ]
+}

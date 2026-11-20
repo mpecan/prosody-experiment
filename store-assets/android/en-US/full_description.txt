@@ -1,0 +1,25 @@
+Prosody turns a poem into a piece of music. Not a backing track for the words: the poem itself is the score.
+
+Each line becomes a bar. Stressed syllables become the beat. Rhymes become notes. Repeated lines become loops that build up and wear away. Rarer words sound brighter. A voice can read the poem over the music, and the words light up as they play.
+
+Every sound traces back to a word. Change a word and you hear exactly what it changed, and nothing else in the piece moves. Tighten a line's metre and the rhythm tightens. Add a refrain and that instrument comes back.
+
+WHAT YOU CAN DO
+• Play 18 poems to start from: Blake, Dickinson, Carroll, Shakespeare, Poe, Hopkins, Whitman and more, one of them in Slovenian.
+• Write your own, or paste one in, and press Play.
+• Watch the music on a scrolling roll, layer by layer: pulse, ornament, bass, rhyme and chords.
+• Hear it two ways: set how rhyme, stress and refrain are heard on A and on B, and switch between them while it plays.
+• Choose a sound: piano, vibraphone, a jazz trio, lo-fi, techno, ambient, bossa, chamber, a hymn, or bare waves. The style changes how it sounds, never what happens.
+• Mix the band and the voice, each layer on its own fader, with mute and solo.
+• Have it read aloud: recorded readings of the example poems, your phone's own voices for anything you write, or neural voices you can download.
+• Look under the hood: what each word became, and the pattern the poem compiled to.
+• Share a poem as a link that opens to the same piece.
+• Keep listening with the screen off, with play and stop on the lock screen.
+
+PRIVATE AND OFFLINE
+No account, no ads, no tracking. Your poems stay on your device. Everything works offline; the optional neural voices are downloaded only if you choose one, after you are asked.
+
+AN EXPERIMENT
+Prosody is an experiment in what a poem sounds like when its own patterns are the music. It is open source (MIT): how it works, and every rule it follows, is at github.com/mpecan/prosody-experiment.
+
+Questions, poems, ideas: me@prosody.rocks

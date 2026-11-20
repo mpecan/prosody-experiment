@@ -1,6 +1,6 @@
 // The roll: the notes playing now, scrolling past a playhead, each row one sound coloured by its
 // layer, faint lines marking the bars. Shown or hidden from the top bar, whichever folder is open;
-// Strudel's own piano roll draws it (watch.ts).
+// painted each frame from the Performance at the player's playhead (watch.ts).
 import { useEffect, useRef } from 'preact/hooks';
 
 import { setRollBars } from '../actions';

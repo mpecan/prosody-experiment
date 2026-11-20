@@ -1,0 +1,68 @@
+{
+ "name": "gm_kalimba",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/1080_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 56,
+   "root": 55,
+   "loopStart": 13876,
+   "loopEnd": 15001,
+   "rate": 44100,
+   "file": "zones/0b8e01eeeb8d5d36.flac"
+  },
+  {
+   "position": 1,
+   "low": 57,
+   "high": 65,
+   "root": 65,
+   "loopStart": 13993,
+   "loopEnd": 15001,
+   "rate": 44100,
+   "file": "zones/4b13c08aebeb428d.flac"
+  },
+  {
+   "position": 2,
+   "low": 66,
+   "high": 69,
+   "root": 69,
+   "loopStart": 14000,
+   "loopEnd": 15001,
+   "rate": 44100,
+   "file": "zones/52ed307e93ca594b.flac"
+  },
+  {
+   "position": 3,
+   "low": 70,
+   "high": 78,
+   "root": 77,
+   "loopStart": 13990,
+   "loopEnd": 15001,
+   "rate": 44100,
+   "file": "zones/b63efbd734eaad64.flac"
+  },
+  {
+   "position": 4,
+   "low": 79,
+   "high": 84,
+   "root": 84,
+   "loopStart": 13989,
+   "loopEnd": 15001,
+   "rate": 44100,
+   "file": "zones/c04f3b9db63ed88c.flac"
+  },
+  {
+   "position": 5,
+   "low": 85,
+   "high": 127,
+   "root": 96,
+   "loopStart": 13990,
+   "loopEnd": 15001,
+   "rate": 44100,
+   "file": "zones/82da8b8c6a4be3b8.flac"
+  }
+ ]
+}

@@ -9,8 +9,8 @@ import { settings, suggested, type Setting, type Side } from './store';
 
 // One exception, `long-stanzas`: B starts where A does. Its first variant, `gradual`, is the
 // quadratic arrangement erosion exists to remove (SPEC.md §4.6) — for "Patterns" 1,314 bars and a
-// 4 MB pattern, which the static page's compiler takes about 5 s to write and 8 s to score, and
-// Strudel seconds more to parse, on every edit, while the A side waits for it — so it is there
+// 4 MB pattern, which the static page's compiler takes about 5 s to write and 8 s to score, on
+// every edit, while the A side waits for it — so it is there
 // to choose, not loaded behind every long poem.
 export const B_STARTS_AS_A = ['long-stanzas'];
 

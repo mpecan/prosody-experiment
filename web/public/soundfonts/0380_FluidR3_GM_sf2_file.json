@@ -1,0 +1,48 @@
+{
+ "name": "gm_synth_bass_1",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0380_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 45,
+   "root": 45,
+   "loopStart": 10,
+   "loopEnd": 411,
+   "rate": 44100,
+   "file": "zones/a296c4a4323fe62d.flac"
+  },
+  {
+   "position": 1,
+   "low": 46,
+   "high": 57,
+   "root": 57,
+   "loopStart": 7,
+   "loopEnd": 207,
+   "rate": 44100,
+   "file": "zones/7313c4312ebc6069.flac"
+  },
+  {
+   "position": 2,
+   "low": 58,
+   "high": 69,
+   "root": 69,
+   "loopStart": 7,
+   "loopEnd": 107,
+   "rate": 44100,
+   "file": "zones/230eb5ad5ecd8289.flac"
+  },
+  {
+   "position": 3,
+   "low": 70,
+   "high": 127,
+   "root": 81,
+   "loopStart": 7,
+   "loopEnd": 57,
+   "rate": 44100,
+   "file": "zones/c485f59bf638e52b.flac"
+  }
+ ]
+}

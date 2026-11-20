@@ -1,0 +1,20 @@
+[package]
+name = "prosody-synth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# The player's synth (`docs/player.md` §4): a Performance's notes and decoded samples in, PCM out.
+# Pure — no IO, no clock, no randomness — so it runs unchanged in the browser's render worker
+# (`prosody-synth-wasm`), in the CLI (`prosody render`) and, later, natively in the app.
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+# Golden audio: a render's PCM is hashed and the hash snapshotted (`tests/golden.rs`). Both already
+# in the workspace.
+blake3.workspace = true
+insta.workspace = true
+
+[lints]
+workspace = true

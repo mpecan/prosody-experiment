@@ -1,0 +1,58 @@
+{
+ "name": "gm_synth_strings_1",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0500_GeneralUserGS_sf2_file.js",
+ "licence": "GeneralUser GS by S. Christian Collins, free for any use (its licence permits use and redistribution, commercial included)",
+ "licenceFile": "LICENSES/GeneralUser_GS.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 65,
+   "root": 60,
+   "loopStart": 3612,
+   "loopEnd": 51658,
+   "rate": 44100,
+   "file": "zones/42f263787a20a164.flac"
+  },
+  {
+   "position": 1,
+   "low": 66,
+   "high": 77,
+   "root": 60,
+   "loopStart": 1806,
+   "loopEnd": 25829,
+   "rate": 22050,
+   "file": "zones/71a9b6fa05b35fa4.flac"
+  },
+  {
+   "position": 2,
+   "low": 78,
+   "high": 89,
+   "root": 84,
+   "loopStart": 1211,
+   "loopEnd": 32666,
+   "rate": 44100,
+   "file": "zones/ff618631d8ecc7a9.flac"
+  },
+  {
+   "position": 3,
+   "low": 90,
+   "high": 101,
+   "root": 84,
+   "loopStart": 605,
+   "loopEnd": 16333,
+   "rate": 22050,
+   "file": "zones/ca90a95d24a7248c.flac"
+  },
+  {
+   "position": 4,
+   "low": 102,
+   "high": 113,
+   "root": 84,
+   "loopStart": 302,
+   "loopEnd": 8166,
+   "rate": 11025,
+   "file": "zones/a501eb64e29fa0d0.flac"
+  }
+ ]
+}

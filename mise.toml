@@ -1,5 +1,404 @@
+# The toolchain and the commands that build, check and ship this repository. `mise install` once,
+# then `mise run gates` before calling a change done (CLAUDE.md §3), `mise tasks` for the rest.
+#
+# Every task runs from the repository root, whatever directory it is started in, and is a thin
+# wrapper: the scripts under scripts/ and the commands CLAUDE.md §3 lists remain the truth, and each
+# task is that command spelled once.
+
 [tools]
 # The page's build and tests (web/): an LTS release, which CI's `web` job uses too.
 node = "24.18.0"
 # Pinned to the version CI deploys with (.github/workflows/ci.yml, `wranglerVersion`).
 wrangler = { version = "4.152.0", allow_builds = ["esbuild", "sharp", "workerd"] }
+# The bindings' generator must be exactly the `wasm-bindgen` crate's version in Cargo.lock (0.2.129);
+# scripts/wasm-bindgen.sh checks that and uses this one when it matches, so bump both together. Its
+# prebuilt binary comes through cargo-binstall rather than a six-minute compile.
+cargo-binstall = "1.20.0"
+"cargo:wasm-bindgen-cli" = "0.2.129"
+# The app's shell (src-tauri): the Tauri CLI, and the JDK its Android project's Gradle build runs on
+# (AGP 8 needs 17).
+"cargo:tauri-cli" = "2.11.3"
+java = "temurin-17.0.9+9"
+# The same patch release as rust-toolchain.toml (keep the two in step), with what that file asks
+# rustup for, plus the Android target the app (src-tauri) builds for. mise sets RUSTUP_TOOLCHAIN to
+# this version, so it wins over the file wherever mise is active. Listed last: its bin directory is
+# ~/.cargo/bin, and whatever `cargo install` put there must not shadow the versions pinned above.
+rust = { version = "1.96.1", components = "rustfmt,clippy,llvm-tools", targets = "wasm32-unknown-unknown,aarch64-linux-android" }
+
+[env]
+# What mise cannot install — the Android SDK and NDK come from Android Studio's SDK manager — is
+# found where Android Studio puts it on macOS unless already set; `mise run android:env` checks it is
+# there. The NDK version is the one the app is built and tested with.
+ANDROID_HOME = "{{ get_env(name='ANDROID_HOME', default=env.HOME ~ '/Library/Android/sdk') }}"
+NDK_HOME = "{{ get_env(name='NDK_HOME', default=env.ANDROID_HOME ~ '/ndk/28.2.13676358') }}"
+_.path = ["{{ env.ANDROID_HOME }}/platform-tools"]
+
+# ── The gates (CLAUDE.md §3), in its order, stopping at the first that fails ──────────────────────
+#
+# PROSODY_CARGO_SCOPE narrows clippy, test and doc to part of the workspace (CI's Linux `gates` job
+# leaves the app out, its `app` job checks only the app); unset, it is the whole workspace.
+
+[tasks.gates]
+description = "Every gate in CLAUDE.md §3: Rust, the page, the built site end to end"
+run = [{ task = "gates:rust" }, { task = "gates:web" }, { task = "e2e" }]
+
+[tasks."gates:rust"]
+description = "fmt, clippy, test, doc — the Rust gates"
+run = [{ task = "gates:fmt" }, { task = "gates:clippy" }, { task = "gates:test" }, { task = "gates:doc" }]
+
+[tasks."gates:fmt"]
+description = "cargo fmt --check"
+run = "cargo fmt --all -- --check"
+
+[tasks."gates:clippy"]
+description = "cargo clippy, warnings denied"
+run = "cargo clippy ${PROSODY_CARGO_SCOPE:---workspace} --all-targets --all-features --locked -- -D warnings"
+
+[tasks."gates:test"]
+description = "cargo test, every target even after one fails"
+run = "cargo test ${PROSODY_CARGO_SCOPE:---workspace} --no-fail-fast --locked"
+
+[tasks."gates:doc"]
+description = "cargo doc with rustdoc warnings denied, as CI runs it"
+env = { RUSTDOCFLAGS = "-D warnings" }
+run = "cargo doc ${PROSODY_CARGO_SCOPE:---workspace} --no-deps --locked"
+
+[tasks."gates:web"]
+description = "The page: install from its lockfile, typecheck, Vitest, Vite build"
+run = ["npm --prefix web ci", "npm --prefix web run check"]
+
+[tasks.e2e]
+description = "Build the static site, then test it in Chromium (Playwright)"
+depends = ["site"]
+run = [
+  # Fetches Chromium once; a no-op when the pinned browser is already there.
+  "npm --prefix web exec -- playwright install chromium",
+  # Serves the site on 127.0.0.1:4802 and fails if that is taken (another checkout's run, say):
+  # PROSODY_E2E_PORT=<port> mise run gates picks another.
+  "npm --prefix web run e2e",
+]
+
+# ── Builds and checks beyond the gates ────────────────────────────────────────────────────────────
+
+[tasks.site]
+description = "The page as static files with the compiler as WebAssembly (scripts/build-site.sh)"
+run = "./scripts/build-site.sh"
+
+[tasks.synth]
+description = "The player's synth for the browser, into web/public (scripts/build-synth.sh)"
+run = "./scripts/build-synth.sh"
+
+[tasks.check-wasm]
+description = "The browser build answers byte for byte as the native server (scripts/check-wasm.sh)"
+run = "./scripts/check-wasm.sh"
+
+[tasks.grammar]
+description = "The grammar's corpus tests, and the committed parser matches the grammar"
+dir = "{{ config_root }}/crates/tree-sitter-prosody"
+run = [
+  "npx --yes tree-sitter-cli@0.26.11 test",
+  "npx --yes tree-sitter-cli@0.26.11 generate",
+  "git diff --exit-code -- src/",
+]
+
+# ── Running it locally (README, "Path A") ─────────────────────────────────────────────────────────
+
+[tasks.serve]
+description = "Build the synth and the page, then serve them with the native compiler on :4747"
+run = [
+  "./scripts/build-synth.sh",
+  "npm --prefix web ci --no-audit --no-fund",
+  "npm --prefix web run build",
+  "cargo run --locked -p prosody-web",
+]
+
+[tasks.dev]
+description = "Work on the page: prosody-web on :4747 answering, Vite with hot reload in front"
+run = """
+set -eu
+./scripts/build-synth.sh
+npm --prefix web ci --no-audit --no-fund
+cargo build --locked -p prosody-web
+cargo run --quiet --locked -p prosody-web &
+server=$!
+trap 'kill $server 2>/dev/null' EXIT INT TERM
+npm --prefix web run dev
+"""
+
+[tasks."dev:page"]
+description = "Vite alone (extra arguments go to Vite); the app's beforeDevCommand runs it with --host"
+run = "npm --prefix web run dev --"
+
+# ── The app (src-tauri), Android ──────────────────────────────────────────────────────────────────
+#
+# Debug builds for a 64-bit ARM phone. `cargo tauri android build` works from the repository root and
+# from src-tauri alike: tauri.conf.json's beforeBuildCommand is `mise run site`, which does not
+# depend on the directory Tauri happens to run it in. The iOS family is below.
+
+[tasks."android:env"]
+description = "Check the Android SDK, NDK and adb that mise cannot install are where mise.toml says"
+run = """
+set -eu
+ok=true
+check() { if [ ! -e "$2" ]; then echo "android: $1 not found at $2 — $3" >&2; ok=false; fi; }
+check "SDK (ANDROID_HOME)" "$ANDROID_HOME" "install it with Android Studio, or set ANDROID_HOME"
+check "NDK (NDK_HOME)" "$NDK_HOME" "install NDK 28.2.13676358 with Android Studio's SDK manager, or set NDK_HOME"
+check "adb" "$ANDROID_HOME/platform-tools/adb" "install Android SDK Platform-Tools"
+command -v java >/dev/null 2>&1 || { echo "android: no java — mise install" >&2; ok=false; }
+command -v cargo-tauri >/dev/null 2>&1 || { echo "android: no tauri CLI — mise install" >&2; ok=false; }
+$ok
+echo "android: SDK $ANDROID_HOME, NDK $NDK_HOME"
+"""
+
+[tasks."android:build"]
+description = "Debug APK for aarch64 (its beforeBuildCommand builds the site first)"
+depends = ["android:env"]
+run = "cargo tauri android build --debug --target aarch64 --apk"
+
+[tasks."android:install"]
+description = "adb install -r the debug APK to ANDROID_SERIAL, or to the only attached device"
+depends = ["android:env"]
+run = """
+set -eu
+apk=src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+if [ ! -f "$apk" ]; then echo "android: no $apk — mise run android:build first" >&2; exit 1; fi
+serial=$(./scripts/android-device.sh)
+echo "android: installing $apk ($(date -r "$apk" '+%F %T' 2>/dev/null || echo 'unknown date')) on $serial"
+adb -s "$serial" install -r "$apk"
+"""
+
+[tasks."android:run"]
+description = "Install the debug APK, then launch rocks.prosody.debug"
+depends = ["android:install"]
+run = """
+set -eu
+serial=$(./scripts/android-device.sh)
+adb -s "$serial" shell monkey -p rocks.prosody.debug -c android.intent.category.LAUNCHER 1 >/dev/null
+echo "android: launched rocks.prosody.debug on $serial"
+"""
+
+[tasks."android:deploy"]
+description = "Build the debug APK from this checkout, install it and launch it: the one to use after a change"
+# In sequence rather than as `depends`, which mise runs in parallel: android:install alone installs
+# whatever APK was built last, however old.
+run = """
+set -eu
+mise run android:build
+mise run android:run
+"""
+
+# ── The app (src-tauri), iOS ──────────────────────────────────────────────────────────────────────
+#
+# Xcode, its simulators and the Rust targets are not something mise installs: `mise run ios:env` says
+# what is missing. The builds drive xcodebuild on the committed project (src-tauri/gen/apple, made by
+# `cargo tauri ios init` from its project.yml), whose build phase compiles the app's Rust library,
+# after the page is built without the neural voices (`site:ios`). Their products go under
+# target/ios. A TestFlight build goes through the Tauri CLI instead (docs/player.md §14).
+
+[tasks."site:ios"]
+description = "The static site for the iOS app, into target/site-ios: without the neural voices"
+# The one switch for the reading's neural engines on iOS (docs/player.md §14): `off` leaves out
+# Kokoro, Piper and Kitten (the eSpeak NG inside them is GPL-3, and they fetch code at run time,
+# which the App Store does not allow); `on` builds the page with them, as the web and Android have.
+env = { PROSODY_NEURAL_VOICES = "off" }
+run = "./scripts/build-site.sh target/site-ios"
+
+[tasks."ios:env"]
+description = "Check Xcode, the iOS SDKs, the Rust targets and a simulator, which mise cannot install"
+run = """
+set -eu
+ok=true
+if ! xcodebuild -version >/dev/null 2>&1; then
+  echo "ios: no Xcode — install it from the App Store, then: sudo xcode-select -s /Applications/Xcode.app" >&2
+  ok=false
+else
+  for sdk in iphoneos iphonesimulator; do
+    xcrun --sdk "$sdk" --show-sdk-path >/dev/null 2>&1 ||
+      { echo "ios: Xcode has no $sdk SDK — add the iOS platform in Xcode > Settings > Components" >&2; ok=false; }
+  done
+fi
+for target in aarch64-apple-ios aarch64-apple-ios-sim; do
+  rustup target list --installed 2>/dev/null | grep -qx "$target" ||
+    { echo "ios: no Rust target $target — rustup target add $target" >&2; ok=false; }
+done
+command -v cargo-tauri >/dev/null 2>&1 || { echo "ios: no tauri CLI — mise install" >&2; ok=false; }
+simulator=$(./scripts/ios-simulator.sh) || ok=false
+$ok
+echo "ios: $(xcodebuild -version | head -n 1), simulator $simulator"
+"""
+
+[tasks."ios:build"]
+description = "Debug app for the iOS simulator (arm64), into target/ios/simulator"
+depends = ["ios:env", "site:ios"]
+run = """
+set -eu
+xcodebuild -quiet -project src-tauri/gen/apple/prosody-app.xcodeproj -scheme prosody-app_iOS \\
+  -configuration debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \\
+  -derivedDataPath target/ios/simulator ARCHS=arm64 build
+echo "ios: target/ios/simulator/Build/Products/debug-iphonesimulator/Prosody.app"
+"""
+
+[tasks."ios:build:device"]
+description = "Debug app for an iPhone, signed for APPLE_DEVELOPMENT_TEAM, into target/ios/device"
+depends = ["ios:env"]
+run = """
+set -eu
+if [ -z "${APPLE_DEVELOPMENT_TEAM:-}" ]; then
+  echo "ios: a device build must be signed, and signing needs your Apple development team:" >&2
+  echo "ios:   APPLE_DEVELOPMENT_TEAM=<your 10-character team ID> mise run ios:build:device" >&2
+  echo "ios: or once, in mise.local.toml (gitignored): [env] APPLE_DEVELOPMENT_TEAM = \\"<team ID>\\"" >&2
+  echo "ios: the ID is under Membership at developer.apple.com, or in Xcode > Settings > Accounts." >&2
+  exit 1
+fi
+mise run site:ios
+xcodebuild -quiet -project src-tauri/gen/apple/prosody-app.xcodeproj -scheme prosody-app_iOS \\
+  -configuration debug -sdk iphoneos -destination 'generic/platform=iOS' \\
+  -derivedDataPath target/ios/device -allowProvisioningUpdates \\
+  DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" build
+echo "ios: target/ios/device/Build/Products/debug-iphoneos/Prosody.app — mise run ios:install:device"
+"""
+
+[tasks."ios:install:device"]
+description = "Install the device build on the iPhone (PROSODY_IOS_DEVICE, or the only one paired)"
+run = """
+set -eu
+app=target/ios/device/Build/Products/debug-iphoneos/Prosody.app
+if [ ! -d "$app" ]; then echo "ios: no $app — mise run ios:build:device first" >&2; exit 1; fi
+udid=$(./scripts/ios-device.sh)
+echo "ios: installing $app ($(date -r "$app" '+%F %T')) on $udid"
+xcrun devicectl device install app --quiet --device "$udid" "$app" || {
+  # devicectl's own words for an unreachable phone are a CoreDevice usage-assertion error.
+  echo "ios: the install failed — is the iPhone unlocked, and on a cable or the same Wi-Fi as this Mac?" >&2
+  exit 1
+}
+"""
+
+[tasks."ios:run:device"]
+description = "Install the device build on the iPhone, then launch rocks.prosody.debug (unlock it first)"
+depends = ["ios:install:device"]
+run = """
+set -eu
+udid=$(./scripts/ios-device.sh)
+xcrun devicectl device process launch --quiet --device "$udid" rocks.prosody.debug >/dev/null
+echo "ios: launched rocks.prosody.debug on $udid"
+"""
+
+[tasks."ios:deploy"]
+description = "Build the signed debug app from this checkout, install it on the iPhone and launch it"
+# In sequence, as android:deploy is, so that what goes on the phone is what this checkout builds.
+run = """
+set -eu
+mise run ios:build:device
+mise run ios:run:device
+"""
+
+[tasks."ios:install"]
+description = "Boot the simulator (PROSODY_IOS_SIMULATOR, or an iPhone 17), install the debug app"
+run = """
+set -eu
+app=target/ios/simulator/Build/Products/debug-iphonesimulator/Prosody.app
+if [ ! -d "$app" ]; then echo "ios: no $app — mise run ios:build first" >&2; exit 1; fi
+udid=$(./scripts/ios-simulator.sh)
+xcrun simctl boot "$udid" 2>/dev/null || true # already booted
+# Its window, where there is a Simulator app to show it in; the simulator runs without one.
+open -b com.apple.iphonesimulator --args -CurrentDeviceUDID "$udid" 2>/dev/null ||
+  echo "ios: no Simulator app to show it in; the simulator runs headless (xcrun simctl io $udid screenshot …)"
+xcrun simctl bootstatus "$udid" -b >/dev/null
+echo "ios: installing $app ($(date -r "$app" '+%F %T')) on $udid"
+xcrun simctl install "$udid" "$app"
+"""
+
+[tasks."ios:run"]
+description = "Install the debug app on the simulator, then launch rocks.prosody.debug"
+depends = ["ios:install"]
+run = """
+set -eu
+udid=$(./scripts/ios-simulator.sh)
+xcrun simctl launch "$udid" rocks.prosody.debug >/dev/null
+echo "ios: launched rocks.prosody.debug on $udid; its log:"
+echo "ios:   xcrun simctl spawn $udid log stream --level info --predicate 'process == \\"Prosody\\"'"
+"""
+
+# ── Releases and the store listings ───────────────────────────────────────────────────────────────
+#
+# What goes to Google Play and App Store Connect: a signed release of each app, and the listing's
+# images, made from the built site (store-assets/README.md is the whole checklist). Each upload
+# needs a build number higher than the last one the store has seen, in PROSODY_BUILD; the version
+# both stores show is tauri.conf.json's.
+
+[tasks."android:bundle"]
+description = "Release App Bundle for Google Play (aarch64), signed with the upload key, numbered PROSODY_BUILD"
+depends = ["android:env"]
+run = """
+set -eu
+if [ -z "${PROSODY_BUILD:-}" ]; then
+  echo "android: a release is numbered for Play, higher than the last upload: PROSODY_BUILD=<n> mise run android:bundle" >&2
+  exit 1
+fi
+if [ ! -f src-tauri/gen/android/keystore.properties ]; then
+  echo "android: no src-tauri/gen/android/keystore.properties — the upload key signs a release (store-assets/README.md)" >&2
+  exit 1
+fi
+cargo tauri android build --aab --target aarch64
+aab=src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
+# Play refuses native code that 16 KB-page phones cannot load (from 1 February 2027 for updates):
+# every LOAD segment of the app's library must be aligned to 2**14 (NDK 28 links them so).
+lib=$(mktemp -d)
+trap 'rm -rf "$lib"' EXIT
+unzip -q -o "$aab" 'base/lib/arm64-v8a/*.so' -d "$lib"
+for so in "$lib"/base/lib/arm64-v8a/*.so; do
+  if "$NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf -lW "$so" | awk '$1 == "LOAD" && $NF != "0x4000" { bad = 1 } END { exit !bad }'; then
+    echo "android: $(basename "$so") has a LOAD segment not aligned to 16 KB" >&2
+    exit 1
+  fi
+done
+jarsigner -verify "$aab" >/dev/null || { echo "android: $aab is not signed" >&2; exit 1; }
+echo "android: $aab — version $(node -p "require('./src-tauri/tauri.conf.json').version") ($PROSODY_BUILD), signed, 16 KB-aligned"
+echo "android: upload it in Play Console (Test and release), or with fastlane supply"
+"""
+
+[tasks."ios:archive"]
+description = "Release build for App Store Connect, signed for APPLE_DEVELOPMENT_TEAM, numbered PROSODY_BUILD, into target/ios/release"
+depends = ["ios:env"]
+run = """
+set -eu
+if [ -z "${APPLE_DEVELOPMENT_TEAM:-}" ] || [ -z "${PROSODY_BUILD:-}" ]; then
+  echo "ios: a release needs the team that signs it and a build number higher than the last upload:" >&2
+  echo "ios:   APPLE_DEVELOPMENT_TEAM=<team ID> PROSODY_BUILD=<n> mise run ios:archive" >&2
+  exit 1
+fi
+version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+mise run site:ios
+rm -rf target/ios/release
+xcodebuild -quiet -project src-tauri/gen/apple/prosody-app.xcodeproj -scheme prosody-app_iOS \\
+  -configuration release -sdk iphoneos -destination 'generic/platform=iOS' \\
+  -derivedDataPath target/ios/release/derived -archivePath target/ios/release/Prosody.xcarchive \\
+  -allowProvisioningUpdates DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" \\
+  MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$PROSODY_BUILD" archive
+# Re-signed for the App Store with the team's distribution certificate; Xcode makes the profile,
+# signed in either as the Apple account in Xcode's settings or with an App Store Connect API key
+# (PROSODY_ASC_KEY: the .p8 file, PROSODY_ASC_KEY_ID, PROSODY_ASC_ISSUER), which the upload uses too.
+auth=""
+if [ -n "${PROSODY_ASC_KEY:-}" ]; then
+  auth="-authenticationKeyPath $PROSODY_ASC_KEY -authenticationKeyID ${PROSODY_ASC_KEY_ID:?} -authenticationKeyIssuerID ${PROSODY_ASC_ISSUER:?}"
+fi
+# shellcheck disable=SC2086 # $auth is three flags or none
+xcodebuild -quiet -exportArchive -archivePath target/ios/release/Prosody.xcarchive \\
+  -exportPath target/ios/release -exportOptionsPlist src-tauri/gen/apple/ExportOptions-AppStore.plist \\
+  -allowProvisioningUpdates $auth || {
+  echo "ios: the export failed — it needs an Apple account in Xcode > Settings > Accounts, or PROSODY_ASC_KEY" >&2
+  echo "ios: and the app's record in App Store Connect (store-assets/README.md)" >&2
+  exit 1
+}
+echo "ios: target/ios/release/Prosody.ipa — version $version ($PROSODY_BUILD)"
+echo "ios: upload it with Transporter, or: xcrun altool --upload-app -f target/ios/release/Prosody.ipa -t ios --apiKey <key ID> --apiIssuer <issuer ID>"
+"""
+
+[tasks."store:screenshots"]
+description = "The store screenshots and Play's feature graphic, from both sites, into store-assets"
+run = """
+set -eu
+mise run site
+mise run site:ios
+node scripts/store-screenshots.mjs
+"""

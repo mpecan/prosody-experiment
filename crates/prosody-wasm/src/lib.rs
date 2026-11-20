@@ -1,7 +1,8 @@
 //! `prosody-wasm` — the whole compiler, inside the page.
 //!
-//! The page asks four things of whatever answers it: a pattern, the annotated poem, the
-//! measurements, and the reading's cues ([`prosody_web::Site`]). Served by `prosody-web`, they are
+//! The page asks a handful of things of whatever answers it: a pattern, the annotated poem, the
+//! measurements, the reading's cues, the trace, and every note resolved — the Performance
+//! (`docs/player.md`) — ([`prosody_web::Site`]). Served by `prosody-web`, they are
 //! HTTP requests. Built for `wasm32-unknown-unknown` and bound with `wasm-bindgen`, this crate
 //! answers the same requests with the same code in the browser, so the page can be hosted as static
 //! files and nobody has to install anything to hear a poem.
@@ -84,6 +85,7 @@ mod tests {
             "/explain?set=bass:feet",
             "/reading",
             "/score?profile=jazz",
+            "/performance?swing=0.33&set=pulse:elastic",
         ] {
             let served = site.respond(&prosody_web::Request::new(
                 "POST",

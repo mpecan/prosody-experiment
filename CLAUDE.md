@@ -75,6 +75,12 @@ code**, not the summary text. `cargo test` prints `test result: FAILED. 9 passed
 command that greps for a passed-count reports a healthy-looking number while a test is failing.
 That happened; it hid a broken test for a whole iteration.
 
+**`mise run gates`** runs every command below, in this order, with `--locked`, and stops at the
+first non-zero exit; its exit code is the verdict. The pieces are tasks of their own
+(`gates:rust`, `gates:web`, `e2e`; `mise tasks` lists them all), and CI runs the same tasks. The
+commands are listed here because they are what the tasks run: if the two ever disagree, the task
+is wrong.
+
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings

@@ -6,7 +6,7 @@
 scale       = "harmonic_minor"
 root        = "B"
 tempo_range = [112, 120]
-bank        = "casio"
+bank        = "fm_drums"
 +++
 What do you sell, O ye merchants?
 Richly your wares are displayed.

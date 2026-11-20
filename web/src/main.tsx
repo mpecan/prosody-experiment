@@ -12,6 +12,14 @@ import { loadSettings } from './settings';
 import { loadSite } from './site';
 import { decode } from './share';
 import { poem, settings, status } from './store';
+// The two typefaces, built into the page rather than fetched from Google, so the phone app needs no
+// network: Spectral for the poem, IBM Plex Mono for the hardware's markings. Only the faces used.
+import '@fontsource/spectral/400.css';
+import '@fontsource/spectral/400-italic.css';
+import '@fontsource/spectral/500.css';
+import '@fontsource/spectral/500-italic.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-mono/600.css';
 import './styles.css';
 
 async function start(): Promise<void> {

@@ -7,7 +7,7 @@
 scale       = "minor"
 root        = "E"
 tempo_range = [92, 100]
-bank        = "tr707"
+bank        = "fm_drums"
 +++
 I walk down the garden paths,
 And all the daffodils

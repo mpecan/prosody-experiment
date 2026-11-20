@@ -154,16 +154,43 @@ impl Named {
     }
 }
 
-/// Every sample bank a poem may name.
+/// Every sample bank a poem may name: five drum kits whose recordings are in the public domain,
+/// rendered into `web/public/drums/` by `scripts/render-drums.mjs` and chosen there by ear.
 ///
-/// The vocabulary is the poem's, not Strudel's: a backend translates these to whatever it can
-/// play. `SPEC.md` §5's example uses `tr909`.
+/// - `uzu` — Switch Angel's electronic kit from uzu-drumkit, punchy and bright.
+/// - `fm_drums` — `Terry93D`'s kit made entirely by FM synthesis.
+/// - `modular` — hits from a modular synthesiser, with friedensreich's modular kicks.
+/// - `big_rusty` — Karoryfer's Big Rusty Drums, an acoustic kit, every microphone of a hit mixed.
+/// - `virtuosity` — Virtuosity Drums, an acoustic kit heard from its room microphones, and the
+///   jazz palette's: the nearest thing here to a kit with a real ride and snare.
 ///
-/// `r8` is the Roland R-8, a sampled *acoustic* kit, and the closest thing to a jazz kit the
-/// drum-machine sample map the page loads has: none of its 71 machines has brushes, and the R-8's
-/// ride and snare are recordings of real ones (checked against `tidal-drum-machines.json` on
-/// `strudel.b-cdn.net`, 2026-10-22: `RolandR8_rd` and `RolandR8_sd` exist).
-pub const BANKS: &[&str] = &["tr909", "tr808", "tr707", "linn", "casio", "r8"];
+/// They replace the drum machines strudel.cc loads (`tidal-drum-machines`), whose samples carry no
+/// licence and so may not be shipped in the app or cached for offline use. A header naming one of
+/// those still compiles: see [`RETIRED_BANKS`].
+pub const BANKS: &[&str] = &["uzu", "fm_drums", "modular", "big_rusty", "virtuosity"];
+
+/// Banks a palette once offered and no longer does, and the kit a header naming one now plays, so
+/// an old poem or shared link still compiles. Each goes to the kit nearest its character: the 909's
+/// punch to uzu, the 808's synthesised drums to the modular kit, the 707's and the RZ-1's thin
+/// digital ones to FM, the Linn drum machine's sampled acoustic kit to Big Rusty, and the R-8's to
+/// Virtuosity.
+pub const RETIRED_BANKS: &[(&str, &str)] = &[
+    ("tr909", "uzu"),
+    ("tr808", "modular"),
+    ("tr707", "fm_drums"),
+    ("linn", "big_rusty"),
+    ("casio", "fm_drums"),
+    ("r8", "virtuosity"),
+];
+
+/// A header's bank: one of [`BANKS`], or a retired name read as the kit that replaced it.
+fn bank(name: &str) -> Result<Named, StyleError> {
+    let name = RETIRED_BANKS
+        .iter()
+        .find(|(retired, _)| *retired == name)
+        .map_or(name, |(_, now)| now);
+    Named::parse("bank", name, BANKS)
+}
 
 /// Every synth a poem may name. `SPEC.md` §5 names four; the plain waveforms are here so a palette
 /// can ask for something ordinary.
@@ -189,11 +216,12 @@ pub const SYNTHS: &[&str] = &[
 /// it is palette work (`CLAUDE.md` §10); every name here must exist in `@strudel/soundfonts`' GM
 /// table, or it plays silence (checked against `@strudel/soundfonts` 1.3.0's `dist/index.mjs`,
 /// 2026-10-25).
+///
+/// Each plays the variant [`SOUNDFONT_VARIANTS`] names, not Strudel's first: see there.
 pub const SOUNDFONTS: &[&str] = &[
     "gm_acoustic_bass",
     "gm_electric_bass_finger",
     "gm_electric_bass_pick",
-    "gm_fretless_bass",
     "gm_synth_bass_1",
     "gm_synth_bass_2",
     "gm_epiano1",
@@ -220,6 +248,145 @@ pub const SOUNDFONTS: &[&str] = &[
     "gm_choir_aahs",
     "gm_pad_halo",
 ];
+
+/// One soundfont as it plays: the Strudel sound that selects its variant (`name:index`, the index
+/// into `@strudel/soundfonts`' list for that name), and the webaudiofont file that variant loads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SoundfontVariant {
+    /// The instrument's name, one of [`SOUNDFONTS`].
+    pub name: &'static str,
+    /// What the pattern asks Strudel for: the name and the variant's index.
+    pub sound: &'static str,
+    /// The file that variant loads, without `.js` — what an offline copy has to hold.
+    pub file: &'static str,
+}
+
+const fn variant(name: &'static str, sound: &'static str, file: &'static str) -> SoundfontVariant {
+    SoundfontVariant { name, sound, file }
+}
+
+/// The variant each of [`SOUNDFONTS`] plays, in the same order: always one from a bank whose
+/// licence lets the app ship it (`FluidR3` GM, MIT; `GeneralUser` GS, free for any use). Strudel's
+/// first variant is `JCLive`, Aspirin or Chaos for every instrument here, and those banks carry no
+/// licence. Indices are into `@strudel/soundfonts` 1.3.0's `gm` table, checked by hand against that
+/// package when they were chosen (2026-10-30). Nothing re-checks them now: the e2e test that did
+/// left with the vendored package when Strudel's runtime left the page (2026-10-31). The page and
+/// the app play `file`'s zones, never the index (`web/e2e` checks those zones are beside the page);
+/// the index matters only where the pattern's text is played by Strudel itself, as on strudel.cc,
+/// whose upgrade could reorder the table and play another bank. Choosing a variant is palette work
+/// (`CLAUDE.md` §10): it changes the sound, not the poem's structure.
+pub const SOUNDFONT_VARIANTS: &[SoundfontVariant] = &[
+    variant(
+        "gm_acoustic_bass",
+        "gm_acoustic_bass:1",
+        "0320_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_electric_bass_finger",
+        "gm_electric_bass_finger:3",
+        "0330_GeneralUserGS_sf2_file",
+    ),
+    variant(
+        "gm_electric_bass_pick",
+        "gm_electric_bass_pick:1",
+        "0340_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_synth_bass_1",
+        "gm_synth_bass_1:1",
+        "0380_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_synth_bass_2",
+        "gm_synth_bass_2:1",
+        "0390_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_epiano1", "gm_epiano1:1", "0040_FluidR3_GM_sf2_file"),
+    variant("gm_epiano2", "gm_epiano2:1", "0050_FluidR3_GM_sf2_file"),
+    variant("gm_piano", "gm_piano:1", "0000_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_vibraphone",
+        "gm_vibraphone:3",
+        "0110_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_marimba", "gm_marimba:3", "0120_FluidR3_GM_sf2_file"),
+    variant("gm_celesta", "gm_celesta:3", "0080_FluidR3_GM_sf2_file"),
+    variant("gm_music_box", "gm_music_box:3", "0100_FluidR3_GM_sf2_file"),
+    variant("gm_kalimba", "gm_kalimba:1", "1080_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_glockenspiel",
+        "gm_glockenspiel:3",
+        "0090_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_acoustic_guitar_nylon",
+        "gm_acoustic_guitar_nylon:3",
+        "0240_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_orchestral_harp",
+        "gm_orchestral_harp:1",
+        "0460_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_pad_warm", "gm_pad_warm:3", "0890_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_string_ensemble_1",
+        "gm_string_ensemble_1:2",
+        "0480_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_cello", "gm_cello:1", "0420_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_contrabass",
+        "gm_contrabass:2",
+        "0430_GeneralUserGS_sf2_file",
+    ),
+    variant(
+        "gm_harpsichord",
+        "gm_harpsichord:1",
+        "0060_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_church_organ",
+        "gm_church_organ:3",
+        "0190_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_lead_2_sawtooth",
+        "gm_lead_2_sawtooth:3",
+        "0810_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_flute", "gm_flute:2", "0730_FluidR3_GM_sf2_file"),
+    variant(
+        "gm_string_ensemble_2",
+        "gm_string_ensemble_2:2",
+        "0490_FluidR3_GM_sf2_file",
+    ),
+    variant(
+        "gm_synth_strings_1",
+        "gm_synth_strings_1:1",
+        "0500_GeneralUserGS_sf2_file",
+    ),
+    variant(
+        "gm_choir_aahs",
+        "gm_choir_aahs:2",
+        "0520_FluidR3_GM_sf2_file",
+    ),
+    variant("gm_pad_halo", "gm_pad_halo:1", "0940_FluidR3_GM_sf2_file"),
+];
+
+/// The variant `name` plays, if it is one of [`SOUNDFONTS`].
+#[must_use]
+pub fn soundfont_variant(name: &str) -> Option<&'static SoundfontVariant> {
+    SOUNDFONT_VARIANTS
+        .iter()
+        .find(|variant| variant.name == name)
+}
+
+/// Instruments a palette once offered and no longer does, and what a header naming one now gets,
+/// so an old poem or shared link still compiles. `gm_fretless_bass` has no variant from a licensed
+/// bank (`@strudel/soundfonts` comments out the `FluidR3` and `GeneralUser` ones as crackling); the upright
+/// bass is the nearest soft, round bass.
+const RETIRED_INSTRUMENTS: &[(&str, &str)] = &[("gm_fretless_bass", "gm_acoustic_bass")];
 
 /// Every named palette — a starting point a header or the page can pick with `preset = "…"`.
 ///
@@ -317,10 +484,13 @@ impl Kit {
 
 /// What keeps time under [`Kit::Ride`] on a bank that has no ride sample.
 ///
-/// The TR-808 and TR-707 in the sample map have no ride, and asking for one silences the whole
-/// foundation layer (`SPEC.md` §4.1's pulse), which no palette may do. Which drum stands in is a
-/// choice of colour, not of events — the stand-in strikes exactly where the ride would — so it is
-/// palette, and a header can make it. Both stand-ins are in every bank the page loads.
+/// Asking a bank for a ride it does not have silences the whole foundation layer (`SPEC.md` §4.1's
+/// pulse), which no palette may do. Which drum stands in is a choice of colour, not of events —
+/// the stand-in strikes exactly where the ride would — so it is palette, and a header can make it.
+///
+/// Every bank in [`BANKS`] has a ride, so today nothing stands in and the page does not offer the
+/// choice; the drum machines this key was written for (the TR-808 and TR-707 had none) are retired.
+/// The key is still read, so an old header or shared link that sets it still compiles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RideFallback {
     /// The open hat: the drum machine's usual stand-in for a ride, short and bright.
@@ -890,7 +1060,7 @@ fn scale(name: &str) -> Scale {
 ///
 /// - **default** — what a poem with no header gets: an electric-piano melody over an acoustic
 ///   bass, a modest room, a little echo on the melody, light compression and a small human stray.
-/// - **warm** — softer and wider: vibraphone over fretless bass, a long room, more echo, a lower
+/// - **warm** — softer and wider: vibraphone over upright bass, a long room, more echo, a lower
 ///   high cut, a touch of saturation, and more stray; levels follow density at `0.5`.
 /// - **raw** — the palette as it was before soundfonts and a mix existed: triangle oscillators,
 ///   dry, on the grid. Kept so the difference stays audible, not as a recommendation.
@@ -947,7 +1117,7 @@ fn preset_palette(name: &str) -> Option<Preset> {
             },
         )),
         "warm" => Some(sound(
-            "gm_fretless_bass",
+            "gm_acoustic_bass",
             "gm_vibraphone",
             // Electric piano comping under the vibraphone.
             "gm_epiano1",
@@ -1003,10 +1173,9 @@ fn preset_palette(name: &str) -> Option<Preset> {
 /// - **The ride keeps time, the snare comps** ([`Kit::Ride`] on `r8`, the sampled acoustic kit;
 ///   no brushed kit exists in the sample map). The drums sit lower than the default's because a
 ///   ride rings longer than a kick and every foundation syllable strikes it.
-/// - **Triplet swing**, `0.33`: Strudel's `swingBy(x, n)` delays the second half of each of a
-///   bar's `n` beats by `x / 2` of a beat, so a third puts an iamb's second syllable at two thirds
-///   of the beat — the 2:1 long–short of a swung eighth (`swing(n)` is the same `1/3`;
-///   `@strudel/core` `pattern.mjs`, as bundled in `@strudel/web` 1.3.0).
+/// - **Triplet swing**, `0.33`: swing delays the second half of each beat by `x / 2` of a beat
+///   (Strudel's documented `swingBy`), so a third puts an iamb's second syllable at two thirds
+///   of the beat — the 2:1 long–short of a swung eighth.
 /// - **Dorian** — the minor mode of modal jazz. Its raised sixth makes the seventh chord on its
 ///   fourth degree a dominant seventh, so the chords on degrees 0 and 3 are the minor-seventh and
 ///   dominant-seventh pair of the classic dorian vamp (Dm7 and G7 in D).
@@ -1043,24 +1212,24 @@ fn jazz() -> Preset {
         feel: Some(Feel {
             scale: scale("dorian"),
             swing: Swing(33),
-            bank: "r8",
+            bank: "virtuosity",
         }),
     }
 }
 
 /// The genre palettes after jazz: each the instruments its genre is heard in, a mix in its
-/// manner, and its feel — a scale, a swing and a drum machine. Every value is palette.
+/// manner, and its feel — a scale, a swing and a drum kit. Every value is palette.
 ///
 /// - **lofi** — a worn electric piano voicing rhyme words as seventh chords over a fingered bass
-///   and a warm pad, the TR-808, a lazy swing, dorian; dark (a low high cut), driven and squeezed,
-///   with the most human stray of any palette — the sound of a sampled record.
-/// - **techno** — a synth bass and a sawtooth lead over synth strings, the TR-909 straight, phrygian
-///   for its darkness; bright, driven and compressed hard, a short room, an echo on the lead and no
+///   and a warm pad, the modular kit, a lazy swing, dorian; dark (a low high cut), driven and
+///   squeezed, with the most human stray of any palette — the sound of a sampled record.
+/// - **techno** — a synth bass and a sawtooth lead over synth strings, uzu straight, phrygian for
+///   its darkness; bright, driven and compressed hard, a short room, an echo on the lead and no
 ///   stray at all: the machine is the point.
-/// - **ambient** — a celesta over a soft fretless bass and a halo pad, the drums almost gone, lydian
+/// - **ambient** — a celesta over a soft upright bass and a halo pad, the drums almost gone, lydian
 ///   for its floating fourth; a long, wet room and a long echo, the levels following density.
 /// - **bossa** — a flute over a nylon guitar's seventh chords and an upright bass, the ride and snare
-///   of the acoustic R-8, a light swing, major; a dry, close room.
+///   of the acoustic Virtuosity kit, a light swing, major; a dry, close room.
 /// - **chamber** — a harpsichord over a cello, with strings, the drums almost gone, harmonic minor;
 ///   a hall's reverb and no echo.
 /// - **hymn** — an organ over a double bass and a choir, the drums almost gone, major; a church's long
@@ -1111,7 +1280,7 @@ fn genre(name: &str) -> Option<Preset> {
             Kit::Machine,
             Voicing::Seventh,
             mix(30, 20, 20, 2400, 20, 45, 50)(26, 34, 60, 35, 50),
-            feel("dorian", 25, "tr808"),
+            feel("dorian", 25, "modular"),
         ),
         "techno" => preset(
             "gm_synth_bass_2",
@@ -1120,16 +1289,16 @@ fn genre(name: &str) -> Option<Preset> {
             Kit::Machine,
             Voicing::Note,
             mix(15, 10, 25, 9000, 30, 55, 0)(32, 36, 45, 30, 0),
-            feel("phrygian", 0, "tr909"),
+            feel("phrygian", 0, "uzu"),
         ),
         "ambient" => preset(
-            "gm_fretless_bass",
+            "gm_acoustic_bass",
             "gm_celesta",
             "gm_pad_halo",
             Kit::Machine,
             Voicing::Note,
             mix(80, 80, 45, 3000, 0, 25, 30)(10, 24, 55, 35, 50),
-            feel("lydian", 0, "linn"),
+            feel("lydian", 0, "big_rusty"),
         ),
         "bossa" => preset(
             "gm_acoustic_bass",
@@ -1138,7 +1307,7 @@ fn genre(name: &str) -> Option<Preset> {
             Kit::Ride,
             Voicing::Seventh,
             mix(25, 15, 10, 5000, 0, 30, 35)(20, 34, 55, 45, 50),
-            feel("major", 10, "r8"),
+            feel("major", 10, "virtuosity"),
         ),
         "chamber" => preset(
             "gm_cello",
@@ -1147,7 +1316,7 @@ fn genre(name: &str) -> Option<Preset> {
             Kit::Machine,
             Voicing::Note,
             mix(40, 30, 0, 7000, 0, 20, 25)(10, 36, 60, 35, 50),
-            feel("harmonic_minor", 0, "linn"),
+            feel("harmonic_minor", 0, "big_rusty"),
         ),
         "hymn" => preset(
             "gm_contrabass",
@@ -1156,7 +1325,7 @@ fn genre(name: &str) -> Option<Preset> {
             Kit::Machine,
             Voicing::Note,
             mix(60, 60, 0, 5000, 0, 25, 15)(10, 30, 45, 35, 50),
-            feel("major", 0, "linn"),
+            feel("major", 0, "big_rusty"),
         ),
         _ => return None,
     })
@@ -1177,7 +1346,7 @@ impl Default for Style {
                 high: Bpm(130),
             },
             swing: Swing(0),
-            bank: Named { name: "tr909" },
+            bank: Named { name: "uzu" },
             bass: Named { name: "triangle" },
             melody: Named { name: "triangle" },
             chord_sound: Named { name: "triangle" },
@@ -1398,7 +1567,7 @@ impl Style {
                 ("scale", toml::Value::String(name)) => style.scale = Scale::parse(name)?,
                 ("root", toml::Value::String(name)) => style.root = Note::parse(name)?,
                 ("bank", toml::Value::String(name)) => {
-                    style.bank = Named::parse("bank", name, BANKS)?;
+                    style.bank = bank(name)?;
                 }
                 ("bass", toml::Value::String(name)) => style.bass = instrument(key, name)?,
                 ("kit", toml::Value::String(name)) => style.kit = Kit::parse(name)?,
@@ -1506,6 +1675,10 @@ impl Style {
 
 /// A pitched instrument: a synth name or a soundfont.
 fn instrument(key: &str, name: &str) -> Result<Named, StyleError> {
+    let name = RETIRED_INSTRUMENTS
+        .iter()
+        .find(|(retired, _)| *retired == name)
+        .map_or(name, |(_, now)| now);
     Named::parse(key, name, SYNTHS)
         .or_else(|_| Named::parse(key, name, SOUNDFONTS))
         .map_err(|_| StyleError::Unknown {
@@ -1616,7 +1789,66 @@ fn read_tempo(bounds: &[toml::Value]) -> Result<TempoRange, StyleError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Kit, Note, RideFallback, Scale, Style, StyleError, Swing, Voicing};
+    use super::{
+        BANKS, Kit, Note, RideFallback, SOUNDFONT_VARIANTS, SOUNDFONTS, Scale, Style, StyleError,
+        Swing, Voicing,
+    };
+
+    #[test]
+    fn every_soundfont_plays_a_variant_from_a_licensed_bank() {
+        let names: Vec<_> = SOUNDFONT_VARIANTS.iter().map(|v| v.name).collect();
+        assert_eq!(
+            names, SOUNDFONTS,
+            "one variant per soundfont, in the same order"
+        );
+        for variant in SOUNDFONT_VARIANTS {
+            let (name, index) = variant.sound.split_once(':').unwrap();
+            assert_eq!(name, variant.name);
+            assert!(index.parse::<u8>().is_ok(), "{}", variant.sound);
+            assert!(
+                variant.file.ends_with("_FluidR3_GM_sf2_file")
+                    || variant.file.ends_with("_GeneralUserGS_sf2_file"),
+                "{} loads {}, from a bank with no licence",
+                variant.name,
+                variant.file
+            );
+        }
+    }
+
+    #[test]
+    fn a_retired_instrument_still_compiles_as_its_stand_in() {
+        // An old poem or shared link may still name the fretless bass.
+        let header = "+++\n[style]\nbass = \"gm_fretless_bass\"\n+++\n";
+        assert_eq!(
+            Style::parse(header).unwrap().bass().get(),
+            "gm_acoustic_bass"
+        );
+        assert!(!SOUNDFONTS.contains(&"gm_fretless_bass"));
+    }
+
+    #[test]
+    fn a_retired_drum_machine_still_compiles_as_the_kit_that_replaced_it() {
+        // Hand-written from the mapping the kits were chosen for (2026-10-31): an old poem or share
+        // link that names a drum machine plays the kit nearest its character.
+        let expect = [
+            ("tr909", "uzu"),
+            ("tr808", "modular"),
+            ("tr707", "fm_drums"),
+            ("linn", "big_rusty"),
+            ("casio", "fm_drums"),
+            ("r8", "virtuosity"),
+        ];
+        for (old, now) in expect {
+            let header = format!("+++\nbank = \"{old}\"\n+++");
+            assert_eq!(Style::parse(&header).unwrap().bank().get(), now, "{old}");
+            assert!(!BANKS.contains(&old), "{old} is retired, not offered");
+        }
+        // Every bank the palette offers parses as itself.
+        for name in BANKS {
+            let header = format!("+++\nbank = \"{name}\"\n+++");
+            assert_eq!(Style::parse(&header).unwrap().bank().get(), *name);
+        }
+    }
 
     const HEADER: &str = "+++\n\
         [style]\n\
@@ -1666,7 +1898,8 @@ mod tests {
         assert_eq!(style.tempo_range().low().get(), 128);
         assert_eq!(style.tempo_range().high().get(), 134);
         assert_eq!(style.swing(), Swing(12));
-        assert_eq!(style.bank().get(), "tr909");
+        // The spec's `tr909` is retired; uzu replaced it.
+        assert_eq!(style.bank().get(), "uzu");
         // `synth` is the older key: it sets both pitched instruments.
         assert_eq!(style.bass().get(), "karplus");
         assert_eq!(style.melody().get(), "karplus");
@@ -1685,7 +1918,7 @@ mod tests {
         assert_eq!(style.tempo_range().low().get(), 110);
         assert_eq!(style.tempo_range().high().get(), 130);
         assert_eq!(style.swing(), Swing(0), "no swing unless asked for");
-        assert_eq!(style.bank().get(), "tr909");
+        assert_eq!(style.bank().get(), "uzu");
         // The default preset: recorded instruments, a modest room, a small human stray.
         assert_eq!(style.bass().get(), "gm_acoustic_bass");
         assert_eq!(style.melody().get(), "gm_epiano1");
@@ -1753,7 +1986,7 @@ mod tests {
         assert_eq!(described["root"], "d");
         assert_eq!(described["tempo_range"], "128..134");
         assert_eq!(described["swing"], "0.12");
-        assert_eq!(described["bank"], "tr909");
+        assert_eq!(described["bank"], "uzu");
         assert_eq!(described["bass"], "karplus");
         assert_eq!(described["melody"], "karplus");
         assert_eq!(described["reverb"], "0.25");
@@ -1908,7 +2141,7 @@ mod tests {
                 scale: "dorian",
                 steps: &[0, 2, 3, 5, 7, 9, 10],
                 swing: 25,
-                bank: "tr808",
+                bank: "modular",
             },
             Genre {
                 name: "techno",
@@ -1920,19 +2153,19 @@ mod tests {
                 scale: "phrygian",
                 steps: &[0, 1, 3, 5, 7, 8, 10],
                 swing: 0,
-                bank: "tr909",
+                bank: "uzu",
             },
             Genre {
                 name: "ambient",
                 melody: "gm_celesta",
-                bass: "gm_fretless_bass",
+                bass: "gm_acoustic_bass",
                 chords: "gm_pad_halo",
                 kit: Kit::Machine,
                 voicing: Voicing::Note,
                 scale: "lydian",
                 steps: &[0, 2, 4, 6, 7, 9, 11],
                 swing: 0,
-                bank: "linn",
+                bank: "big_rusty",
             },
             Genre {
                 name: "bossa",
@@ -1944,7 +2177,7 @@ mod tests {
                 scale: "major",
                 steps: major,
                 swing: 10,
-                bank: "r8",
+                bank: "virtuosity",
             },
             Genre {
                 name: "chamber",
@@ -1956,7 +2189,7 @@ mod tests {
                 scale: "harmonic_minor",
                 steps: &[0, 2, 3, 5, 7, 8, 11],
                 swing: 0,
-                bank: "linn",
+                bank: "big_rusty",
             },
             Genre {
                 name: "hymn",
@@ -1968,7 +2201,7 @@ mod tests {
                 scale: "major",
                 steps: major,
                 swing: 0,
-                bank: "linn",
+                bank: "big_rusty",
             },
         ];
         for genre in &genres {
@@ -1986,13 +2219,13 @@ mod tests {
     #[test]
     fn the_jazz_preset_sets_a_feel_as_well_as_a_sound() {
         // Hand-written from the palette's own description: Rhodes sevenths over an upright, the
-        // ride and snare of the R-8, triplet swing, dorian.
+        // ride and snare of the Virtuosity kit, triplet swing, dorian.
         let jazz = Style::preset("jazz").unwrap();
         assert_eq!(jazz.melody().get(), "gm_epiano1");
         assert_eq!(jazz.bass().get(), "gm_acoustic_bass");
         assert_eq!(jazz.kit(), Kit::Ride);
         assert_eq!(jazz.voicing(), Voicing::Seventh);
-        assert_eq!(jazz.bank().get(), "r8");
+        assert_eq!(jazz.bank().get(), "virtuosity");
         assert_eq!(jazz.swing(), Swing(33));
         assert_eq!(jazz.scale().name(), "dorian");
         assert_eq!(jazz.mix().density_level().hundredths(), 50);

@@ -21,10 +21,13 @@ questions, and [`CLAUDE.md`](CLAUDE.md) for the engineering rules.
 
 ## Quick start
 
-Needs Rust 1.96.1 (pinned in `rust-toolchain.toml`; `rustup` will fetch it automatically).
+The toolchain is pinned in [`mise.toml`](mise.toml): Rust 1.96.1 (also in `rust-toolchain.toml`,
+so plain `rustup` fetches it too), node, wrangler, the `wasm-bindgen` CLI, the Tauri CLI and the JDK
+the Android build needs. With [mise](https://mise.jdx.dev) installed:
 
 ```sh
 git clone <this repo> && cd prosody-experiment
+mise trust && mise install
 cargo build --release
 
 # compile a poem to Strudel pattern text
@@ -36,7 +39,7 @@ You get something like:
 ```js
 // compiled from a poem by prosody
 // 36 bars from 12 lines, 12 voices, 255 events
-//   bank = tr909
+//   bank = uzu
 //   root = c
 //   scale = minor
 stack(
@@ -52,6 +55,57 @@ it is one **foot**; each bracketed group inside that is the **syllables** of tha
 one beat, so `.cpm` is the tempo in beats a minute and a bar of three beats is shorter than a bar
 of four (see [the pulse](#the-pulse)).
 
+### Building and checking: `mise tasks`
+
+Every build, check and run command is a mise task, a thin wrapper over the scripts in `scripts/`
+and the commands in [`CLAUDE.md`](CLAUDE.md) §3. Tasks run from the repository root wherever you
+start them.
+
+| Task | What it does |
+|---|---|
+| `mise run gates` | every quality gate (CLAUDE.md §3) in order, stopping at the first failure: `gates:rust` (fmt, clippy, test, doc), `gates:web` (the page's typecheck, Vitest, build), `e2e` (the built site in Chromium) |
+| `mise run site` | the static site into `target/site` (`scripts/build-site.sh`) |
+| `mise run synth` | the player's synth into `web/public` (`scripts/build-synth.sh`) |
+| `mise run serve` | Path A below: synth, page, then `prosody-web` on :4747 |
+| `mise run dev` | `prosody-web` plus Vite with hot reload, for working on the page |
+| `mise run check-wasm` | the browser build answers byte for byte as the native one |
+| `mise run grammar` | the grammar's corpus tests, and that the committed parser matches it |
+| `mise run android:build` | the Android app's debug APK for 64-bit ARM |
+| `mise run android:install` | `adb install -r` it to `$ANDROID_SERIAL`, or to the only attached device |
+| `mise run android:run` | install, then launch `rocks.prosody.debug` |
+| `mise run android:deploy` | build, install and launch: what goes on the phone is this checkout (`android:install` alone installs the last APK built, however old) |
+| `mise run site:ios` | the static site for the iOS app into `target/site-ios`, without the neural voices (`PROSODY_NEURAL_VOICES=off`) |
+| `mise run ios:env` | check Xcode, the iOS SDKs, the Rust targets and a simulator |
+| `mise run ios:build` | the iOS app's debug build for the simulator (arm64), into `target/ios/simulator` |
+| `mise run ios:build:device` | the debug build for an iPhone, signed for `$APPLE_DEVELOPMENT_TEAM`, into `target/ios/device` |
+| `mise run ios:install` | boot the simulator (`$PROSODY_IOS_SIMULATOR`, or an iPhone 17) and install the debug build |
+| `mise run ios:run` | install, then launch `rocks.prosody.debug` on the simulator |
+| `mise run ios:install:device` | install the device build on the iPhone (`$PROSODY_IOS_DEVICE`, a name or UDID, or the only one paired) |
+| `mise run ios:run:device` | install, then launch it on the iPhone |
+| `mise run ios:deploy` | build the device app, install and launch it on the iPhone |
+| `mise run android:bundle` | the release App Bundle for Google Play, signed with the upload key, numbered `$PROSODY_BUILD` |
+| `mise run ios:archive` | the release `.ipa` for App Store Connect, signed for `$APPLE_DEVELOPMENT_TEAM`, numbered `$PROSODY_BUILD` |
+| `mise run store:screenshots` | both stores' screenshots and Play's feature graphic, from the built sites, into `store-assets` |
+
+The store listings — their text, images, privacy policy and every form's answers — are in
+[`store-assets/README.md`](store-assets/README.md).
+
+The Android SDK and NDK are not something mise installs: install them with Android Studio. mise.toml
+looks for them where Android Studio puts them on macOS (`~/Library/Android/sdk`, NDK
+28.2.13676358) unless `ANDROID_HOME` / `NDK_HOME` are already set, and `mise run android:env` says
+what is missing. `cargo tauri android build` also works by hand, from the repository root or from
+`src-tauri`: the app's `beforeBuildCommand` is `mise run site`.
+
+The iOS app needs a Mac with Xcode, its iOS platform, and `rustup target add aarch64-apple-ios
+aarch64-apple-ios-sim`; `mise run ios:env` says what is missing. Its first build fetches swift-rs
+(which Tauri's Swift code depends on) from GitHub. A simulator build needs no Apple account; a
+device build is signed, so it needs your development team's ID in `APPLE_DEVELOPMENT_TEAM`: set it
+once in a `mise.local.toml` (gitignored) beside mise.toml, under `[env]`, where `ANDROID_SERIAL`
+and `PROSODY_IOS_DEVICE` can go too when more than one phone is attached. The
+iOS app reads with the recorded readings and the system's voice only: the neural voices carry
+eSpeak NG (GPL-3) and fetch their code at run time, which the App Store does not allow
+(`docs/player.md` §14 says how to switch them back on, and how to make a TestFlight build).
+
 ---
 
 ## Hearing it
@@ -60,15 +114,22 @@ Three ways. The first is the one to start with.
 
 ### Path A — the local web page (easiest)
 
+`mise run serve` does all of this; by hand:
+
 ```sh
+./scripts/build-synth.sh                            # the player's synth, into the page, once
 npm --prefix web ci && npm --prefix web run build   # the page, once (node from mise.toml)
 cargo run -p prosody-web
 # prosody: http://127.0.0.1:4747 — ^C to stop
 ```
 
 The page is its own program in `web/` — Preact and TypeScript, built by Vite into `web/dist`, which
-`prosody-web` serves beside the compiler's answers. Working on the page itself, run
-`npm --prefix web run dev` with `prosody-web` still running: Vite serves the page with hot reload
+`prosody-web` serves beside the compiler's answers. Its player's synth is Rust built for the browser
+(`crates/prosody-synth-wasm`); `./scripts/build-synth.sh` writes it into `web/public` (it needs the
+`wasm32-unknown-unknown` target, which `rust-toolchain.toml` asks for, and installs the pinned
+`wasm-bindgen` once), and without it the page shows and compiles but says the player could not
+start. Working on the page itself, run
+`npm --prefix web run dev` with `prosody-web` still running (`mise run dev` starts both): Vite serves the page with hot reload
 and sends every question to the server. `npm --prefix web run check` typechecks it, runs its tests
 (Vitest) and builds it.
 
@@ -95,8 +156,9 @@ of the arrangement hands over to the next, over a set number of bars. Everything
 that a tab opens and the open tab (or its handle) folds away. The **Mixer** has every level in one
 place — drums, bass, melody, chords and the voice — each with a meter that moves with what sounds,
 and **M**ute and **S**olo: heard at once, with nothing recompiled and nothing in the pattern
-changed, because the page plays each event through a filter that reads the switches, and a muted
-layer's events stay on the roll, faint. Then **Sound** (styles, the key, the tempo and the
+changed, because each channel is a stem of the page's player and mute and solo are only its gain
+(glided over 5 ms, so a mute mid-note does not click), and a muted layer's events stay on the roll,
+faint. Then **Sound** (styles, the key, the tempo and the
 instruments), **Reading**, **Mappings** (A and B) and **Under the hood** (the pattern, what each
 word became, and the score); the page remembers which was open. It opens with a welcome — what
 *prosody* means and what this experiment does — which stays closed once closed (**about** reopens
@@ -112,17 +174,19 @@ bytes to a couple of kilobytes — and whoever opens it hears the same piece, co
 browser; a line says it is a shared poem, and nothing the link holds is saved over the visitor's
 own settings. Where the link is pasted, its preview shows the poem's own first lines: the site's
 worker reads the link as it passes and puts them in the page's title and description
-(`deploy/preview.js`), keeping nothing. A link opens a stranger's poem in the page, which runs what
-it compiles to, so a test pins that no text of a poem reaches that code
-(`no_poem_text_reaches_the_code_the_page_runs`): the compiled pattern, the reading's cues and the
-trace carry no word of it.
+(`deploy/preview.js`), keeping nothing. A link opens a stranger's poem in the page. The page runs
+nothing it compiles — its player reads the Performance as data — but the pattern is code that
+strudel.cc runs when someone pastes it there, so a test pins that no text of a poem reaches it
+(`no_poem_text_reaches_the_code_the_page_runs`, from when the page ran the pattern too): the
+compiled pattern, the reading's cues and the trace carry no word of it.
 
 The lighting is `SPEC.md` §8's traceability made visible: every lit syllable is the span the sound
-came from. The page gets it from `/trace` (`prosody_emit::trace`), a silent pattern of syllable ids
-built by the same walk of bars and beats as the music and on the same clock, so the light lands
-where the sound does. Each layer in the pattern carries `.color(...)`, which Strudel's sound ignores:
-the page's roll lays the layers out by it, its mixer mutes and solos by it (`site.json` names each
-layer's colour, from the emitter itself), and `pianoroll()` on strudel.cc draws it too.
+came from. The page plays the piece's **Performance** (`prosody_emit::perform`, `docs/player.md`): every
+note and every syllable's light resolved by the compiler, with its time and its words, so the light
+lands where the sound does — both are read at the player's playhead. Each layer in the pattern text
+carries `.color(...)`, which Strudel's sound ignores and `pianoroll()` on strudel.cc draws; the
+page's roll and mixer use the same colours (`site.json` names each layer's colour, from the emitter
+itself).
 
 The palette controls are the whole of `SPEC.md` §5: scale, root, tempo range, swing, sample bank,
 the bass and melody instruments, and the mix. Changing one of them changes what you hear and
@@ -131,12 +195,12 @@ which is invariant I3 in front of you.
 
 The **Style** cards at the top of the Sound folder pick a named palette for the instruments and
 the mix: **default** (electric piano over acoustic bass, a modest room, a little echo on the
-melody, light compression, a small human stray), **warm** (vibraphone over fretless bass, a long
+melody, light compression, a small human stray), **warm** (vibraphone over upright bass, a long
 room, more echo, a lower high cut, a touch of drive, more stray) and **raw** (the palette as it
 was before any of this: triangle oscillators, dry, on the grid) leave scale, root, tempo and bank
-alone. The genres set a scale, a swing and a drum machine as well: **jazz** (Rhodes playing each
+alone. The genres set a scale, a swing and a drum kit as well: **jazz** (Rhodes playing each
 rhyme word as the seventh chord on its degree, an upright bass, the ride keeping time and the
-snare comping on the sampled acoustic R-8 kit, triplet swing, dorian, a warm room), **lo-fi**,
+snare comping on the acoustic Virtuosity kit, triplet swing, dorian, a warm room), **lo-fi**,
 **techno**, **ambient**, **bossa**, **chamber** and **hymn**. A genre also suggests what the poem
 might *do* — jazz a walking bass and cadences, techno the bass on every foot — and picking it on
 the page sets those mappings on side A, marked in the Mappings folder with a button to put A back;
@@ -145,9 +209,9 @@ is custom. **Kit**
 picks kick-and-hat or ride-and-snare for the two drum layers, and **Voicing** plays each rhyme word
 as one note or as a seventh chord built in the current scale; neither moves an event. With a side's
 harmony mapping on, that side's rhyme words play as single notes over the chord lane whatever the
-voicing, and the voicing shapes only the chords. **Ride
-stand-in** picks what keeps time under the ride kit on a bank without one (open hat or crash), and
-**Bass octave** and **Melody octave** move each role's register by whole octaves. **Levels follow
+voicing, and the voicing shapes only the chords. **Drums** picks one of five kits, all of them
+in the public domain and served with the page (`web/public/drums/SOURCES.md` says where each
+sound came from): **uzu**, **FM drums**, **Modular**, **Big Rusty** and **Virtuosity**. **Bass octave** and **Melody octave** move each role's register by whole octaves. **Levels follow
 density** (in the mix) turns down the bars where several lines sound at once — a stanza looping
 under the next, a held line, a call — so dense poems stop leaning on the page's soft clipper;
 warm and jazz set it to 0.5. The mix controls: reverb, room size, echo on the melody, high cut, drive, compression,
@@ -204,8 +268,8 @@ refrains in its lane or repeats in the outro. Under `stanza`, a stanza's lines a
 from the first bar any of them is heard in, so a stanza that transforms a loop (one new line a
 pass, five bars apart in The Tyger under `arrives`) is read straight through while the music is
 still turning into it, with no pause after the stanza before it. Under `off`, nothing is read.
-Strudel's own clock fires each line, so it stays on the bar; a line still being spoken when the
-next is due is cut off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
+The page's player places each line on the music's own clock as it renders the music around it, so
+it stays on the bar; a line still being spoken when the next is due is cut off. The speaking rate is fitted so the line fills most of its bar at the piece's tempo, within
 0.6–1.6 — at the **fitted** pace. The default pace is **natural**: each line at the voice's own
 speed, a little faster or slower line by line (0.92–1.08, from the line's own seed), the next after
 a pause from how the line ends (0.25 s running on, 0.45 s at a comma, 0.8 s at a full stop, 1.5 s
@@ -219,34 +283,34 @@ you edit has no recording and is read live, which the status bar says) or your b
 while a model downloads, or if one fails to load or stops working — the status bar says so in red;
 choose the engine again to retry). Each download shows its progress in the status bar
 and is kept by the browser; every line is rendered ahead after each compile, the line due next
-first, and started exactly on the music's clock. A line the reading leaves out — the piece came
+first, and placed by the frame on the player's reading stem, with the music ducked under it from the
+same timeline. Your browser's own voice cannot be placed in the music: it starts when the playhead
+reaches its line, so it is not in step with the music, and the status bar says so. A line the reading leaves out — the piece came
 round, or ended, before its turn — is said in the status bar. At the fitted pace a rendered line too long for its bar is rendered again,
 faster, to fit. An example poem sets its own **language** — Prešeren's Zdravljica is read in
 Slovenian, which only Piper (`sl_SI-artur-medium`) and perhaps your browser can speak. The page
 remembers the engine, pace, level and a voice per engine and language; untick **duck** to stop the
 music dipping while a stanza is read. Add `?device=wasm` to the page's address to keep every
 engine off WebGPU. The Pattern tab shows the cue pattern under the music's, and the
-browser console logs every line as it is cued and started: which bar, which bytes, which rate or
-pace, which engine, and how late if a render was. Picking a
+browser console logs every line as it is placed: when, which bytes, which pace, which engine, and
+how late if a render was. Picking a
 preset or switching A/B while playing starts the piece again from bar 1, so the reading begins at
 the first line. A live edit keeps playing from where it is, and the reading carries on from there.
-If Strudel's scheduler ever falls behind — it skips a tick it reaches too late, and every note and
-cue in that tick is lost, saying so only on the console — the status bar says so in red:
-`Strudel fell behind: 58 tick(s) not played, their notes unheard; not read: line 10`.
-Nothing the page does should cause that: it parses a new pattern's mini-notation ahead, a few
-milliseconds at a time between the scheduler's ticks, and remembers what it has parsed, so a live
-edit to "Patterns" while it plays — about 1,200 strings, a second to parse — swaps in the new
-version without a gap (an edit changes only the strings of the voices it touches).
+The music and the reading are rendered about half a second ahead, in a worker, and only mixed on
+the audio thread, so a busy page cannot make a note or a line late (`docs/player.md`); if the
+audio ever runs dry anyway, the status bar says so in red.
 It is a
 candidate mapping and a page-only one — the CLI's pattern and strudel.cc know nothing of it
 (`SPEC.md` §4.7).
 
 It binds to `127.0.0.1` only, and deliberately: it compiles arbitrary text from a request body,
-which is exactly right on your own machine and exactly wrong on a network. Playback loads Strudel,
-the drum-machine samples (the map strudel.cc uses) and the General MIDI soundfonts from CDNs, so
-the first Play needs an internet connection; each instrument a pattern uses is loaded before it
-starts. The page's output goes through a gentle compressor and then a soft clipper that cannot
-exceed 0.95, so a dense bar bends rather than clips.
+which is exactly right on your own machine and exactly wrong on a network. Playback needs no
+network: the player is Prosody's own (`docs/player.md`) — a synth in Rust, compiled to WebAssembly,
+rendering in a worker — and the drum kits, the soundfonts (lossless zones converted from the
+licensed General MIDI files) and the recorded readings are all served beside the page; each sound a
+piece uses is loaded before it starts. Only a neural voice, once chosen, downloads its model. Strudel's runtime is not loaded at all: the pattern is shown,
+copied and shared as text for strudel.cc (Path B). The page's output goes through a gentle
+compressor and then a soft clipper that cannot exceed 0.95, so a dense bar bends rather than clips.
 
 ### Path A′ — the same page, without a server
 
@@ -257,6 +321,8 @@ The page also builds as static files, with the whole compiler inside it as WebAs
 python3 -m http.server -d target/site    # or any static host; then open http://localhost:8000
 npm --prefix web run e2e                 # the built site in Chromium, end to end
 ```
+
+(`mise run site` and `mise run e2e` are the first and the last.)
 
 It is the same page with the same controls, and it answers itself: every request the served page
 sends to `prosody-web` goes to `prosody_bg.wasm` instead (`crates/prosody-wasm`, bound to the
@@ -340,13 +406,19 @@ rather than keeping it under the new pace. Adding a voice is a line in `scripts/
    cargo run -p prosody-cli -- examples/blake-tyger.poem | xclip -sel clip   # Linux
    ```
 2. Open **<https://strudel.cc>**.
-3. Select everything in the editor and paste over it.
+3. Select everything in the editor and paste over it, then add this line above it — strudel.cc
+   has the same General MIDI soundfonts as this page (its own copies of the files the page's
+   lossless zones were converted from), but not its drum kits:
+   ```js
+   samples('https://prosody.rocks/drums/strudel.json')
+   ```
 4. Press **Ctrl+Enter** (or the ▶ button). The first run downloads the drum samples, so give it a
    second.
-   strudel.cc registers the same drum machines and GM soundfonts this page loads, so the
-   instruments sound the same. One difference: strudel.cc honours `.nudge` only for samples, so
-   there the humanise stray moves the drums and not the bass or melody (their softening still
-   applies); the local page applies it to every sound.
+   The instruments then sound much as they do on the page: the page's player plays the same notes
+   (a parity test checks every one against Strudel's own evaluation of the text) and was matched to
+   Strudel's sound by measurement, the reverb aside (`docs/player.md` §11). One difference:
+   strudel.cc honours `.nudge` only for samples, so there the humanise stray moves the drums and
+   not the bass or melody (their softening still applies); the page applies it to every sound.
 
 That is the whole loop. Edit the poem, recompile, paste again — or keep a terminal open with
 `--watch` and paste whenever you like something.
@@ -375,6 +447,19 @@ cargo run -p prosody-cli -- --osc examples/dickinson-because.poem
 #     0.000  /prosody/note  0.000 "foundation" 0 0.333 -1 0.000 0.688 0.000 1.000 0.333
 #     0.500  /prosody/note  0.500 "foundation" 0 1.000 36 0.000 0.688 0.000 1.000 1.000
 ```
+
+To hear a piece through Prosody's own synth instead (`docs/player.md`), render it to a WAV file:
+
+```sh
+cargo run -p prosody-cli -- render --out tyger.wav examples/blake-tyger.poem
+```
+
+It plays the oscillators only for now, with every effect the pattern asks for (room, echo, crush,
+vowel, shape, compressor) and the page's master stage: the drums and the soundfonts are FLAC files
+beside the page (`web/public/drums`, `web/public/soundfonts`), which need a FLAC decoder the CLI
+does not have yet, and it says how many notes it left out. A header of `synth = "subtractive"`
+puts the bass and melody on oscillators. The page plays every piece through the same synth, every
+sound from beside the page.
 
 A note's arguments are `beats layer voice gain note detune sharpness family sustain noteGain`.
 `gain` is the drum's accent, always the syllable's own stress; `noteGain` is the pitched note's,
@@ -508,8 +593,8 @@ page). How long a bar of the Strudel pattern lasts.
 
 - **`steady`** — a bar lasts as many beats as it holds, so the beat is the same speed all the way
   through. A cycle is a beat: the bars are weighted with mini-notation's `@` (`<[…]@3 […]@4>`, a
-  bar of weight *w* lasting *w* cycles), and `.cpm` is the tempo itself. Swing is
-  `.swingBy(x, 1)`, so it swings every beat whatever the length of its bar.
+  bar of weight *w* lasting *w* cycles), and `.cpm` is the tempo itself. Swing slices a
+  cycle, so it swings every beat whatever the length of its bar.
 - **`elastic`** — every bar lasts the same time, one cycle, at the tempo over the piece's integer
   mean bar length: the pattern as it was until now. A bar of four beats among bars of three plays
   its beats a third faster — Wilde's Theocritus at 161 bpm against its 121.
@@ -596,7 +681,8 @@ A piece of more than 16 bars is written in groups (`strudel::nested`): runs of r
 one rest as long, then bars bracketed sixteen at a time (`<[a@3 b@4 …]@58 …>`). The same notes at
 the same times — every hap of every example's whole loop compared under the page's Strudel — but
 Strudel visits every element of a sequence on every query, and the flat 284-bar sequence cost more
-per scheduler tick than a tick lasts: the page played about a sixth of "Patterns". Grouped, it
+per scheduler tick than a tick lasts: the page, which then played through Strudel, played about a
+sixth of "Patterns". Grouped, it
 plays all of it (a query costs 3.9 ms instead of 49 ms). The text of the 13 examples over 16 bars
 changed with it; nothing they play did.
 
@@ -643,7 +729,7 @@ scale       = "phrygian_dominant"
 root        = "D"
 tempo_range = [124, 132]
 swing       = 0.08
-bank        = "tr909"
+bank        = "uzu"
 synth       = "karplus"
 +++
 Tyger Tyger, burning bright,
@@ -657,7 +743,11 @@ and 132, and the poem says where in that window, from how densely its syllables 
 
 Scales: `major`, `minor`, `harmonic_minor`, `dorian`, `phrygian`, `phrygian_dominant`, `lydian`,
 `mixolydian`, `locrian`, `pentatonic_minor`, `whole_tone`, `chromatic`.
-Banks: `tr909`, `tr808`, `tr707`, `linn`, `casio`, `r8` (Roland R-8, sampled acoustic drums).
+Banks: `uzu` (Switch Angel's electronic kit), `fm_drums` (drums made by FM synthesis), `modular`
+(a modular synthesiser's hits), `big_rusty` and `virtuosity` (sampled acoustic kits). The drum
+machines the page once loaded from strudel.cc carry no licence and are retired; a header naming
+one plays the kit nearest it — `tr909` is `uzu`, `tr808` is `modular`, `tr707` and `casio` are
+`fm_drums`, `linn` is `big_rusty`, `r8` is `virtuosity`.
 Synths: `karplus`, `fm`, `subtractive`, `physical`, `sine`, `sawtooth`, `square`, `triangle`.
 `synth` sets both pitched instruments; in Strudel the four model names play the recorded
 instrument nearest the model (Karplus–Strong: acoustic bass and nylon guitar; FM: DX-style synth
@@ -667,12 +757,12 @@ The rest of the header, every key optional:
 
 | key | what | range | default |
 |---|---|---|---|
-| `preset` | a named palette to start from — `default`, `warm`, `raw`, `jazz` (which also sets `scale = "dorian"`, `swing = 0.33`, `bank = "r8"`); applied before every other key | | `default` |
-| `kit` | which drum each layer plays: `machine` (kick on the foundation, hat on the flourish) or `ride` (ride and snare; on `tr808` and `tr707`, which have no ride, the open hat keeps time instead and the pattern's header says so) | | `machine` |
-| `ride_fallback` | what keeps time under `kit = "ride"` on a bank with no ride (`tr808`, `tr707`): `open_hat` or `crash`; named on the pattern header's `plays:` line | | `open_hat` |
+| `preset` | a named palette to start from — `default`, `warm`, `raw`, `jazz` (which also sets `scale = "dorian"`, `swing = 0.33`, `bank = "virtuosity"`); applied before every other key | | `default` |
+| `kit` | which drum each layer plays: `machine` (kick on the foundation, hat on the flourish) or `ride` (ride and snare) | | `machine` |
+| `ride_fallback` | what keeps time under `kit = "ride"` on a bank with no ride: `open_hat` or `crash`, named on the pattern header's `plays:` line. Every bank has a ride, so it changes nothing today; an older header that sets it still compiles | | `open_hat` |
 | `voicing` | each rhyme word as one `note`, or as the `seventh` chord on its degree in the scale (the level is shared between the tones; in a scale without seven notes it stacks every other degree all the same — fourths in `pentatonic_minor`). With the harmony mapping on, rhyme words are single notes over the chords whatever this says, and it shapes only the chord lane | | `note` |
 | `chord_sound` | the chord lane's instrument (heard only with the harmony mapping on): any name `bass` and `melody` take | | `gm_pad_warm` (`warm`, `jazz`: `gm_epiano1`; `raw`: `triangle`) |
-| `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_fretless_bass`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
+| `bass`, `melody` | the instrument for each pitched role: a synth name above, or a GM soundfont — `gm_acoustic_bass`, `gm_electric_bass_finger`, `gm_electric_bass_pick`, `gm_synth_bass_1`, `gm_synth_bass_2`, `gm_epiano1`, `gm_epiano2`, `gm_piano`, `gm_vibraphone`, `gm_marimba`, `gm_celesta`, `gm_music_box`, `gm_kalimba`, `gm_glockenspiel`, `gm_acoustic_guitar_nylon`, `gm_orchestral_harp`, `gm_pad_warm`, `gm_string_ensemble_1` | | `gm_acoustic_bass`, `gm_epiano1` |
 | `reverb` | reverb send (the drums take half, plus §4.4's rise with distinctiveness; the bass three tenths) | 0–1 | 0.25 |
 | `room_size` | reverb length, seconds | 0.1–10 | 2.0 |
 | `delay` | echo on the melody, a dotted eighth behind | 0–1 | 0.15 |
@@ -740,7 +830,9 @@ crates/
   prosody-cmudict/    the CMU pronouncing dictionary, vendored
   prosody-lts/        guessing pronunciation from spelling, for words it lacks
   prosody-lexicon/    word-rarity table, built from public-domain texts
-  prosody-emit/       Style, and the Strudel and OSC backends
+  prosody-emit/       Style, and the Strudel, OSC and Performance backends
+  prosody-synth/      the Prosody player's synth: a Performance and samples in, PCM out (docs/player.md)
+  prosody-synth-wasm/ that synth built for the page's render worker
   prosody-score/      how interesting a compiled poem is, and whether it still listens to the poem
   prosody-cli/        arguments, files, stdout, the watcher — all IO lives here
   prosody-web/        what the page asks, answered by a library, plus a local server
@@ -784,7 +876,9 @@ design, not a bug fix.
 ## Voices and their licences
 
 The reading's neural voices are not part of this repository: the page loads each from a CDN at an
-exact version, and its model from Hugging Face, only when you choose it.
+exact version, and its model from Hugging Face, only when you choose it. The iOS app does not offer
+them at all (`PROSODY_NEURAL_VOICES=off`, `docs/player.md` §14): only the recorded readings and the
+system's voice.
 
 | Engine | Code (version, licence) | Model and voices (licence) |
 |---|---|---|
@@ -805,6 +899,16 @@ licence that allows it:
 
 `manifest.json` repeats each voice's licence. The tool's one dependency, playwright-core 1.64.0,
 is Apache-2.0, and is used only on the machine that renders.
+
+## Notices
+
+The page and the apps carry the notices their parts' licences ask for: **about → licences and
+notices** names who made the words, sounds, voices and fonts and under what terms, and lists every
+package the build ships — each crate the compiler, the synth and the app link (for Android, iOS
+and the browser), and each npm package in the page's bundle — with the licence texts it carries.
+`scripts/notices.mjs` writes that list into the built site (`notices.json`) from `cargo metadata`
+and `web/node_modules`; a package whose published source holds no licence file is given its
+licence's standard text, and is marked so.
 
 ## Development
 

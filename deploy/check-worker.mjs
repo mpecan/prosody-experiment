@@ -38,6 +38,14 @@ assert.equal(served.headers.get('strict-transport-security'), HSTS);
 assert.equal(await served.text(), 'page');
 const local = await worker.fetch(new Request('http://localhost:8787/'), env);
 assert.equal(local.headers.get('strict-transport-security'), null);
+// The drums may be fetched from any site (strudel.cc); nothing else may.
+const drum = await worker.fetch(new Request('https://prosody.rocks/drums/strudel.json'), env);
+assert.equal(drum.headers.get('access-control-allow-origin'), '*');
+assert.equal(drum.headers.get('strict-transport-security'), HSTS);
+assert.equal(served.headers.get('access-control-allow-origin'), null);
+const localDrum = await worker.fetch(new Request('http://localhost:8787/drums/uzu/bd.flac'), env);
+assert.equal(localDrum.headers.get('access-control-allow-origin'), '*');
+assert.equal(localDrum.headers.get('strict-transport-security'), null);
 
 const stagingEnv = { CANONICAL_HOST: 'staging.prosody.rocks', ASSETS: { fetch: async () => new Response('staging-page', { status: 200 }) } };
 const stagingMoved = await worker.fetch(new Request('http://staging.prosody.rocks/a'), stagingEnv);

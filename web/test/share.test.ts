@@ -87,6 +87,13 @@ describe('a link read back', () => {
     expect(sides.B).toMatchObject({ pulse: 'steady', held: 'off' });
   });
 
+  it('shows a retired drum machine as the kit it will be heard on', () => {
+    expect(settingsOf({ v: 1, poem: 'x', sound: { bank: 'tr808' } }).sound.bank).toBe('modular');
+    expect(settingsOf({ v: 1, poem: 'x', sound: { bank: 'big_rusty' } }).sound.bank).toBe('big_rusty');
+    // A link that left the bank at the default had the TR-909, and now has the default kit.
+    expect(settingsOf({ v: 1, poem: 'x' }).sound.bank).toBe('uzu');
+  });
+
   it('drops what this page does not know, as a stale save does', async () => {
     const code = await encode({ v: 1, poem: 'x', sound: { reverb: '0.6', script: 'alert(1)' }, A: { bass: 'polka', nope: 'on' }, lang: 'English!' } as never);
     const shared = await decode(code);

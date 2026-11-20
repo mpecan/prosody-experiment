@@ -4,7 +4,7 @@ import { setSite } from '../src/data';
 import type { Palette, SiteData } from '../src/site';
 
 const defaultPalette: Palette = {
-  bank: 'tr909', bass: 'gm_acoustic_bass', bass_gain: '0.32', bass_octave: '2', chord_gain: '0.40',
+  bank: 'uzu', bass: 'gm_acoustic_bass', bass_gain: '0.32', bass_octave: '2', chord_gain: '0.40',
   chord_sound: 'gm_pad_warm', compress: '0.30', delay: '0.15', density_level: '0.00', drive: '0.00',
   drums_gain: '0.28', high_cut: '4400', humanise: '0.20', kit: 'machine', melody: 'gm_epiano1',
   melody_gain: '0.75', melody_octave: '4', reverb: '0.25', ride_fallback: 'open_hat', room_size: '2.0',
@@ -23,7 +23,13 @@ export const fixture: SiteData = {
     dorian: [0, 2, 3, 5, 7, 9, 10],
     phrygian_dominant: [0, 1, 4, 5, 7, 8, 10],
   },
-  banks: ['tr909', 'tr808', 'linn'],
+  soundfonts: {
+    'gm_acoustic_bass:1': '0320_FluidR3_GM_sf2_file', 'gm_epiano1:1': '0040_FluidR3_GM_sf2_file',
+    'gm_pad_warm:3': '0890_FluidR3_GM_sf2_file', 'gm_vibraphone:3': '0110_FluidR3_GM_sf2_file',
+  },
+  banks: ['uzu', 'modular', 'big_rusty'],
+  retiredBanks: { tr909: 'uzu', tr808: 'modular', linn: 'big_rusty' },
+  drumSamples: ['bd', 'sd', 'hh', 'oh', 'rd', 'cr', 'lt', 'mt', 'ht'],
   instruments: ['triangle', 'gm_acoustic_bass', 'gm_epiano1', 'gm_pad_warm', 'gm_vibraphone'],
   kits: ['machine', 'jazz'],
   voicings: ['note', 'seventh'],
@@ -49,7 +55,7 @@ export const fixture: SiteData = {
   ],
   palettes: {
     default: defaultPalette,
-    jazz: { ...defaultPalette, kit: 'jazz', voicing: 'seventh', melody: 'gm_epiano1', scale: 'dorian', swing: '0.33', bank: 'linn' },
+    jazz: { ...defaultPalette, kit: 'jazz', voicing: 'seventh', melody: 'gm_epiano1', scale: 'dorian', swing: '0.33', bank: 'big_rusty' },
   },
   paletteKeys: {
     default: SOUND,

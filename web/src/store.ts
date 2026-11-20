@@ -1,5 +1,5 @@
 // What the page shows, as signals: the components render from these, and the engine modules (the
-// compiler's answers, Strudel, the reading) write them. State the screen never shows lives in those
+// compiler's answers, the player, the reading) write them. State the screen never shows lives in those
 // modules as plain variables, as it did when the page was one script.
 import { computed, signal } from '@preact/signals';
 
@@ -79,13 +79,15 @@ export const sharedOpened = signal(false);
 /** The share dialog: open, and the link it offers once made. */
 export const shareLink = signal<{ link: string; copied: boolean } | null>(null);
 export const welcomeOpen = signal(false);
+/** The Licences dialog: what the site and the apps are made of, and the notices they owe. */
+export const licencesOpen = signal(false);
 /** How many bars the roll shows. */
 export const rollBars = signal('4');
 /** The beat the Play button breathes on, in seconds, while it plays under the steady pulse. */
 export const beat = signal<number | null>(null);
 
 // The reading's settings and its menus (reading/index.ts `showVoices`).
-export type EngineName = 'browser' | 'kokoro' | 'piper' | 'kitten' | 'recorded';
+export type EngineName = 'browser' | 'system' | 'kokoro' | 'piper' | 'kitten' | 'recorded';
 export type Pace = 'natural' | 'fitted';
 export interface ReadingSettings {
   engine: EngineName;
@@ -107,6 +109,8 @@ export interface ReadingMenus {
   voices: Option[];
   voice: string;
   voiceDisabled: boolean;
+  /** Where to get a better voice, when the phone has only basic ones in the poem's language. */
+  voiceHint?: string | null;
 }
 export const readingMenus = signal<ReadingMenus>({ engines: [], languages: [], voices: [], voice: '', voiceDisabled: false });
 /** The mixer's channels, and which are muted and soloed. Not remembered: a visit starts hearing

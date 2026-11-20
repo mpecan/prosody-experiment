@@ -5,7 +5,7 @@
 scale       = "phrygian"
 root        = "A"
 tempo_range = [76, 84]
-bank        = "tr707"
+bank        = "fm_drums"
 +++
 In the desert
 I saw a creature, naked, bestial,

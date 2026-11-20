@@ -1,11 +1,10 @@
 // Mute and solo, and the lane roll's geometry.
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { audible, played } from '../src/mix';
+import { audible } from '../src/mix';
 import { voiceLevel } from '../src/reading';
-import { laneRects } from '../src/roll';
+import { laneRects, type RollNote } from '../src/roll';
 import { muted, readingSettings, soloed } from '../src/store';
-import type { Hap } from '../src/strudel/globals';
 import { barLines } from '../src/watch';
 import { fixture, useFixture } from './site.fixture';
 
@@ -32,20 +31,6 @@ describe('mute and solo', () => {
     expect(audible('melody')).toBe(false);
   });
 
-  it('silence an event of a channel not heard, and mark it, leaving every other as it was', () => {
-    muted.value = { drums: true };
-    const kick = { s: 'bd', gain: 0.28, color: '#c9a6ff' };
-    const hat = { s: 'hh', gain: 0.28, color: '#6fd6c5' };
-    const note = { note: 36, gain: 0.32, color: '#ffb86b' };
-    const cue = { n: 3 };
-    // Both drum layers play through the drums.
-    expect(played(kick)).toEqual({ s: 'bd', gain: 0, color: '#c9a6ff', muted: true });
-    expect(played(hat)).toEqual({ s: 'hh', gain: 0, color: '#6fd6c5', muted: true });
-    expect(played(note)).toBe(note);
-    // A reading cue carries no colour: the mixer never touches it.
-    expect(played(cue)).toBe(cue);
-  });
-
   it('take the voice down to nothing, and back to its fader', () => {
     readingSettings.value = { ...readingSettings.value, level: 1.4 };
     expect(voiceLevel()).toBe(1.4);
@@ -57,8 +42,8 @@ describe('mute and solo', () => {
   });
 });
 
-const hap = (begin: number, end: number, value: Record<string, unknown>): Hap =>
-  ({ whole: { begin, end }, value, hasOnset: () => true }) as unknown as Hap;
+const hap = (begin: number, end: number, value: { color: string; note?: number; muted?: boolean }): RollNote =>
+  ({ begin, end, colour: value.color, note: value.note, muted: value.muted });
 
 describe('the lane roll', () => {
   // Five lanes of 20 px in a 100 px canvas; a 20 px gutter, 400 px for 4 s around the playhead.
@@ -80,7 +65,7 @@ describe('the lane roll', () => {
     const rects = laneRects([
       hap(10, 11, { color: '#ffb86b', note: 36 }),
       hap(11, 12, { color: '#ffb86b', note: 48 }),
-      hap(10, 11, { n: 2 }),
+      hap(10, 11, { color: '#000000' }),
       hap(20, 21, { color: '#ffb86b', note: 40 }),
     ], fixture.layers, 10, [-2, 2], frame);
     expect(rects).toHaveLength(2);

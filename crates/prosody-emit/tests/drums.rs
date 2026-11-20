@@ -92,7 +92,7 @@ fn tyger_and_sonnet_articulate_across_kick_snare_and_hat_only_under_articulated(
     };
     assert_eq!(after_s(&flat_out), after_s(&art_out));
 
-    // Under the jazz preset (`kit = "ride"`, `bank = "tr909"`), even foundation stresses play `rd`,
+    // Under the jazz preset (`kit = "ride"`, `bank = "virtuosity"`), even foundation stresses play `rd`,
     // odd backbeat stresses play `sd` and unstressed subdivisions play `hh`.
     let jazz = Style::parse("+++\npreset = \"jazz\"\n+++").unwrap();
     let art_jazz = Strudel::new().render(&art_tyger, &jazz).unwrap();
@@ -105,16 +105,18 @@ fn tyger_and_sonnet_articulate_across_kick_snare_and_hat_only_under_articulated(
         "{art_jazz}"
     );
 
-    // Under jazz kit with a bank that lacks a ride sample (e.g. `tr808`) and `ride_fallback = "crash"`,
-    // even foundation stresses play `cr` and odd backbeat stresses play `sd`.
+    // The TR-808 had no ride, and kept time on its crash under `ride_fallback = "crash"`. It is
+    // retired: a header naming it plays the modular kit, which has a ride, so the same pattern
+    // plays `rd` where the crash stood in.
     let tr808_style =
         Style::parse("+++\nkit = \"ride\"\nbank = \"tr808\"\nride_fallback = \"crash\"\n+++")
             .unwrap();
     let art_tr808 = Strudel::new().render(&art_tyger, &tr808_style).unwrap();
     assert_eq!(
         argument(&art_tr808, "s(", "s"),
-        "<[[cr hh] [sd hh] [cr hh] sd]@4 [[cr hh] [sd hh] [cr hh] sd]@4>"
+        "<[[rd hh] [sd hh] [rd hh] sd]@4 [[rd hh] [sd hh] [rd hh] sd]@4>"
     );
+    assert!(art_tr808.contains(".bank(\"modular\")"), "{art_tr808}");
 
     // Under `IAMBIC` ("Shall I compare thee to a summer's day?"), CMUdict stresses "Shall"
     // (SH AE1 L), "I" (AY1), "thee" (DH IY1) and "to" (T UW1), so with `function_words = full`

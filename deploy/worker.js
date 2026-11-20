@@ -9,6 +9,8 @@
 // - Any other host (wrangler dev on localhost, a preview) is served as it comes.
 // - A shared poem's link (`/?s=…`) gets the poem's own title and description in the page's head, for
 //   its link preview (deploy/preview.js); the link is read as it passes and nothing is kept.
+// - The drums (`/drums/…`, public domain) may be fetched from any site, so a pattern pasted into
+//   strudel.cc can load them with `samples('https://prosody.rocks/drums/strudel.json')`.
 
 import { previewOf, sharedIn, withPreview } from './preview.js';
 import { HSTS, redirectFor } from './redirect.js';
@@ -31,9 +33,11 @@ export default {
         response = new Response(page, { status: response.status, headers });
       }
     }
-    if (url.protocol !== 'https:') return response;
-    const secured = new Response(response.body, response);
-    secured.headers.set('Strict-Transport-Security', HSTS);
-    return secured;
+    const drums = url.pathname.startsWith('/drums/');
+    if (url.protocol !== 'https:' && !drums) return response;
+    const answer = new Response(response.body, response);
+    if (url.protocol === 'https:') answer.headers.set('Strict-Transport-Security', HSTS);
+    if (drums) answer.headers.set('Access-Control-Allow-Origin', '*');
+    return answer;
   },
 };

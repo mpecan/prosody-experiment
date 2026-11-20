@@ -1,6 +1,6 @@
 // Serves the static site (`scripts/build-site.sh`, target/site by default) for the end-to-end
-// tests, with the types a browser insists on: a module worker and an import map's target must be
-// JavaScript, the compiler `application/wasm`.
+// tests, with the types a browser insists on: a module worker must be JavaScript, the compiler and
+// the synth `application/wasm`.
 //
 //   node e2e/serve.mjs [DIR] [PORT]
 import { createReadStream, statSync } from 'node:fs';

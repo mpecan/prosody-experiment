@@ -84,3 +84,96 @@ export interface Trace {
   cpm: number;
   marks: Mark[];
 }
+
+/** What makes a performed note's sound (`prosody_emit::perform::Sound`). */
+export type PerformedSound =
+  | { kind: 'drum'; bank: string; piece: string }
+  | { kind: 'font'; name: string; variant: number; file: string }
+  | { kind: 'wave'; wave: string };
+
+/** The stems mute and solo act on. */
+export type PerformedChannel = 'drums' | 'bass' | 'melody' | 'chords';
+
+/** One note of the Performance, resolved: when, what, how loud, from which words. */
+export interface PerformedNote {
+  from: number;
+  to: number;
+  channel: PerformedChannel;
+  /** The roll's lane: a layer's name (`site.layers`). */
+  lane: string;
+  slot: number;
+  onset: number;
+  length: number;
+  sound: PerformedSound;
+  pitch: number | null;
+  /** `gain` × `velocity`. */
+  gain: number;
+  attack: number | null;
+  release: number | null;
+  lpf: number;
+  /** Bit depth, or null for none. */
+  crush: number | null;
+  /** The formant vowel, or null for none. */
+  vowel: string | null;
+  /** The waveshaper's amount, or null for none. */
+  shape: number | null;
+  /** The reverb send, and the reverb's RT60 in seconds. */
+  room: number;
+  roomsize: number;
+  /** The echo, or null for none. */
+  delay: { level: number; time: number; feedback: number } | null;
+  postgain: number;
+  /** The layer's compressor, or null for none. */
+  compressor: { threshold: number; ratio: number } | null;
+}
+
+/** A syllable lighting up while it sounds. */
+export interface PerformedMark {
+  from: number;
+  to: number;
+  lane: string;
+  slot: number;
+  onset: number;
+  length: number;
+  fresh: boolean;
+  melody: boolean;
+  bass: boolean;
+}
+
+/** A line of the reading on the piece's clock (`prosody_emit::perform::Cue`): where it is read at
+ * each pace, `null` where that pace does not read it. */
+export interface PerformedCue {
+  line: number;
+  stanza: number;
+  from: number;
+  to: number;
+  /** The speed the natural pace asks a voice for, and the pause after the line there, in seconds. */
+  pace: number;
+  pause: number;
+  /** The bar it is read in at the fitted pace, when that bar begins, and the rate it is fitted at. */
+  fitted: { slot: number; at: number; rate: number } | null;
+  /** What it waits for at the natural pace, and the bar it may begin in (`null` for a line that only
+   * follows the one before). */
+  natural: { onset: 'at' | 'breath' | 'follows' | string; slot: number | null; at: number | null } | null;
+}
+
+/** A line a pace leaves unread, and why. */
+export interface PerformedUnread {
+  line: number;
+  from: number;
+  to: number;
+  why: string;
+}
+
+/** Every note of the piece, resolved (`docs/player.md` §3; `performance_json` in
+ * crates/prosody-web/src/lib.rs). Times are seconds; the piece loops round at `seconds`. */
+export interface Performance {
+  seconds: number;
+  cpm: number;
+  bars: { slot: number; at: number }[];
+  notes: PerformedNote[];
+  marks: PerformedMark[];
+  cues: PerformedCue[];
+  unread: PerformedUnread[];
+  natural_unread: PerformedUnread[];
+}
