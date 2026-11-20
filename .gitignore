@@ -13,3 +13,7 @@
 
 # Each developer's own mise settings: the Apple team that signs device builds, a chosen phone.
 mise.local.toml
+
+# Signing keys never go in the repository.
+*.jks
+*.keystore

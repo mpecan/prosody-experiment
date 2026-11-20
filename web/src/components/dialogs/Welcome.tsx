@@ -34,6 +34,9 @@ export function Welcome() {
         <p class="small">How it works, and the source: <a href="https://github.com/mpecan/prosody-experiment"
           rel="noopener" target="_blank">github.com/mpecan/prosody-experiment</a>. Questions, poems,
           ideas: <a href="mailto:me@prosody.rocks">me@prosody.rocks</a>.</p>
+        {/* A page of the site, so the apps carry it and open it offline (the stores ask for it in the app). */}
+        <p class="small" id="privacy">Nothing you write leaves your device, and nothing about you is collected:{' '}
+          <a href="privacy.html">privacy</a>.</p>
         {/* What the page is made of travels with it, and its notices with that (Licences.tsx). */}
         <p class="small" id="credits">The instruments are recordings from FluidR3 GM and GeneralUser GS;
           the drums are in the public domain; the pronunciations come from the CMU Pronouncing

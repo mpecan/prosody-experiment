@@ -71,6 +71,8 @@ describe('a first visit', () => {
     expect(within(welcome).getByText('github.com/mpecan/prosody-experiment').getAttribute('href'))
       .toBe('https://github.com/mpecan/prosody-experiment');
     expect(within(welcome).getByText('me@prosody.rocks').getAttribute('href')).toBe('mailto:me@prosody.rocks');
+    // The privacy policy is a page beside this one, so the apps open their own copy, offline.
+    expect(within(welcome).getByText('privacy').getAttribute('href')).toBe('privacy.html');
     fireEvent.click(within(welcome).getByText('Start listening'));
     await waitFor(() => expect(welcome.open).toBe(false));
     expect(localStorage.getItem('prosody.welcomed')).toBe('1');

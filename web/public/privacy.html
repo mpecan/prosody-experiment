@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Privacy · prosody</title>
+<meta name="description" content="What Prosody does with your poems and your data: it keeps them on your device.">
+<style>
+  :root { color-scheme: light dark; --bg: #f7f2e8; --ink: #24202b; --dim: #6c6676; --accent: #6b4bb8; --line: #dccfb6; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14131a; --ink: #e6e3ef; --dim: #918da8; --accent: #c9a6ff; --line: #2e2c3a; } }
+  html { background: var(--bg); color: var(--ink); }
+  body { margin: 0 auto; max-width: 42rem; padding: max(1.5rem, env(safe-area-inset-top)) 1.25rem 3rem;
+    font: 1.05rem/1.6 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+  h1 { font-weight: 500; font-size: 2rem; margin: 1rem 0 .25rem; }
+  h2 { font-weight: 500; font-size: 1.25rem; margin: 2rem 0 .5rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+  a { color: var(--accent); }
+  .dim { color: var(--dim); }
+  .back { font: 500 .95rem/1 system-ui, sans-serif; text-decoration: none; }
+  ul { padding-left: 1.2rem; }
+</style>
+</head>
+<body>
+<p><a class="back" href="./">← back to prosody</a></p>
+<h1>Privacy</h1>
+<p class="dim">Prosody, on the web at prosody.rocks and as an app for Android and iOS. In effect from 20 November 2026.</p>
+
+<p><strong>In short: Prosody collects nothing about you.</strong> There are no accounts, no ads, no analytics
+and no tracking. The poems you write stay on your device. The developer receives none of your data.</p>
+
+<h2>What stays on your device</h2>
+<p>The poem you are writing, the settings you choose (the sound, the mappings, the reading voice, the theme)
+and whether you have seen the welcome are kept in the app's own storage on your device, so they are there
+the next time you open it. They are never sent anywhere. Uninstalling the app, or clearing the site's data
+in your browser, deletes them.</p>
+<p>The music is made on your device, from the poem, by the app itself. The instruments, drums, pronunciation
+dictionary and recorded readings of the example poems are part of the app.</p>
+
+<h2>The reading voice</h2>
+<ul>
+  <li><strong>Recorded readings</strong> are files inside the app; nothing is sent to read them.</li>
+  <li><strong>The system voice</strong> (in the Android and iOS apps) reads with the text-to-speech engine
+    of your phone. The app hands it the line to be read and nothing else. On iOS the voices run on the
+    device. On Android, what happens to the text is up to the speech engine you have chosen in your
+    phone's settings and its own privacy policy; Google's speech engine, for example, reads with
+    on-device voices unless you have chosen a network voice.</li>
+  <li><strong>Neural voices</strong> (Kokoro, Piper, Kitten; on the website and in the Android app, not in
+    the iOS app) run on your device too, but their code and voice models must be downloaded first, which
+    the app asks you about, with the size, before it starts. They are downloaded from
+    <a href="https://www.jsdelivr.com/terms/privacy-policy-jsdelivr-net">jsDelivr</a> (cdn.jsdelivr.net)
+    and <a href="https://huggingface.co/privacy">Hugging Face</a> (huggingface.co). As with any
+    download, those services see your device's IP address and what was downloaded; no poem and nothing
+    about you is sent to them. If you never choose a neural voice, nothing is downloaded.</li>
+</ul>
+
+<h2>Sharing</h2>
+<p>If you share a poem, the link carries the poem and its settings inside the address itself. Nothing is
+uploaded or stored by Prosody: whoever you send it to has the poem in the link. When a shared link is
+opened at prosody.rocks, the website reads the poem from the link to show its first lines in the link's
+preview, and keeps nothing. Where you send the link is up to you.</p>
+
+<h2>The website</h2>
+<p>prosody.rocks is served by Cloudflare. Like any web host, Cloudflare processes the requests your browser
+makes, including its IP address, to deliver the pages, under
+<a href="https://www.cloudflare.com/privacypolicy/">its privacy policy</a>. Prosody adds no cookies,
+analytics or tracking of its own. The apps do not contact the website; the links they make for sharing
+point to it.</p>
+
+<h2>Children</h2>
+<p>Prosody collects no personal information from anyone, children included.</p>
+
+<h2>Changes and contact</h2>
+<p>If this policy changes, the new version will be published here, with its date. Questions about privacy,
+or anything else: <a href="mailto:me@prosody.rocks">me@prosody.rocks</a>.</p>
+</body>
+</html>

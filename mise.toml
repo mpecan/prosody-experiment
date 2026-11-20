@@ -318,3 +318,87 @@ xcrun simctl launch "$udid" rocks.prosody.debug >/dev/null
 echo "ios: launched rocks.prosody.debug on $udid; its log:"
 echo "ios:   xcrun simctl spawn $udid log stream --level info --predicate 'process == \\"Prosody\\"'"
 """
+
+# ── Releases and the store listings ───────────────────────────────────────────────────────────────
+#
+# What goes to Google Play and App Store Connect: a signed release of each app, and the listing's
+# images, made from the built site (store-assets/README.md is the whole checklist). Each upload
+# needs a build number higher than the last one the store has seen, in PROSODY_BUILD; the version
+# both stores show is tauri.conf.json's.
+
+[tasks."android:bundle"]
+description = "Release App Bundle for Google Play (aarch64), signed with the upload key, numbered PROSODY_BUILD"
+depends = ["android:env"]
+run = """
+set -eu
+if [ -z "${PROSODY_BUILD:-}" ]; then
+  echo "android: a release is numbered for Play, higher than the last upload: PROSODY_BUILD=<n> mise run android:bundle" >&2
+  exit 1
+fi
+if [ ! -f src-tauri/gen/android/keystore.properties ]; then
+  echo "android: no src-tauri/gen/android/keystore.properties — the upload key signs a release (store-assets/README.md)" >&2
+  exit 1
+fi
+cargo tauri android build --aab --target aarch64
+aab=src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
+# Play refuses native code that 16 KB-page phones cannot load (from 1 February 2027 for updates):
+# every LOAD segment of the app's library must be aligned to 2**14 (NDK 28 links them so).
+lib=$(mktemp -d)
+trap 'rm -rf "$lib"' EXIT
+unzip -q -o "$aab" 'base/lib/arm64-v8a/*.so' -d "$lib"
+for so in "$lib"/base/lib/arm64-v8a/*.so; do
+  if "$NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf -lW "$so" | awk '$1 == "LOAD" && $NF != "0x4000" { bad = 1 } END { exit !bad }'; then
+    echo "android: $(basename "$so") has a LOAD segment not aligned to 16 KB" >&2
+    exit 1
+  fi
+done
+jarsigner -verify "$aab" >/dev/null || { echo "android: $aab is not signed" >&2; exit 1; }
+echo "android: $aab — version $(node -p "require('./src-tauri/tauri.conf.json').version") ($PROSODY_BUILD), signed, 16 KB-aligned"
+echo "android: upload it in Play Console (Test and release), or with fastlane supply"
+"""
+
+[tasks."ios:archive"]
+description = "Release build for App Store Connect, signed for APPLE_DEVELOPMENT_TEAM, numbered PROSODY_BUILD, into target/ios/release"
+depends = ["ios:env"]
+run = """
+set -eu
+if [ -z "${APPLE_DEVELOPMENT_TEAM:-}" ] || [ -z "${PROSODY_BUILD:-}" ]; then
+  echo "ios: a release needs the team that signs it and a build number higher than the last upload:" >&2
+  echo "ios:   APPLE_DEVELOPMENT_TEAM=<team ID> PROSODY_BUILD=<n> mise run ios:archive" >&2
+  exit 1
+fi
+version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+mise run site:ios
+rm -rf target/ios/release
+xcodebuild -quiet -project src-tauri/gen/apple/prosody-app.xcodeproj -scheme prosody-app_iOS \\
+  -configuration release -sdk iphoneos -destination 'generic/platform=iOS' \\
+  -derivedDataPath target/ios/release/derived -archivePath target/ios/release/Prosody.xcarchive \\
+  -allowProvisioningUpdates DEVELOPMENT_TEAM="$APPLE_DEVELOPMENT_TEAM" \\
+  MARKETING_VERSION="$version" CURRENT_PROJECT_VERSION="$PROSODY_BUILD" archive
+# Re-signed for the App Store with the team's distribution certificate; Xcode makes the profile,
+# signed in either as the Apple account in Xcode's settings or with an App Store Connect API key
+# (PROSODY_ASC_KEY: the .p8 file, PROSODY_ASC_KEY_ID, PROSODY_ASC_ISSUER), which the upload uses too.
+auth=""
+if [ -n "${PROSODY_ASC_KEY:-}" ]; then
+  auth="-authenticationKeyPath $PROSODY_ASC_KEY -authenticationKeyID ${PROSODY_ASC_KEY_ID:?} -authenticationKeyIssuerID ${PROSODY_ASC_ISSUER:?}"
+fi
+# shellcheck disable=SC2086 # $auth is three flags or none
+xcodebuild -quiet -exportArchive -archivePath target/ios/release/Prosody.xcarchive \\
+  -exportPath target/ios/release -exportOptionsPlist src-tauri/gen/apple/ExportOptions-AppStore.plist \\
+  -allowProvisioningUpdates $auth || {
+  echo "ios: the export failed — it needs an Apple account in Xcode > Settings > Accounts, or PROSODY_ASC_KEY" >&2
+  echo "ios: and the app's record in App Store Connect (store-assets/README.md)" >&2
+  exit 1
+}
+echo "ios: target/ios/release/Prosody.ipa — version $version ($PROSODY_BUILD)"
+echo "ios: upload it with Transporter, or: xcrun altool --upload-app -f target/ios/release/Prosody.ipa -t ios --apiKey <key ID> --apiIssuer <issuer ID>"
+"""
+
+[tasks."store:screenshots"]
+description = "The store screenshots and Play's feature graphic, from both sites, into store-assets"
+run = """
+set -eu
+mise run site
+mise run site:ios
+node scripts/store-screenshots.mjs
+"""

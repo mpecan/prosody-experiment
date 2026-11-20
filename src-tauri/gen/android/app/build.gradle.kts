@@ -13,6 +13,16 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// The upload key that signs a release for Google Play, from a file kept out of the repository
+// (src-tauri/gen/android/keystore.properties: storeFile, password, keyAlias; store-assets/README.md
+// says how to make one). Without it a release builds unsigned and Play refuses it.
+val keystoreProperties = Properties().apply {
+    val propFile = rootProject.file("keystore.properties")
+    if (propFile.exists()) {
+        propFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     compileSdk = 36
     namespace = "rocks.prosody"
@@ -22,8 +32,21 @@ android {
         // 26 (Android 8.0): AAudio, which the native player plays through (docs/player.md §13).
         minSdk = 26
         targetSdk = 36
-        versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
+        // Each upload to Play needs a higher code than the last: `mise run android:bundle` passes its
+        // PROSODY_BUILD. Otherwise it is the one Tauri derives from tauri.conf.json's version.
+        versionCode = System.getenv("PROSODY_BUILD")?.toInt()
+            ?: tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (keystoreProperties.containsKey("storeFile")) {
+            create("upload") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("password")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("password")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -39,6 +62,7 @@ android {
             }
         }
         getByName("release") {
+            signingConfig = signingConfigs.findByName("upload")
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

@@ -12,6 +12,11 @@ settingGroups:
     base:
       PRODUCT_NAME: Prosody
       PRODUCT_BUNDLE_IDENTIFIER: rocks.prosody
+      # iPhone only: the page is laid out for a phone held upright. An iPad runs it as an iPhone app,
+      # and the store asks for no iPad screenshots (store-assets/README.md).
+      TARGETED_DEVICE_FAMILY: "1"
+      MARKETING_VERSION: 0.1.0
+      CURRENT_PROJECT_VERSION: "1"
     # The debug build installs beside the release one, as on Android (rocks.prosody.debug). The
     # development team is not written here: a device build takes it from APPLE_DEVELOPMENT_TEAM
     # (`mise run ios:build:device`; the Tauri CLI reads the same variable).
@@ -49,11 +54,13 @@ targets:
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-        CFBundleShortVersionString: 0.1.0
-        CFBundleVersion: "0.1.0"
+        # The only encryption is the system's (WebKit's HTTPS; no TLS library is linked), which is
+        # exempt: App Store Connect then asks no export questions at each upload.
+        ITSAppUsesNonExemptEncryption: false
+        # The version is tauri.conf.json's and the build number is each upload's own, both passed by
+        # `mise run ios:archive`; the settings' defaults below serve the debug builds.
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # Plays on in the background and with the screen locked, as long as it plays (the native
         # player, with the audio session's `playback` category: docs/player.md §14).
         UIBackgroundModes: [audio]

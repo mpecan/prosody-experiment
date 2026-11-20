@@ -47,6 +47,22 @@ test('carries its licences: from "about" to every package the build ships, each 
   }
 });
 
+test('carries its privacy policy: from "about" to the page and back, with nothing fetched elsewhere', async ({ page, baseURL }) => {
+  const elsewhere: string[] = [];
+  // By origin: the page's own blob: URLs (its workers) belong to it.
+  page.on('request', (request) => {
+    if (new URL(request.url()).origin !== new URL(baseURL!).origin) elsewhere.push(request.url());
+  });
+  await open(page);
+  await page.click('#about');
+  await page.locator('#privacy').getByRole('link', { name: 'privacy' }).click();
+  await expect(page.getByRole('heading', { name: 'Privacy', level: 1 })).toBeVisible();
+  await expect(page.locator('body')).toContainText('Prosody collects nothing about you');
+  await page.getByRole('link', { name: '← back to prosody' }).click();
+  await expect(page.locator('#status')).toContainText('bars');
+  expect(elsewhere).toEqual([]);
+});
+
 test('reads an example poem in its own language, from its recordings', async ({ page }) => {
   await open(page);
   await page.selectOption('#preset', 'preseren-zdravljica');

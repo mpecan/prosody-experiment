@@ -14,6 +14,8 @@
 #                        scripts/readings/render.mjs): a manifest and an MP3 a line and voice
 #   notices.json         every package the site and the apps ship, with its licence texts
 #                        (scripts/notices.mjs), for the page's Licences dialog
+#   privacy.html,        the privacy policy and the support page (web/public): the stores link them
+#   support.html         at prosody.rocks, and the apps open their own copies (store-assets/README.md)
 #
 #   ./scripts/build-site.sh              into target/site
 #   ./scripts/build-site.sh DIR          into DIR

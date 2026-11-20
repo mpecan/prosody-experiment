@@ -1,0 +1,13 @@
+Prosody turns a poem into music. No account or sign-in is needed, and the app works fully offline.
+
+To try it:
+1. Close the welcome card ("Start listening"). An example poem is already loaded.
+2. Press Play (the purple button). The music starts within a few seconds and the words light up as they are heard.
+3. Use the arrows beside the poem's name to switch between the 18 example poems, or edit the text to write your own: the music follows the words.
+4. The tabs at the bottom open the mixer, the sound styles, the reading voice, the A/B mappings and "Under the hood", which shows what each word became.
+
+Background audio (UIBackgroundModes: audio): the music is synthesized on the device by the app's own audio engine, and keeps playing with the screen locked or the app in the background, as a music player does. It starts only when the user presses Play and stops with Stop, a call or an alarm.
+
+Reading voice: in Reading, "recorded readings" plays recordings bundled with the app for the example poems; "system voice" reads with the iPhone's own text-to-speech voices (AVSpeechSynthesizer), on the device.
+
+Privacy: nothing is collected or sent; poems stay on the device. The privacy policy is in the app (about, then "privacy") and at https://prosody.rocks/privacy.

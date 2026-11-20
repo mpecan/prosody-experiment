@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The app's privacy manifest (App Store Connect refuses an app whose code calls a required-reason API
+  it does not declare). Prosody tracks no one and collects nothing (web/public/privacy.html). The two
+  API categories are the ones the app's own binary calls, found with the Rust toolchain's llvm-nm on
+  the release libapp.a (Apple's nm cannot read Rust's objects):
+    stat, fstat, fstatat, lstat (Rust's std and the log plugin, on files in the app's own container)
+      → FileTimestamp, C617.1
+    mach_absolute_time (Rust's Instant: the player's clock and timers, never sent anywhere)
+      → SystemBootTime, 35F9.1
+  No UserDefaults, disk-space or keyboard API is called from the app's code (WebKit's own use is
+  Apple's to declare). Look again when a dependency is added.
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

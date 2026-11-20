@@ -83,6 +83,12 @@ start them.
 | `mise run ios:install:device` | install the device build on the iPhone (`$PROSODY_IOS_DEVICE`, a name or UDID, or the only one paired) |
 | `mise run ios:run:device` | install, then launch it on the iPhone |
 | `mise run ios:deploy` | build the device app, install and launch it on the iPhone |
+| `mise run android:bundle` | the release App Bundle for Google Play, signed with the upload key, numbered `$PROSODY_BUILD` |
+| `mise run ios:archive` | the release `.ipa` for App Store Connect, signed for `$APPLE_DEVELOPMENT_TEAM`, numbered `$PROSODY_BUILD` |
+| `mise run store:screenshots` | both stores' screenshots and Play's feature graphic, from the built sites, into `store-assets` |
+
+The store listings — their text, images, privacy policy and every form's answers — are in
+[`store-assets/README.md`](store-assets/README.md).
 
 The Android SDK and NDK are not something mise installs: install them with Android Studio. mise.toml
 looks for them where Android Studio puts them on macOS (`~/Library/Android/sdk`, NDK
