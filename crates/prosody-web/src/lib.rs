@@ -25,10 +25,15 @@ use prosody_core::lower::{self, Analyses};
 use prosody_core::mapping::{Mapping, Mappings};
 use prosody_core::voice::Score;
 use prosody_core::{Fallback, Poem, meter, repetition, rhyme, role, sound, surprisal};
+use prosody_emit::perform::{Echo, Note, Sound};
+use prosody_emit::strudel::DRUM_SAMPLES;
 use prosody_emit::style::{
-    BANKS, KITS, PRESETS as PALETTES, RIDE_FALLBACKS, SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
+    BANKS, KITS, PRESETS as PALETTES, RETIRED_BANKS, RIDE_FALLBACKS, SOUNDFONT_VARIANTS,
+    SOUNDFONTS, SYNTHS, VOICINGS, preset_keys,
 };
-use prosody_emit::{Backend as _, Reading, Scale, Strudel, Style, reading, trace};
+use prosody_emit::{
+    Backend as _, Perform, Performance, Reading, Scale, Strudel, Style, fmt_param, reading, trace,
+};
 use prosody_lexicon::EnglishLexicon;
 use prosody_lts::LetterToSound;
 use prosody_score::{DEFAULT_PROBES, Profile, Report, sensitivity};
@@ -100,6 +105,7 @@ impl Site {
             ("POST", "/score") => compile(request, &Output::Score),
             ("POST", "/reading") => compile(request, &Output::Reading),
             ("POST", "/trace") => compile(request, &Output::Trace),
+            ("POST", "/performance") => compile(request, &Output::Performance),
             _ => Response::problem(404, "no such thing here\n".to_owned()),
         }
     }
@@ -159,7 +165,10 @@ fn site_json(transport: Transport) -> Result<String> {
         ("transport", json_string(transport.name())),
         ("scales", list(&scales)),
         ("scaleSteps", scale_steps()),
+        ("soundfonts", soundfont_files()),
         ("banks", list(BANKS)),
+        ("retiredBanks", retired_banks()),
+        ("drumSamples", list(DRUM_SAMPLES)),
         ("instruments", list(&instruments)),
         ("kits", list(KITS)),
         ("voicings", list(VOICINGS)),
@@ -195,7 +204,7 @@ const STYLES: &[StyleEntry] = &[
     },
     StyleEntry {
         name: "warm",
-        what: "vibraphone over a fretless bass, a long room and echo",
+        what: "vibraphone over an upright bass, a long room and echo",
         suggests: &[],
     },
     StyleEntry {
@@ -317,6 +326,60 @@ fn scale_steps() -> String {
             let steps: Vec<String> = scale.steps().iter().map(u8::to_string).collect();
             format!("{}:[{}]", json_string(scale.name()), steps.join(","))
         })
+        .collect();
+    format!("{{{}}}", entries.join(","))
+}
+
+/// The webaudiofont file each soundfont sound loads, by the sound a pattern asks Strudel for
+/// (`gm_cello:1`): the file whose zones the page plays (converted beside it by
+/// `scripts/render-soundfonts.mjs`), and which the page's end-to-end test checks is there.
+fn soundfont_files() -> String {
+    let entries: Vec<String> = SOUNDFONT_VARIANTS
+        .iter()
+        .map(|variant| {
+            format!(
+                "{}:{}",
+                json_string(variant.sound),
+                json_string(variant.file)
+            )
+        })
+        .collect();
+    format!("{{{}}}", entries.join(","))
+}
+
+/// Where the drums are served from, for a pattern played somewhere other than the page.
+const DRUMS_URL: &str = "https://prosody.rocks/drums/";
+
+/// The drums as a Strudel sample map, `drums/strudel.json`: what a pattern pasted into strudel.cc
+/// loads with `samples('https://prosody.rocks/drums/strudel.json')`, since strudel.cc has none of
+/// these kits. The page itself registers the same names from `site.json` and its own files.
+#[must_use]
+pub fn drum_map() -> String {
+    let entries: Vec<String> = BANKS
+        .iter()
+        .flat_map(|bank| {
+            DRUM_SAMPLES.iter().map(move |drum| {
+                format!(
+                    "{}:[{}]",
+                    json_string(&format!("{bank}_{drum}")),
+                    json_string(&format!("{bank}/{drum}.flac"))
+                )
+            })
+        })
+        .collect();
+    format!(
+        "{{\"_base\":{},{}}}",
+        json_string(DRUMS_URL),
+        entries.join(",")
+    )
+}
+
+/// Each retired bank and the kit a header naming it now plays, so the page can show a shared link's
+/// old bank as the kit it will hear.
+fn retired_banks() -> String {
+    let entries: Vec<String> = RETIRED_BANKS
+        .iter()
+        .map(|(retired, now)| format!("{}:{}", json_string(retired), json_string(now)))
         .collect();
     format!("{{{}}}", entries.join(","))
 }
@@ -547,6 +610,9 @@ enum Output {
     /// Which syllable sounds when, as JSON (`prosody_emit::trace`): the page lights the poem from
     /// it while the piece plays.
     Trace,
+    /// Every note of the piece, resolved, as JSON (`prosody_emit::perform`): what a player of our
+    /// own plays (`docs/player.md`), with the reading's cues and the lights on the same clock.
+    Performance,
 }
 
 /// Compiles the request body under the palette in its query string.
@@ -767,7 +833,232 @@ fn render(
             .map(|reading| reading_json(&reading, source, typed))
             .context("planning the reading"),
         Output::Trace => Ok(trace_json(&trace::plan(&score, &style), source, typed)),
+        Output::Performance => {
+            let performance = Perform::new()
+                .render(&score, &style)
+                .map_err(|error| anyhow::anyhow!("{error}"))
+                .context("performing the piece")?;
+            let reading =
+                reading::plan(&poem, &score, &style, mappings).context("planning the reading")?;
+            Ok(performance_json(&performance.read(&reading), source, typed))
+        }
     }
+}
+
+/// Seconds for the Performance's JSON, at nine decimals: finer than a sample at any rate a player
+/// runs at, and fixed, so the text is byte-stable (`CLAUDE.md` §4).
+fn seconds(value: f64) -> String {
+    let rounded = if value == 0.0 { 0.0 } else { value };
+    format!("{rounded:.9}")
+}
+
+/// A note's level at six decimals: `gain` times `velocity`, each printed at three, multiply to
+/// exactly six, so this is the product the pattern means, recovered from the float.
+fn level(value: f64) -> String {
+    let rounded = if value == 0.0 { 0.0 } else { value };
+    format!("{rounded:.6}")
+}
+
+/// A value the pattern may leave out, or `null`.
+fn optional(value: Option<String>) -> String {
+    value.unwrap_or_else(|| "null".to_owned())
+}
+
+/// One note as JSON (see [`performance_json`]).
+fn note_json(note: &Note, place: &dyn Fn(prosody_core::span::Span) -> (usize, usize)) -> String {
+    let (from, to) = place(note.span());
+    let sound = match note.sound() {
+        Sound::Drum { bank, piece } => format!(
+            "{{\"kind\":\"drum\",\"bank\":{},\"piece\":{}}}",
+            json_string(bank),
+            json_string(piece)
+        ),
+        Sound::Font {
+            name,
+            variant,
+            file,
+        } => format!(
+            "{{\"kind\":\"font\",\"name\":{},\"variant\":{variant},\"file\":{}}}",
+            json_string(name),
+            json_string(file)
+        ),
+        Sound::Wave(wave) => format!(
+            "{{\"kind\":\"wave\",\"wave\":{}}}",
+            json_string(wave.name())
+        ),
+    };
+    let voice = note.voice();
+    let sends = note.sends();
+    let delay = sends.delay().map(|echo: Echo| {
+        format!(
+            "{{\"level\":{},\"time\":{},\"feedback\":{}}}",
+            fmt_param(echo.level().get()),
+            fmt_param(echo.time().get()),
+            fmt_param(echo.feedback().get())
+        )
+    });
+    let compressor = note.compressor().map(|compressor| {
+        format!(
+            "{{\"threshold\":{},\"ratio\":{}}}",
+            fmt_param(compressor.threshold().get()),
+            fmt_param(compressor.ratio())
+        )
+    });
+    format!(
+        "{{\"from\":{from},\"to\":{to},\"channel\":{},\"lane\":{},\"slot\":{},\"cycle\":{},\"onset\":{},\"length\":{},\"sound\":{sound},\"pitch\":{},\"gain\":{},\"attack\":{},\"release\":{},\"lpf\":{},\"crush\":{},\"vowel\":{},\"shape\":{},\"room\":{},\"roomsize\":{},\"delay\":{},\"postgain\":{},\"compressor\":{}}}",
+        json_string(note.channel().name()),
+        json_string(note.lane().name()),
+        note.slot(),
+        seconds(note.grid().as_f64()),
+        seconds(note.onset().get()),
+        seconds(note.length().get()),
+        optional(note.pitch().map(|pitch| fmt_param(pitch.get()))),
+        level(note.gain().get()),
+        optional(voice.attack().map(|attack| fmt_param(attack.get()))),
+        optional(voice.release().map(|release| fmt_param(release.get()))),
+        fmt_param(voice.lpf().get()),
+        optional(voice.crush().map(|crush| crush.to_string())),
+        optional(voice.vowel().map(|vowel| json_string(vowel.name()))),
+        optional(voice.shape().map(|shape| fmt_param(shape.get()))),
+        fmt_param(sends.room().get()),
+        fmt_param(sends.room_size()),
+        optional(delay),
+        fmt_param(note.postgain().get()),
+        optional(compressor),
+    )
+}
+
+/// A Performance as JSON, for the page's player (`docs/player.md` §3, §5).
+///
+/// - `seconds`: the piece's length, where it loops round, tails excluded; `cpm`, the pattern's
+///   cycles a minute; `swing`, `{amount, slices}` or `null`.
+/// - `bars`: each slot's `slot` and the second it begins `at`.
+/// - `notes`: every note in playing order — its word (`from`, `to`), its `channel` (the stem mute
+///   and solo act on) and `lane` (the roll's), its `slot` and `cycle` (where it falls in the
+///   pattern before swing: structure, which no palette moves), its `onset` and `length` in seconds
+///   after swing and nudge, its `sound` (`{kind: "drum", bank, piece}`, `{kind: "font", name,
+///   variant, file}` or `{kind: "wave", wave}`), `pitch` (MIDI, fractional for a slant rhyme, or
+///   `null`), `gain` (`.gain` times `.velocity`), and every parameter the pattern sets on it, `null`
+///   where the pattern leaves it to the player's default.
+/// - `marks`: every syllable's light — its word, `lane`, `slot`, `onset`, `length`, and whether it
+///   is `fresh`, and also carries a `melody` or `bass` note.
+/// - `cues`: every line the reading speaks — its `line`, `stanza`, words (`from`, `to`), natural
+///   `pace` and `pause`, and where it is spoken at each pace: `fitted` (`slot`, `at`, `rate`) and
+///   `natural` (`onset`, `slot`, `at`), either `null` where that pace does not read it.
+/// - `unread` and `natural_unread`: each line a pace leaves unread although the reading is on —
+///   its `line`, words (`from`, `to`) and `why` — as `/reading` lists them, for the page to say.
+///
+/// Parameters are at the pattern's three decimals, times at nine, a note's level at six.
+fn performance_json(performance: &Performance, source: &str, typed: &str) -> String {
+    let at = text_box(source, typed);
+    let place =
+        |span: prosody_core::span::Span| at(span.start()).zip(at(span.end())).unwrap_or((0, 0));
+    let swing = performance.swing().map_or_else(
+        || "null".to_owned(),
+        |swing| {
+            format!(
+                "{{\"amount\":{},\"slices\":{}}}",
+                fmt_param(swing.amount()),
+                swing.slices()
+            )
+        },
+    );
+    let bars: Vec<String> = performance
+        .bars()
+        .iter()
+        .map(|bar| {
+            format!(
+                "{{\"slot\":{},\"at\":{}}}",
+                bar.slot(),
+                seconds(bar.at().get())
+            )
+        })
+        .collect();
+    let notes: Vec<String> = performance
+        .notes()
+        .iter()
+        .map(|note| note_json(note, &place))
+        .collect();
+    let marks: Vec<String> = performance
+        .marks()
+        .iter()
+        .map(|mark| {
+            let (from, to) = place(mark.span());
+            format!(
+                "{{\"from\":{from},\"to\":{to},\"lane\":{},\"slot\":{},\"onset\":{},\"length\":{},\"fresh\":{},\"melody\":{},\"bass\":{}}}",
+                json_string(mark.lane().name()),
+                mark.slot(),
+                seconds(mark.onset().get()),
+                seconds(mark.length().get()),
+                mark.fresh(),
+                mark.melody(),
+                mark.bass(),
+            )
+        })
+        .collect();
+    let cues: Vec<String> = performance
+        .cues()
+        .iter()
+        .map(|cue| {
+            let (from, to) = place(cue.span());
+            let fitted = cue.fitted().map(|fitted| {
+                format!(
+                    "{{\"slot\":{},\"at\":{},\"rate\":{}}}",
+                    fitted.slot(),
+                    seconds(fitted.at().get()),
+                    fmt_param(fitted.rate())
+                )
+            });
+            let natural = cue.natural().map(|natural| {
+                format!(
+                    "{{\"onset\":{},\"slot\":{},\"at\":{}}}",
+                    json_string(natural.onset().name()),
+                    optional(natural.onset().slot().map(|slot| slot.to_string())),
+                    optional(natural.at().map(|at| seconds(at.get()))),
+                )
+            });
+            format!(
+                "{{\"line\":{},\"stanza\":{},\"from\":{from},\"to\":{to},\"pace\":{},\"pause\":{},\"fitted\":{},\"natural\":{}}}",
+                cue.line(),
+                cue.stanza(),
+                fmt_param(cue.pace()),
+                fmt_param(cue.pause().get()),
+                optional(fitted),
+                optional(natural),
+            )
+        })
+        .collect();
+    format!(
+        "{{\"seconds\":{},\"cpm\":{},\"swing\":{swing},\"bars\":[{}],\"notes\":[{}],\"marks\":[{}],\"cues\":[{}],\"unread\":[{}],\"natural_unread\":[{}]}}\n",
+        seconds(performance.seconds().get()),
+        fmt_param(performance.cycles_per_minute()),
+        bars.join(","),
+        notes.join(","),
+        marks.join(","),
+        cues.join(","),
+        unread_json(performance.unread(), &place),
+        unread_json(performance.natural_unread(), &place),
+    )
+}
+
+/// The lines a pace of the Performance's reading leaves out, and why, so the page can say so
+/// (`CLAUDE.md` §6: a loss is visible).
+fn unread_json(
+    unread: &[reading::Unread],
+    place: &dyn Fn(prosody_core::span::Span) -> (usize, usize),
+) -> String {
+    unread
+        .iter()
+        .map(|line| {
+            let (from, to) = place(line.span());
+            format!(
+                "{{\"line\":{},\"from\":{from},\"to\":{to},\"why\":{}}}",
+                line.line(),
+                json_string(line.why().says()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// A reading as JSON, for the page to speak at either pace (`SPEC.md` §4.7).
@@ -999,6 +1290,38 @@ mod tests {
     use super::{Mapping, Mappings, Output, Profile, SEED, body_of, json_string, site_json};
 
     #[test]
+    fn the_drums_are_a_sample_map_strudel_cc_can_load() {
+        // Strudel joins `_base` and each file by plain concatenation, and `.bank("uzu")` with
+        // `s("bd")` asks for `uzu_bd`.
+        let map = super::drum_map();
+        assert!(
+            map.starts_with(
+                "{\"_base\":\"https://prosody.rocks/drums/\",\"uzu_bd\":[\"uzu/bd.flac\"],"
+            ),
+            "{map}"
+        );
+        assert!(
+            map.contains("\"virtuosity_rd\":[\"virtuosity/rd.flac\"]"),
+            "{map}"
+        );
+        // Five kits of nine drums.
+        assert_eq!(map.matches(".flac").count(), 45, "{map}");
+    }
+
+    #[test]
+    fn the_site_data_names_the_drums_and_the_retired_banks() {
+        let data = site_json(super::Transport::Wasm).unwrap();
+        assert!(
+            data.contains(
+                "\"drumSamples\":[\"bd\",\"sd\",\"hh\",\"oh\",\"rd\",\"cr\",\"lt\",\"mt\",\"ht\"]"
+            ),
+            "{data}"
+        );
+        assert!(data.contains("\"tr909\":\"uzu\""), "retired banks");
+        assert!(data.contains("\"r8\":\"virtuosity\""), "retired banks");
+    }
+
+    #[test]
     fn the_site_data_lists_every_palette_value_the_style_accepts() {
         // From `Style`'s own tables rather than typed into the page, so a scale added in one place
         // cannot be missing from the other.
@@ -1138,9 +1461,11 @@ mod tests {
 
     #[test]
     fn no_poem_text_reaches_the_code_the_page_runs() {
-        // A shared link hands a stranger's poem to the page, which evaluates what it compiles to —
-        // the pattern, the reading's two cue patterns and the trace — as JavaScript. So no text of
-        // the poem may reach that code except inside a `//` comment it cannot leave: no line of the
+        // A shared link hands a stranger's poem to the page, which shows what it compiles to — the
+        // pattern, the reading's two cue patterns and the trace — as code someone may paste into
+        // strudel.cc, which runs it as JavaScript (the page itself evaluated it too, before its own
+        // player replaced Strudel's: docs/player.md §12). So no text of the poem may reach that
+        // code except inside a `//` comment it cannot leave: no line of the
         // code outside a comment carries the poem's words, and no line terminator JavaScript knows
         // (U+2028, U+2029, a carriage return) appears at all, since one inside a comment would end
         // it. Every word below carries the marker `qzx`.
@@ -1503,7 +1828,7 @@ mod tests {
             assert_eq!(response.status, 200, "{}", response.body);
             assert!(response.body.contains("// the chords"), "{}", response.body);
             assert!(
-                response.body.contains(".sound(\"gm_vibraphone\")"),
+                response.body.contains(".sound(\"gm_vibraphone:3\")"),
                 "{variant}"
             );
             assert!(response.body.contains("//   chords by line: "), "{variant}");
@@ -1610,6 +1935,46 @@ mod tests {
     }
 
     #[test]
+    fn the_performance_is_json_on_the_text_box_the_writer_typed() {
+        // A poem pasted with a header of its own: the controls' header replaces it, and every
+        // note's place is in the text box as typed, in UTF-16 units — here the first word, "the".
+        let typed = "+++\n[style]\nswing = 0.5\n+++\nthe fire will burn the night\n";
+        let response = super::compile(&request(&[], typed), &Output::Performance);
+        assert_eq!(response.status, 200, "{}", response.body);
+        let body = response.body.trim_end();
+        assert!(body.starts_with("{\"seconds\":"), "{body}");
+        assert!(body.ends_with('}'), "{body}");
+        // The pasted swing is not the controls': there is none.
+        assert!(body.contains(",\"swing\":null,"), "{body}");
+        let first = typed.find("the fire").unwrap();
+        assert!(
+            body.contains(&format!(
+                "\"notes\":[{{\"from\":{first},\"to\":{},",
+                first + 3
+            )),
+            "{body}"
+        );
+        for key in [
+            "\"bars\":[{\"slot\":0,\"at\":0.000000000}",
+            "\"marks\":[{",
+            "\"cues\":[{",
+        ] {
+            assert!(body.contains(key), "{key} in {body}");
+        }
+        assert!(body.contains("\"sound\":{\"kind\":\"drum\",\"bank\":\"uzu\",\"piece\":\"bd\"}"));
+        // Swing from the controls reaches it; a poem with nothing to say is refused, as /pattern is.
+        let swung = super::compile(&request(&[("swing", "0.33")], typed), &Output::Performance);
+        assert!(
+            swung
+                .body
+                .contains("\"swing\":{\"amount\":0.330,\"slices\":1}")
+        );
+        let silent = super::compile(&request(&[], "zzzz\n"), &Output::Performance);
+        assert_eq!(silent.status, 400, "{}", silent.body);
+        assert!(silent.body.contains("nothing to play"), "{}", silent.body);
+    }
+
+    #[test]
     fn the_reading_speaks_every_line_once_in_order() {
         // The seed poem has eight lines; the reading speaks each once, in reading order, at either
         // pace, and the first is the first line, with the bytes it came from (I4).
@@ -1701,6 +2066,34 @@ mod tests {
                 // last one is for the page to find out, and say.
                 && unread.ends_with("Praise him.\"}],\"natural_unread\":[]}\n"),
             "{unread}"
+        );
+        // The Performance, which the player will read from (docs/player.md §5), says the same:
+        // line 10 is not cued, and is listed with its reason, on the words of "Praise him."
+        let performance = super::compile(
+            &request(&[("set", "reading:breath,outro:off")], &poem),
+            &Output::Performance,
+        );
+        assert_eq!(performance.status, 200, "{}", performance.body);
+        // Where the line is in the text box, in UTF-16 units, as every `from` is.
+        let praise = poem[..poem.find("Praise him.").unwrap()]
+            .encode_utf16()
+            .count();
+        let (resolved, lost) = performance.body.split_once("\"unread\":").unwrap();
+        // Its cue is the natural pace's alone: the fitted pace does not read it.
+        let (_, cue) = resolved.split_once("{\"line\":10,").unwrap();
+        assert!(
+            cue.split_once("},{")
+                .map_or(cue, |(cue, _)| cue)
+                .contains("\"fitted\":null,\"natural\":{"),
+            "{cue}"
+        );
+        assert_eq!(
+            lost,
+            format!(
+                "[{{\"line\":10,\"from\":{praise},\"to\":{},\"why\":\"the piece ends before its \
+                 turn\"}}],\"natural_unread\":[]}}\n",
+                praise + "Praise him.".len()
+            )
         );
         // Not among the fitted cues; the natural pace's lines still list it.
         let (fitted, natural) = cues.split_once("\"lines\":[").unwrap();
@@ -1909,7 +2302,7 @@ mod tests {
         for field in [
             "\"scale\":\"phrygian_dominant\"",
             "\"root\":\"D\"",
-            "\"bank\":\"tr909\"",
+            "\"bank\":\"uzu\"",
             "\"bass\":\"karplus\"",
             "\"melody\":\"karplus\"",
             "\"low\":\"124\"",
@@ -1999,7 +2392,7 @@ mod tests {
         let response = super::compile(&request(&query, SEED), &Output::Pattern);
         assert_eq!(response.status, 200, "{}", response.body);
         let body = &response.body;
-        assert!(body.contains(".bank(\"RolandR8\")"), "{body}");
+        assert!(body.contains(".bank(\"virtuosity\")"), "{body}");
         // A drum lane of ride strokes. Not "the first bar is a ride bar": 24 bars are more than
         // a level holds, so the first element may be a group of bars (`strudel::nested`).
         assert!(
@@ -2007,7 +2400,7 @@ mod tests {
                 .any(|l| l.trim_start().starts_with("s(\"<") && l.contains("[rd rd]")),
             "the ride keeps time: {body}"
         );
-        assert!(body.contains(".swingBy(0.330,"), "triplet swing: {body}");
+        assert!(body.contains(".late(0.330 / "), "triplet swing: {body}");
         // C dorian, degree 0 as a seventh: C E♭ G B♭ from 60 — 60 63 67 70.
         assert!(body.contains("[60,63,67,70]"), "{body}");
         assert!(body.contains("//   voicing = seventh"), "{body}");
@@ -2046,7 +2439,9 @@ mod tests {
     }
 
     #[test]
-    fn the_register_the_ride_stand_in_and_density_reach_the_pattern() {
+    fn the_register_the_ride_fallback_and_density_reach_the_pattern() {
+        // A link shared before the drum machines were retired: the TR-808, which had no ride, and
+        // the crash standing in for it. It compiles, as the modular kit, which has a ride.
         let query = [
             ("bass_octave", "1"),
             ("melody_octave", "5"),
@@ -2063,11 +2458,13 @@ mod tests {
             "//   melody_octave = 5\n",
             "//   ride_fallback = crash\n",
             "//   density_level = 0.50\n",
-            "crash in place of the ride, which RolandTR808 does not have,",
+            "//   bank = modular\n",
+            "(ride on the foundation",
             "//   density: every gain in a bar divided by n^0.500",
         ] {
             assert!(body.contains(line), "{line} missing: {body}");
         }
+        assert!(!body.contains("in place of the ride"), "{body}");
         // An octave outside its role's range is refused at the boundary, naming the key.
         let response = super::compile(&request(&[("bass_octave", "4")], SEED), &Output::Pattern);
         assert_eq!(response.status, 400);

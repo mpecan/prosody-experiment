@@ -4,7 +4,7 @@ scale       = "phrygian_dominant"
 root        = "D"
 tempo_range = [124, 132]
 swing       = 0.08
-bank        = "tr909"
+bank        = "uzu"
 synth       = "karplus"
 +++
 Tyger Tyger, burning bright,

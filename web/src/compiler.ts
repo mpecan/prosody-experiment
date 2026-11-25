@@ -4,8 +4,8 @@
 // else. Either way the answer is a `Response`, so nothing else knows which.
 //
 // The compiler runs in two workers, never on the page's own thread: compiling "Patterns" takes
-// about a second there and scoring it seven, and the page's thread is the one Strudel's scheduler
-// ticks on — a block there while the music plays is music skipped. One worker answers what plays
+// about a second there and scoring it seven, and the page's thread draws the lit poem, the roll and
+// the reading while the music plays — a block there is a frozen page. One worker answers what plays
 // (pattern, trace, reading, explanation), the other only measures, so a new pattern never waits
 // behind the scores of the last one. Each loads its own copy of the compiler; their answers are
 // the same bytes, which `scripts/check-wasm.sh` checks against the server.
@@ -24,8 +24,8 @@ interface Bindings {
 /** The address of the generated bindings, beside the page — never bundled: they are built apart. */
 export const bindingsUrl = () => new URL('./prosody.js', document.baseURI).href;
 
-// `initStrudel` fills the global scope with names of its own, `Response` not among them today; the
-// page's own is kept anyway, so an answer is always a real one.
+// The page's own `Response`, kept apart from whatever a script might put on the global scope, so an
+// answer is always a real one.
 const NativeResponse = Response;
 
 let compiler: Promise<Bindings> | null = null;

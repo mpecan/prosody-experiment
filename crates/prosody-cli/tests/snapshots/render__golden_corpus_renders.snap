@@ -1,0 +1,11 @@
+---
+source: crates/prosody-cli/tests/render.rs
+expression: "lines.join(\"\\n\")"
+---
+free-verse.poem: 5619756 bytes, 49 notes played, blake3 88011bace79c238f879f6da6685f753e6a9a63d488e920952897080c744092d6
+nonsense.poem: 3629100 bytes, 30 notes played, blake3 897311312ae49febf860b301ef8f306c5b68e6be467969d917e38a06d5988073
+one-line.poem: 1499180 bytes, 10 notes played, blake3 d267c5920a17ae95922cfe4328b7b5629fd03ff75ee01705762b94002da9d6fa
+pentameter.poem: 4644908 bytes, 63 notes played, blake3 25061abd4d37cd8aabea449eba9a821e194f2ab4ae3c48d2b5f570fcc00d0aa2
+refrain.poem: 6438956 bytes, 121 notes played, blake3 911ee361ab54dac0599d1806ae847e5fdab6a3e78168f3bc057d515af1e64583
+slovenian.poem: 3325996 bytes, 36 notes played, blake3 3b6569f4c591ed58e54b90603e6a175f380acaf104df5bc789bf0cf50e57921e
+villanelle.poem: 11919404 bytes, 376 notes played, blake3 faeb473699b1763d1a8bfdd18e8cafeef4f0082120954ab73d4fede5ec35d770

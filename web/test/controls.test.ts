@@ -31,7 +31,7 @@ describe('the palette menu', () => {
     expect(choosePalette('jazz')).toBe(true);
     expect(controls.value.scale).toBe('dorian');
     expect(controls.value.swing).toBe('0.33');
-    expect(controls.value.bank).toBe('linn');
+    expect(controls.value.bank).toBe('big_rusty');
     expect(controls.value.kit).toBe('jazz');
     expect(controls.value.root).toBe('F#');
     expect(controls.value.low).toBe('90');

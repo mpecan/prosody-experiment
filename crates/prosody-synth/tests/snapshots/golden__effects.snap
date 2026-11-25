@@ -1,0 +1,6 @@
+---
+source: crates/prosody-synth/tests/golden.rs
+expression: "describe(\"effects\", bank, notes, 4.5)"
+---
+effects: 240640 frames, peak 0.8285, rms 0.1159, stolen 0, missing 0
+blake3 e3d9eb147eca12796eb9e5ff716458a547cb624af27ee314fb3cd32f0e603671

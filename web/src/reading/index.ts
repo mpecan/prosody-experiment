@@ -1,61 +1,62 @@
 // ---- The reading ----
 //
-// Where a line is read comes from two cue patterns (`prosody_emit::reading`), both stacked with
-// the music so a change of pace needs no new pattern: `pattern`, the fitted pace, a line a bar;
-// and `natural`, the natural pace, whose cues are the earliest bar a line — a stanza's first,
-// under `breath` — may begin in. Each is `n("<0@3 1@4 ~@3 2@4 …>").cpm(…)`, one element per bar,
-// each as long as the music's bar (under the elastic pulse, a cycle a bar), at the music's cycles
-// per minute, so Strudel's scheduler fires a cue as its bar begins. Its callback is attached with
-// `Pattern.onTrigger(fn, true)` (@strudel/core 1.2.6, pattern.mjs: the `true` makes it the cue's
-// only output). Strudel calls it ahead of time — `(hap, currentTime, cps, targetTime)`, in
-// audio-context seconds — and `targetTime` is when the bar begins on the audio clock: a rendered
-// line is started then, exactly, by an AudioBufferSourceNode; the browser's voice, which cannot be
-// scheduled, by a timer that waits out the difference, as Strudel's own `onTriggerTime` does.
-//
-// A neural engine renders every line ahead of time, after each compile, and keeps what it made by
-// engine, voice, speed and text, so a recompile reuses every line it did not change. A line the
-// recorded readings have no file of — an edited line, a poem of the writer's own — is read by a
-// live engine instead, and said (speakerOf).
-import type { Cue, NaturalLine, Reading, SpokenLine } from '../answers';
+// Who reads the poem over the music, in which voice, and the lines rendered ahead of their turn. The
+// reading is *timed* by the Prosody player (`docs/player.md` §5, "The reading"): its render worker
+// knows each line's cue from the Performance and places a rendered line on the speech stem at its
+// frame, with the duck, as it renders the music around it (crates/prosody-player). This module decides
+// who reads each line (`castOf`) and renders the lines ahead: a neural engine renders every line
+// after each compile, and keeps what it made by engine, voice, speed and text, so a recompile reuses
+// every line it did not change. A line the recorded readings have no file of — an edited line, a
+// poem of the writer's own — is read by a live engine instead, and said (speakerOf). The browser's
+// own voice cannot be rendered ahead: the player says when its line is due and this module speaks
+// it then (`readAloud`), off the playhead.
+import type { Cue, Reading, SpokenLine } from '../answers';
 import { closeLoader, loaderBack, loaderEngine, loaderFailed, loaderProgress, loaderSays, openLoader } from '../loader';
 import { piece, showPattern } from '../piece';
 import { load, loadJson, save } from '../storage';
 import {
-  downloadQuestion, duck, hearing, language, playing, readingMenus, readingNote, readingNoteBad,
+  downloadQuestion, hearing, language, playing, readingMenus, readingNote, readingNoteBad,
   readingSettings, type EngineName, type Pace, type ReadingSettings,
 } from '../store';
-import { audioContext, evaluate, strudel, type Hap, type Pattern } from '../strudel/globals';
-import { followPace } from '../strudel';
 import { audible } from '../mix';
-import { followWords, setSpeaking, showSpoken, speaking, type Speaking } from '../watch';
+import { setSpeaking, showSpoken, speaking, type Speaking } from '../watch';
 import {
-  ENGINE_INFO, ENGINE_NAMES, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
+  ENGINE_INFO, NEURAL_ENGINES, NEURAL_VOICES, OFFERED_ENGINES, SYSTEM_VOICE, browserVoices, engines, failures, listBrowserVoices, type Engine, type Progress, type Rendered,
 } from './engines';
+
+export type { Rendered } from './engines';
 
 export { ENGINE_INFO, engines } from './engines';
 
-/** What the reading is doing now, shared with Play and Stop. */
+/** What the reading is doing now, shared with the player. */
 export const speech = {
-  // Which cue patterns are current. Every play() starts a new generation; a cue from an older one —
-  // a hap Strudel had already scheduled from the previous pattern, or its pending timer — is
-  // dropped, so a line of the previous poem or setting is never read over the new music.
-  generation: 0,
-  generations: 0,   // handed out one per play(), so two overlapping plays never share one
-  /** The reading of the pattern now playing, and its cues. */
+  /** The reading of the piece now playing. */
   playing: null as Reading | null,
-  cues: null as Cues | null,
-  duckGain: null as GainNode | null,   // the music, before the master stage
-  bus: null as GainNode | null,        // the reading's level, into the master stage
+  /** A Play still loading (player/index.ts): not yet playing, but the voices it will read with are
+   * kept (letVoicesGo), or the piece it starts would play with nobody to read it. */
+  starting: false,
 };
-export interface Cues {
-  fitted: Pattern;
-  natural: Pattern;
-  both: Pattern;
-}
 
-const DUCK = 0.6;      // the music under a spoken line, as a fraction of its level
-const LEAD = 0.05;     // the least ahead of now a late line is started, in seconds
-const SCHEDULER_CPS = 1;   // reading::SCHEDULER_CPS, and the page's repl.setCps(1)
+/** The player, as the reading needs it. The player registers itself (`hostReading`) when it loads,
+ * so this module never imports it. */
+export interface ReadingHost {
+  /** Who reads each line may have changed: a line was rendered, an engine loaded or failed, a
+   * setting changed. With `quiet` (a change of voice, engine, pace or language), what is placed is
+   * let go and the reading picks up at the next cue in the new voice. */
+  recast(quiet: boolean): void;
+  /** A line rendered or fetched, by its render key: the player sends it on if it wants it. */
+  rendered(key: string, buffer: Rendered): void;
+  /** A line the player waits for could not be rendered. */
+  failed(key: string): void;
+  /** The music lowered (or raised again) under the browser's voice, which the player cannot place. */
+  duck(down: boolean): void;
+  /** The reading's level changed (its fader, or mute and solo). */
+  level(): void;
+}
+let host: ReadingHost | null = null;
+export function hostReading(player: ReadingHost | null): void {
+  host = player;
+}
 
 export const LANGUAGES: Record<string, string> = { en: 'English', sl: 'Slovenian' };
 
@@ -64,15 +65,18 @@ const readings = () => piece.readings;
 
 // ---- The reading's own settings, remembered per browser like the voice picker ----
 
-export const READING_DEFAULTS: ReadingSettings = { engine: 'recorded', pace: 'natural', level: 1, voices: {} };
-const ENGINE_IDS: EngineName[] = ['browser', 'kokoro', 'piper', 'kitten', 'recorded'];
+// In the phone apps the phone's own voice reads by default (the user's decision, 2026-11-01, for
+// Android; iOS follows it): on time from the first Play, in the phone's language, with nothing to
+// download.
+export const READING_DEFAULTS: ReadingSettings = { engine: SYSTEM_VOICE ? 'system' : 'recorded', pace: 'natural', level: 1, voices: {} };
 
-/** The reading settings saved, read defensively: anything unknown falls back to the default. */
-export function readSaved(saved: unknown, oldVoice: string | null): ReadingSettings {
+/** The reading settings saved, read defensively: anything unknown falls back to the default, and so
+ * does an engine this build does not offer (a neural voice saved before, in a build without them). */
+export function readSaved(saved: unknown, oldVoice: string | null, offered: readonly EngineName[] = OFFERED_ENGINES): ReadingSettings {
   const out: ReadingSettings = { ...READING_DEFAULTS, voices: {} };
   if (saved && typeof saved === 'object') {
     const s = saved as Record<string, unknown>;
-    out.engine = ENGINE_IDS.includes(s.engine as EngineName) ? s.engine as EngineName : READING_DEFAULTS.engine;
+    out.engine = offered.includes(s.engine as EngineName) ? s.engine as EngineName : READING_DEFAULTS.engine;
     out.pace = s.pace === 'natural' || s.pace === 'fitted' ? s.pace : READING_DEFAULTS.pace;
     out.level = Number(s.level) >= 0 && Number(s.level) <= 2 ? Number(s.level) : 1;
     out.voices = s.voices && typeof s.voices === 'object' ? s.voices as ReadingSettings['voices'] : {};
@@ -115,24 +119,55 @@ interface Who {
   fallback?: boolean;
 }
 
+// Who stands in for a voice that cannot read: the browser's; in the phone apps, the phone's own once
+// it has started and has a voice in the poem's language — and the browser's until then (which reads
+// nothing in the Android app, whose WebView has none).
+export function standIn(): EngineName {
+  return SYSTEM_VOICE && engines.system.state === 'ready' && voiceOf('system') ? 'system' : 'browser';
+}
+
+// What reads instead, as the status bar says it. The Android app's WebView has no voice of its own,
+// so a line handed to the browser's voice there is not read at all, and that is what is said
+// (CLAUDE.md §6: a fallback is visible, and true).
+/** Whether a line handed to the browser's voice is not read at all: the Android app's WebView. */
+export const noBrowserVoice = () => SYSTEM_VOICE && !('speechSynthesis' in window);
+function readingBy(back: EngineName, meanwhile = false): string {
+  const when = meanwhile ? ' meanwhile' : '';
+  return back === 'browser' && noBrowserVoice()
+    ? `nothing reads it${when} (this app has no browser voice)`
+    : `reading with the ${ENGINE_INFO[back].label}${when}`;
+}
+// The stand-in as the download question and the loader name it, before it may have started: the
+// phone's own voice in the apps.
+const standInName = () => (SYSTEM_VOICE ? 'the phone\'s own voice' : 'your browser\'s own voice');
+// What reads instead of a voice that could not load, as the loader says it: the phone's own voice
+// unless it could not start either, and then the browser's, which in the Android app is nothing.
+function readsInstead(): string {
+  if (SYSTEM_VOICE && engines.system.state !== 'failed') return 'The phone\'s own voice reads instead';
+  return noBrowserVoice() ? 'Nothing reads instead (this app has no browser voice)' : 'The browser\'s voice reads instead';
+}
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
 // Who reads now, and why not the chosen one when it is not: the chosen engine once it has
-// loaded and has a voice in the poem's language; the browser's voice meanwhile, and instead.
+// loaded and has a voice in the poem's language; the stand-in meanwhile, and instead.
 export function speaker(): Who {
   const chosen = settingsNow().engine;
   const engine = engines[chosen];
   if (chosen === 'browser') return { engine: 'browser', why: '' };
+  const back = chosen === 'system' ? 'browser' : standIn();
+  const by = readingBy(back);
   const name = ENGINE_INFO[chosen].label;
-  if (engine.state === 'failed') return { engine: 'browser', why: `${name} could not load (${engine.error}); reading with the browser voice`, bad: true };
-  if (engine.state !== 'ready') return { engine: 'browser', why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; reading with the browser voice meanwhile` };
+  if (engine.state === 'failed') return { engine: back, why: `${name} could not load (${engine.error}); ${by}`, bad: true };
+  if (engine.state !== 'ready') return { engine: back, why: `${name} ${engine.state === 'loading' ? 'loading' + (engine.progress ? ': ' + engine.progress : '') : 'not loaded'}; ${readingBy(back, true)}` };
   const lang = language.value;
-  if (!voiceOf(chosen)) return { engine: 'browser', why: `${name} has no ${LANGUAGES[lang] || lang} voice; reading with the browser voice${lang === 'sl' ? ' (Piper has one)' : ''}`, bad: true };
+  if (!voiceOf(chosen)) return { engine: back, why: `${name} has no ${LANGUAGES[lang] || lang} voice; ${by}${lang === 'sl' && NEURAL_VOICES ? ' (Piper has one)' : ''}`, bad: true };
   return { engine: chosen, why: '' };
 }
 
 // Who reads the line `text`, in which voice, and why not the chosen one when it is not. As
 // speaker(), and for the recorded readings line by line: a line recorded in the chosen voice is
 // read from its file; one that is not is read by the live voice that made the recordings, if its
-// engine has loaded, and otherwise by the browser's voice (`fallback`, with the reason, which the
+// engine has loaded, and otherwise by the stand-in (`fallback`, with the reason, which the
 // caller says with the line's number).
 export function speakerOf(text: string): Who {
   const who = speaker();
@@ -144,7 +179,9 @@ export function speakerOf(text: string): Who {
   if (engine?.render && engine.state === 'ready' && engine.voices(language.value).some((v) => v.id === liveVoice)) {
     return { engine: live, voice: liveVoice, why: `no recording of it; read live by ${ENGINE_INFO[live].label} ${liveVoice}`, fallback: true };
   }
-  return { engine: 'browser', voice: null, why: 'no recording of it; read by the browser voice', fallback: true };
+  const back = standIn();
+  const by = back === 'browser' && noBrowserVoice() ? 'nothing reads it (this app has no browser voice)' : `read by the ${ENGINE_INFO[back].label}`;
+  return { engine: back, voice: back === 'browser' ? null : voiceOf(back), why: `no recording of it; ${by}`, fallback: true };
 }
 
 // The speed a line is rendered at by `engine`: a recording's own (the line's pace, at which it was
@@ -161,6 +198,7 @@ export function baseSpeed(engine: EngineName, item: { speed: number; pace: numbe
 let progressShown = false;   // the reading's note is an engine's progress, cleared when it is done
 const chosenEngine = (engine: Engine) => settingsNow().engine === engine.name;
 export function ensureEngine(retry = false): void {
+  startSystem();
   const engine = engines[settingsNow().engine];
   if (engine.state === 'ready' || engine.state === 'loading' || !engine.render) return;
   if (engine.state === 'failed' && !retry) return;
@@ -168,7 +206,8 @@ export function ensureEngine(retry = false): void {
   let shown = '';
   engine.load((progress: Progress) => {
     if (!chosenEngine(engine)) return;
-    if (engine.state === 'ready' && renderingJob && (renderingJob.engine !== engine.name || renderingJob.voice !== voiceOf(engine.name))) return;
+    const busy = renderingJobs.get(engine.name);
+    if (engine.state === 'ready' && busy && busy.voice !== voiceOf(engine.name)) return;
     // Said in the status bar as it moves, a whole percent at a time; logged only when it is done.
     const said = `${name}: ${progress.text}${progress.fraction != null ? ' (' + Math.round(progress.fraction * 100) + '%)' : ''}`;
     if (said !== shown) { noteReading(shown = said, false, true); progressShown = true; }
@@ -176,17 +215,51 @@ export function ensureEngine(retry = false): void {
   }).then(() => {
     console.log(`[reading] ${engine.name} loaded on ${engine.device}`);
     save('prosody.fetched.' + engine.name, '1');
+    // Loaded while the page is hidden and silent (it was still loading when it was hidden, or
+    // stopped): let go now, as it would have been then. Its files are kept for the next Play.
+    if (hiddenAndSilent()) { letVoicesGo(); showVoices(); return; }
     showVoices();
+    host?.recast(false);
     if (!chosenEngine(engine)) return;
     noteReading(`${name} ready (${engine.device === 'files' ? 'from files' : engine.device === 'webgpu' ? 'WebGPU' : 'WebAssembly'})`);
     prerender();
   }, (error: Error & { cancelled?: boolean }) => {
     if (error.cancelled) { showVoices(); return; }
     console.warn(`[reading] ${engine.name} failed to load:`, error);
-    loaderFailed(engine.name, name, error);
+    loaderFailed(engine.name, name, error, readsInstead());
     showVoices();
+    host?.recast(false);
     if (!chosenEngine(engine)) return;
-    noteReading(`${name} could not load: ${error.message} — reading with the browser voice`, true);
+    noteReading(`${name} could not load: ${error.message} — ${readingBy(standIn())}`, true);
+  });
+}
+
+// The phone's own voice, in the phone apps: started with the page and on every Play (it is let go
+// while the page is hidden and silent), as it costs nothing to download and stands in for any
+// voice that cannot read. A failure is logged, and said where it is the voice chosen; the reading
+// carries on without it.
+function startSystem(): void {
+  const engine = engines.system;
+  if (!SYSTEM_VOICE || engine.state === 'ready' || engine.state === 'loading') return;
+  // Chosen, it is said here: ensureEngine finds it loading (this started it) and leaves it, so
+  // nothing else replaces the status bar's "loading" with what came of it.
+  const said = () => {
+    if (settingsNow().engine !== 'system') return;
+    const who = speaker();
+    noteReading(who.why, who.bad);
+  };
+  engine.load().then(() => {
+    console.log(`[reading] system voice: ${engine.device}, ${engine.listed?.length ?? 0} voices on the phone`);
+    if (hiddenAndSilent()) { letVoicesGo(); showVoices(); return; }
+    showVoices();
+    host?.recast(false);
+    prerender();
+    said();
+  }, (error: Error) => {
+    console.warn('[reading] the system voice did not start:', error);
+    showVoices();
+    host?.recast(false);
+    said();
   });
 }
 
@@ -196,8 +269,9 @@ export function ensureEngine(retry = false): void {
 failures.onFailed = (engine, error) => {
   console.warn(`[reading] ${engine.name} failed:`, error);
   showVoices();
+  host?.recast(false);
   if (!chosenEngine(engine)) return;
-  noteReading(`${ENGINE_INFO[engine.name].label} failed: ${error.message} — reading with the browser voice; choose it again to retry`, true);
+  noteReading(`${ENGINE_INFO[engine.name].label} failed: ${error.message} — ${readingBy(standIn())}; choose it again to retry`, true);
 };
 
 // ---- Rendering ahead ----
@@ -221,8 +295,11 @@ interface Job {
 const renders = new Map<string, Entry>();   // engine|voice|speed|text → { buffer, promise }
 const RENDERS_KEPT = 600;
 let renderQueue: Job[] = [];
-let rendering = false;
-let renderingJob: Job | null = null;     // the job the engine is rendering now
+// Each engine renders one line at a time, and the engines side by side: each is a process or
+// worker of its own, and a fast stand-in's line (the phone's own voice, in a fraction of a second)
+// must not wait behind a neural voice's (seconds).
+const renderingJobs = new Map<EngineName, Job>();   // the job each engine is rendering now
+const isRendering = (key: string) => [...renderingJobs.values()].some((job) => job.key === key);
 // A pending line is in `renders` exactly while its job is queued or rendering: a job dropped from
 // the queue (no longer to be read: the poem, engine, voice or pace changed) takes its entry with it
 // and rejects its promise as `dropped`, so asking for that line again queues it afresh rather than
@@ -257,7 +334,7 @@ function whenRendered(engine: EngineName, voice: string, speed: number, text: st
   if (entry?.direct) return entry.promise;   // a recording being fetched (below)
   // An entry neither queued nor rendering has lost its job (it cannot, by `dropJob`, but a line
   // waiting on it would wait for good): it is asked for afresh.
-  if (entry && renderingJob?.key !== key && !renderQueue.some((job) => job.key === key)) {
+  if (entry && !isRendering(key) && !renderQueue.some((job) => job.key === key)) {
     renders.delete(key);
     entry = undefined;
   }
@@ -276,6 +353,7 @@ function whenRendered(engine: EngineName, voice: string, speed: number, text: st
         fresh.resolve(buffer);
         afterRender(job, buffer);
         trimRenders();
+        arrived(key, buffer);
         console.log(`[reading] fetched from the recording, ${voice} at ${Number(speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${((buffer.took ?? 0) / 1000).toFixed(2)} s: ${text}`);
       }, (error: Error) => {
         if (renders.get(key) === fresh) renders.delete(key);
@@ -289,9 +367,16 @@ function whenRendered(engine: EngineName, voice: string, speed: number, text: st
     const at = renderQueue.findIndex((job) => job.key === key);
     if (at > 0) renderQueue.unshift(...renderQueue.splice(at, 1));
   }
-  void pumpRenders();
+  void pumpRenders(engine);
   return entry.promise;
 }
+/** A line is ready: the player hears of it, and of who reads now (a refit may move a fitted line onto
+ * its faster rendering). */
+function arrived(key: string, buffer: Rendered): void {
+  host?.rendered(key, buffer);
+  host?.recast(false);
+}
+
 // Oldest first out: insertion order is the order lines were first asked for.
 function trimRenders(): void {
   while (renders.size > RENDERS_KEPT) {
@@ -300,38 +385,48 @@ function trimRenders(): void {
     renders.delete(oldest);
   }
 }
-async function pumpRenders(): Promise<void> {
-  if (rendering) return;
-  rendering = true;
-  try {
-    while (renderQueue.length) {
-      const job = renderQueue.shift()!;
-      const engine = engines[job.engine];
-      if (engine.state !== 'ready' || !engine.render) { renders.delete(job.key); job.entry.reject(new Error('not loaded')); continue; }
-      renderingJob = job;
-      try {
-        const buffer = await engine.render(job.text, { voice: job.voice, speed: job.speed });
-        job.entry.buffer = buffer;
-        job.entry.resolve(buffer);
-        // A voice's download shown while it rendered has done its work.
-        if (progressShown) { progressShown = false; noteReading(speaker().why, speaker().bad); }
-        afterRender(job, buffer);
-        console.log(`[reading] rendered with ${job.engine} ${job.voice} at ${Number(job.speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${((buffer.took ?? 0) / 1000).toFixed(2)} s: ${job.text}`);
-      } catch (error) {
+async function pumpRenders(name: EngineName): Promise<void> {
+  if (renderingJobs.has(name)) return;
+  for (;;) {
+    const at = renderQueue.findIndex((queued) => queued.engine === name);
+    if (at < 0) break;
+    const job = renderQueue.splice(at, 1)[0]!;
+    const engine = engines[name];
+    if (engine.state !== 'ready' || !engine.render) {
+      // An engine let go (hidden and silent, or its download cancelled) drops its lines, as a line
+      // no longer to be read is dropped: nothing failed, so nothing is said. A failed engine's lines fail.
+      if (engine.state === 'failed') { renders.delete(job.key); job.entry.reject(new Error('not loaded')); } else dropJob(job);
+      continue;
+    }
+    renderingJobs.set(name, job);
+    try {
+      const buffer = await engine.render(job.text, { voice: job.voice, speed: job.speed });
+      job.entry.buffer = buffer;
+      job.entry.resolve(buffer);
+      // A voice's download shown while it rendered has done its work.
+      if (progressShown) { progressShown = false; noteReading(speaker().why, speaker().bad); }
+      afterRender(job, buffer);
+      arrived(job.key, buffer);
+      console.log(`[reading] rendered with ${job.engine} ${job.voice} at ${Number(job.speed).toFixed(3)}: ${buffer.duration.toFixed(3)} s in ${((buffer.took ?? 0) / 1000).toFixed(2)} s: ${job.text}`);
+    } catch (error) {
+      // Let go while it rendered (its state changed under the await): dropped, as above.
+      if ((error as { cancelled?: boolean }).cancelled || (engine.state as Engine['state']) === 'idle') dropJob(job);
+      else {
         renders.delete(job.key);
         job.entry.reject(error as Error);
         console.warn(`[reading] ${job.engine} could not render "${job.text}":`, error);
-      } finally {
-        renderingJob = null;
       }
+    } finally {
+      renderingJobs.delete(name);
     }
-  } finally {
-    rendering = false;
+    // An engine kept while it rendered (letVoicesGo) is let go once its line is done.
+    letVoicesGo();
   }
   trimRenders();
 }
 
 interface ToRead {
+  line: number;
   text: string;
   speed: number;
   pace: number;
@@ -343,8 +438,8 @@ interface ToRead {
 export function linesToRead(reading: Reading | null, pace: Pace = settingsNow().pace): ToRead[] {
   if (!reading) return [];
   return pace === 'fitted'
-    ? reading.cues.map((cue) => ({ text: cue.text, speed: cue.rate, pace: cue.pace, room: slotLength(reading, cue.slot) * reading.fill, cue }))
-    : reading.lines.map((line) => ({ text: line.text, speed: line.pace, pace: line.pace }));
+    ? reading.cues.map((cue) => ({ line: cue.line, text: cue.text, speed: cue.rate, pace: cue.pace, room: slotLength(reading, cue.slot) * reading.fill, cue }))
+    : reading.lines.map((line) => ({ line: line.line, text: line.text, speed: line.pace, pace: line.pace }));
 }
 /** `lines` from `at` round to the one before it: the order the lines will be wanted in. */
 export function fromWhere<T>(lines: T[], at: number): T[] {
@@ -353,13 +448,22 @@ export function fromWhere<T>(lines: T[], at: number): T[] {
 }
 // The same, from the line the reading of the playing piece is at round to the one before it: the
 // order the lines will be wanted in. Any other reading from its first line.
-let fittedAt: { reading: Reading; index: number } | null = null;   // the fitted cue after the one last cued
+let readingAt: { reading: Reading; pace: Pace; line: number | null } | null = null;
 function upcoming(reading: Reading | null): ToRead[] {
   const lines = linesToRead(reading);
   let at = 0;
-  if (settingsNow().pace === 'natural' && chain?.reading === reading) at = chain.next;
-  if (settingsNow().pace === 'fitted' && fittedAt?.reading === reading) at = fittedAt.index;
+  if (readingAt && readingAt.reading === reading && readingAt.pace === settingsNow().pace) {
+    const { line } = readingAt;
+    at = line === null ? lines.length : Math.max(0, lines.findIndex((item) => item.line === line));
+  }
   return fromWhere(lines, at);
+}
+/** Where the player says the reading of `reading` is: the line it will want next (null once the
+ * round's are read). The render queue is put in the order it will want them from there. */
+export function readingIsAt(reading: Reading, pace: Pace, line: number | null): void {
+  if (readingAt?.reading === reading && readingAt.pace === pace && readingAt.line === line) return;
+  readingAt = { reading, pace, line };
+  prerender();
 }
 
 // ---- Fitting a rendered line to its bar ----
@@ -398,7 +502,7 @@ function fitWhenRendered(key: string, entry: Entry | undefined, job: Omit<Job, '
   if (!entry || refits.has(key)) return;
   if (entry.buffer) { afterRender(job, entry.buffer); return; }
   if (entry.direct) { entry.promise.then((buffer) => { if (!refits.has(key)) afterRender(job, buffer); }, () => {}); return; }
-  const queued = renderingJob?.key === key ? renderingJob : renderQueue.find((queuedJob) => queuedJob.key === key);
+  const queued = [...renderingJobs.values()].find((busy) => busy.key === key) ?? renderQueue.find((queuedJob) => queuedJob.key === key);
   if (queued && !queued.room) queued.room = job.room;
 }
 // The speed a fitted cue is rendered at for this engine and voice: refitted if it was too long.
@@ -410,7 +514,7 @@ function fittedSpeed(engine: EngineName, voice: string, cue: Cue, base = cue.rat
 // from where its reading is, then the side heard, then the other. The queue then holds exactly
 // those, in that order — a queued line nobody will read (of a poem no longer loaded, or another
 // engine, voice or pace) is dropped — so a line due next is never stuck behind one of the top of
-// the poem, or of the last poem. Called again whenever the reading moves on (advance, fittedCue).
+// the poem, or of the last poem. Called again whenever the reading moves on (readingIsAt).
 // Each line is asked of whoever reads it (speakerOf): under the recorded readings, a line with no
 // recording is rendered ahead by the live voice standing in for it, if that has loaded.
 export function prerender(): void {
@@ -432,6 +536,17 @@ export function prerender(): void {
         keys.add(key);
         wanted.push({ key, engine, voice, text, speed: s, room: r });
       }
+      // The phone's own voice renders the line too, in a fraction of a second, to be read while
+      // the slower voice's rendering is not yet ready (castOf).
+      const back = handsOver(engine) ? voiceOf('system') : null;
+      if (back) {
+        const speed = baseSpeed('system', item);
+        const key = renderKey('system', back, speed, text);
+        if (!keys.has(key)) {
+          keys.add(key);
+          wanted.push({ key, engine: 'system', voice: back, text, speed, room: room ?? null });
+        }
+      }
     }
   }
   renderQueue = renderQueue.filter((job) => {
@@ -444,53 +559,85 @@ export function prerender(): void {
   renderQueue.sort((a, b) => (rank.get(a.key) ?? 0) - (rank.get(b.key) ?? 0));
 }
 
-// ---- Playing a line ----
+// ---- Who reads each line, for the player ----
 
-const sources = new Set<AudioBufferSourceNode>();   // every source scheduled and not yet ended
+// A live voice that hands its lines over (the user's decision, 2026-11-01): where the phone's own
+// voice stands in, a line the chosen voice has not rendered yet is read by the phone's, which has,
+// so it comes on time rather than late; the chosen voice takes each line over as its rendering
+// arrives (arrived → recast). Kokoro just loaded renders a line in seconds on a phone, so without
+// this the first line it read was the fourth. A recording is fetched in milliseconds: it waits.
+function handsOver(engine: EngineName): boolean {
+  return engine !== 'system' && engine !== 'recorded' && engine !== 'browser' && standIn() === 'system';
+}
+/** `key`, the line as the chosen voice renders it — or, while that is not ready, the phone's own
+ * voice's rendering of it at `speed`, if that is. */
+function orStandIn(key: string, engine: EngineName, text: string, speed: number): string {
+  if (!handsOver(engine) || renderedFor(key)) return key;
+  const voice = voiceOf('system');
+  const other = voice ? renderKey('system', voice, speed, text) : null;
+  return other && renderedFor(other) ? other : key;
+}
+
+/** Who reads each line of `reading` at `pace`, by line number: the render key of the rendering the
+ * player places (the refitted one, at the fitted pace, once it is ready), or null for the browser's
+ * own voice. The player places a line from this (crates/prosody-player's reader). */
+export function castOf(reading: Reading | null, pace: Pace = settingsNow().pace): Map<number, string | null> {
+  const cast = new Map<number, string | null>();
+  if (!reading) return cast;
+  if (pace === 'fitted') {
+    for (const cue of reading.cues) {
+      const who = speakerOf(cue.text);
+      if (who.engine === 'browser' || !who.voice) { cast.set(cue.line, null); continue; }
+      const base = baseSpeed(who.engine, { speed: cue.rate, pace: cue.pace });
+      const key = renderKey(who.engine, who.voice, fittedSpeed(who.engine, who.voice, cue, base), cue.text);
+      const back = voiceOf('system');
+      cast.set(cue.line, orStandIn(key, who.engine, cue.text, back ? fittedSpeed('system', back, cue) : cue.rate));
+    }
+  } else {
+    for (const line of reading.lines) {
+      const who = speakerOf(line.text);
+      cast.set(line.line, who.engine === 'browser' || !who.voice ? null
+        : orStandIn(renderKey(who.engine, who.voice, line.pace, line.text), who.engine, line.text, line.pace));
+    }
+  }
+  return cast;
+}
+
+/** The rendering a render key names, if it is ready. */
+export function renderedFor(key: string): Rendered | null {
+  return renders.get(key)?.buffer ?? null;
+}
+
+/** A line the player found unrendered when it was due: asked for first in the queue, fitted to its
+ * bar at the fitted pace. */
+export function renderUrgently(reading: Reading | null, line: SpokenLine & { rate?: number; slot?: number }, pace: Pace): void {
+  const who = speakerOf(line.text);
+  if (who.engine === 'browser' || !who.voice) return;
+  const fitted = pace === 'fitted' && line.rate !== undefined;
+  const speed = fitted ? baseSpeed(who.engine, { speed: line.rate!, pace: line.pace }) : line.pace;
+  const room = fitted && reading ? slotLength(reading, line.slot ?? 0) * reading.fill : null;
+  whenRendered(who.engine, who.voice, speed, line.text, true, room).catch((error: Error & { dropped?: boolean }) => {
+    if (error.dropped) return;
+    noteReading(`${ENGINE_INFO[who.engine].label} could not render line ${line.line + 1}: ${error.message}`, true);
+    host?.failed(renderKey(who.engine, who.voice!, speed, line.text));
+  });
+}
+
+// ---- The browser's own voice ----
+//
+// It cannot be rendered ahead or placed in a stream: the player's render worker says when its line
+// is due, and the page speaks it when the playhead gets there — off the playhead, not in step with
+// the music (docs/player.md §5).
+
 const readingTimers = new Set<ReturnType<typeof setTimeout>>();
 function later(seconds: number, fn: () => void): void {
   const timer = setTimeout(() => { readingTimers.delete(timer); fn(); }, Math.max(0, seconds) * 1000);
   readingTimers.add(timer);
 }
 
-// Starts `buffer` so its speech begins at `start` on the audio clock — the buffer itself its quiet
-// margin earlier — through the reading's level into the master stage, and shows the line from
-// then until it ends. Returns its source, to cut it off.
-function playBuffer(buffer: Rendered, start: number, line: SpokenLine, last: boolean): AudioBufferSourceNode {
-  const ctx = audioContext();
-  const source = new AudioBufferSourceNode(ctx, { buffer });
-  source.connect(speech.bus || ctx.destination);
-  const at = start - (buffer.lead || 0);
-  if (at >= ctx.currentTime) source.start(at); else source.start(ctx.currentTime, ctx.currentTime - at);
-  sources.add(source);
-  source.onended = () => { sources.delete(source); source.disconnect(); };
-  const end = spokenEnd(buffer, start);
-  duckSpan(start, end, last ? 0 : line.pause);
-  const shown: Speaking = { line, start, duration: end - start };
-  later(start - ctx.currentTime, () => { setSpeaking(shown); followWords(shown, () => audioContext().currentTime); });
-  later(end - ctx.currentTime, () => { if (speaking === shown) setSpeaking(null); });
-  return source;
-}
-
-// Where a line whose speech begins at `start` stops sounding.
-function spokenEnd(buffer: Rendered, start: number): number {
-  return start - (buffer.lead || 0) + buffer.duration;
-}
-
-// The music ducked from `start` to `end`, on the audio clock, and kept down through a pause of
-// `hold` seconds after it, so the lines of one stanza duck it once rather than pumping: the next
-// line's own duck, starting within the hold, cancels the release.
-function duckSpan(start: number, end: number, hold: number): void {
-  if (!speech.duckGain) return;
-  const gain = speech.duckGain.gain;
-  const level = duck.value ? DUCK : 1;
-  gain.cancelScheduledValues(start);
-  gain.setTargetAtTime(level, start, 0.08);
-  gain.setTargetAtTime(1, end + hold + 0.05, 0.15);
-}
-
-// The browser's voice, at `rate`, from now. `onEnd` is called when it has finished (or failed).
-function readLine(line: SpokenLine & { stanzaLast?: boolean }, rate: number, onEnd?: () => void): void {
+/** Reads `line` in the browser's voice, at `rate`, from now. `onEnd` is called when it has finished
+ * (or failed). */
+export function readAloud(line: SpokenLine & { stanzaLast?: boolean }, rate: number, onEnd?: () => void): void {
   if (!('speechSynthesis' in window)) { onEnd?.(); return; }
   // A line still being read when the next is due is cut off, so the reading stays on the bar.
   speechSynthesis.cancel();
@@ -503,7 +650,7 @@ function readLine(line: SpokenLine & { stanzaLast?: boolean }, rate: number, onE
   // that has started since, so each handler checks it is still the one speaking.
   const shown: Speaking = { line, utterance };
   setSpeaking(shown, false);   // shown once it starts
-  utterance.onstart = () => { readingDuck(true); if (speaking === shown) setSpeaking(shown); };
+  utterance.onstart = () => { host?.duck(true); if (speaking === shown) setSpeaking(shown); };
   utterance.onboundary = (event) => {
     if (speaking === shown && event.name !== 'sentence') showSpoken(event);
   };
@@ -511,7 +658,8 @@ function readLine(line: SpokenLine & { stanzaLast?: boolean }, rate: number, onE
   const done = () => {
     if (ended) return;
     ended = true;
-    readingDuck(false, line.stanzaLast ? 0 : line.pause);
+    // The lines of a stanza duck the music once: it rises only after the pause before the next.
+    later(line.stanzaLast ? 0 : line.pause, () => { if (!speaking?.utterance) host?.duck(false); });
     if (speaking === shown) setSpeaking(null);
     onEnd?.();
   };
@@ -520,281 +668,30 @@ function readLine(line: SpokenLine & { stanzaLast?: boolean }, rate: number, onE
   speechSynthesis.speak(utterance);
 }
 
-function readingDuck(down: boolean, hold = 0): void {
-  if (!speech.duckGain) return;
-  const now = audioContext().currentTime;
-  if (down) duckSpan(now, now + 3600, 0);
-  else { speech.duckGain.gain.cancelScheduledValues(now); speech.duckGain.gain.setTargetAtTime(1, now + hold, 0.15); }
-}
-
-/** Everything scheduled is let go: the timers, the sources, the browser's voice, the duck. */
+/** Everything the page itself is reading is let go: the browser's voice, its timers, its duck, the
+ * line shown. What the player has placed is the player's to let go (`ReadingHost.recast`). */
 export function quietReading(): void {
-  for (const timer of readingTimers) clearTimeout(timer);
-  readingTimers.clear();
-  for (const source of sources) { try { source.stop(); } catch { /* already stopped */ } }
-  sources.clear();
-  if ('speechSynthesis' in window) speechSynthesis.cancel();
-  chain = null;
-  fittedLast = null;
-  fittedAt = null;
-  if (speech.duckGain) {
-    const now = audioContext().currentTime;
-    speech.duckGain.gain.cancelScheduledValues(now);
-    speech.duckGain.gain.setTargetAtTime(1, now, 0.08);
-  }
+  hushBrowserVoice();
+  readingAt = null;
   setSpeaking(null);
 }
 
-// ---- The fitted pace: a line a bar ----
-
-let fittedLast: AudioBufferSourceNode | null = null;   // the line last started, to cut off at the next cue
-function fittedCue(cue: Cue, time: number, generation: number): void {
-  if (generation !== speech.generation || settingsNow().pace !== 'fitted') return;
-  const ctx = audioContext();
-  const who = speakerOf(cue.text);
-  const voice = who.voice;
-  const base = baseSpeed(who.engine, { speed: cue.rate, pace: cue.pace });
-  const speed = voice ? fittedSpeed(who.engine, voice, cue, base) : cue.rate;
-  const buffer = voice ? rendered(who.engine, voice, speed, cue.text) : null;
-  if (who.fallback) noteReading(`line ${cue.line + 1}: ${who.why}`);
-  if (speech.playing) {
-    fittedAt = { reading: speech.playing, index: speech.playing.cues.indexOf(cue) + 1 };
-    prerender();
-  }
-  console.log(`[reading] fitted: bar ${cue.slot + 1} line ${cue.line + 1} at ${time.toFixed(3)} s`
-    + ` (bytes ${cue.start}..${cue.end}), rate ${cue.rate}${speed !== base ? ', refitted to ' + speed.toFixed(3) : ''}, ${buffer ? who.engine + ' ' + voice : 'browser'}: ${cue.text}`);
-  if (buffer) {
-    // A line still sounding when the next is due is cut off at the bar, as the browser's is.
-    try { fittedLast?.stop(time); } catch { /* already stopped */ }
-    fittedLast = playBuffer(buffer, time, cue, true);
-    const bar = speech.playing ? slotLength(speech.playing, cue.slot) : Infinity;
-    const over = speechOf(buffer) - bar;
-    if (over > 0.02) noteReading(`line ${cue.line + 1} runs ${over.toFixed(2)} s past its bar and may be cut off at the next cue`);
-    return;
-  }
-  if (voice) {
-    void whenRendered(who.engine, voice, base, cue.text, true, speech.playing ? slotLength(speech.playing, cue.slot) * speech.playing.fill : null);
-    noteReading(`line ${cue.line + 1} not rendered in time; read by the browser voice`);
-  } else if (who.why && !who.fallback) noteReading(who.why, who.bad);
-  later(time - ctx.currentTime, () => { if (generation === speech.generation) readLine(cue, cue.rate); });
+/** The browser's voice cut off: its line, its timers and its duck let go, and its line no longer
+ * shown. Where the reading is, and what the player has placed, are left alone — at a live edit's
+ * hand-over the reading goes on in the new version (SPEC.md §4.7: a line being spoken from the
+ * previous version is cut off where the new one takes over). */
+export function hushBrowserVoice(): void {
+  for (const timer of readingTimers) clearTimeout(timer);
+  readingTimers.clear();
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  host?.duck(false);
+  if (speaking?.utterance) setSpeaking(null);
 }
 
-// ---- The natural pace: a line after the last ----
-//
-// SPEC.md §4.7. A line is read at the voice's own speed times its pace, and the next begins when
-// it has finished plus its pause; a stanza begins where its cue says the music has reached it —
-// and, under `breath`, not before a whole silent bar has passed since the previous stanza's last
-// line ended, nor before that line's stanza-end pause: on the first bar that satisfies all three.
-// All of it is timed on the audio clock from the cue's `targetTime`. A rendered line's end is known
-// the moment it is scheduled, so a stanza is scheduled line after line ahead of time; the
-// browser's voice reports its end only when it gets there, so its lines are chained on `onend`.
-export interface Chain {
-  reading: Reading;
-  generation: number;
-  seconds: number[];
-  next: number;            // the index into reading.lines of the line to read next
-  round: number | null;    // which pass of the looping piece the anchors below belong to
-  wrapTo: number | null;   // the line the new round starts at, when it came round mid-line
-  origin: number;          // the audio time this round's bar 1 began
-  anchors: Map<number, number>;  // index into reading.lines → the audio time its cue fired for, this round
-  prevEnd: number | null;
-  prevPause: number;
-  busy: boolean;
-}
-let chain: Chain | null = null;
-function newChain(reading: Reading, generation: number): Chain {
-  return {
-    reading, generation,
-    seconds: barSeconds(reading),
-    next: 0, round: null, wrapTo: null, origin: 0,
-    anchors: new Map(),
-    prevEnd: null, prevPause: 0,
-    busy: false,
-  };
-}
-// The music's bars, in seconds from the piece's start, and its length last.
+// The music's bars, in seconds from the piece's start, and its length last: for fitting a line to
+// its bar's room.
 export function barSeconds(reading: Pick<Reading, 'bars' | 'cpm'>): number[] {
-  return reading.bars.map((cycles) => cycles * 60 / reading.cpm / SCHEDULER_CPS);
-}
-// Bar `k` of the looping piece (negative or past the end: the rounds before and after) on the
-// audio clock, and the bar playing at audio time `t`.
-export function barTime(c: Pick<Chain, 'seconds' | 'origin'>, k: number): number {
-  const bars = c.seconds, slots = bars.length - 1, length = bars[slots] ?? 0;
-  const round = Math.floor(k / slots);
-  return c.origin + round * length + (bars[k - round * slots] ?? 0);
-}
-export function barAt(c: Pick<Chain, 'seconds' | 'origin'>, t: number): number {
-  const bars = c.seconds, slots = bars.length - 1, length = bars[slots] ?? 0;
-  const round = Math.floor((t - c.origin) / length);
-  const within = t - c.origin - round * length;
-  let k = 0;
-  while (k + 1 < slots && (bars[k + 1] ?? Infinity) <= within + 1e-9) k += 1;
-  return k + round * slots;
-}
-
-function naturalCue(index: number, hap: Hap, time: number, cps: number, generation: number): void {
-  if (generation !== speech.generation || settingsNow().pace !== 'natural') return;
-  const reading = speech.playing;
-  if (!reading) return;
-  if (!chain || chain.generation !== generation) chain = newChain(reading, generation);
-  const line = reading.lines[index];
-  if (!line || !hap.whole) return;
-  const length = chain.seconds[chain.seconds.length - 1] ?? 0;
-  const at = hap.whole.begin.valueOf() / cps / SCHEDULER_CPS;   // seconds since the scheduler's cycle 0
-  const slotAt = chain.seconds[line.slot] ?? 0;
-  const round = Math.round((at - slotAt) / length);
-  chain.origin = time - slotAt;
-  if (round !== chain.round) {
-    // The piece has come round: this round's cues begin afresh, from this one. While a line is
-    // still being read (the browser's voice until its `onend`, a neural line until it is rendered)
-    // the move waits for it to finish (`wrapTo`, taken in advance()), or its `after()` would step
-    // past the last line and leave this round unread. The last line's end is kept, so a first
-    // stanza still waits for its breath after a last one that ran over the loop's seam.
-    if (chain.round !== null && !chain.busy) wrapRound(chain, index);
-    else if (chain.round !== null) chain.wrapTo = index;
-    else chain.next = index;
-    chain.round = round;
-    chain.anchors.clear();
-  }
-  chain.anchors.set(index, time);
-  // Nothing being read, and the line waited for is not this one: either the clock was joined
-  // part-way through (a live edit) or the reading had finished this round. Start here.
-  if (!chain.busy && chain.next !== index && !chain.anchors.has(chain.next)) chain.next = index;
-  console.log(`[reading] natural: cue for line ${line.line + 1} (${line.onset}) in bar ${line.slot + 1} at ${time.toFixed(3)} s`);
-  advance();
-}
-
-// The chain moves to the new round's line `index`. A line of the old round not yet read will not
-// be — its round's cues are gone — and is said, not dropped in silence (CLAUDE.md §6).
-function wrapRound(c: Chain, index: number): void {
-  const lines = c.reading.lines;
-  if (c.next < lines.length) {
-    const lost = lines.slice(c.next).map((l) => l.line + 1);
-    noteLoss(`not read last time round: line ${lost.join(', ')}, the piece came round before its turn`);
-  }
-  c.next = index;
-  c.wrapTo = null;
-}
-
-// Reads on, then puts the lines it will want next at the head of the render queue.
-function advance(): void {
-  advanceChain();
-  if (chain && chain.generation === speech.generation) prerender();
-}
-function advanceChain(): void {
-  const c = chain;
-  if (!c || c.busy || c.generation !== speech.generation) return;
-  if (c.wrapTo !== null) wrapRound(c, c.wrapTo);
-  const lines = c.reading.lines;
-  while (c.next < lines.length) {
-    const line = lines[c.next]!;
-    let earliest = -Infinity;
-    if (line.onset !== 'follows') {
-      const anchor = c.anchors.get(c.next);
-      if (anchor === undefined) {
-        // Waiting for its bar. If a later line's cue has already fired this round, this one's
-        // will not (the clock was joined after it): move on to that one.
-        const after = [...c.anchors.keys()].filter((k) => k > c.next).sort((a, b) => a - b)[0];
-        if (after === undefined) return;
-        c.next = after;
-        continue;
-      }
-      earliest = anchor;
-    } else if (c.prevEnd === null) {
-      // Joined in the middle of a stanza: there is no line before to follow, so this one waits for
-      // the piece to come round, as a line before the clock's bar does at the fitted pace.
-      c.next += 1;
-      continue;
-    }
-    if (c.prevEnd !== null) {
-      earliest = Math.max(earliest, c.prevEnd + c.prevPause);
-      if (line.onset === 'breath') {
-        // On a bar, and at least two bars after the one the last line ended in, so one whole bar
-        // between is silent: the first bar from there that begins no earlier than `earliest`.
-        let bar = Math.max(barAt(c, c.prevEnd) + 2, barAt(c, earliest));
-        if (barTime(c, bar) < earliest - 1e-6) bar += 1;
-        earliest = barTime(c, bar);
-      }
-    }
-    const pieceEnd = c.origin + (c.seconds[c.seconds.length - 1] ?? 0);
-    if (earliest >= pieceEnd - 1e-6) {
-      const lost = lines.slice(c.next).filter((l) => l.stanza >= line.stanza).map((l) => l.line + 1);
-      noteReading(`not read this time round: line ${lost.join(', ')}, the piece ends before its turn`);
-      console.log(`[reading] natural: the piece ends before line ${line.line + 1}`);
-      c.next = lines.length;
-      return;
-    }
-    speakNatural(c, line, earliest);
-    if (c.busy) return;
-  }
-}
-
-function speakNatural(c: Chain, line: NaturalLine, earliest: number): void {
-  const ctx = audioContext();
-  const who = speakerOf(line.text);
-  const nextLine = c.reading.lines[c.next + 1];
-  const last = !nextLine || nextLine.stanza !== line.stanza;
-  const after = () => { c.prevPause = line.pause; c.next += 1; };
-  if (who.fallback) noteReading(`line ${line.line + 1}: ${who.why}`);
-  if (who.engine === 'browser') {
-    if (who.why && !who.fallback) noteReading(who.why, who.bad);
-    c.busy = true;
-    later(earliest - ctx.currentTime, () => {
-      if (chain !== c) return;
-      console.log(`[reading] natural: line ${line.line + 1} with the browser voice at ${ctx.currentTime.toFixed(3)} s (due ${earliest.toFixed(3)}), pace ${line.pace}: ${line.text}`);
-      readLine({ ...line, stanzaLast: last }, line.pace, () => {
-        if (chain !== c) return;
-        c.prevEnd = audioContext().currentTime;
-        after();
-        c.busy = false;
-        advance();
-      });
-    });
-    return;
-  }
-  const voice = who.voice ?? '';
-  const buffer = rendered(who.engine, voice, line.pace, line.text);
-  if (!buffer) {
-    c.busy = true;
-    noteReading(`waiting for ${ENGINE_INFO[who.engine].label} to ${who.engine === 'recorded' ? 'fetch' : 'render'} line ${line.line + 1}`);
-    whenRendered(who.engine, voice, line.pace, line.text, true).then(() => {
-      if (chain !== c) return;
-      c.busy = false;
-      advance();
-    }, (error: Error & { dropped?: boolean }) => {
-      if (chain !== c) return;
-      // Dropped for a change of engine or voice: the line is asked for again by whoever reads now.
-      if (error.dropped) { c.busy = false; advance(); return; }
-      noteReading(`${ENGINE_INFO[who.engine].label} could not render line ${line.line + 1}: ${error.message}`, true);
-      after();
-      c.busy = false;
-      advance();
-    });
-    return;
-  }
-  const start = Math.max(earliest, ctx.currentTime + LEAD);
-  const late = start - earliest;
-  console.log(`[reading] natural: line ${line.line + 1} with ${who.engine} ${voice} at ${start.toFixed(3)} s`
-    + (late > 0.001 ? ` (${late.toFixed(3)} s late)` : '') + `, ${buffer.duration.toFixed(3)} s, pace ${line.pace}, then ${line.pause} s: ${line.text}`);
-  playBuffer(buffer, start, line, last);
-  c.prevEnd = spokenEnd(buffer, start);
-  if (readingNote.value.startsWith('waiting for')) noteReading('');
-  after();
-}
-
-/** Both cue patterns of a reading, their callbacks attached, stacked to play with the music. */
-export function cuesOf(reading: Reading, generation: number): Cues {
-  const byLine = new Map(reading.cues.map((cue) => [cue.line, cue]));
-  const fitted = evaluate(reading.pattern).onTrigger((hap, _currentTime, _cps, targetTime) => {
-    const cue = byLine.get(Number(hap.value?.n));
-    if (cue) fittedCue(cue, targetTime, generation);
-  }, true);
-  const indexOf = new Map(reading.lines.map((line, index) => [line.line, index]));
-  const natural = evaluate(reading.natural).onTrigger((hap, _currentTime, cps, targetTime) => {
-    const index = indexOf.get(Number(hap.value?.n));
-    if (index !== undefined) naturalCue(index, hap, targetTime, cps, generation);
-  }, true);
-  return { fitted, natural, both: strudel.stack(fitted, natural) };
+  return reading.bars.map((cycles) => cycles * 60 / reading.cpm);
 }
 
 // ---- What the reading says in the status bar ----
@@ -812,13 +709,31 @@ export function noteReading(text: string, bad = false, quiet = false): void {
   readingNoteBad.value = bad;
 }
 
-function noteLoss(text: string): void {
+export function noteLoss(text: string): void {
   lossNote = text;
   lossUntil = performance.now() + 8000;
   noteReading(text);
 }
 
 // ---- The reading panel's menus ----
+
+// A better voice, while the phone's voice is the one chosen and reads in a basic one: the
+// better one on the phone, by name, if there is one (the reader chose the basic one, or chose it
+// before the better one was downloaded); otherwise where to get one, as the phone says it (iOS has
+// that to say, Android not). An app cannot download a voice; the reader can, in Settings.
+export function voiceHint(): string | null {
+  const engine = engines.system;
+  if (engine.state !== 'ready') return null;
+  // Only while it is the voice chosen, whose voices the menu lists: standing in for another, the
+  // way to a better one would be to switch engines and back, which a hint should not ask.
+  if (settingsNow().engine !== 'system') return null;
+  const offered = engine.voices(language.value);
+  const now = voiceOf('system');
+  if (offered.find((v) => v.id === now)?.good) return null;
+  const better = offered.find((v) => v.good);
+  if (!better) return engine.improve ?? null;
+  return `${better.name} is on this phone: choose it under Voice for a better reading.`;
+}
 
 /** The reading panel's menus, from the settings and what each engine offers. */
 export function showVoices(): void {
@@ -831,7 +746,7 @@ export function showVoices(): void {
   const engine = settings.engine;
   const offered = engines[engine].voices(language.value);
   readingMenus.value = {
-    engines: ENGINE_NAMES.map((name) => {
+    engines: OFFERED_ENGINES.map((name) => {
       const state = engines[name].state === 'failed' ? ' — could not load' : engines[name].state === 'loading' ? ' — loading…' : '';
       return { value: name, label: ENGINE_INFO[name].label + state };
     }),
@@ -840,6 +755,7 @@ export function showVoices(): void {
       .concat(offered.map((v) => ({ value: v.id, label: v.name }))),
     voice: voiceOf(engine) ?? '',
     voiceDisabled: !offered.length && engine !== 'browser',
+    voiceHint: voiceHint(),
   };
 }
 
@@ -853,8 +769,8 @@ export function readingChanged(retry = false): void {
   if (playing.value) {
     quietReading();
     showPattern();
-    followPace();
   }
+  host?.recast(playing.value);
   const who = speaker();
   noteReading(who.why, who.bad);
 }
@@ -883,9 +799,10 @@ export function setLevel(level: number): void {
 export function voiceLevel(): number {
   return audible('voice') ? settingsNow().level : 0;
 }
-/** The voice's level, set on whatever is reading now. */
+/** The voice's level, set on whatever is reading now: the player's reading stem takes it as its
+ * gain (player/index.ts `sendGains`); the browser's voice, at its next line. A muted voice stops. */
 export function applyVoiceLevel(): void {
-  if (speech.bus) speech.bus.gain.setTargetAtTime(voiceLevel(), audioContext().currentTime, 0.02);
+  host?.level();
   if (!audible('voice') && 'speechSynthesis' in window) speechSynthesis.cancel();
 }
 
@@ -894,10 +811,8 @@ export function applyVoiceLevel(): void {
  * poem's in the old one's: until the new poem has compiled there is nothing to read. */
 export function readIn(code: string): void {
   if (code === language.value) return;
-  speech.generation = ++speech.generations;   // nothing the old poem cues is read any more
   quietReading();
   speech.playing = null;
-  speech.cues = null;
   piece.readings = { A: null, B: null, poem: '' };
   language.value = code;
   readingChanged();
@@ -927,7 +842,7 @@ export function chooseEngine(name: EngineName): void {
     downloadQuestion.value = {
       title: `${label} needs a one-time download of ${size()}.`,
       text: 'It runs entirely in your browser and is kept after this, so it won\'t download again. '
-        + 'Until it\'s ready, the poem is read by your browser\'s own voice, and the music plays on.',
+        + `Until it's ready, the poem is read by ${standInName()}, and the music plays on.`,
       yes: `Download ${label}`,
       answer: (yes) => {
         downloadQuestion.value = null;
@@ -950,7 +865,7 @@ function useEngine(name: EngineName, show: boolean): void {
     engine: name,
     back: before === name ? 'recorded' : before,
     title: `Downloading ${ENGINE_INFO[name].label}`,
-    text: `${DOWNLOADS[name]?.() ?? 'A download'}, once. Your browser's voice reads meanwhile; Hide lets it carry on in the background.`,
+    text: `${DOWNLOADS[name]?.() ?? 'A download'}, once. ${capital(standInName())} reads meanwhile; Hide lets it carry on in the background.`,
   });
   void warmVoice(name);
 }
@@ -962,7 +877,11 @@ async function warmVoice(name: EngineName): Promise<void> {
   const engine = engines[name];
   try {
     if (engine.loading) await engine.loading;
-    if (engine.state !== 'ready') return;
+    if (engine.state !== 'ready') {
+      // Loaded and let go at once, the page being hidden and silent (ensureEngine): nothing failed.
+      if (engine.state === 'idle' && loaderEngine() === name) closeLoader();
+      return;
+    }
     const line = (piece.readings[hearing.value]?.lines || []).find((l) => l.text.trim());
     const voice = voiceOf(name);
     if (line && engine.render && voice) {
@@ -972,7 +891,9 @@ async function warmVoice(name: EngineName): Promise<void> {
     if (loaderEngine() === name) closeLoader();
   } catch (error) {
     const failed = error as Error & { cancelled?: boolean; dropped?: boolean };
-    if (!failed.cancelled && !failed.dropped) loaderFailed(name, ENGINE_INFO[name].label, failed);
+    // Let go mid-line, the loader would otherwise stay frozen at its last progress.
+    if (failed.cancelled || failed.dropped) { if (loaderEngine() === name) closeLoader(); return; }
+    loaderFailed(name, ENGINE_INFO[name].label, failed, readsInstead());
   }
 }
 
@@ -1006,4 +927,32 @@ export function startReading(): void {
   // read from its file, not by the browser while the manifest is still on its way. A live engine
   // still loads only when chosen or played, its model being hundreds of MB.
   if (readingSettings.value.engine === 'recorded') ensureEngine();
+  startSystem();
+  document.addEventListener('visibilitychange', letVoicesGo);
+  document.addEventListener('visibilitychange', relistSystem);
+}
+
+// Back in front with nothing playing, the phone's voice lists its voices again: the reader may have
+// been to Settings to download a better one. While a piece plays it is left be, so the stand-in
+// never drops out mid-piece.
+export function relistSystem(): void {
+  if (document.visibilityState !== 'visible' || playing.value) return;
+  if (engines.system.state === 'ready') engines.system.state = 'idle';
+  startSystem();
+}
+
+// A loaded neural voice keeps its model and working memory in its worker until it is let go: about
+// 800 MB for Kokoro on WebAssembly, measured on a Pixel, which a phone short of memory swaps out
+// once another app is in front — and then every app stalls. So hidden and silent, the page lets
+// each loaded voice go (a download under way carries on, and the voice is let go once it has
+// loaded), and the phone's own engine with them; the next Play loads them again, as at start-up,
+// and the lines they rendered are kept. A Play still loading counts as playing (speech.starting).
+// One rendering a line is let go once the line is done (pumpRenders): cut off, Piper would lose the
+// voice it fetches with its first line, and the phone's engine leave the line unanswered.
+const hiddenAndSilent = () => document.visibilityState === 'hidden' && !playing.value && !speech.starting;
+export function letVoicesGo(): void {
+  if (!hiddenAndSilent()) return;
+  for (const name of [...NEURAL_ENGINES, 'system'] as const) {
+    if (engines[name].state === 'ready' && !renderingJobs.has(name)) engines[name].cancel?.();
+  }
 }

@@ -7,7 +7,7 @@ scale       = "whole_tone"
 root        = "D"
 tempo_range = [96, 104]
 swing       = 0.12
-bank        = "linn"
+bank        = "big_rusty"
 +++
 A CARAFE, THAT IS A BLIND GLASS.
 

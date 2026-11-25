@@ -1,0 +1,30 @@
+FluidR3 GM SoundFont
+
+The recordings of the soundfonts here whose file names contain "FluidR3_GM" come from the FluidR3 GM
+SoundFont by Frank Wen, by way of the webaudiofont files (webaudiofontdata.txt). The copyright and
+licence below are as the fluid-soundfont package records them from the bank's own README and COPYING
+(Debian, fluid-soundfont 3.1-5.3, debian/copyright).
+
+Copyright (c) 2000-2002, 2008 Frank Wen <getfrank@gmail.com>
+
+From the README: "I hereby release Fluid under the MIT license, as described in COPYING."
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES
+OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Fluid was constructed in part from samples found in the public domain, edited, cleaned, remixed and
+programmed by Frank Wen, and largely from his own recordings, with the help of Suren M. Seron, Scott
+Hanan, Steve Aupperle, Chris Gillman, Alex Taubr, Chris Prola, Andrew Klenk, Winfried Hubbe, Dylan,
+Tim, Gort, Uros Katic and Ethan Winer (from the README).

@@ -1,0 +1,88 @@
+{
+ "name": "gm_celesta",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0080_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 59,
+   "root": 54,
+   "loopStart": 25359,
+   "loopEnd": 26312,
+   "rate": 44100,
+   "file": "zones/4d6d6c934b56159b.flac"
+  },
+  {
+   "position": 1,
+   "low": 60,
+   "high": 65,
+   "root": 60,
+   "loopStart": 19225,
+   "loopEnd": 19562,
+   "rate": 44100,
+   "file": "zones/08eb3b2800b17afb.flac"
+  },
+  {
+   "position": 2,
+   "low": 66,
+   "high": 71,
+   "root": 66,
+   "loopStart": 24481,
+   "loopEnd": 24958,
+   "rate": 44100,
+   "file": "zones/aa5adec25b1036c8.flac"
+  },
+  {
+   "position": 3,
+   "low": 72,
+   "high": 77,
+   "root": 72,
+   "loopStart": 22571,
+   "loopEnd": 23245,
+   "rate": 44100,
+   "file": "zones/4aeb22ae94889c75.flac"
+  },
+  {
+   "position": 4,
+   "low": 78,
+   "high": 83,
+   "root": 78,
+   "loopStart": 21396,
+   "loopEnd": 21873,
+   "rate": 44100,
+   "file": "zones/17dbbb7b19899ff5.flac"
+  },
+  {
+   "position": 5,
+   "low": 84,
+   "high": 89,
+   "root": 84,
+   "loopStart": 19665,
+   "loopEnd": 20126,
+   "rate": 44100,
+   "file": "zones/60bb027844fb477d.flac"
+  },
+  {
+   "position": 6,
+   "low": 90,
+   "high": 95,
+   "root": 90,
+   "loopStart": 9497,
+   "loopEnd": 9884,
+   "rate": 44100,
+   "file": "zones/eca72194670ce445.flac"
+  },
+  {
+   "position": 7,
+   "low": 96,
+   "high": 108,
+   "root": 96,
+   "loopStart": 11684,
+   "loopEnd": 11705,
+   "rate": 44100,
+   "file": "zones/c594b500df1804bf.flac"
+  }
+ ]
+}

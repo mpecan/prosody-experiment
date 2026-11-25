@@ -2,9 +2,18 @@
 // layer's colour, scrolling past a playhead in the middle. Within a pitched lane a higher note sits
 // higher; a drum lane's hits sit on its middle line. An event sounding now is lit; one the mixer
 // silences is drawn faint, still there, since muting changes what is heard and not what the poem
-// is. Drawn from the events Strudel's drawer hands over each frame, so the roll and the lit poem
-// read one clock.
-import type { Hap } from './strudel/globals';
+// is. Drawn from the Performance's notes at the player's playhead each frame (player/index.ts), so
+// the roll and the lit poem read one clock.
+
+/** A note as the roll draws it: when it sounds on the playhead's clock, its lane's colour, its
+ * pitch if it has one, and whether the mixer silences it. */
+export interface RollNote {
+  begin: number;
+  end: number;
+  colour: string;
+  note?: number;
+  muted?: boolean;
+}
 
 /** A lane: its layer's name and colour. */
 export interface Lane {
@@ -33,33 +42,31 @@ export interface Frame {
   gutter: number;
 }
 
-const time = (at: { valueOf(): number }) => at.valueOf();
-
 /** Every event's bar, laid out: x from its span on the clock between `from` and `to`, y from its
  * lane and, in a pitched lane, its note against the lowest and highest note in view there. */
-export function laneRects(haps: Hap[], lanes: Lane[], now: number, [from, to]: [number, number], frame: Frame): Rect[] {
+export function laneRects(notes: RollNote[], lanes: Lane[], now: number, [from, to]: [number, number], frame: Frame): Rect[] {
   const laneHeight = frame.height / Math.max(1, lanes.length);
   const span = to - from || 1;
   const width = frame.width - frame.gutter;
-  const laneOf = (hap: Hap) => lanes.findIndex((lane) => lane.colour === hap.value?.color);
+  const laneOf = (note: RollNote) => lanes.findIndex((lane) => lane.colour === note.colour);
   // Each lane's range of notes in view, so its notes spread over its height.
   const range = new Map<number, [number, number]>();
-  for (const hap of haps) {
-    const lane = laneOf(hap);
-    const note = Number(hap.value?.note);
+  for (const played of notes) {
+    const lane = laneOf(played);
+    const note = Number(played.note);
     if (lane < 0 || !Number.isFinite(note)) continue;
     const [low, high] = range.get(lane) ?? [note, note];
     range.set(lane, [Math.min(low, note), Math.max(high, note)]);
   }
   const rects: Rect[] = [];
-  for (const hap of haps) {
-    const lane = laneOf(hap);
-    if (lane < 0 || !hap.whole) continue;
-    const [begin, end] = [time(hap.whole.begin), time(hap.whole.end)];
+  for (const played of notes) {
+    const lane = laneOf(played);
+    if (lane < 0) continue;
+    const { begin, end } = played;
     if (end < now + from || begin > now + to) continue;
     const x = frame.gutter + ((begin - now - from) / span) * width;
     const w = Math.max(2, ((end - begin) / span) * width - 1);
-    const note = Number(hap.value?.note);
+    const note = Number(played.note);
     const [low, high] = range.get(lane) ?? [0, 0];
     // A bar a third of its lane tall; within the lane, up to a third above or below its middle.
     const height = Math.max(3, laneHeight / 3);
@@ -67,7 +74,7 @@ export function laneRects(haps: Hap[], lanes: Lane[], now: number, [from, to]: [
     const y = lane * laneHeight + laneHeight / 2 - height / 2 - at * (laneHeight - height) * 0.8;
     rects.push({
       lane, x, y, width: w, height, colour: lanes[lane]!.colour,
-      active: begin <= now && now < end, muted: !!hap.value?.muted,
+      active: begin <= now && now < end, muted: !!played.muted,
     });
   }
   return rects;

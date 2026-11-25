@@ -1,6 +1,7 @@
 // The page: the top bar and the notices, then the stage — the poem, the roll under it, and the
 // folders beside it on a wide screen or under it on a phone — and the dialogs.
 import { Download } from './dialogs/Download';
+import { Licences } from './dialogs/Licences';
 import { Loader } from './dialogs/Loader';
 import { Share } from './dialogs/Share';
 import { Welcome } from './dialogs/Welcome';
@@ -21,6 +22,7 @@ export function App() {
         <Folders />
       </div>
       <Welcome />
+      <Licences />
       <Download />
       <Loader />
       <Share />

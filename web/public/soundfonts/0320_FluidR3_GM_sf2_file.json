@@ -1,0 +1,108 @@
+{
+ "name": "gm_acoustic_bass",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0320_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 28,
+   "root": 28,
+   "loopStart": 76560,
+   "loopEnd": 78701,
+   "rate": 44100,
+   "file": "zones/1fbf668959667006.flac"
+  },
+  {
+   "position": 1,
+   "low": 29,
+   "high": 29,
+   "root": 29,
+   "loopStart": 90123,
+   "loopEnd": 91133,
+   "rate": 44100,
+   "file": "zones/11458912c68d4aa5.flac"
+  },
+  {
+   "position": 2,
+   "low": 30,
+   "high": 36,
+   "root": 36,
+   "loopStart": 51742,
+   "loopEnd": 52417,
+   "rate": 44100,
+   "file": "zones/67d557b85c6b6e54.flac"
+  },
+  {
+   "position": 3,
+   "low": 37,
+   "high": 41,
+   "root": 41,
+   "loopStart": 52903,
+   "loopEnd": 53409,
+   "rate": 44100,
+   "file": "zones/63f9e1725c928ef3.flac"
+  },
+  {
+   "position": 4,
+   "low": 42,
+   "high": 46,
+   "root": 46,
+   "loopStart": 43947,
+   "loopEnd": 44705,
+   "rate": 44100,
+   "file": "zones/53582b3735d969d4.flac"
+  },
+  {
+   "position": 5,
+   "low": 47,
+   "high": 50,
+   "root": 54,
+   "loopStart": 36227,
+   "loopEnd": 36704,
+   "rate": 44100,
+   "file": "zones/50953c16e8548bc5.flac"
+  },
+  {
+   "position": 6,
+   "low": 51,
+   "high": 54,
+   "root": 54,
+   "loopStart": 36227,
+   "loopEnd": 36704,
+   "rate": 44100,
+   "file": "zones/50953c16e8548bc5.flac"
+  },
+  {
+   "position": 7,
+   "low": 55,
+   "high": 60,
+   "root": 60,
+   "loopStart": 42151,
+   "loopEnd": 42657,
+   "rate": 44100,
+   "file": "zones/a1d5fb3a6f09b324.flac"
+  },
+  {
+   "position": 8,
+   "low": 61,
+   "high": 66,
+   "root": 66,
+   "loopStart": 37190,
+   "loopEnd": 37667,
+   "rate": 44100,
+   "file": "zones/358a2e717a77782e.flac"
+  },
+  {
+   "position": 9,
+   "low": 67,
+   "high": 127,
+   "root": 72,
+   "loopStart": 24106,
+   "loopEnd": 24696,
+   "rate": 44100,
+   "file": "zones/71feeb80d195ba79.flac"
+  }
+ ]
+}

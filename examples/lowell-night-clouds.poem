@@ -5,7 +5,7 @@
 scale       = "lydian"
 root        = "C"
 tempo_range = [100, 108]
-bank        = "tr909"
+bank        = "uzu"
 +++
 The white mares of the moon rush along the sky
 Beating their golden hoofs upon the glass Heavens;

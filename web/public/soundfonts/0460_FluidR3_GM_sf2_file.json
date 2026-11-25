@@ -1,0 +1,148 @@
+{
+ "name": "gm_orchestral_harp",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0460_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 39,
+   "root": 34,
+   "loopStart": 52377,
+   "loopEnd": 53889,
+   "rate": 44100,
+   "file": "zones/06a2ba522cfd346d.flac"
+  },
+  {
+   "position": 1,
+   "low": 40,
+   "high": 46,
+   "root": 44,
+   "loopStart": 46854,
+   "loopEnd": 48129,
+   "rate": 44100,
+   "file": "zones/6d97b8bceb138d74.flac"
+  },
+  {
+   "position": 2,
+   "low": 47,
+   "high": 50,
+   "root": 49,
+   "loopStart": 44187,
+   "loopEnd": 44505,
+   "rate": 44100,
+   "file": "zones/e5877a5c74c70884.flac"
+  },
+  {
+   "position": 3,
+   "low": 51,
+   "high": 55,
+   "root": 54,
+   "loopStart": 51328,
+   "loopEnd": 52278,
+   "rate": 44100,
+   "file": "zones/714337657074ff24.flac"
+  },
+  {
+   "position": 4,
+   "low": 56,
+   "high": 59,
+   "root": 56,
+   "loopStart": 44800,
+   "loopEnd": 45651,
+   "rate": 44100,
+   "file": "zones/9008bdb97349f297.flac"
+  },
+  {
+   "position": 5,
+   "low": 60,
+   "high": 62,
+   "root": 61,
+   "loopStart": 30340,
+   "loopEnd": 30977,
+   "rate": 44100,
+   "file": "zones/3d702c154fd0de61.flac"
+  },
+  {
+   "position": 6,
+   "low": 63,
+   "high": 65,
+   "root": 63,
+   "loopStart": 18560,
+   "loopEnd": 18985,
+   "rate": 44100,
+   "file": "zones/35a857195b5423c2.flac"
+  },
+  {
+   "position": 7,
+   "low": 66,
+   "high": 68,
+   "root": 68,
+   "loopStart": 22767,
+   "loopEnd": 23297,
+   "rate": 44100,
+   "file": "zones/b155deea0dd33839.flac"
+  },
+  {
+   "position": 8,
+   "low": 69,
+   "high": 71,
+   "root": 70,
+   "loopStart": 25472,
+   "loopEnd": 25851,
+   "rate": 44100,
+   "file": "zones/88296999e1353083.flac"
+  },
+  {
+   "position": 9,
+   "low": 72,
+   "high": 75,
+   "root": 73,
+   "loopStart": 22848,
+   "loopEnd": 23246,
+   "rate": 44100,
+   "file": "zones/f56accc8e10c670f.flac"
+  },
+  {
+   "position": 10,
+   "low": 76,
+   "high": 81,
+   "root": 78,
+   "loopStart": 18866,
+   "loopEnd": 19105,
+   "rate": 44100,
+   "file": "zones/891aa08e42e15959.flac"
+  },
+  {
+   "position": 11,
+   "low": 82,
+   "high": 98,
+   "root": 83,
+   "loopStart": 14176,
+   "loopEnd": 14621,
+   "rate": 44100,
+   "file": "zones/8d4560883a849bb4.flac"
+  },
+  {
+   "position": 12,
+   "low": 99,
+   "high": 101,
+   "root": 99,
+   "loopStart": 10894,
+   "loopEnd": 11233,
+   "rate": 44100,
+   "file": "zones/90150c9beea9ec01.flac"
+  },
+  {
+   "position": 13,
+   "low": 102,
+   "high": 108,
+   "root": 102,
+   "loopStart": 8909,
+   "loopEnd": 9264,
+   "rate": 44100,
+   "file": "zones/0b1b199dfef9b6f6.flac"
+  }
+ ]
+}

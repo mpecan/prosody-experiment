@@ -6,3 +6,14 @@
 .DS_Store
 .idea/
 *.swp
+
+# The player's synth, built into the page by scripts/build-synth.sh, not written by hand.
+/web/public/synth.js
+/web/public/synth_bg.wasm
+
+# Each developer's own mise settings: the Apple team that signs device builds, a chosen phone.
+mise.local.toml
+
+# Signing keys never go in the repository.
+*.jks
+*.keystore

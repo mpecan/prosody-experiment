@@ -1,0 +1,138 @@
+{
+ "name": "gm_contrabass",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0430_GeneralUserGS_sf2_file.js",
+ "licence": "GeneralUser GS by S. Christian Collins, free for any use (its licence permits use and redistribution, commercial included)",
+ "licenceFile": "LICENSES/GeneralUser_GS.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 30,
+   "root": 30.78,
+   "loopStart": 7447.273,
+   "loopEnd": 13653.333,
+   "rate": 32000,
+   "file": "zones/0e6b9b0142585ec6.flac"
+  },
+  {
+   "position": 1,
+   "low": 31,
+   "high": 36,
+   "root": 33.83,
+   "loopStart": 15060.364,
+   "loopEnd": 21706.667,
+   "rate": 32000,
+   "file": "zones/a853833d841ca227.flac"
+  },
+  {
+   "position": 2,
+   "low": 37,
+   "high": 40,
+   "root": 38.81,
+   "loopStart": 12744.727,
+   "loopEnd": 19388.121,
+   "rate": 32000,
+   "file": "zones/162b80f40c510d93.flac"
+  },
+  {
+   "position": 3,
+   "low": 41,
+   "high": 45,
+   "root": 41.9,
+   "loopStart": 11164.121,
+   "loopEnd": 18118.788,
+   "rate": 32000,
+   "file": "zones/986bb17760f9680d.flac"
+  },
+  {
+   "position": 4,
+   "low": 46,
+   "high": 48,
+   "root": 47.54,
+   "loopStart": 15093.333,
+   "loopEnd": 21363.394,
+   "rate": 32000,
+   "file": "zones/b93cca7d77a16e32.flac"
+  },
+  {
+   "position": 5,
+   "low": 49,
+   "high": 52,
+   "root": 49.55,
+   "loopStart": 12128,
+   "loopEnd": 18604.606,
+   "rate": 32000,
+   "file": "zones/120c85514b20d689.flac"
+  },
+  {
+   "position": 6,
+   "low": 53,
+   "high": 57,
+   "root": 54.87,
+   "loopStart": 14151.758,
+   "loopEnd": 19240.727,
+   "rate": 32000,
+   "file": "zones/11fad8547c7476ef.flac"
+  },
+  {
+   "position": 7,
+   "low": 58,
+   "high": 59,
+   "root": 54,
+   "loopStart": 29466.667,
+   "loopEnd": 35827.2,
+   "rate": 32000,
+   "file": "zones/4f375d10932c23c8.flac"
+  },
+  {
+   "position": 8,
+   "low": 60,
+   "high": 67,
+   "root": 64,
+   "loopStart": 23222.693,
+   "loopEnd": 29199.027,
+   "rate": 32000,
+   "file": "zones/79119b3f05ef1173.flac"
+  },
+  {
+   "position": 9,
+   "low": 68,
+   "high": 69,
+   "root": 65,
+   "loopStart": 18672.178,
+   "loopEnd": 25119.541,
+   "rate": 32000,
+   "file": "zones/8e4d8648dd7d438a.flac"
+  },
+  {
+   "position": 10,
+   "low": 70,
+   "high": 72,
+   "root": 69,
+   "loopStart": 25450.448,
+   "loopEnd": 31642.655,
+   "rate": 32000,
+   "file": "zones/2b5d35848acb4e17.flac"
+  },
+  {
+   "position": 11,
+   "low": 73,
+   "high": 100,
+   "root": 71,
+   "loopStart": 26119.859,
+   "loopEnd": 31840.011,
+   "rate": 32000,
+   "file": "zones/25e6e683787155b6.flac"
+  },
+  {
+   "position": 12,
+   "low": 101,
+   "high": 105,
+   "root": 75,
+   "loopStart": 31276.824,
+   "loopEnd": 37480.351,
+   "rate": 32000,
+   "file": "zones/5071469fb13760b5.flac"
+  }
+ ]
+}

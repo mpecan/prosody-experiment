@@ -40,7 +40,7 @@ const settings = [
   'set=anchor:on&profile=jazz',
   'set=melody:assonance&profile=jazz',
 ];
-const views = ['/pattern', '/explain', '/reading', '/score', '/trace'];
+const views = ['/pattern', '/explain', '/reading', '/score', '/trace', '/performance'];
 
 let compared = 0;
 for (const file of readdirSync(examples).filter((name) => name.endsWith('.poem')).sort()) {

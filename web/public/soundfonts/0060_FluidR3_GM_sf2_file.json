@@ -1,0 +1,118 @@
+{
+ "name": "gm_harpsichord",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0060_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 39,
+   "root": 38,
+   "loopStart": 167374,
+   "loopEnd": 170995,
+   "rate": 44100,
+   "file": "zones/a89a3f719b54e942.flac"
+  },
+  {
+   "position": 1,
+   "low": 40,
+   "high": 44,
+   "root": 43,
+   "loopStart": 82026,
+   "loopEnd": 86528,
+   "rate": 44100,
+   "file": "zones/98d9b0deead0bc26.flac"
+  },
+  {
+   "position": 2,
+   "low": 45,
+   "high": 48,
+   "root": 48,
+   "loopStart": 99441,
+   "loopEnd": 102477,
+   "rate": 44100,
+   "file": "zones/83191e83460e2f5e.flac"
+  },
+  {
+   "position": 3,
+   "low": 49,
+   "high": 54,
+   "root": 53,
+   "loopStart": 47196,
+   "loopEnd": 47448,
+   "rate": 44100,
+   "file": "zones/dd610dd5599d4f50.flac"
+  },
+  {
+   "position": 4,
+   "low": 55,
+   "high": 61,
+   "root": 60,
+   "loopStart": 91398,
+   "loopEnd": 93249,
+   "rate": 44100,
+   "file": "zones/9ccea8411102e61e.flac"
+  },
+  {
+   "position": 5,
+   "low": 62,
+   "high": 65,
+   "root": 65,
+   "loopStart": 36618,
+   "loopEnd": 36997,
+   "rate": 44100,
+   "file": "zones/facb921ecaee1e76.flac"
+  },
+  {
+   "position": 6,
+   "low": 66,
+   "high": 71,
+   "root": 71,
+   "loopStart": 37383,
+   "loopEnd": 39081,
+   "rate": 44100,
+   "file": "zones/ba8cfc4c62ebc996.flac"
+  },
+  {
+   "position": 7,
+   "low": 72,
+   "high": 77,
+   "root": 77,
+   "loopStart": 30673,
+   "loopEnd": 31873,
+   "rate": 44100,
+   "file": "zones/c095150a9d68651c.flac"
+  },
+  {
+   "position": 8,
+   "low": 78,
+   "high": 86,
+   "root": 86,
+   "loopStart": 30172,
+   "loopEnd": 30397,
+   "rate": 44100,
+   "file": "zones/1f28d44aa062b929.flac"
+  },
+  {
+   "position": 9,
+   "low": 87,
+   "high": 95,
+   "root": 95,
+   "loopStart": 20130,
+   "loopEnd": 20576,
+   "rate": 44100,
+   "file": "zones/f81db7a29dd0053e.flac"
+  },
+  {
+   "position": 10,
+   "low": 96,
+   "high": 127,
+   "root": 96,
+   "loopStart": 35993,
+   "loopEnd": 36753,
+   "rate": 44100,
+   "file": "zones/b51e7ee333433069.flac"
+  }
+ ]
+}

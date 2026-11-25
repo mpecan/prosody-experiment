@@ -410,6 +410,213 @@ jazz profile now measures the first (`cross_rhythm`).
 
 ## Log
 
+### The player, step 5 — the native player on Android, with the screen off
+
+Step 5 of `docs/player.md` for Android (iOS later); what reality changed in the design is in its §13.
+
+- **`prosody-player`**, a new pure crate: the render worker's logic (rendering ahead, the reading's
+  timing, the recordings asked for and let go, the events) as `Engine` and `reader`, which the
+  browser's worker (through `prosody-synth-wasm`) and the app both run; the worklet's mix as `Mixer`
+  for the app. `reader.ts` is gone; its tests are Rust now, the same cases and numbers, on whole
+  frames. Cues travel as records, like notes.
+- **The native player** (`src-tauri/src/player`): `player_open`, `player_post` (the worker's
+  messages, buffers as base64), `player_mix`, `player_poll` (report and events, asked for rather than
+  pushed); a render thread and a lock-free audio callback through `cpal` (new: Apache-2.0, a safe
+  wrapper of AAudio and, later, Core Audio, where calling them by hand needs `unsafe`). The lead is at
+  least twice the output's largest buffer; output xruns are counted and said. The page uses it when it
+  is inside the app (`web/src/player/native.ts`), the worklet otherwise.
+- **Android**: a `mediaPlayback` foreground service with a `MediaSession` notification
+  (`PlaybackService.kt`), a wake lock and the audio focus while playing; its buttons reach the native
+  player through an app plugin (`MediaPlugin.kt`, `src-tauri/src/media.rs`). Stop works with the page
+  asleep; Play goes through the page. Minimum SDK 24 → 26 (AAudio).
+- **Tests**: the reader, engine, mixer and records (Rust, hand-worked); the bridge's base64 against
+  RFC 4648's vectors, the messages it reads and refuses, the render thread keeping its lead and the
+  callback playing it, the outbox keeping order, a mute through the atomics, the lead widening, a
+  pause button; on the page, the base64 the Rust side reads back, the calls in order, the poll handed
+  on, and the page playing through the native player and stopping on its pause button.
+- **Device.** The Pixel (58131FDCQ009PT) was not connected; the debug app was checked on the arm64
+  emulator. Before `prosody-synth`/`prosody-player` were optimised in the dev profile, the render
+  thread took 36% of a core and the queue ran dry 3–47 buffers at a time around the screen turning
+  off or on; after, about 10%, and over 3 min 15 s with six 20 s screen-offs (and a separate 60 s one)
+  no underrun, every line of the reading on its cue (35 of 35), the stream `started`, the wake lock
+  held and the session `PLAYING` throughout; the emulator's output reported two xruns in the long run
+  and the playhead ended 3.5 s behind the wall clock there (within 0.5 s in the 60 s run). A headset
+  pause dispatched with the screen off (`cmd media_session dispatch pause`) stopped the music and the
+  session; `input keyevent` media keys are not routed with the emulator's screen off.
+- **Review remediation.** A failed output (a route change, the audio server restarting: cpal's
+  `DeviceNotAvailable`) is reopened by the render thread, which now holds the stream, at the same
+  rate, on a new channel to a fresh mixer, the engine going on from its frontier in the same start of
+  play (`Engine::reopened`); it counts as one glitch, is reopened only while something plays, and a
+  reopen that fails is told once and retried every second. Nothing playing for a second, the stream
+  pauses and the render thread parks until a command; the page asks every 500 ms instead of 40 ms
+  while stopped. The lead narrows again: twice the largest buffer since the page was last shown while
+  shown, twice the largest ever while hidden (`player_view`, `Engine::keep` replacing `widen`). A
+  lock-screen Play is kept 5 s, and a stop cancels it. `PlaybackService` keeps the latest state asked
+  for, so a Stop during its creation brings it up stopped and gone; a refused audio focus stops the
+  music. The notification is told of starts and stops under the player's lock. Pinned by tests that
+  fail without the fixes: the render thread's rounds against a pretend output (a loss reopened and
+  played on from the frontier, a failing reopen told once and retried, no reopen while stopped, the
+  idle pause and the resume, a stuck resume reopened), a lost output's replacement channel, the lead
+  narrowing and widening, a stale Play let go, the notification told under the lock, the engine's
+  `keep` and `reopened` (Rust); the idle poll and the hiding told (Vitest). The Kotlin compiles
+  (`compileUniversalDebugKotlin`) and the app passes clippy for `aarch64-linux-android`; none of it
+  has been run on a device yet.
+- **Final review remediation** (`docs/player.md` §13 lists each): underruns, glitches and losses
+  counted per start of play, not blamed on the next Play; a flush's fade under the browser voice's
+  duck; echoes up to 45 s, so a style under tempo 11.25 plays; `prosody render` keeps the echo's
+  repeats; the channel compressor hears the loudest voice, not the sum (every corpus render's hash
+  moved: pentameter differs by −51 dB rms, 0.12 dB louder; the echoing ones are also about 2 s
+  longer); a shrunk room rings on; a mark over the loop's end stays lit; the browser player suspends
+  its AudioContext a second after Stop and its worker's timer stops; the soundfonts' licence texts in
+  `web/public/soundfonts/LICENSES/`, linked from the about dialog and served (`.txt`) by
+  `prosody-web`; CI's `app` job installs `libasound2-dev` for cpal. All gates green, e2e included.
+
+### The player, step 4 — the reading through the player, and Strudel's runtime gone
+
+Step 4 of `docs/player.md`; what reality changed in the design is in its §12.
+
+- **`prosody-synth`** (`speech`): a recorded line placed on the fifth stem from an output frame,
+  resampled to the output's rate, cut off with a 256-frame fade; the duck written into each block's
+  lane from the same placements (0.08 s fall, 0.15 s rise, 0.05 s after a line and its hold — the
+  page's own automation). `prosody-synth-wasm` gives the worker `add_line`, `speak`, `cut_speech`,
+  `set_duck`.
+- **The render worker times the reading** (`web/src/player/reader.ts`): the Performance's cues of
+  the pace read, found in each block before it is rendered, round the loop and across a hand-over;
+  the natural pace's chain moved from the page unchanged in what it decides, on output frames, "now"
+  being the render frontier; the breath carried across a live edit. The page casts each line (a
+  render key, or the browser's voice) and sends a piece's rendered lines ahead of the piece; the
+  browser's voice is spoken by the page off the playhead, ducked by the worklet, and said to be
+  unsynchronised.
+- **Strudel's runtime removed** from the page and the app (decision 1): `@strudel/web`, `draw` and
+  `soundfonts`, the import map and globals, the warm-up, parse-ahead, dropped-tick watcher, `Drawer`
+  and the Player switch. `@strudel/core`, `mini` and `transpiler` stay dev dependencies for the
+  parity test. The page runs no code it compiles. The Strudel text, its copy and share links and the
+  strudel.cc instructions are unchanged.
+- **Tests**: hand-worked units for placement, resampling, late starts, cuts, the duck's fall and
+  rise and a stanza's single duck (`speech`), the renderer and the wasm binding with a line among
+  notes; the reader at both paces (bars, loops, the breath, a line waited for, the browser's voice
+  chained on its end, a stanza the piece ends before, a hand-over with the breath carried, a change
+  of pace, what is wanted); the worklet's browser-voice duck; the page handing the worker the
+  reading; e2e: playing and reading with every other host refused, a recorded line placed exactly on
+  its cue and lit, a muted voice silent on its stem and heard again, every soundfont beside the page.
+- **Device.** The Android app was rebuilt (`cargo tauri android build --debug --target aarch64
+  --apk`, with the site built first: run from the repository, the config's `beforeBuildCommand`
+  looks for `scripts/build-site.sh` inside `src-tauri` and fails); its binary carries the synth and
+  no Strudel file. On the emulator, attached over CDP, The Tyger played 18 s with zero underruns,
+  nothing missing, and all eight lines placed on their cues. The Pixel (58131FDCQ009PT) was not
+  connected, so the profile of §6 was not rerun.
+- **Review remediation.** The served page plays again: `scripts/build-synth.sh` writes the synth
+  into `web/public`, so `npm run build` (served by `prosody-web`) and `npm run dev` carry it, and
+  the server answers `.wasm` and `.flac` (the bindings' installer is shared, `scripts/wasm-bindgen.sh`).
+  Play loads a saved live engine. The natural pace places a line only when the block it begins in is
+  next, so a long stanza cannot overflow the synth's 64 placements, and a refused line is not told
+  as spoken. A cut releases the duck from the cut, and a line cut in its quiet lead ducks nothing. A
+  hand-over cuts a still-sounding line of the browser's voice at the playhead, and the duck switch
+  reaches that voice at once. `Renderer::speaking`, unused and unsound, is gone. Pinned by tests that
+  fail without the fixes: the duck after a cut with a hold and in a lead (Rust); a 100-line stanza
+  placed a line at a time, a refused line, `failed()`, the re-ask on a recast, a wrap at the seam
+  while the voice reads, a saved engine loading on Play, the browser's voice cut at a hand-over and
+  following the duck switch (Vitest); every file in `web/public` of a type the server answers (Rust);
+  and e2e for the fitted pace, a preset restarting the reading at line 1 (B's defaults read nothing),
+  and a live edit while reading with no underruns.
+
+### The player, step 3 — everything the text asks for, matched to Strudel by measurement
+
+Step 3 of `docs/player.md`; what reality changed in the design, and every measurement, is in its
+§11. Strudel's source was not read: single notes were played through its public API in headless
+Chromium and its output recorded beside our synth's.
+
+- **`prosody-synth`**: per note, a formant vowel (five parallel band-passes fitted to Strudel's
+  response), a bit crusher, Bram de Jong's waveshaper, then postgain; per channel, a bus with a
+  feed-forward compressor (Giannoulis et al., Web Audio's makeup), a feedback echo and an 8-line
+  feedback delay network (RT60 = `roomsize`); five stereo stems and a duck lane; the master's glue
+  compressor and soft clip for a file. Measured and matched: 0.3 output level for oscillators and
+  soundfonts, Strudel's default envelope (50 ms decay to 0.6 when nothing is set), linear release,
+  the Gibbs-normalised saw and square, the low-pass at Web Audio's Q. Its own `log2`, so a render
+  is still the same bits everywhere.
+- **Soundfonts as our own FLAC zones** (`scripts/render-soundfonts.mjs`, decision 3): 31.1 MB for
+  28 instruments, licences and sources in `web/public/soundfonts/SOURCES.md`, decoded at their own
+  rate on the page. A key plays the zone holding the key below it, as Strudel was measured to.
+- **The page**: notes carry every effect (22 numbers a note); the worklet mixes five stems, ducks
+  the music, glues and clips as the page's Strudel master did; mute and solo stay instant.
+- **Tests**: hand-worked units for every stage (formant levels, the compressor's curve, makeup,
+  attack and release, the echo's repeats, the reverb's decay and decorrelation, the crusher's
+  steps, the shaper, the decay to sustain, the duck); a golden `effects` scene; the page's records,
+  glue and duck; the shipped soundfonts' integrity; an e2e that plays jazz through the Prosody
+  player with every other host refused. The Pixel profile was not rerun (the device was not
+  connected).
+- **Review remediation.** A channel's compressor no longer outlives the piece that asked for it (a
+  dry note or a stop removes it); bus changes land on the starting note's frame rather than the
+  block's, so a hand-over is the same bits at any block size; a tempo or compression edit lets the
+  old echo ring out and keeps the compressor's reduction; mono voices run the low-pass and vowel
+  once for both sides (the same bits). The fixes are pinned by tests that fail without them (a
+  fresh renderer against stop-then-play and against a swap, two block sizes, the old echo's
+  repeats, the compressor's kept reduction, the reverb's tail kept through a resize), the mono
+  path by the same sample given in stereo, and the echo's silence and clearing has its own test.
+
+### The player, step 2 — first sound: our own synth, a render worker and a worklet
+
+Step 2 of `docs/player.md`, behind a Strudel/Prosody **Player** switch in the Mixer (Strudel stays
+the default). What reality changed in the design is in its §10.
+
+- **`prosody-synth`** (pure, no workspace dependency): a sampler (drums played through; soundfont
+  zones pitched by 2^((note − root)/12), Catmull–Rom interpolation, loops), PolyBLEP saw and square,
+  a PolyBLAMP triangle, a sine; a linear-attack, exponential-release envelope; an RBJ low-pass at
+  the Butterworth Q; gain × postgain; a fixed pool of 64 voices that steals the voice nearest its
+  end and counts it; missing sounds counted. Four stereo stems. Its own `sin`, `exp2` and `tanh`,
+  so a render is the same bits everywhere; scheduling, looping and the bar-boundary hand-over in
+  whole frames.
+- **`prosody-synth-wasm`**: the synth for the page's render worker (105 kB), fed a flat record of
+  twelve numbers a note.
+- **`prosody render --out x.wav`**: the piece once through the synth to a hand-rolled 16-bit WAV.
+  Oscillators only — FLAC and MP3 decoding are deferred (a dependency to argue for, best settled
+  with the soundfont conversion of decision 3) — and every note left out is named.
+- **The page** (`web/src/player`): the render worker keeps ~0.5 s of stems rendered ahead and posts
+  them straight to the AudioWorklet over a MessageChannel; the worklet mixes the stems at the
+  mixer's gains (mute and solo are instant) through the page's soft clip, counts underruns, and
+  reports its playhead. The lit poem, the roll and the meters read the Performance at that
+  playhead. Live edits hand over at the next bar boundary after the render frontier; presets and
+  A/B switches restart. The reading is not played by it yet (step 4), and the status line says so.
+- **Tests**: hand-worked DSP units (−3 dB at the cutoff, envelope levels at known frames, oscillator
+  periods and Fourier amplitudes, PolyBLEP's alias suppression, sampler pitch ratio, loops, WAV
+  bytes); the renderer's clock (loops, bar hand-over, stealing); golden hashes of oscillator, drum
+  and soundfont scenes and of the corpus rendered with oscillators; the page's records, clock,
+  mixer and soundfont parsing (Vitest); and an e2e that blocks the page's thread for 500 ms while
+  the Prosody player plays — zero underruns, the playhead moving, sound coming out.
+
+### The player, step 1 — the Performance: every note resolved, and a parity test against Strudel
+
+The user accepted `docs/player.md` (our own player; Strudel stays the text) with its open questions
+answered as recommended, and asked for it built step by step. Step 1, no audio:
+
+- **One source of the numbers (`prosody_emit::perform`).** Every per-event value the Strudel text
+  prints — drum piece, gain, cutoff, attack, room, crush, vowel, nudge and velocity, shape, the bus
+  calls, melody and bass and chord tones, release, echo — is now a function there, and the emitter
+  prints what it returns. The grid walk is shared too: `strudel::lines` builds a lane's steps once,
+  the text writes them, the Performance times them. Every corpus snapshot is byte-identical.
+- **The `Perform` backend** (`Output = Performance`): notes with span, channel, lane, slot, grid
+  position, onset and length in seconds after swing and nudge, sound, pitch, level and every
+  parameter; bars; the trace's lights; and, through `Performance::read`, the reading's cues at both
+  paces. Values at the text's three decimals; times exact fractions until read.
+- **`POST /performance`** answers it as JSON, the same from the server and the WebAssembly build
+  (`scripts/check-wasm.mjs` compares it too).
+- **Properties** (`crates/prosody-emit/tests/perform.rs`): I1, I3 (no palette moves a note's word,
+  lane, bar or grid place), I4 (every note, light and cue on its words), and I2 scoped as the core's
+  bass property is (layer, rhyme words and refrains assumed unchanged).
+- **The parity test** (`web/test/parity.test.ts`) evaluates thirteen committed fixtures' patterns
+  with `@strudel/core` and compares every hap with the Performance, to 1e-6: they agree note for
+  note. **Measured, and a decision for the user:** Strudel's `swingBy` doubles some notes and drops
+  others that its documentation says it delays (`docs/player.md` §9). The Performance follows the
+  documentation, which keeps I3; the test names exactly the notes where Strudel departs. Making the
+  text swing as documented would change every swung piece's text, so it waits for the user.
+- **Review remediation.** The cue clock, the marks and each note's bar are now pinned by hand-worked
+  tests (a later slot at 100 cpm; marks against the trace; every note's grid inside its bar's
+  cycles and its onset before the next bar but for swing and nudge). Cycles and exact seconds are
+  separate types, as is a compressor's threshold. The Performance carries the reading's unread
+  lines and their reasons (`unread`, `natural_unread`, in `/performance` too). Three more parity
+  fixtures reach chords at a density level, erosion, and the gradual handover without an outro;
+  all sixteen agree with Strudel.
+
 ### CI and build pipeline speedups
 
 The user asked to review CI performance and optimize build and tool installation times.

@@ -1,6 +1,7 @@
 // The Reading folder: a voice reading the poem over the music — who reads, in what language and
 // voice, and at what pace. Its level and the duck are on the Mixer.
 import { chooseEngine, setLanguage, setPace, setVoice } from '../../reading';
+import { NEURAL_VOICES } from '../../reading/engines';
 import { language, readingMenus, readingSettings, type EngineName, type Pace } from '../../store';
 import { More } from '../desk/More';
 import { Patch } from '../desk/Patch';
@@ -16,7 +17,9 @@ export function ReadingFolder() {
         <span class="hint">A voice reading the poem over the music.</span>
       </div>
       <div class="module reading" aria-label="The reading">
-        <div class="wide" title="Who reads: your browser's own voice, a neural voice that runs in this page — downloaded once you choose it, then kept by the browser — or readings recorded ahead of time for the example poems, a small file a line">
+        <div class="wide" title={NEURAL_VOICES
+          ? "Who reads: your browser's own voice, a neural voice that runs in this page — downloaded once you choose it, then kept by the browser — or readings recorded ahead of time for the example poems, a small file a line"
+          : "Who reads: your device's own voice, or readings recorded ahead of time for the example poems, a small file a line"}>
           <Segmented id="engine" label="Who reads" value={settings.engine} options={menus.engines} wrap colour="var(--rhyme)"
             onChange={(name) => chooseEngine(name as EngineName)} />
         </div>
@@ -28,6 +31,7 @@ export function ReadingFolder() {
         </div>
         <div class="wide">
   <Patch id="voice" label="Voice" value={menus.voice} options={menus.voices} onChange={setVoice} colour="var(--rhyme)" disabled={menus.voiceDisabled} />
+          {menus.voiceHint && <span class="hint" id="voice-hint">{menus.voiceHint}</span>}
         </div>
       </div>
       <More label="How the reading works">
@@ -43,9 +47,13 @@ export function ReadingFolder() {
           At the <em>natural</em> pace a line follows the one before after a pause from how it
           ends — a quarter of a second after a line that runs on, more after a comma, more after a
           full stop, a second and a half at a stanza's end; <em>fitted</em> fits each line to its bar.
-          Strudel's clock places every line; a neural voice is rendered ahead and started exactly on
-          it, the browser's voice as near as its speech allows. Kokoro and Kitten speak English;
-          Piper speaks many languages, Slovenian among them. Kitten needs WebGPU.
+          The player places every line on the music's clock: a recorded or neural voice is rendered
+          ahead and starts exactly on its beat, ducking the band as it goes; the browser's own voice
+          cannot be placed, so it starts when the playhead reaches its line and is not in step with
+          the music.
+          {NEURAL_VOICES
+            ? ' Kokoro and Kitten speak English; Piper speaks many languages, Slovenian among them. Kitten needs WebGPU.'
+            : " A line the recordings do not have — an edited line, a poem of your own — is read by the device's own voice."}
         </p>
       </More>
     </div>

@@ -7,7 +7,11 @@
 // answers the same three calls: `load(onProgress)`, `voices(language)` and `render(text, { voice,
 // speed })`, which gives an AudioBuffer. A fifth, `recorded`, answers the same calls from files
 // made ahead of time (scripts/readings/): its `render` fetches and decodes a line's recording.
+// In the phone apps, `system` is the phone's own speech engine, which renders a line as the neural
+// voices do with nothing to download; it stands in where the browser's voice would, since the
+// Android app's WebView has no speech synthesis and iOS's cannot be placed on the beat.
 import type { Reading } from '../answers';
+import { inApp, invoke } from '../player/native';
 import type { EngineName } from '../store';
 
 export interface Voice {
@@ -15,6 +19,8 @@ export interface Voice {
   name: string;
   lang: string;
   have?: number;
+  /** A phone voice good enough not to suggest a better one (Enhanced or Premium on iOS). */
+  good?: boolean;
 }
 
 export interface Progress {
@@ -39,6 +45,8 @@ export interface Engine {
   /** Null for the browser's voice, which is spoken, not made. */
   render: ((text: string, options: { voice: string; speed: number }) => Promise<Rendered>) | null;
   cancel?(): void;
+  /** Where the reader can get a better voice than the ones listed, as the phone says it. */
+  improve?: string | null;
 }
 
 // What each neural engine offers before it has loaded — its default voice per language — and,
@@ -46,13 +54,38 @@ export interface Engine {
 // catalogue (rhasspy/piper-voices) and offers every language there.
 export const ENGINE_INFO: Record<EngineName, { label: string; defaults: Record<string, string> }> = {
   browser: { label: 'browser voice', defaults: {} },
+  system: { label: 'system voice', defaults: {} },
   kokoro: { label: 'Kokoro-82M', defaults: { en: 'af_heart' } },
   piper: { label: 'Piper', defaults: { en: 'en_GB-cori-medium', sl: 'sl_SI-artur-medium' } },
   kitten: { label: 'Kitten TTS (nano)', defaults: { en: 'Bella' } },
   // The recorded readings' voices are named `engine:voice`, after the live voice that made them.
   recorded: { label: 'recorded readings', defaults: { en: 'kokoro:af_heart', sl: 'piper:sl_SI-artur-medium' } },
 };
-export const ENGINE_NAMES: EngineName[] = ['kokoro', 'piper', 'kitten', 'recorded', 'browser'];
+export const ENGINE_NAMES: EngineName[] = ['kokoro', 'piper', 'kitten', 'recorded', 'system', 'browser'];
+
+// The neural engines carry eSpeak NG (GPL-3) inside them — Kokoro's phonemiser, piper-wasm, Kitten's
+// — and run code fetched at run time, neither of which an App Store app may ship. A build made with
+// `PROSODY_NEURAL_VOICES=off` (scripts/build-site.sh passes it to Vite; `mise run site:ios` sets it
+// for the iOS app) leaves speech-worker.mjs out and offers only the recorded readings and the
+// browser's voice. Every other build offers all five, as before.
+export const NEURAL_ENGINES: readonly EngineName[] = ['kokoro', 'piper', 'kitten'];
+export const NEURAL_VOICES = import.meta.env.VITE_PROSODY_NEURAL_VOICES !== 'off';
+
+// The phone's own speech engine is bridged on Android and iOS (src-tauri/src/speech.rs), not on a
+// desktop; where it is, it replaces the browser's voice. An iPad's WebView says it is a Mac, and
+// is told apart by its touch screen.
+export const SYSTEM_VOICE = inApp() && onPhone(navigator.userAgent, navigator.maxTouchPoints);
+export function onPhone(agent: string, touches: number): boolean {
+  return /Android|iPhone|iPad|iPod/.test(agent) || (/Macintosh/.test(agent) && touches > 1);
+}
+
+/** The engines a build offers: all of them, or, without the neural voices, the recordings and the
+ * stand-in voice — the browser's, or in the phone apps the system's. */
+export function offeredEngines(neural: boolean, system = false): EngineName[] {
+  return ENGINE_NAMES.filter((name) => (neural || !NEURAL_ENGINES.includes(name))
+    && name !== (system ? 'browser' : 'system'));
+}
+export const OFFERED_ENGINES = offeredEngines(NEURAL_VOICES, SYSTEM_VOICE);
 
 export const sameLanguage = (lang: string | undefined, wanted: string) =>
   (lang || '').toLowerCase().replace('_', '-').split('-')[0] === wanted;
@@ -73,6 +106,141 @@ const browser: Engine = {
   voices: (lang) => browserVoices.filter((v) => sameLanguage(v.lang, lang)).map((v) => ({ id: v.name, name: `${v.name} (${v.lang})`, lang: v.lang })),
   // The browser's voice cannot be rendered ahead: it is spoken, not made.
   render: null,
+};
+
+// ---- The phone's own voice ----
+
+/** A WAV file's first channel as samples, and its rate: 16-bit, 8-bit or 32-bit float PCM, as an
+ * Android speech engine writes it, and as SpeechPlugin.swift does (float). */
+export function parseWav(bytes: ArrayBuffer): { pcm: Float32Array; rate: number } {
+  const view = new DataView(bytes);
+  const tag = (at: number) => String.fromCharCode(view.getUint8(at), view.getUint8(at + 1), view.getUint8(at + 2), view.getUint8(at + 3));
+  if (bytes.byteLength < 12 || tag(0) !== 'RIFF' || tag(8) !== 'WAVE') throw new Error('not a WAV file');
+  let format = 0, channels = 1, rate = 0, bits = 0;
+  for (let at = 12; at + 8 <= bytes.byteLength;) {
+    const id = tag(at);
+    // An engine still writing gives the data chunk's size as 0 or past the end: it runs to the end.
+    const declared = view.getUint32(at + 4, true);
+    const size = id === 'data' && (declared === 0 || at + 8 + declared > bytes.byteLength) ? bytes.byteLength - at - 8 : declared;
+    if (id === 'fmt ') {
+      format = view.getUint16(at + 8, true);
+      channels = view.getUint16(at + 10, true);
+      rate = view.getUint32(at + 12, true);
+      bits = view.getUint16(at + 22, true);
+    } else if (id === 'data') {
+      // Android's FileSynthesisCallback labels float audio as PCM (format 1, 32 bits): any 32-bit
+      // file is read as float. A pair not read here is refused, never decoded as silence.
+      const float = bits === 32 && (format === 3 || format === 1);
+      if (!rate || !(float || (format === 1 && (bits === 16 || bits === 8)))) throw new Error(`a WAV the reading cannot read (format ${format}, ${bits} bits)`);
+      const width = bits / 8;
+      const frames = width && channels ? Math.floor(size / (width * channels)) : 0;
+      const pcm = new Float32Array(frames);
+      for (let i = 0; i < frames; i += 1) {
+        const p = at + 8 + i * width * channels;
+        pcm[i] = float ? view.getFloat32(p, true)
+          : bits === 16 ? view.getInt16(p, true) / 32768
+            : (view.getUint8(p) - 128) / 128;
+      }
+      return { pcm, rate };
+    }
+    at += 8 + size + (size % 2);   // chunks are padded to an even length
+  }
+  throw new Error('a WAV file with no audio');
+}
+
+interface SystemVoice {
+  id: string;
+  lang: string;
+  /** Its own name, where the phone gives one (iOS: Ava, Daniel); Android gives only the id. */
+  name?: string | null;
+  /** What the menu says of its quality (Premium, Enhanced, Eloquence), if anything. */
+  tier?: string | null;
+  rank: number;
+  good?: boolean;
+}
+interface SystemVoices {
+  voices: SystemVoice[];
+  default: string | null;
+  engine: string | null;
+  improve?: string | null;
+}
+
+// A language tag as a reader says it (en-GB: British English), falling back to the tag itself.
+let languageNames: Intl.DisplayNames | null | undefined;
+function languageName(tag: string): string {
+  if (languageNames === undefined) {
+    try { languageNames = new Intl.DisplayNames(['en'], { type: 'language' }); } catch { languageNames = null; }
+  }
+  try { return languageNames?.of(tag) ?? tag; } catch { return tag; }
+}
+/** What the voice menu calls a phone voice: its name, its language and how good it is (iOS:
+ * "Ava (American English, Premium)"); Android's, which have only ids, by language and the id's
+ * whole variant ("American English, iob"; "American English, sfg female 1" for
+ * en-us-x-sfg#female_1-local, so its male twin is told apart). */
+export function systemVoiceLabel(voice: SystemVoice): string {
+  const language = languageName(voice.lang);
+  if (voice.name) return `${voice.name} (${language}${voice.tier ? ', ' + voice.tier : ''})`;
+  const variant = /-x-(.+?)(?:-local|-network)?$/i.exec(voice.id)?.[1]?.replace(/[#_]/g, ' ')
+    ?? (voice.id.endsWith('-language') ? 'default' : voice.id);
+  return `${language}, ${variant}`;
+}
+
+/** The last release asked of the phone's engine, until it has been answered. */
+let releasing: Promise<unknown> = Promise.resolve();
+
+const system: Engine = {
+  name: 'system',
+  state: 'idle',
+  device: null,
+  error: null,
+  progress: '',
+  listed: null,
+  // Starting the phone's engine and asking for its voices: a fraction of a second, nothing fetched.
+  load() {
+    if (system.state === 'ready') return Promise.resolve();
+    if (system.loading) return system.loading;
+    system.state = 'loading';
+    system.error = null;
+    system.loading = (async () => {
+      try {
+        // A release still on its way is let arrive first: the two cross to the phone on threads of
+        // their own, and a release landing after this load would leave the engine let go.
+        await releasing;
+        const answer = await invoke('speech_voices') as SystemVoices;
+        // The phone's own choice first, then the better voices: voiceOf takes the first offered.
+        const rank = (v: SystemVoice) => (v.id === answer.default ? 1000 : 0) + v.rank;
+        system.listed = [...answer.voices].sort((a, b) => rank(b) - rank(a) || systemVoiceLabel(a).localeCompare(systemVoiceLabel(b)))
+          .map((v) => ({ id: v.id, name: systemVoiceLabel(v), lang: v.lang, good: v.good ?? true }));
+        system.improve = answer.improve ?? null;
+        system.device = answer.engine;
+        system.state = 'ready';
+      } catch (error) {
+        system.state = 'failed';
+        system.error = String((error as Error).message ?? error);
+        throw error;
+      } finally {
+        system.loading = null;
+      }
+    })();
+    return system.loading;
+  },
+  // Let go while the page is hidden and silent; the next Play starts it again (ensureEngine).
+  cancel() {
+    if (system.state !== 'ready') return;
+    system.state = 'idle';
+    releasing = invoke('speech_release').catch(() => {});
+  },
+  voices: (lang) => (system.listed ?? []).filter((v) => sameLanguage(v.lang, lang)),
+  async render(text, { voice, speed }) {
+    const began = performance.now();
+    const bytes = await invoke('speech_render', { text, voice, speed }) as ArrayBuffer;
+    const { pcm, rate } = parseWav(bytes);
+    const buffer = new AudioBuffer({ numberOfChannels: 1, length: Math.max(1, pcm.length), sampleRate: rate });
+    buffer.copyToChannel(pcm as Float32Array<ArrayBuffer>, 0);
+    const kept = trimmedBuffer(buffer);
+    kept.took = performance.now() - began;
+    return kept;
+  },
 };
 
 /** Called when an engine that had loaded fails (its worker died). Set by the reading. */
@@ -171,7 +339,9 @@ function workerEngine(name: EngineName): Engine {
       waiting.clear();
       worker?.terminate();
       worker = null;
-      if (!engine.cancelling) { engine.state = 'idle'; engine.listed = null; }
+      // A loaded engine let go keeps its list of voices, which no reload changes: the menu goes on
+      // showing the voice chosen, not the engine's default (voiceOf finds only a voice listed).
+      if (!engine.cancelling) engine.state = 'idle';
     },
     voices(lang) {
       const listed = engine.listed || Object.entries(ENGINE_INFO[name].defaults)
@@ -308,14 +478,15 @@ const recorded: RecordedEngine = {
 
 export const engines: Record<EngineName, Engine> & { recorded: RecordedEngine } = {
   browser,
+  system,
   kokoro: workerEngine('kokoro'),
   piper: workerEngine('piper'),
   kitten: workerEngine('kitten'),
   recorded,
 };
 
-// What decodes a recording: a context of the page's own, so a line can be fetched ahead before
-// Strudel has made the audio context it plays in (which resamples a 48 kHz buffer as it plays it).
+// What decodes a recording: a context of the page's own, so a line can be fetched ahead before the
+// player has made its audio context. The player resamples a line to the output's rate itself.
 let decoding: OfflineAudioContext | null = null;
 function decoder(): OfflineAudioContext {
   decoding ??= new OfflineAudioContext(1, 1, 48000);

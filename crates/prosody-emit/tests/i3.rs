@@ -83,9 +83,9 @@ const BODY: &str = "teA bAn\nteA rAn\nteA bAn\n\nbo\nteA dot roso beA nAt\nteA r
 
 /// Two palettes with nothing in common.
 const ONE: &str = "+++\n[style]\nscale = \"phrygian_dominant\"\nroot = \"D\"\n\
-                   tempo_range = [128, 134]\nswing = 0.12\nbank = \"tr909\"\nsynth = \"karplus\"\n+++\n";
+                   tempo_range = [128, 134]\nswing = 0.12\nbank = \"uzu\"\nsynth = \"karplus\"\n+++\n";
 const TWO: &str = "+++\n[style]\nscale = \"lydian\"\nroot = \"A\"\n\
-                   tempo_range = [70, 72]\nswing = 0\nbank = \"casio\"\nsynth = \"sawtooth\"\n+++\n";
+                   tempo_range = [70, 72]\nswing = 0\nbank = \"fm_drums\"\nsynth = \"sawtooth\"\n+++\n";
 
 fn score_of(source: &str) -> (Score, Style) {
     score_with(source, &prosody_core::Mappings::all())
@@ -196,10 +196,13 @@ fn i3_but_the_style_does_reach_the_output() {
     let b = Strudel::new().render(&score, &two).unwrap();
     assert_ne!(a, b, "two palettes must not sound the same");
 
-    assert!(a.contains("tr909") && b.contains("casio"), "bank");
+    assert!(
+        a.contains(".bank(\"uzu\")") && b.contains(".bank(\"fm_drums\")"),
+        "bank"
+    );
     assert!(a.contains("karplus") && b.contains("sawtooth"), "synth");
-    assert!(a.contains(".swingBy"), "swing reaches the output");
-    assert!(!b.contains(".swingBy"), "and no swing means none");
+    assert!(a.contains("// swing: "), "swing reaches the output");
+    assert!(!b.contains("// swing: "), "and no swing means none");
     // Tempo comes from the style's window, positioned by the poem's density, then divided by the
     // beats in a bar because `cpm` counts *cycles* and a cycle is a bar. Both styles must land in
     // their own window before that division, and the windows do not overlap — so the two tempos
@@ -325,7 +328,7 @@ fn i3_the_rendered_arrangement_is_the_same_under_any_palette() {
     let strip = |text: &str| {
         text.lines()
             .filter(|line| !line.starts_with("//") && !line.trim_start().starts_with(".cpm"))
-            .filter(|line| !line.trim_start().starts_with(".swingBy"))
+            .filter(|line| !line.trim_start().starts_with(".layer(x => x.mask("))
             .count()
     };
     assert_eq!(

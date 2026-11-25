@@ -4,7 +4,7 @@
 scale       = "mixolydian"
 root        = "G"
 tempo_range = [72, 80]
-bank        = "linn"
+bank        = "big_rusty"
 +++
 The LORD is my shepherd; I shall not want.
 He maketh me to lie down in green pastures: he leadeth me beside the still waters.

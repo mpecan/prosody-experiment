@@ -1,0 +1,68 @@
+{
+ "name": "gm_marimba",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0120_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 53,
+   "root": 48,
+   "loopStart": null,
+   "loopEnd": null,
+   "rate": 44100,
+   "file": "zones/2992ff3186ac739e.flac"
+  },
+  {
+   "position": 1,
+   "low": 54,
+   "high": 65,
+   "root": 60,
+   "loopStart": null,
+   "loopEnd": null,
+   "rate": 44100,
+   "file": "zones/8957f2c8e462db0e.flac"
+  },
+  {
+   "position": 2,
+   "low": 66,
+   "high": 71,
+   "root": 66,
+   "loopStart": null,
+   "loopEnd": null,
+   "rate": 44100,
+   "file": "zones/22c5952307262da3.flac"
+  },
+  {
+   "position": 3,
+   "low": 72,
+   "high": 77,
+   "root": 72,
+   "loopStart": null,
+   "loopEnd": null,
+   "rate": 44100,
+   "file": "zones/1759a29028e9484d.flac"
+  },
+  {
+   "position": 4,
+   "low": 78,
+   "high": 83,
+   "root": 78,
+   "loopStart": null,
+   "loopEnd": null,
+   "rate": 44100,
+   "file": "zones/241a4f9ee15f324a.flac"
+  },
+  {
+   "position": 5,
+   "low": 84,
+   "high": 108,
+   "root": 84,
+   "loopStart": null,
+   "loopEnd": null,
+   "rate": 44100,
+   "file": "zones/51153defbb4b774d.flac"
+  }
+ ]
+}

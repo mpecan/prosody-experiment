@@ -3,7 +3,7 @@
 import { choosePreset, nextTheme, openShare, showRoll } from '../actions';
 import { site } from '../data';
 import { hear } from '../piece';
-import { play, stop } from '../strudel';
+import { play, stop } from '../transport';
 import { beat, hearing, playing, preset, rollShown, theme, welcomeOpen } from '../store';
 import { Patch } from './desk/Patch';
 

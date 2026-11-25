@@ -1,0 +1,138 @@
+{
+ "name": "gm_vibraphone",
+ "source": "https://github.com/felixroos/webaudiofontdata/blob/23ca907d4370a04fd89ca483a92915e4d6159ab9/sound/0110_FluidR3_GM_sf2_file.js",
+ "licence": "FluidR3 GM by Frank Wen, MIT licence",
+ "licenceFile": "LICENSES/FluidR3_GM.txt",
+ "zones": [
+  {
+   "position": 0,
+   "low": 0,
+   "high": 57,
+   "root": 57,
+   "loopStart": 14677,
+   "loopEnd": 17684,
+   "rate": 44100,
+   "file": "zones/7a2f6b8c2d84dd10.flac"
+  },
+  {
+   "position": 1,
+   "low": 58,
+   "high": 63,
+   "root": 63,
+   "loopStart": 8998,
+   "loopEnd": 9423,
+   "rate": 44100,
+   "file": "zones/e9991f2e6c3218a1.flac"
+  },
+  {
+   "position": 2,
+   "low": 64,
+   "high": 66,
+   "root": 66,
+   "loopStart": 9361,
+   "loopEnd": 9600,
+   "rate": 44100,
+   "file": "zones/19f5e40f60720808.flac"
+  },
+  {
+   "position": 3,
+   "low": 67,
+   "high": 71,
+   "root": 71,
+   "loopStart": 6939,
+   "loopEnd": 7028,
+   "rate": 44100,
+   "file": "zones/78e41e0d01a32538.flac"
+  },
+  {
+   "position": 4,
+   "low": 72,
+   "high": 78,
+   "root": 78,
+   "loopStart": 6006,
+   "loopEnd": 6125,
+   "rate": 44100,
+   "file": "zones/4b400e4a3cbd1951.flac"
+  },
+  {
+   "position": 5,
+   "low": 79,
+   "high": 81,
+   "root": 81,
+   "loopStart": 4376,
+   "loopEnd": 4627,
+   "rate": 44100,
+   "file": "zones/f7e03d76b2034672.flac"
+  },
+  {
+   "position": 6,
+   "low": 82,
+   "high": 85,
+   "root": 85,
+   "loopStart": 5155,
+   "loopEnd": 5314,
+   "rate": 44100,
+   "file": "zones/773349c313c75785.flac"
+  },
+  {
+   "position": 7,
+   "low": 86,
+   "high": 88,
+   "root": 88,
+   "loopStart": 4649,
+   "loopEnd": 4716,
+   "rate": 44100,
+   "file": "zones/afaf58d61b63feb0.flac"
+  },
+  {
+   "position": 8,
+   "low": 89,
+   "high": 94,
+   "root": 94,
+   "loopStart": 5096,
+   "loopEnd": 5238,
+   "rate": 44100,
+   "file": "zones/ac6f64bb70f1d020.flac"
+  },
+  {
+   "position": 9,
+   "low": 95,
+   "high": 96,
+   "root": 96,
+   "loopStart": 4658,
+   "loopEnd": 5079,
+   "rate": 44100,
+   "file": "zones/26d05a3b1d1519ea.flac"
+  },
+  {
+   "position": 10,
+   "low": 97,
+   "high": 99,
+   "root": 99,
+   "loopStart": 5202,
+   "loopEnd": 5343,
+   "rate": 44100,
+   "file": "zones/dc7420e9f5ac3290.flac"
+  },
+  {
+   "position": 11,
+   "low": 100,
+   "high": 103,
+   "root": 103,
+   "loopStart": 4954,
+   "loopEnd": 4968,
+   "rate": 44100,
+   "file": "zones/6f4fc86a67e2780a.flac"
+  },
+  {
+   "position": 12,
+   "low": 104,
+   "high": 108,
+   "root": 107,
+   "loopStart": 5894,
+   "loopEnd": 6005,
+   "rate": 44100,
+   "file": "zones/3bc0614a01c2540b.flac"
+  }
+ ]
+}

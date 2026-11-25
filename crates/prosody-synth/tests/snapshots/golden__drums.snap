@@ -1,0 +1,6 @@
+---
+source: crates/prosody-synth/tests/golden.rs
+expression: "describe(\"drums\", bank, notes, 2.0)"
+---
+drums: 120832 frames, peak 0.8291, rms 0.0603, stolen 0, missing 0
+blake3 e8dc4889bba0c0bcc13257704353925f97e7b93211014e9adb62042aa5e20737
